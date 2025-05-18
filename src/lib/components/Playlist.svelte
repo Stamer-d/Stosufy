@@ -3,10 +3,10 @@
 	import { keyStore, user } from '$lib/stores/auth';
 	import Button from './Button.svelte';
 	import { getImageUrl, mapDataStore } from '$lib/stores/data';
-    import { playlists, getPlaylists, createPlaylist, deletePlaylist} from '$lib/stores/playlist';
-  	import { goto } from '$app/navigation';
+	import { playlists, getPlaylists, createPlaylist, deletePlaylist } from '$lib/stores/playlist';
+	import { goto } from '$app/navigation';
 
-	async function getPlaylist(){
+	async function getPlaylist() {
 		let playlist_list = await getPlaylists($keyStore.access_token);
 
 		const downloadedSongsPlaylist = {
@@ -27,22 +27,24 @@
 
 	async function createNewPlaylist() {
 		let amount = 1;
-		$playlists.forEach(element => {
-			if(element?.created_by == $user?.stosufy_id){
+		$playlists.forEach((element) => {
+			if (element?.created_by == $user?.stosufy_id) {
 				amount++;
 			}
 		});
-		let newPlaylist = await createPlaylist(`My Playlist Nr.${amount}`)
+		let newPlaylist = await createPlaylist(`My Playlist Nr.${amount}`);
 		$playlists = [$playlists[0], newPlaylist, ...$playlists.slice(1)];
 	}
 
 	async function deleteClickedPlaylist(playlistId) {
 		$playlists = $playlists.filter((playlist) => playlist.id !== playlistId);
-		await deletePlaylist(playlistId)
+		await deletePlaylist(playlistId);
 	}
 
-	onMount(async () => {
-		await getPlaylist();
+	$effect(async () => {
+		if ($user?.id) {
+			await getPlaylist();
+		}
 	});
 </script>
 
@@ -53,7 +55,9 @@
 			type="ghost"
 			icon="icon-[fa6-solid--plus]"
 			class="text-gray-400 hover:text-white"
-			on:click={async() => {await createNewPlaylist()}}
+			on:click={async () => {
+				await createNewPlaylist();
+			}}
 		/>
 	</div>
 
@@ -62,7 +66,7 @@
 		{#each $playlists as playlist}
 			<button
 				on:click={() => {
-					console.log(playlist.id)
+					console.log(playlist.id);
 					goto(`/playlist/${playlist?.id}`);
 				}}
 				class="group flex items-center p-2 rounded-md hover:bg-secondary-200 w-full cursor-pointer transition duration-100"
@@ -75,7 +79,9 @@
 							class="w-full h-full object-cover rounded-md"
 						/>
 						{#if playlist.id == -1}
-							<span class="icon-[fa6-solid--circle-arrow-down] text-secondary-600 absolute size-6 top-3.5 left-3"></span>
+							<span
+								class="icon-[fa6-solid--circle-arrow-down] text-secondary-600 absolute size-6 top-3.5 left-3"
+							></span>
 						{/if}
 					</div>
 				</div>
@@ -85,16 +91,15 @@
 				</div>
 				{#if playlist.id !== -1}
 					<Button
-					type="ghost"
-					icon="icon-[fa6-solid--trash]"
-					class="text-gray-400 hover:text-white ml-auto opacity-0 group-hover:opacity-100"
-					on:click={async (e) => {
-						e.preventDefault();
-						await deleteClickedPlaylist(playlist.id);
-					}}
-				/>
+						type="ghost"
+						icon="icon-[fa6-solid--trash]"
+						class="text-gray-400 hover:text-white ml-auto opacity-0 group-hover:opacity-100"
+						on:click={async (e) => {
+							e.preventDefault();
+							await deleteClickedPlaylist(playlist.id);
+						}}
+					/>
 				{/if}
-				
 			</button>
 		{/each}
 	</ul>

@@ -105,12 +105,17 @@ export async function verifyAccessToken(token) {
 			Authorization: `Bearer ${token}`
 		}
 	});
+
 	if (response.ok) {
+		const data = await response.json();
+
+		user.set(data);
 		return {
 			status: true,
-			userData: await response.json()
+			userData: data
 		};
 	}
+
 	return {
 		status: false,
 		userData: null
@@ -166,7 +171,6 @@ export async function checkAccessToken(shouldPush = true, round = 0) {
 	//Check if token is valid
 	let isValid = await verifyAccessToken(tokens.access_token);
 	if (isValid.status) {
-		user.set(isValid.userData);
 		return true;
 	}
 

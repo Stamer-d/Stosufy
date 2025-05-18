@@ -11,25 +11,28 @@
 	import ContextMenu from './ContextMenu.svelte';
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
+	import { keyStore } from '../stores/auth';
 
-	let search;
-	let osuMapsSearch = null;
+	let search = $state('');
+	let osuMapsSearch = $state(null);
 	let searchTimeout = null;
-	let allMaps = [];
+	let allMaps = $state([]);
 
-	let endOfContent = null;
+	let endOfContent = $state(null);
 	let observer = null;
-	let loading = true;
+	let loading = $state(true);
 
-	let playMap = null;
+	let playMap = $state(null);
 	let addPlaylistModal = {
 		open: false,
 		map: null
 	};
 
-	$: if (playMap) {
-		handlePlayMapChange(playMap);
-	}
+	$effect(() => {
+		if (playMap) {
+			handlePlayMapChange(playMap);
+		}
+	});
 
 	// Function to handle the async operation
 	function handlePlayMapChange(map) {
@@ -89,16 +92,20 @@
 		});
 	};
 
-	$: if (endOfContent) {
-		if (!observer) {
-			setupObserver();
+	$effect(() => {
+		if (endOfContent) {
+			if (!observer) {
+				setupObserver();
+			}
 		}
-	}
+	});
 
-	onMount(async () => {
-		osuMapsSearch = await fetchMaps();
-		allMaps = osuMapsSearch.beatmapsets;
-		loading = false;
+	$effect(async () => {
+		if ($keyStore.access_token) {
+			osuMapsSearch = await fetchMaps();
+			allMaps = osuMapsSearch.beatmapsets;
+			loading = false;
+		}
 	});
 
 	onDestroy(() => {
@@ -120,7 +127,6 @@
 <div class="text-2xl flex gap-1">
 	Welcome back {$user?.username}
 </div>
-
 {#if osuMapsSearch}
 	<div class="grid xl:grid-cols-3 md:grid-cols-2 gap-2 grid-cols-1">
 		{#key allMaps}
@@ -147,6 +153,7 @@
 
 	<div bind:this={endOfContent} class=""></div>
 {/if}
+
 {#if loading}
 	<div class="w-full text-center">
 		<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
