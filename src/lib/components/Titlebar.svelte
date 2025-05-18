@@ -58,14 +58,16 @@
 
 <div class="h-16 px-1 bg-secondary-100 grid grid-cols-3" data-tauri-drag-region>
 	<div data-tauri-drag-region class="flex items-center">
-		<Button
-			type="ghost"
-			icon="icon-[fa6-solid--house]"
-			size="lg"
-			on:click={() => {
-				goto('/home');
-			}}
-		></Button>
+		{#if $user?.username}
+			<Button
+				type="ghost"
+				icon="icon-[fa6-solid--house]"
+				size="lg"
+				on:click={() => {
+					goto('/home');
+				}}
+			></Button>
+		{/if}
 	</div>
 	<div data-tauri-drag-region></div>
 	<div class="flex items-center justify-end group" data-tauri-drag-region>

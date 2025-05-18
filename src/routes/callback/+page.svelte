@@ -1,18 +1,17 @@
 <script>
-
 	import { onDestroy, onMount } from 'svelte';
 	import Button from '$lib/components/Button.svelte';
-    import { verifyAccessToken, exchangeCode, keyStore } from '$lib/stores/auth';
-  import { goto } from '$app/navigation';
+	import { verifyAccessToken, exchangeCode, keyStore } from '$lib/stores/auth';
+	import { goto } from '$app/navigation';
 	let timer = null;
 	let count = 0;
 
 	async function processAuthCode(code) {
 		const tokenData = await exchangeCode(code);
-        console.log('Token data:', tokenData);
+		console.log('Token data:', tokenData);
 		$keyStore.access_token = tokenData.access_token;
-        $keyStore.refresh_token = tokenData.refresh_token;
-        $keyStore.expiry_time = Date.now() + tokenData.expires_in * 1000;
+		$keyStore.refresh_token = tokenData.refresh_token;
+		$keyStore.expiry_time = Date.now() + tokenData.expires_in * 1000;
 		timer = setInterval(checkStatus, 3000);
 	}
 
@@ -23,20 +22,31 @@
 			clearInterval(timer);
 		}
 		console.log('Access token valid:', accessTokenValid);
-		if (accessTokenValid.status ) {
+		if (accessTokenValid.status) {
 			clearInterval(timer);
 			goto('/home');
 		}
 	}
 
 	onMount(() => {
-        console.log('Mounting callback page');
-        console.log('Current URL:', window.location.href);
-		if (window.location.search.includes('?code%20=')) {
-			const code = window.location.search.split('?code%20=')[1];
-			if (code) {
-				processAuthCode(code);
-			}
+		console.log('Raw URL search:', window.location.search);
+
+		// Try standard method first
+		const urlParams = new URLSearchParams(window.location.search);
+		let code = urlParams.get('code');
+
+		// If standard method fails, try parsing the non-standard format
+		if (!code && window.location.search.includes('code%20=')) {
+			const searchStr = window.location.search;
+			const codeStartIndex = searchStr.indexOf('code%20=') + 8; // 8 is the length of 'code%20='
+			code = searchStr.substring(codeStartIndex);
+		}
+
+		if (code) {
+			console.log('Found auth code, processing...');
+			processAuthCode(code);
+		} else {
+			console.error('No authorization code found in URL');
 		}
 	});
 
