@@ -1,0 +1,18 @@
+@import "tailwindcss";
+@plugin "@iconify/tailwind4";
+@theme {
+  --color-primary-100: oklch(0.4 0.25 296);
+  --color-primary-200: oklch(0.5 0.21 290);
+  --color-primary-300: oklch(0.6 0.18 285);
+  --color-primary-400: oklch(0.68 0.15 280);
+  --color-primary-500: oklch(0.75 0.12 275);
+  --color-primary-600: oklch(0.82 0.09 270);
+
+  --color-secondary-50: oklch(0.12 0.01 300);
+  --color-secondary-100: oklch(0.22 0.01 300);
+  --color-secondary-200: oklch(0.32 0.01 300);
+  --color-secondary-300: oklch(0.42 0.01 300);
+  --color-secondary-400: oklch(0.52 0.01 300);
+  --color-secondary-500: oklch(0.62 0.01 300);
+  --color-secondary-600: oklch(0.72 0.01 300);
+}

@@ -1,0 +1,49 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "stosufy-tauri",
+	"version": "0.1.0",
+	"identifier": "com.stosufy-tauri.app",
+	"build": {
+		"beforeDevCommand": "npm run dev",
+		"devUrl": "http://localhost:2021",
+		"beforeBuildCommand": "npm run build",
+		"frontendDist": "../build"
+	},
+	"plugins": {
+		"deep-link": {
+			"desktop": {
+				"schemes": ["stosufynew"]
+			}
+		},
+		"updater": {
+			"active": true,
+			"endpoints": ["https://github.com/stamer_d/stosufy/releases/latest/download/update.json"],
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGQjQzOUZFMThEMTQ0QjcKUldTM1JORVkvam0wNzV5di9KWlgvcFo5dm9MeU1MbkgwLzA1ZWJMODdvaHM2L3dyNkxOOWZaZDAK"
+		}
+	},
+	"app": {
+		"windows": [
+			{
+				"decorations": false,
+				"title": "Stosufy",
+				"width": 800,
+				"height": 600
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		]
+	}
+}
