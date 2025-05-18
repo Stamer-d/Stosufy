@@ -6,6 +6,7 @@
 	let x = 0;
 	let y = 0;
 	let showMenu = false;
+	export let disabled = false;
 
 	// Dispatch events for menu interactions
 	const dispatch = createEventDispatcher();
@@ -13,6 +14,9 @@
 	const CLOSE_ALL_CONTEXT_MENUS = 'closeAllContextMenus';
 
 	function handleContextMenu(event: MouseEvent) {
+		if (disabled) {
+			return;
+		}
 		event.preventDefault();
 
 		window.dispatchEvent(new CustomEvent(CLOSE_ALL_CONTEXT_MENUS));

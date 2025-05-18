@@ -1,5 +1,5 @@
 <script>
-// @ts-nocheck
+	// @ts-nocheck
 
 	import { onMount, createEventDispatcher } from 'svelte';
 	import Button from './Button.svelte';
@@ -67,11 +67,11 @@
 
 {#if open}
 	<div
-		class="modal-backdrop fixed inset-0 bg-secondary-100/60 z-40 flex items-center justify-center px-4"
+		class="modal-backdrop fixed inset-0 bg-secondary-100/70 z-40 flex items-center justify-center px-4"
 		role="presentation"
 	>
 		<div
-			class="modal bg-secondary-100 rounded-lg max-w-md z-50"
+			class="modal bg-secondary-200 rounded-lg max-w-md z-50"
 			style="width: {width};"
 			role="dialog"
 			aria-modal="true"

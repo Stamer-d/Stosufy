@@ -22,8 +22,8 @@
 
 	$: inputClasses = `
       ${sizeClasses[size]} 
-      rounded ring-1 ring-secondary-300  transition  outline-none w-full
-      ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:ring-secondary-400 focus:ring-secondary-600 focus:ring-2'}
+      rounded ring-1 ring-secondary-300  transition  outline-none w-full bg-secondary-300
+      ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:ring-secondary-400 focus:ring-secondary-600'}
     `;
 </script>
 

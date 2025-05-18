@@ -5,6 +5,13 @@
 	import { playlists, getPlaylists, createPlaylist, deletePlaylist } from '$lib/stores/playlist';
 	import { goto } from '$app/navigation';
 	import ContextMenu from './ContextMenu.svelte';
+	import Modal from './Modal.svelte';
+	import Input from './Input.svelte';
+
+	let editPlaylistModal = $state({
+		open: false,
+		playlist: null
+	});
 
 	async function getPlaylist() {
 		let playlist_list = await getPlaylists($keyStore.access_token);
@@ -76,7 +83,7 @@
 	<!-- Playlist List -->
 	<ul class="overflow-y-auto flex flex-col gap-2 pl-2">
 		{#each $playlists as playlist}
-			<ContextMenu>
+			<ContextMenu disabled={playlist.id == -1 ? true : false}>
 				<button
 					on:click={() => {
 						console.log(playlist.id);
@@ -114,7 +121,62 @@
 						/>
 					{/if}
 				</button>
+				<svelte:fragment slot="menu">
+					{#if playlist.id !== -1}
+						<Button
+							type="ghost"
+							class="w-full py-3 rounded-sm hover:bg-secondary-300"
+							icon="icon-[fa6-solid--pen]"
+							on:click={async (e) => {
+								e.preventDefault();
+								editPlaylistModal.open = true;
+								editPlaylistModal.playlist = playlist;
+							}}
+						>
+							Edit Playlist
+						</Button>
+					{/if}
+				</svelte:fragment>
 			</ContextMenu>
 		{/each}
 	</ul>
 </div>
+
+<Modal title="Edit Playlist" bind:open={editPlaylistModal.open}>
+	<div class="flex gap-2 items-center">
+		<button class="relative w-48 flex items-center group">
+			<div
+				class="absolute w-full h-full rounded bg-secondary-100/50 opacity-0 group-hover:opacity-100 cursor-pointer z-10"
+			></div>
+
+			<span
+				class="icon-[fa6-solid--pen] absolute opacity-0 group-hover:opacity-100 text-secondary-600 size-6 left-1/2 cursor-pointer top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
+			></span>
+
+			<!-- Image -->
+			<img
+				class=" bg-secondary-300/30 rounded cursor-pointer w-full"
+				src={getImageUrl(editPlaylistModal.playlist?.image_path)}
+				alt="Playlist cover"
+			/>
+		</button>
+		<div class="flex flex-col gap-2 w-full">
+			<div>
+				<h3 class="font-semibold">Playlist Title</h3>
+				<Input
+					value={editPlaylistModal?.playlist?.title}
+					type="text"
+					placeholder="Playlist Title"
+				/>
+			</div>
+			<div>
+				<h3 class="font-semibold">Playlist Description</h3>
+				<Input
+					value={editPlaylistModal?.playlist?.Description}
+					type="text"
+					placeholder="Playlist Description"
+				/>
+			</div>
+		</div>
+	</div>
+</Modal>
