@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 
-    import Button from '$lib/components/Button.svelte';
-    import Input from '$lib/components/Input.svelte';
-    import Modal from '$lib/components/Modal.svelte';
-    import { checkSessionKey, keyStore } from '$lib/stores/auth';
-    import { open } from '@tauri-apps/plugin-shell';
-    import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
-    import { goto } from '$app/navigation';
+	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Modal from '$lib/components/Modal.svelte';
+	import { checkSessionKey, keyStore } from '$lib/stores/auth';
+	import { open } from '@tauri-apps/plugin-shell';
+	import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
+	import { goto } from '$app/navigation';
 
-	const clientId =  '40234'
+	const clientId = '40234';
 	const redirectUrl = 'stosufynew://callback';
 	const scope = 'public';
 	const authUrl = `https://osu.ppy.sh/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=code&scope=${scope}`;
@@ -23,15 +23,23 @@
 		if ($keyStore.sessionKey) {
 			sessionKeyValid = await checkSessionKey($keyStore?.sessionKey);
 		}
-        
-        await onOpenUrl((urls) => {
-            goto('/callback?code =' + urls[0].split('code=')[1]);
-        })
 
-});
+		await onOpenUrl((urls) => {
+			goto('/callback?code =' + urls[0].split('code=')[1]);
+		});
+	});
 </script>
 
-<main class="flex flex-col justify-center items-center h-screen gap-6">
+<main class="flex flex-col justify-center items-center h-screen gap-6 relative">
+	{#if sessionKeyValid.status_code === 429}
+		<p class="font-semibold absolute top-1/8 z-50 text-red-300 text-center text-xl p-4">
+			Rate limit exceeded. Please try again later.
+		</p>
+	{:else if sessionKeyValid.status_code === 401}
+		<p class="font-semibold absolute top-1/8 z-50 text-red-300 text-center text-xl p-4">
+			Invalid session key. Please check your session key.
+		</p>
+	{/if}
 	<div class="flex flex-col gap-2 items-center">
 		<img src="logo.png" alt="" class="size-30" />
 		<p class="text-5xl font-semibold">Log in to Stosufy</p>
@@ -67,11 +75,11 @@
 		class="w-1/4 flex justify-center"
 		type="primary"
 		disabled={!sessionKeyValid.status}
-		on:click={async() => {
-        	await open(authUrl);
+		on:click={async () => {
+			await open(authUrl);
 		}}>Authorize at Osu!</Button
 	>
-</main> 
+</main>
 
 <Modal bind:open={showInfo} title="Session Key Info">
 	<div class="flex flex-col gap-4">

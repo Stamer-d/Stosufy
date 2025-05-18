@@ -58,6 +58,7 @@ export async function checkSessionKey(sessionKey: string) {
 	let newToken = response.headers.get('set-cookie');
 	if (!response.ok) {
 		return {
+			status_code: response.status,
 			status: false,
 			session_key: null
 		};
