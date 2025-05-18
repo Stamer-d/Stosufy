@@ -68,6 +68,7 @@
 			setTimeout(() => {
 				downloadingMap.update((state) => ({ ...state, [song.id]: false }));
 				downloadProgressMap.update((state) => ({ ...state, [song.id]: 0 }));
+				songs = [...songs];
 			}, 500);
 		} catch (error) {
 			console.error(`Failed to download map ${song.id}:`, error);
