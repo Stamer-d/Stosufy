@@ -9,24 +9,36 @@
 	import { goto } from '$app/navigation';
 	import Modal from './Modal.svelte';
 	import { check } from '@tauri-apps/plugin-updater';
+	import { relaunch } from '@tauri-apps/plugin-process';
 
 	const appWindow = getCurrentWindow();
-
+	let updating = $state(false);
 	let updateModal = $state({
 		show: false,
 		open: async () => {
 			updateModal.show = true;
 			await checkForUpdates();
 		},
-		hasUpdate: null
+		hasUpdate: null,
+		update: null
 	});
 
 	async function checkForUpdates() {
 		const update = await check();
 		if (update) {
 			updateModal.hasUpdate = true;
+			updateModal.update = update;
 		} else {
 			updateModal.hasUpdate = false;
+		}
+	}
+
+	async function updateApp() {
+		const update = updateModal.update;
+		if (update) {
+			updating = true;
+			await update.downloadAndInstall();
+			await relaunch();
 		}
 	}
 
@@ -45,7 +57,16 @@
 </script>
 
 <div class="h-16 px-1 bg-secondary-100 grid grid-cols-3" data-tauri-drag-region>
-	<div data-tauri-drag-region></div>
+	<div data-tauri-drag-region class="flex items-center">
+		<Button
+			type="ghost"
+			icon="icon-[fa6-solid--house]"
+			size="lg"
+			on:click={() => {
+				goto('/home');
+			}}
+		></Button>
+	</div>
 	<div data-tauri-drag-region></div>
 	<div class="flex items-center justify-end group" data-tauri-drag-region>
 		<Dropdown>
@@ -118,9 +139,14 @@
 			<p class="text-lg">Checking for updates</p>
 			<span class="icon-[line-md--loading-loop] text-center size-8"></span>
 		</div>
-	{:else if updateModal.hasUpdate}
+	{:else if updateModal.hasUpdate && updating !== true}
 		<p class="text-center text-lg">A new version is available!</p>
 		<Button type="primary" class="w-full mt-4" on:click={async () => {}}>Update Now</Button>
+	{:else if updating}
+		<div class="flex flex-col gap-2 items-center justify-center">
+			<p class="text-lg">Updating Stosufy</p>
+			<span class="icon-[line-md--loading-loop] text-center size-8"></span>
+		</div>
 	{:else}
 		<p class="text-center text-lg">You are on the latest version!</p>
 	{/if}

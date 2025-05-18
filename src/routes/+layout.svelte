@@ -5,7 +5,7 @@
 	import Playlist from '$lib/components/Playlist.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { startTokenRefresh } from '$lib/stores/auth';
+	import { keyStore, startTokenRefresh } from '$lib/stores/auth';
 	import Titlebar from '$lib/components/Titlebar.svelte';
 
 	let showUI = $state(false);
@@ -23,6 +23,7 @@
 	onMount(async () => {
 		await startTokenRefresh();
 		updateShowUI();
+		console.log($keyStore);
 	});
 
 	// Setup effect to update when the page changes

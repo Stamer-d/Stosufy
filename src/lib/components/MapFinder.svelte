@@ -14,6 +14,9 @@
 	import { keyStore } from '../stores/auth';
 	import { playlists } from '$lib/stores/playlist';
 	import { getImageUrl } from '$lib/stores/data';
+	import { addSongToPlaylist } from '$lib/stores/playlist';
+
+	let initialTokenLoad = $state(true);
 
 	let search = $state('');
 	let osuMapsSearch = $state(null);
@@ -103,10 +106,11 @@
 	});
 
 	$effect(async () => {
-		if ($keyStore.access_token) {
+		if ($keyStore.access_token && initialTokenLoad) {
 			osuMapsSearch = await fetchMaps();
 			allMaps = osuMapsSearch.beatmapsets;
 			loading = false;
+			initialTokenLoad = false;
 		}
 	});
 
@@ -169,14 +173,33 @@
 			<div class="flex flex-col gap-2 max-h-60 overflow-y-auto pr-2">
 				{#each $playlists as playlist}
 					{#if playlist.id !== -1}
-						<div class="p-2 rounded flex items-center gap-2 hover:bg-secondary-200 cursor-pointer">
+						<button
+							class="p-2 rounded flex items-center gap-2 hover:bg-secondary-300 cursor-pointer"
+							onclick={async () => {
+								const updatedPlaylists = $playlists.map((p) => {
+									if (p.id === playlist.id) {
+										return { ...p, song_amount: p.song_amount + 1 };
+									}
+									return p;
+								});
+
+								playlists.set(updatedPlaylists);
+
+								addPlaylistModal.open = false;
+								await addSongToPlaylist(
+									playlist.id,
+									addPlaylistModal.map.id,
+									addPlaylistModal.map.beatmaps[0].id
+								);
+							}}
+						>
 							<img
 								src={playlist.id !== -1 ? getImageUrl(playlist.image_path) : '/NoLetterLogo.png'}
 								alt={playlist.title}
 								class="size-12 object-cover rounded-md"
 							/>
 							{playlist?.title}
-						</div>
+						</button>
 					{/if}
 				{/each}
 			</div>

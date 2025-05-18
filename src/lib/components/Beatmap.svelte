@@ -1,12 +1,12 @@
 <script>
-// @ts-nocheck
+	// @ts-nocheck
 
 	import { songQueue } from '$lib/stores/audio';
 	import { togglePlayback, currentSong, updateSongQueue } from '$lib/stores/audio';
 	import { downloadBeatmap, deleteSong, mapDataStore, formatSongData } from '$lib/stores/data';
 	import { onMount } from 'svelte';
 	import Button from './Button.svelte';
-  	import { keyStore } from '$lib/stores/auth';
+	import { keyStore } from '$lib/stores/auth';
 	import { playlists } from '$lib/stores/playlist';
 
 	export let map;
@@ -27,29 +27,35 @@
 		downloadProgressInterval = setInterval(() => {
 			downloadProgress = Math.min(downloadProgress + 5 * Math.random(), 95);
 		}, 200);
-		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(async () => {
-			downloadProgress = 100;
-			clearInterval(downloadProgressInterval);
-			setTimeout(() => {
-				isDownloading = false;
-				downloadProgress = 0;
-			}, 500);
-			playlists.update((allPlaylists) => {
-				return allPlaylists.map((playlist) => {
-					if (playlist.id == -1) {
-						return {
-							...playlist,
-							song_amount: playlist.song_amount + 1 
-						};
-					}
-					return playlist;
+		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
+			async () => {
+				downloadProgress = 100;
+				clearInterval(downloadProgressInterval);
+				setTimeout(() => {
+					isDownloading = false;
+					downloadProgress = 0;
+				}, 500);
+				playlists.update((allPlaylists) => {
+					return allPlaylists.map((playlist) => {
+						if (playlist.id == -1) {
+							return {
+								...playlist,
+								song_amount: playlist.song_amount + 1
+							};
+						}
+						return playlist;
+					});
 				});
-			});
-			console.log($songQueue)
-			if($songQueue.type == 'playlist' && $songQueue.playlistId == -1){
-				await updateSongQueue($songQueue.currentIndex + 1, formatSongData($mapDataStore), 'playlist',-1);
+				if ($songQueue.type == 'playlist' && $songQueue.playlistId == -1) {
+					await updateSongQueue(
+						$songQueue.currentIndex + 1,
+						formatSongData($mapDataStore),
+						'playlist',
+						-1
+					);
+				}
 			}
-		});
+		);
 	}
 
 	function convertTotalSecondsToTime(totalSeconds) {
@@ -59,7 +65,11 @@
 	}
 
 	function getIcon() {
-		if ($currentSong.song?.id == map.id && $currentSong.isPlaying && $songQueue.type != 'playlist') {
+		if (
+			$currentSong.song?.id == map.id &&
+			$currentSong.isPlaying &&
+			$songQueue.type != 'playlist'
+		) {
 			return 'icon-[fa6-solid--pause]';
 		} else {
 			return 'icon-[fa6-solid--play]';
@@ -150,8 +160,8 @@
 			></div>
 			<div class="relative z-10 p-2 bg-secondary-100/60 h-full">
 				<div class="flex justify-between items-center">
-					<div class="font-semibold line-clamp-1">{map.title}</div>
-					<div class="text-sm text-secondary-600 w-auto">
+					<div class="font-semibold line-clamp-1 overflow-hidden flex-1 mr-2">{map.title}</div>
+					<div class="text-sm text-secondary-600 whitespace-nowrap flex-shrink-0">
 						{convertTotalSecondsToTime(map.beatmaps[0].total_length)}
 					</div>
 				</div>

@@ -18,6 +18,9 @@ import JSZip from 'jszip';
 import { playlists } from './playlist';
 import { songQueue, stopPlayback, updateSongQueue } from './audio';
 
+let downloadInProgress = false;
+const downloadQueue = [];
+
 let homeDir = '';
 let mapSetsDir = '';
 let mapDataFile = '';
@@ -74,6 +77,14 @@ async function getCachedAudio(setId, mapId) {
 		});
 	}
 	return null;
+}
+
+export function isSongDownloaded(songId) {
+	// Check if the song exists in mapDataStore
+	const mapData = get(mapDataStore);
+	// Convert songId to string for consistent comparison
+	const songIdStr = songId.toString();
+	return Object.prototype.hasOwnProperty.call(mapData, songIdStr);
 }
 
 export async function fetchMaps(search = '', cursorString = '') {
@@ -158,42 +169,72 @@ export async function deleteSong(setId) {
 }
 
 export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken) {
-	const setId = mapSetData.id.toString();
-	// Store the full mapset data first
-	// Check if we already have this audio cached
-	const cachedAudio = await getCachedAudio(setId, mapId);
-	if (cachedAudio) {
-		await updateMapsetData(mapSetData);
-		return await bufferToBase64(cachedAudio);
+	if (downloadInProgress) {
+		return new Promise((resolve, reject) => {
+			downloadQueue.push({ mapSetData, mapId, sessionKey, accessToken, resolve, reject });
+		});
 	}
 
-	const response = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
-		headers: {
-			Cookie: `osu_session=${sessionKey}`,
-			Referer: `https://osu.ppy.sh/beatmapsets/${setId}`,
-			'User-Agent':
-				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-		},
-		redirect: 'follow'
-	});
-	if (!response.ok) {
+	downloadInProgress = true;
+
+	try {
+		const setId = mapSetData.id.toString();
+		// Check if we already have this audio cached
+		const cachedAudio = await getCachedAudio(setId, mapId);
+		if (cachedAudio) {
+			await updateMapsetData(mapSetData);
+			return await bufferToBase64(cachedAudio);
+		}
+
+		const response = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
+			headers: {
+				Cookie: `osu_session=${sessionKey}`,
+				Referer: `https://osu.ppy.sh/beatmapsets/${setId}`,
+				'User-Agent':
+					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+			},
+			redirect: 'follow'
+		});
+
+		if (!response.ok) {
+			return null;
+		}
+
+		await fetch('https://api.stamer-d.de/stosufy/addsong', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${accessToken}`
+			},
+			body: JSON.stringify({
+				setId: parseInt(mapSetData.id),
+				mapId: parseInt(mapId)
+			})
+		});
+
+		const buffer = await response.arrayBuffer();
+		const audioBuffer = await extractAudioFromBeatmap(buffer, mapId, setId, mapSetData);
+		await updateMapsetData(mapSetData);
+		return audioBuffer.toString('base64');
+	} catch (error) {
+		console.error('Error downloading beatmap:', error);
 		return null;
+	} finally {
+		downloadInProgress = false;
+
+		// Process next download in queue if any
+		if (downloadQueue.length > 0) {
+			const nextDownload = downloadQueue.shift();
+			downloadBeatmap(
+				nextDownload.mapSetData,
+				nextDownload.mapId,
+				nextDownload.sessionKey,
+				nextDownload.accessToken
+			)
+				.then(nextDownload.resolve)
+				.catch(nextDownload.reject);
+		}
 	}
-	await fetch('https://api.stamer-d.de/stosufy/addsong', {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${accessToken}`
-		},
-		body: JSON.stringify({
-			setId: parseInt(mapSetData.id),
-			mapId: parseInt(mapId)
-		})
-	});
-	const buffer = await response.arrayBuffer();
-	const audioBuffer = await extractAudioFromBeatmap(buffer, (mapId = null), setId, mapSetData);
-	await updateMapsetData(mapSetData);
-	return audioBuffer.toString('base64');
 }
 
 async function extractAudioFromBeatmap(mapsetBuffer, mapId, setId, mapsetData) {
@@ -203,19 +244,42 @@ async function extractAudioFromBeatmap(mapsetBuffer, mapId, setId, mapsetData) {
 		const updatedMapData = { ...mapData };
 
 		// Create and set up temporary extraction directory
-		const extractDir = await path.join(home + '/Stosufy/extract', `osu-extract-${Date.now()}`);
+		const extractDir = await path.join(homeDir + '/Stosufy/extract', `osu-extract-${Date.now()}`);
 		await mkdir(extractDir, { recursive: true });
 		const zipPath = await path.join(extractDir, 'beatmap.osz');
 		await writeFile(zipPath, new Uint8Array(mapsetBuffer));
 		const zip = await JSZip.loadAsync(await readFile(zipPath));
+
 		// Extract all files
 		const extractPromises = [];
 		const osuFiles = [];
 
+		const sanitizeFilename = (filename) => {
+			let sanitized = filename.replace(/[\\/:*?"<>|[\]]/g, '_');
+
+			sanitized = sanitized.replace(/[\u2013\u2014\u2015\u2017\u2020\u2021]/g, '-');
+
+			sanitized = sanitized.replace(/[^\x00-\x7F]/g, '_');
+
+			if (sanitized.length > 150) {
+				const extension = sanitized.includes('.')
+					? sanitized.substring(sanitized.lastIndexOf('.'))
+					: '';
+				const basename = sanitized.includes('.')
+					? sanitized.substring(0, sanitized.lastIndexOf('.'))
+					: sanitized;
+				sanitized = basename.substring(0, 150 - extension.length) + extension;
+			}
+
+			sanitized = sanitized.replace(/[_\-]{2,}/g, '_');
+			sanitized = sanitized.replace('', '');
+			return sanitized;
+		};
+
+		const filenameMap = new Map();
+
 		zip.forEach((relativePath, zipEntry) => {
 			if (!zipEntry.dir) {
-				// Use async path join with await inside the promise
-
 				const isOsuFile = relativePath.endsWith('.osu');
 				const isPotentialAudioFile = /\.(mp3|ogg|wav)$/i.test(relativePath);
 
@@ -226,7 +290,12 @@ async function extractAudioFromBeatmap(mapsetBuffer, mapId, setId, mapsetData) {
 
 				extractPromises.push(
 					(async () => {
-						const extractPath = await path.join(extractDir, relativePath);
+						// Sanitize the path for Windows compatibility
+						const sanitizedPath = sanitizeFilename(relativePath);
+						const extractPath = await path.join(extractDir, sanitizedPath);
+
+						// Keep track of original to sanitized mappings
+						filenameMap.set(relativePath, sanitizedPath);
 
 						// Keep track of .osu files
 						if (isOsuFile) {
@@ -264,7 +333,17 @@ async function extractAudioFromBeatmap(mapsetBuffer, mapId, setId, mapsetData) {
 			if (beatmapIdMatch && audioFileMatch) {
 				const beatmapId = beatmapIdMatch[1].trim();
 				foundMapId = beatmapId;
-				const audioFileName = audioFileMatch[1].trim();
+				let audioFileName = audioFileMatch[1].trim();
+
+				// Check if this filename needed sanitization
+				// If the original filename exists in our map, use the sanitized version
+				for (const [original, sanitized] of filenameMap.entries()) {
+					if (original.endsWith(audioFileName)) {
+						audioFileName = sanitized.substring(sanitized.lastIndexOf('/') + 1);
+						break;
+					}
+				}
+
 				audioFileMap.set(beatmapId, audioFileName);
 			}
 		}

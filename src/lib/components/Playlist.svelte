@@ -8,12 +8,19 @@
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
 	import { writable } from 'svelte/store';
+	import { editPlaylist } from '$lib/stores/playlist';
 
 	let fileInput;
+	let uploadedImage = writable(null);
 
 	let editPlaylistModal = $state({
 		open: false,
-		playlist: null
+		playlist: null,
+		title: '',
+		description: '',
+		isPublic: false,
+		selectedFile: null,
+		imageError: ''
 	});
 
 	async function getPlaylist() {
@@ -24,15 +31,13 @@
 			title: 'Downloaded Songs',
 			description: 'Your offline music collection',
 			image_path: null,
-			song_amount: Object.keys($mapDataStore).length, // This could be updated dynamically if needed
+			song_amount: Object.keys($mapDataStore).length,
 			created_at: null,
 			updated_at: null,
 			public: false
 		};
 
-		// Add the Downloaded Songs playlist at the beginning of the list
 		$playlists = [downloadedSongsPlaylist, ...playlist_list];
-		console.log($playlists);
 	}
 
 	async function createNewPlaylist() {
@@ -48,11 +53,9 @@
 			title: `My Playlist Nr.${amount}`,
 			song_amount: 0,
 			image_path: null,
-			created_by: $user?.stosufy_id,
-			isLoading: true // Flag to show loading state if needed
+			created_by: $user?.stosufy_id
 		};
 
-		// Add dummy playlist to the list (after the Downloaded Songs playlist)
 		$playlists = [$playlists[0], dummyPlaylist, ...$playlists.slice(1)];
 		const newPlaylist = await createPlaylist(`My Playlist Nr.${amount}`);
 		$playlists = $playlists.map((playlist) => (playlist.id === tempId ? newPlaylist : playlist));
@@ -63,19 +66,56 @@
 		await deletePlaylist(playlistId);
 	}
 
-	let uploadedImage = writable(null);
-
 	async function handleImageSelect(event) {
 		const file = event.target.files[0];
 		if (file) {
+			editPlaylistModal.imageError = '';
+
+			// Check if it's an image
+			if (!file.type.startsWith('image/')) {
+				editPlaylistModal.imageError = 'Selected file is not an image';
+				return;
+			}
+
+			// Check if size is under 1MB (1048576 bytes)
+			if (file.size > 1048576) {
+				editPlaylistModal.imageError = 'Image size must be less than 1MB';
+				return;
+			}
+			editPlaylistModal.selectedFile = file;
 			const imageUrl = URL.createObjectURL(file);
 			$uploadedImage = imageUrl;
 		}
 	}
 
+	async function handleSavePlaylistChanges() {
+		const { playlist, title, description, isPublic, selectedFile } = editPlaylistModal;
+
+		const updatedPlaylist = await editPlaylist(
+			playlist.id,
+			title,
+			description,
+			isPublic,
+			selectedFile
+		);
+
+		$playlists = $playlists.map((p) =>
+			p.id === playlist.id ? { ...updatedPlaylist, song_amount: p.song_amount } : p
+		);
+
+		editPlaylistModal.open = false;
+	}
+
+	let playlistsLoaded = false;
+	let lastUserId = null;
+
+	// Replace the effect with this improved version
 	$effect(async () => {
-		if ($user?.id) {
+		if ($user?.id && (!playlistsLoaded || lastUserId !== $user.id)) {
+			console.log('Fetching playlists (should happen only once per session)');
+			lastUserId = $user.id;
 			await getPlaylist();
+			playlistsLoaded = true;
 		}
 	});
 </script>
@@ -103,7 +143,7 @@
 					}}
 					class="group flex items-center p-2 rounded-md hover:bg-secondary-200 w-full cursor-pointer transition duration-100"
 				>
-					<div class="w-12 h-12 mr-3 flex-shrink-0">
+					<div class="w-12 h-12 mr-3 flex items-center">
 						<div class="relative">
 							<img
 								src={playlist.id !== -1 ? getImageUrl(playlist.image_path) : '/NoLetterLogo.png'}
@@ -143,6 +183,12 @@
 								e.preventDefault();
 								editPlaylistModal.open = true;
 								editPlaylistModal.playlist = playlist;
+								editPlaylistModal.title = playlist.title || '';
+								editPlaylistModal.description = playlist.description || '';
+								editPlaylistModal.isPublic = playlist.public || false;
+								editPlaylistModal.selectedFile = null;
+								$uploadedImage = null;
+								editPlaylistModal.imageError = '';
 							}}
 						>
 							Edit Playlist
@@ -155,48 +201,59 @@
 </div>
 
 <Modal title="Edit Playlist" bind:open={editPlaylistModal.open}>
-	<div class="flex gap-2 items-center">
-		<button
-			class="relative flex-shrink-0 w-[150px] h-[150px] flex items-center justify-center group cursor-pointer"
-			on:click={() => fileInput.click()}
-		>
-			<input
-				type="file"
-				bind:this={fileInput}
-				accept="image/*"
-				class="hidden"
-				on:change={handleImageSelect}
-			/>
-
-			<div
-				class="absolute inset-0 rounded bg-secondary-100/70 opacity-0 group-hover:opacity-100 z-10"
-			></div>
-
-			<span
-				class="icon-[fa6-solid--pencil] absolute opacity-0 group-hover:opacity-100 text-white size-8 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
-			></span>
-
-			<div class="w-[150px] h-[150px] bg-secondary-300 rounded overflow-hidden object-cover">
-				<img
-					class="w-full h-full object-contain"
-					src={$uploadedImage || getImageUrl(editPlaylistModal.playlist?.image_path)}
-					alt="Playlist cover"
+	<div class="flex flex-col md:flex-row gap-4">
+		<!-- Image Selection Area -->
+		<div class="flex flex-col items-center">
+			<button
+				class="relative flex-shrink-0 w-[150px] h-[150px] flex items-center justify-center group cursor-pointer rounded-md overflow-hidden"
+				on:click={() => fileInput.click()}
+			>
+				<input
+					type="file"
+					bind:this={fileInput}
+					accept="image/*"
+					class="hidden"
+					on:change={handleImageSelect}
 				/>
-			</div>
-		</button>
-		<div class="flex flex-col gap-2 w-full">
+
+				<div
+					class="absolute inset-0 bg-secondary-100/70 opacity-0 group-hover:opacity-100 z-10"
+				></div>
+
+				<span
+					class="icon-[fa6-solid--pencil] absolute opacity-0 group-hover:opacity-100 text-white size-8 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
+				></span>
+
+				<div class="w-[150px] h-[150px] bg-secondary-300">
+					<img
+						class="w-full h-full object-cover"
+						src={$uploadedImage || getImageUrl(editPlaylistModal.playlist?.image_path)}
+						alt="Playlist cover"
+					/>
+				</div>
+			</button>
+
+			{#if editPlaylistModal.imageError}
+				<div class="mt-2 text-red-500 text-sm text-center w-[150px]">
+					{editPlaylistModal.imageError}
+				</div>
+			{:else}
+				<div class="mt-2 text-sm text-gray-400 text-center">
+					Click to change image<br />
+					<span class="text-xs">(max 1MB)</span>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col gap-3 flex-grow justify-start">
 			<div>
-				<h3 class="font-semibold">Playlist Title</h3>
-				<Input
-					value={editPlaylistModal?.playlist?.title}
-					type="text"
-					placeholder="Playlist Title"
-				/>
+				<h3 class="font-semibold mb-1">Playlist Title</h3>
+				<Input bind:value={editPlaylistModal.title} type="text" placeholder="Playlist Title" />
 			</div>
 			<div>
-				<h3 class="font-semibold">Playlist Description</h3>
+				<h3 class="font-semibold mb-1">Playlist Description</h3>
 				<Input
-					value={editPlaylistModal?.playlist?.Description}
+					bind:value={editPlaylistModal.description}
 					type="text"
 					placeholder="Playlist Description"
 				/>
@@ -205,18 +262,13 @@
 	</div>
 	<svelte:fragment slot="footer">
 		<Button
-			on:click={async () => {
+			on:click={() => {
 				editPlaylistModal.open = false;
 			}}
 		>
 			Cancel
 		</Button>
-		<Button
-			type="primary"
-			on:click={async () => {
-				editPlaylistModal.open = false;
-			}}
-		>
+		<Button type="primary" on:click={handleSavePlaylistChanges} disabled={!editPlaylistModal.title}>
 			Save Changes
 		</Button>
 	</svelte:fragment>

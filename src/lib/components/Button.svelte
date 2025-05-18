@@ -4,18 +4,18 @@
 	export let disabled = false;
 	export let icon: string | null = null;
 	export let iconLeft = icon;
-	export let iconRight: string | null  = null; 
+	export let iconRight: string | null = null;
 
 	const typeClasses = {
 		normal: 'bg-secondary-300/40 text-white',
 		ghost: 'text-gray-400',
-		primary: 'bg-primary-100/70 text-white'
+		primary: 'bg-primary-200/50 text-white'
 	};
 
 	const hoverClasses = {
 		normal: 'hover:bg-secondary-300/60 active:bg-secondary-300',
 		ghost: 'hover:text-white active:text-gray-500',
-		primary: 'hover:bg-primary-100/85 active:bg-primary-100'
+		primary: 'hover:bg-primary-200/85 active:bg-primary-200'
 	};
 
 	const sizeClasses = {
@@ -33,7 +33,7 @@
     `;
 </script>
 
-<button class={buttonClasses} on:click {disabled} on:mouseover on:focus on:blur >
+<button class={buttonClasses} on:click {disabled} on:mouseover on:focus on:blur>
 	{#if iconLeft?.includes('icon-')}
 		<span class="flex-none inline-grid" aria-hidden="true">
 			<span class="place-self-center opacity-75 {iconLeft}" />
