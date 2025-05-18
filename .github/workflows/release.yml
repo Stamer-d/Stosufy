@@ -1,4 +1,6 @@
 name: Release
+permissions:
+  contents: write
 on:
   push:
     tags:
@@ -10,7 +12,23 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-
+      - name: Cache node modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: Cache Rust
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
