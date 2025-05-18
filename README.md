@@ -24,7 +24,7 @@ Create custom playlists, manage your music, and enjoy your collection from any d
 | 🕹️ | **Create playlists** – Organize your favorite tracks your way |
 | 🛠️ | **Actively developed** – Still in progress, so expect a few bugs and chaos |
 | 🔁 | **Built-in updater** – Update Stosufy from within the app (experimental) |
-| 👀 | **[Sneak Peek](https://github.com/user-attachments/assets/840f0a8a-ef6b-4786-bfb9-b1a2b9dd370d)** – Click to see a teaser trailer! |
+| 👀 | **[Sneak Peek](https://www.youtube.com/@Stosufy)** – Click to see a teaser trailer! |
 
 ---
 
