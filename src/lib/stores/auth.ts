@@ -2,26 +2,43 @@ import { get, writable } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
 import { load } from '@tauri-apps/plugin-store';
 import { goto } from '$app/navigation';
-import { onDestroy } from 'svelte';
 
 export const user = writable({});
-const keyData = await load('keyStore.json');
-const storedData = await keyData.get('store');
-export const keyStore = writable(
-	storedData || {
-		access_token: '',
-		refresh_token: '',
-		expiry_time: 0,
-		sessionKey: ''
-	}
-);
-keyStore.subscribe(async (value) => {
-	await keyData.set('store', value);
+
+export const keyStore = writable({
+	access_token: '',
+	refresh_token: '',
+	expiry_time: 0,
+	sessionKey: ''
 });
 
 const clientId = '40234';
 const clientSecret = import.meta.env.VITE_CLIENT_SECRET;
 const redirectUrl = 'stosufynew://callback';
+
+function initializeStores() {
+	load('keyStore.json')
+		.then((keyData) => {
+			return keyData.get('store');
+		})
+		.then((storedData) => {
+			if (storedData) {
+				keyStore.set(storedData);
+			}
+
+			// Set up the subscription after we've loaded the initial data
+			keyStore.subscribe((value) => {
+				load('keyStore.json').then((keyData) => {
+					keyData.set('store', value);
+				});
+			});
+		})
+		.catch((err) => {
+			console.error('Error loading keyStore:', err);
+		});
+}
+
+initializeStores();
 
 export async function checkSessionKey(sessionKey: string) {
 	if (!sessionKey)
@@ -171,9 +188,9 @@ export async function checkAccessToken(shouldPush = true, round = 0) {
 
 let refreshInterval;
 
-const diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
-
 export function startTokenRefresh() {
+	let diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
+
 	// Clear any existing interval first
 	if (refreshInterval) clearInterval(refreshInterval);
 	console.log('Starting token refresh');
@@ -182,8 +199,9 @@ export function startTokenRefresh() {
 	} else {
 		const valid = checkAccessToken();
 		if (valid) goto('/home');
-		refreshInterval = setInterval(() => {
-			refreshToken(get(keyStore).refresh_token);
+		refreshInterval = setInterval(async () => {
+			await refreshToken(get(keyStore).refresh_token);
+			diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
 		}, diffInSeconds);
 	}
 
