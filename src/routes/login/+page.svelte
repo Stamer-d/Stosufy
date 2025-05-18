@@ -4,7 +4,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import { checkSessionKey, keyStore } from '$lib/stores/auth';
+	import { checkSessionKey, exchangeCode, keyStore } from '$lib/stores/auth';
 	import { open } from '@tauri-apps/plugin-shell';
 	import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 	import { goto } from '$app/navigation';
@@ -24,8 +24,13 @@
 			sessionKeyValid = await checkSessionKey($keyStore?.sessionKey);
 		}
 
-		await onOpenUrl((urls) => {
-			goto('/callback?code =' + urls[0].split('code=')[1]);
+		await onOpenUrl(async (urls) => {
+			const code = urls[0].split('code=')[1];
+			const tokenData = await exchangeCode(code);
+			$keyStore.access_token = tokenData.access_token;
+			$keyStore.refresh_token = tokenData.refresh_token;
+			$keyStore.expiry_time = Date.now() + tokenData.expires_in * 1000;
+			goto('/callback');
 		});
 	});
 </script>
