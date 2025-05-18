@@ -33,9 +33,11 @@
 		map: null
 	});
 
+	let lastPlayMap = $state(null);
 	$effect(() => {
-		if (playMap) {
-			handlePlayMapChange(playMap);
+		if (playMap !== lastPlayMap) {
+			setQueue(playMap);
+			lastPlayMap = playMap;
 		}
 	});
 
@@ -87,11 +89,23 @@
 			if (allMaps?.length < 50) return;
 			if (entry.isIntersecting) {
 				loading = true;
-				osuMapsSearch = await fetchMaps(search, osuMapsSearch.cursor_string);
-				allMaps = [...allMaps, ...osuMapsSearch.beatmapsets];
-				loading = false;
-				if ($songQueue.type == 'preview') {
-					await updateSongQueue(null, allMaps);
+				try {
+					osuMapsSearch = await fetchMaps(search, osuMapsSearch?.cursor_string);
+
+					// Safely check that beatmapsets exists and is an array
+					if (osuMapsSearch && Array.isArray(osuMapsSearch.beatmapsets)) {
+						allMaps = [...allMaps, ...osuMapsSearch.beatmapsets];
+
+						if ($songQueue.type == 'preview') {
+							await updateSongQueue(null, allMaps);
+						}
+					} else {
+						console.error('Invalid response: beatmapsets is not an array', osuMapsSearch);
+					}
+				} catch (error) {
+					console.error('Error fetching more maps:', error);
+				} finally {
+					loading = false;
 				}
 			}
 		});
