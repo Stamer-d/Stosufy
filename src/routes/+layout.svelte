@@ -8,7 +8,6 @@
 	import { startTokenRefresh } from '$lib/stores/auth';
 	import Titlebar from '$lib/components/Titlebar.svelte';
 
-	const stopTokenRefresh = startTokenRefresh();
 	let showUI = $state(false);
 
 	// Update showUI based on current URL
@@ -21,7 +20,8 @@
 	}
 
 	// Initial check when mounted
-	onMount(() => {
+	onMount(async () => {
+		await startTokenRefresh();
 		updateShowUI();
 	});
 
@@ -32,8 +32,8 @@
 		}
 	});
 
-	onDestroy(() => {
-		stopTokenRefresh();
+	onDestroy(async () => {
+		await startTokenRefresh();
 	});
 </script>
 

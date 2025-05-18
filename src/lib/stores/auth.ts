@@ -2,7 +2,6 @@ import { get, writable } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
 import { load } from '@tauri-apps/plugin-store';
 import { goto } from '$app/navigation';
-
 export const user = writable({});
 
 export const keyStore = writable({
@@ -16,8 +15,8 @@ const clientId = '40234';
 const clientSecret = import.meta.env.VITE_CLIENT_SECRET;
 const redirectUrl = 'stosufynew://callback';
 
-function initializeStores() {
-	load('keyStore.json')
+async function initializeStores() {
+	await load('keyStore.json')
 		.then((keyData) => {
 			return keyData.get('store');
 		})
@@ -25,10 +24,8 @@ function initializeStores() {
 			if (storedData) {
 				keyStore.set(storedData);
 			}
-
-			// Set up the subscription after we've loaded the initial data
-			keyStore.subscribe((value) => {
-				load('keyStore.json').then((keyData) => {
+			keyStore.subscribe(async (value) => {
+				await load('keyStore.json').then((keyData) => {
 					keyData.set('store', value);
 				});
 			});
@@ -36,9 +33,8 @@ function initializeStores() {
 		.catch((err) => {
 			console.error('Error loading keyStore:', err);
 		});
+	console.log('KeyStore initialized: ', get(keyStore));
 }
-
-initializeStores();
 
 export async function checkSessionKey(sessionKey: string) {
 	if (!sessionKey)
@@ -159,7 +155,7 @@ export async function checkAccessToken(shouldPush = true, round = 0) {
 	}
 
 	let tokens = get(keyStore);
-
+	console.log('Checking access token', tokens);
 	if (!tokens.access_token) {
 		if (shouldPush) {
 			goto('/login');
@@ -189,16 +185,22 @@ export async function checkAccessToken(shouldPush = true, round = 0) {
 
 let refreshInterval;
 
-export function startTokenRefresh() {
+export async function startTokenRefresh() {
+	await initializeStores();
 	let diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
 
 	// Clear any existing interval first
 	if (refreshInterval) clearInterval(refreshInterval);
 	console.log('Starting token refresh');
 	if (get(keyStore).expiry_time < Date.now()) {
-		checkAccessToken();
+		const refreshed = await refreshToken(get(keyStore).refresh_token);
+		if (refreshed == null) {
+			goto('/login');
+		} else {
+			goto('/home');
+		}
 	} else {
-		const valid = checkAccessToken();
+		const valid = await checkAccessToken();
 		if (valid) goto('/home');
 		refreshInterval = setInterval(async () => {
 			await refreshToken(get(keyStore).refresh_token);
