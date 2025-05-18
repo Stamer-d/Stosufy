@@ -12,6 +12,8 @@
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
 	import { keyStore } from '../stores/auth';
+	import { playlists } from '$lib/stores/playlist';
+	import { getImageUrl } from '$lib/stores/data';
 
 	let search = $state('');
 	let osuMapsSearch = $state(null);
@@ -23,10 +25,10 @@
 	let loading = $state(true);
 
 	let playMap = $state(null);
-	let addPlaylistModal = {
+	let addPlaylistModal = $state({
 		open: false,
 		map: null
-	};
+	});
 
 	$effect(() => {
 		if (playMap) {
@@ -160,11 +162,24 @@
 	</div>
 {/if}
 
-<Modal title="Add to Playlist" bind:open={addPlaylistModal.open}>
+<Modal title="Add Song to Playlist" bind:open={addPlaylistModal.open}>
 	<div class="flex flex-col gap-4">
 		<div>
-			<h1 class="text-lg font-bold">Add {addPlaylistModal.map?.title} to Playlist</h1>
-			<p class="text-sm leading-relaxed">Select a playlist to add the map to.</p>
+			<p class="text-sm leading-relaxed">Select a playlist to add the Song to</p>
+			<div class="flex flex-col gap-2 max-h-60 overflow-y-auto pr-2">
+				{#each $playlists as playlist}
+					{#if playlist.id !== -1}
+						<div class="p-2 rounded flex items-center gap-2 hover:bg-secondary-200 cursor-pointer">
+							<img
+								src={playlist.id !== -1 ? getImageUrl(playlist.image_path) : '/NoLetterLogo.png'}
+								alt={playlist.title}
+								class="size-12 object-cover rounded-md"
+							/>
+							{playlist?.title}
+						</div>
+					{/if}
+				{/each}
+			</div>
 		</div>
 	</div>
 </Modal>
