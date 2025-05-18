@@ -35,6 +35,13 @@ Create custom playlists, manage your music, and enjoy your collection from any d
 
 ---
 
+## ❓What to do if something does not load
+> Sometimes the authentication is not working (WIP). So for that I added a Refresh Auth Button, which manually resets your authentication. This should fix your problem
+![image](https://github.com/user-attachments/assets/ce7ee2c1-ff7e-4f28-822f-41fdb285a4c9)
+
+
+---
+
 ## 📄 License
 
 MIT License
