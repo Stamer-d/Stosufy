@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
 	import { fly } from 'svelte/transition';
-	import Icon from '@iconify/svelte';
 
 	// Position of the context menu
 	let x = 0;
@@ -11,22 +10,21 @@
 	// Dispatch events for menu interactions
 	const dispatch = createEventDispatcher();
 
-	// Handler for right-click events
+	const CLOSE_ALL_CONTEXT_MENUS = 'closeAllContextMenus';
+
 	function handleContextMenu(event: MouseEvent) {
 		event.preventDefault();
 
-		// Position the menu at the cursor
+		window.dispatchEvent(new CustomEvent(CLOSE_ALL_CONTEXT_MENUS));
+
 		x = event.clientX;
 		y = event.clientY;
 
-		// Show the menu
 		showMenu = true;
 
-		// Dispatch the open event
 		dispatch('open', { x, y });
 	}
 
-	// Close the menu when clicking elsewhere
 	function handleClickOutside(event: MouseEvent) {
 		if (showMenu) {
 			showMenu = false;
@@ -42,14 +40,24 @@
 		}
 	}
 
+	// Handle custom event to close this menu when another one opens
+	function handleCloseAllContextMenus() {
+		if (showMenu) {
+			showMenu = false;
+			dispatch('close');
+		}
+	}
+
 	onMount(() => {
 		document.addEventListener('click', handleClickOutside);
 		document.addEventListener('keydown', handleKeyDown);
+		window.addEventListener(CLOSE_ALL_CONTEXT_MENUS, handleCloseAllContextMenus);
 	});
 
 	onDestroy(() => {
 		document.removeEventListener('click', handleClickOutside);
 		document.removeEventListener('keydown', handleKeyDown);
+		window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS, handleCloseAllContextMenus);
 	});
 
 	// Ensure the menu stays within viewport bounds
@@ -75,10 +83,8 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="context-menu-container inline-block" on:contextmenu={handleContextMenu}>
-	<!-- Content that can be right-clicked -->
 	<slot></slot>
 
-	<!-- The context menu -->
 	{#if showMenu}
 		<div
 			class="fixed z-50"
@@ -86,15 +92,8 @@
 			transition:fly={{ y: 5, duration: 150 }}
 			use:adjustMenuPosition
 		>
-			<div
-				class="bg-white dark:bg-gray-800 shadow-lg rounded-md border dark:border-gray-700 py-1 min-w-48"
-			>
-				<slot name="menu">
-					<!-- Default menu items if no custom menu is provided -->
-					<div class="px-4 py-2 text-sm text-gray-400 dark:text-gray-500">
-						No menu items provided
-					</div>
-				</slot>
+			<div class="bg-secondary-200 shadow-lg rounded-md py-2 min-w-64 p-1.5">
+				<slot name="menu"></slot>
 			</div>
 		</div>
 	{/if}

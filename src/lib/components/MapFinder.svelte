@@ -1,5 +1,5 @@
 <script>
-// @ts-nocheck
+	// @ts-nocheck
 
 	import { songQueue, setSongQueue, updateSongQueue } from '../stores/audio';
 	import { fetchMaps } from '../stores/data';
@@ -8,6 +8,10 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { mapDataStore } from '../stores/data';
 	import { user } from '../stores/auth';
+	import ContextMenu from './ContextMenu.svelte';
+	import Button from './Button.svelte';
+	import Modal from './Modal.svelte';
+
 	let search;
 	let osuMapsSearch = null;
 	let searchTimeout = null;
@@ -18,6 +22,11 @@
 	let loading = true;
 
 	let playMap = null;
+	let addPlaylistModal = {
+		open: false,
+		map: null
+	};
+
 	$: if (playMap) {
 		handlePlayMapChange(playMap);
 	}
@@ -95,7 +104,7 @@
 	onDestroy(() => {
 		if (searchTimeout) clearTimeout(searchTimeout);
 
-        observer = null;
+		observer = null;
 	});
 </script>
 
@@ -116,7 +125,22 @@
 	<div class="grid xl:grid-cols-3 md:grid-cols-2 gap-2 grid-cols-1">
 		{#key allMaps}
 			{#each allMaps as map}
-				<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
+				<ContextMenu>
+					<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
+					<svelte:fragment slot="menu">
+						<Button
+							type="ghost"
+							class="w-full py-3 rounded-sm hover:bg-secondary-300"
+							icon="icon-[fa6-solid--plus]"
+							on:click={() => {
+								addPlaylistModal.open = true;
+								addPlaylistModal.map = map;
+							}}
+						>
+							Add to Playlist
+						</Button>
+					</svelte:fragment>
+				</ContextMenu>
 			{/each}
 		{/key}
 	</div>
@@ -128,3 +152,12 @@
 		<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
 	</div>
 {/if}
+
+<Modal title="Add to Playlist" bind:open={addPlaylistModal.open}>
+	<div class="flex flex-col gap-4">
+		<div>
+			<h1 class="text-lg font-bold">Add {addPlaylistModal.map?.title} to Playlist</h1>
+			<p class="text-sm leading-relaxed">Select a playlist to add the map to.</p>
+		</div>
+	</div>
+</Modal>
