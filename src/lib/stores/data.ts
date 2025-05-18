@@ -52,6 +52,7 @@ export let mapDataStore = writable({});
 		console.error('Error initializing data store:', error);
 	}
 })();
+
 async function saveMapData() {
 	await writeTextFile(mapDataFile, JSON.stringify(get(mapDataStore)), {
 		baseDir: BaseDirectory.Home
