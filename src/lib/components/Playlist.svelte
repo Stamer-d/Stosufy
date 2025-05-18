@@ -7,6 +7,9 @@
 	import ContextMenu from './ContextMenu.svelte';
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
+	import { writable } from 'svelte/store';
+
+	let fileInput;
 
 	let editPlaylistModal = $state({
 		open: false,
@@ -60,6 +63,16 @@
 		await deletePlaylist(playlistId);
 	}
 
+	let uploadedImage = writable(null);
+
+	async function handleImageSelect(event) {
+		const file = event.target.files[0];
+		if (file) {
+			const imageUrl = URL.createObjectURL(file);
+			$uploadedImage = imageUrl;
+		}
+	}
+
 	$effect(async () => {
 		if ($user?.id) {
 			await getPlaylist();
@@ -86,7 +99,6 @@
 			<ContextMenu disabled={playlist.id == -1 ? true : false}>
 				<button
 					on:click={() => {
-						console.log(playlist.id);
 						goto(`/playlist/${playlist?.id}`);
 					}}
 					class="group flex items-center p-2 rounded-md hover:bg-secondary-200 w-full cursor-pointer transition duration-100"
@@ -144,21 +156,33 @@
 
 <Modal title="Edit Playlist" bind:open={editPlaylistModal.open}>
 	<div class="flex gap-2 items-center">
-		<button class="relative w-48 flex items-center group">
+		<button
+			class="relative flex-shrink-0 w-[150px] h-[150px] flex items-center justify-center group cursor-pointer"
+			on:click={() => fileInput.click()}
+		>
+			<input
+				type="file"
+				bind:this={fileInput}
+				accept="image/*"
+				class="hidden"
+				on:change={handleImageSelect}
+			/>
+
 			<div
-				class="absolute w-full h-full rounded bg-secondary-100/50 opacity-0 group-hover:opacity-100 cursor-pointer z-10"
+				class="absolute inset-0 rounded bg-secondary-100/70 opacity-0 group-hover:opacity-100 z-10"
 			></div>
 
 			<span
-				class="icon-[fa6-solid--pen] absolute opacity-0 group-hover:opacity-100 text-secondary-600 size-6 left-1/2 cursor-pointer top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
+				class="icon-[fa6-solid--pencil] absolute opacity-0 group-hover:opacity-100 text-white size-8 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
 			></span>
 
-			<!-- Image -->
-			<img
-				class=" bg-secondary-300/30 rounded cursor-pointer w-full"
-				src={getImageUrl(editPlaylistModal.playlist?.image_path)}
-				alt="Playlist cover"
-			/>
+			<div class="w-[150px] h-[150px] bg-secondary-300 rounded overflow-hidden object-cover">
+				<img
+					class="w-full h-full object-contain"
+					src={$uploadedImage || getImageUrl(editPlaylistModal.playlist?.image_path)}
+					alt="Playlist cover"
+				/>
+			</div>
 		</button>
 		<div class="flex flex-col gap-2 w-full">
 			<div>
@@ -179,4 +203,21 @@
 			</div>
 		</div>
 	</div>
+	<svelte:fragment slot="footer">
+		<Button
+			on:click={async () => {
+				editPlaylistModal.open = false;
+			}}
+		>
+			Cancel
+		</Button>
+		<Button
+			type="primary"
+			on:click={async () => {
+				editPlaylistModal.open = false;
+			}}
+		>
+			Save Changes
+		</Button>
+	</svelte:fragment>
 </Modal>

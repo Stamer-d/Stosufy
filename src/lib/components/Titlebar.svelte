@@ -7,8 +7,28 @@
 	import Dropdown from './Dropdown.svelte';
 	import { refreshToken, keyStore } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
+	import Modal from './Modal.svelte';
+	import { check } from '@tauri-apps/plugin-updater';
 
 	const appWindow = getCurrentWindow();
+
+	let updateModal = $state({
+		show: false,
+		open: async () => {
+			updateModal.show = true;
+			await checkForUpdates();
+		},
+		hasUpdate: null
+	});
+
+	async function checkForUpdates() {
+		const update = await check();
+		if (update) {
+			updateModal.hasUpdate = true;
+		} else {
+			updateModal.hasUpdate = false;
+		}
+	}
 
 	async function refreshAuth() {
 		const keys = $keyStore;
@@ -47,6 +67,9 @@
 					type="ghost"
 					class="w-full py-3 rounded-sm hover:bg-secondary-300"
 					icon="icon-[fa6-solid--arrows-rotate]"
+					on:click={() => {
+						updateModal.open();
+					}}
 				>
 					Check for Updates
 				</Button>
@@ -88,3 +111,17 @@
 		/>
 	</div>
 </div>
+
+<Modal bind:open={updateModal.show} title="Stosufy Update">
+	{#if updateModal.hasUpdate === null}
+		<div class="flex flex-col gap-2 items-center justify-center">
+			<p class="text-lg">Checking for updates</p>
+			<span class="icon-[line-md--loading-loop] text-center size-8"></span>
+		</div>
+	{:else if updateModal.hasUpdate}
+		<p class="text-center text-lg">A new version is available!</p>
+		<Button type="primary" class="w-full mt-4" on:click={async () => {}}>Update Now</Button>
+	{:else}
+		<p class="text-center text-lg">You are on the latest version!</p>
+	{/if}
+</Modal>

@@ -89,7 +89,7 @@
 					<slot />
 				</div>
 
-				<div class="modal-footer p-4 flex justify-end">
+				<div class="modal-footer p-4 flex justify-end gap-2">
 					<slot name="footer">
 						<Button
 							on:click={() => {

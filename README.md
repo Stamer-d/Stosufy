@@ -1,3 +1,5 @@
 # Stosufy
 
-Descriptino WIP
+Description WIP
+
+This is still in development
