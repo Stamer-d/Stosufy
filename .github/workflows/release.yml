@@ -44,7 +44,7 @@ jobs:
 
       - name: Create .env file
         run: |
-          echo "VITE_SECRET_KEY=${{ secrets.CLIENT_SECRET }}" >> .env
+          echo "VITE_CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" >> .env
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0

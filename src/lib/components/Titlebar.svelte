@@ -143,7 +143,13 @@
 		</div>
 	{:else if updateModal.hasUpdate && updating !== true}
 		<p class="text-center text-lg">A new version is available!</p>
-		<Button type="primary" class="w-full mt-4" on:click={async () => {}}>Update Now</Button>
+		<Button
+			type="primary"
+			class="w-full mt-4"
+			on:click={async () => {
+				await updateApp();
+			}}>Update Now</Button
+		>
 	{:else if updating}
 		<div class="flex flex-col gap-2 items-center justify-center">
 			<p class="text-lg">Updating Stosufy</p>
