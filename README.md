@@ -8,6 +8,9 @@
   <i>A rhythm-inspired music player powered by osu! maps</i>
 </p>
 
+> [!CAUTION]
+> Stosufy is still unstable at the moment. Expect Bugs to happen ([Please Report every bug you find](https://github.com/Stamer-d/Stosufy/issues))
+
 ---
 
 ## 💡 What is Stosufy?
