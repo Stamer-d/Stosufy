@@ -14,6 +14,7 @@
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
+	import { handleImageError } from '$lib/stores/data';
 
 	// Track audio time
 	let currentTime = 0;
@@ -168,6 +169,7 @@
 				src="https://assets.ppy.sh/beatmaps/{$currentSong.song?.id}/covers/list.jpg"
 				class="size-16 rounded"
 				alt=""
+				on:error={handleImageError}
 			/>
 			<div>
 				<div class="font-medium">{$currentSong.song?.title}</div>

@@ -2,13 +2,11 @@
 	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
 	import { fly } from 'svelte/transition';
 
-	// Position of the context menu
 	let x = 0;
 	let y = 0;
 	let showMenu = false;
 	export let disabled = false;
 
-	// Dispatch events for menu interactions
 	const dispatch = createEventDispatcher();
 
 	const CLOSE_ALL_CONTEXT_MENUS = 'closeAllContextMenus';
@@ -36,7 +34,6 @@
 		}
 	}
 
-	// Handle escape key to close the menu
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === 'Escape' && showMenu) {
 			showMenu = false;
@@ -44,7 +41,6 @@
 		}
 	}
 
-	// Handle custom event to close this menu when another one opens
 	function handleCloseAllContextMenus() {
 		if (showMenu) {
 			showMenu = false;
@@ -64,7 +60,6 @@
 		window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS, handleCloseAllContextMenus);
 	});
 
-	// Ensure the menu stays within viewport bounds
 	$: adjustedX = x;
 	$: adjustedY = y;
 
@@ -73,12 +68,10 @@
 		const viewportWidth = window.innerWidth;
 		const viewportHeight = window.innerHeight;
 
-		// Adjust if menu would overflow right edge
 		if (x + rect.width > viewportWidth) {
 			adjustedX = viewportWidth - rect.width;
 		}
 
-		// Adjust if menu would overflow bottom edge
 		if (y + rect.height > viewportHeight) {
 			adjustedY = viewportHeight - rect.height;
 		}

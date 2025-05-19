@@ -57,6 +57,12 @@ export const downloads = writable({});
 	}
 })();
 
+export function handleImageError(event) {
+	event.target.src = '/logo.png';
+	event.target.style.filter = 'grayscale(100%)';
+	event.target.style.opacity = '0.7';
+}
+
 async function saveMapData() {
 	await writeTextFile(mapDataFile, JSON.stringify(get(mapDataStore)), {
 		baseDir: BaseDirectory.Home

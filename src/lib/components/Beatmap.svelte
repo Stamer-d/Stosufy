@@ -3,7 +3,13 @@
 
 	import { songQueue } from '$lib/stores/audio';
 	import { togglePlayback, currentSong, updateSongQueue } from '$lib/stores/audio';
-	import { downloadBeatmap, deleteSong, mapDataStore, formatSongData } from '$lib/stores/data';
+	import {
+		downloadBeatmap,
+		deleteSong,
+		mapDataStore,
+		formatSongData,
+		handleImageError
+	} from '$lib/stores/data';
 	import { onMount } from 'svelte';
 	import Button from './Button.svelte';
 	import { keyStore } from '$lib/stores/auth';
@@ -18,7 +24,6 @@
 	let downloadProgressInterval;
 
 	let sortedBeatmaps = [];
-	let imgNotFound = false;
 
 	$: {
 		if ($downloads[map.id]) {
@@ -108,13 +113,10 @@
 	}
 
 	function sortAndColorDifficulties(beatmaps) {
-		// Handle both array and object structures
 		if (!beatmaps) return [];
 
-		// Convert object structure to array if needed
 		let beatmapsArray = Array.isArray(beatmaps) ? beatmaps : Object.values(beatmaps);
 
-		// If empty, return empty array
 		if (!beatmapsArray.length) return [];
 
 		return beatmapsArray
@@ -151,21 +153,15 @@
 	onMount(() => {
 		sortedBeatmaps = sortAndColorDifficulties(map.beatmaps);
 	});
-	function handleImageError(event) {
-		event.target.src = 'logo.png';
-		imgNotFound = true;
-	}
 </script>
 
 <div class="rounded group hover:ring-2 ring-primary-300 transition duration-100 relative">
 	<div class="flex justify-start h-25 relative">
 		<img
 			src="https://assets.ppy.sh/beatmaps/{map.id}/covers/list.jpg"
-			on:error={(e) => handleImageError(e)}
+			on:error={handleImageError}
 			alt=""
-			class="{imgNotFound
-				? 'grayscale bg-secondary-200'
-				: ''} h-full w-[100px] rounded-s object-cover"
+			class="h-full w-[100px] rounded-s object-cover"
 		/>
 		<!-- svelte-ignore a11y_consider_explicit_label -->
 		<!-- svelte-ignore element_invalid_self_closing_tag -->

@@ -1,6 +1,12 @@
 <script>
 	import Button from '$lib/components/Button.svelte';
-	import { deleteSong, getImageUrl, isSongDownloaded, downloadBeatmap } from '$lib/stores/data';
+	import {
+		deleteSong,
+		getImageUrl,
+		isSongDownloaded,
+		downloadBeatmap,
+		handleImageError
+	} from '$lib/stores/data';
 	import {
 		getPlaylistSongs,
 		playlistLoadingStatus,
@@ -101,49 +107,42 @@
 	}
 
 	function getDateString(timestamp) {
-		// Check if timestamp is in milliseconds (13 digits) or seconds (10 digits)
 		const date =
-			timestamp.toString().length > 10
-				? new Date(timestamp) // Already in milliseconds
-				: new Date(timestamp * 1000); // Convert seconds to milliseconds
+			timestamp.toString().length > 10 ? new Date(timestamp) : new Date(timestamp * 1000);
 
 		const now = new Date();
+		const diffMs = now - date;
 
-		// Calculate time differences
-		const diffTime = now - date;
-		const diffMinutes = Math.floor(diffTime / (1000 * 60));
-		const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
-		const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+		const plural = (value, unit) => `${value} ${unit}${value !== 1 ? 's' : ''} ago`;
 
-		if (diffMinutes < 60) {
-			if (diffMinutes < 1) {
-				return 'Just now';
-			}
-			return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
-		} else if (diffHours < 24) {
-			return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-		} else if (diffDays < 30) {
-			if (diffDays === 0) {
-				return 'Today';
-			} else if (diffDays === 1) {
-				return 'Yesterday';
-			} else if (diffDays < 7) {
-				return `${diffDays} days ago`;
-			} else {
-				const weeks = Math.floor(diffDays / 7);
-				return `${weeks} week${weeks > 1 ? 's' : ''} ago`;
-			}
-		} else {
-			const options = { day: 'numeric', month: 'long', year: 'numeric' };
-			return date.toLocaleDateString('de-DE', options);
-		}
+		const MINUTE = 60 * 1000;
+		const HOUR = 60 * MINUTE;
+		const DAY = 24 * HOUR;
+		const WEEK = 7 * DAY;
+
+		if (diffMs < MINUTE) return 'Just now';
+		if (diffMs < HOUR) return plural(Math.floor(diffMs / MINUTE), 'minute');
+		if (diffMs < DAY) return plural(Math.floor(diffMs / HOUR), 'hour');
+
+		const diffDays = Math.floor(diffMs / DAY);
+
+		if (diffDays === 0) return 'Today';
+		if (diffDays === 1) return 'Yesterday';
+		if (diffDays < 7) return plural(diffDays, 'day');
+		if (diffDays < 30) return plural(Math.floor(diffDays / 7), 'week');
+
+		return date.toLocaleDateString('de-DE', {
+			day: 'numeric',
+			month: 'long',
+			year: 'numeric'
+		});
 	}
 
 	async function removeSong(songId) {
 		songs = songs.filter((song) => song.songInfo.id != songId);
 		const updatedPlaylists = $playlists.map((p) => {
 			if (p.id == playlistId) {
-				return { ...p, song_amount: Math.max(0, p.song_amount - 1) }; // Ensure count doesn't go negative
+				return { ...p, song_amount: Math.max(0, p.song_amount - 1) };
 			}
 			return p;
 		});
@@ -172,7 +171,7 @@
 {#if playlistData}
 	<div class="flex flex-col">
 		<div class="flex items-center gap-4 mb-2">
-			<div class="relative">
+			<div class="relative shrink-0">
 				<img
 					src={playlistId != -1 ? getImageUrl(playlistData.image_path) : '/NoLetterLogo.png'}
 					alt=""
@@ -188,6 +187,9 @@
 			<div class="flex xl:gap-2 gap-1 flex-col">
 				<div>{playlistData.public ? 'Public Playlist' : 'Private Playlist'}</div>
 				<div class="xl:text-6xl text-3xl font-bold">{playlistData.title}</div>
+				<div class=" line-clamp-1 w-full text-secondary-600 font-semibold">
+					{playlistData.description}
+				</div>
 				<div>
 					{playlistData.song_amount} Song{playlistData.song_amount > 1 ? 's' : ''}
 				</div>
@@ -195,14 +197,17 @@
 		</div>
 		{#if songs?.length}
 			{#each songs as song, index (song.id)}
+				<!-- REMOVE IF AND CONTENT COMPLETLY AND MAKE ONE BUTTON OUT OF IT-->
 				{#if !isSongDownloaded(song.id)}
 					<button
 						class="cursor-pointer group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-200 rounded p-2 relative"
 						on:click={async () => {
+							if ($downloads[song.id]?.isDownloading) {
+								return;
+							}
 							await startDownload(song, song.beatmaps[0].id);
 						}}
 					>
-						<!-- Existing content -->
 						<div class="relative flex justify-end mr-4">
 							<span
 								class="icon-[fa6-solid--arrow-down] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
@@ -211,10 +216,10 @@
 								{index + 1}
 							</div>
 						</div>
-						<!-- Rest of existing content -->
 						<img
 							src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
 							alt={song.title}
+							on:error={handleImageError}
 							class="size-14 rounded"
 						/>
 						<div class="flex flex-col text-start ml-4">
@@ -299,6 +304,7 @@
 						<img
 							src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
 							alt={song.title}
+							on:error={handleImageError}
 							class="size-14 rounded"
 						/>
 						<div class="flex flex-col text-start ml-4">

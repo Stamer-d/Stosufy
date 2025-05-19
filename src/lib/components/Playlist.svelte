@@ -35,7 +35,7 @@
 		const downloadedSongsPlaylist = {
 			id: -1,
 			title: 'Downloaded Songs',
-			description: 'Your offline music collection',
+			description: 'Your downloaded music collection',
 			image_path: null,
 			song_amount: Object.keys($mapDataStore).length,
 			created_at: null,
@@ -138,8 +138,6 @@
 			}}
 		/>
 	</div>
-
-	<!-- Playlist List -->
 	<ul class="overflow-y-auto flex flex-col gap-2 pl-2">
 		{#each $playlists as playlist}
 			<ContextMenu disabled={playlist.id == -1 ? true : false}>
@@ -150,11 +148,11 @@
 					class="group flex items-center p-2 rounded-md hover:bg-secondary-200 w-full cursor-pointer transition duration-100"
 				>
 					<div class="w-12 h-12 mr-3 flex items-center">
-						<div class="relative">
+						<div class="relative w-12 h-12 aspect-square">
 							<img
 								src={playlist.id !== -1 ? getImageUrl(playlist.image_path) : '/NoLetterLogo.png'}
 								alt={playlist.title}
-								class="w-full h-full object-cover rounded-md"
+								class="w-full h-full object-cover rounded-md aspect-square"
 							/>
 							{#if playlist.id == -1}
 								<span
@@ -208,7 +206,6 @@
 
 <Modal title="Edit Playlist" bind:open={editPlaylistModal.open}>
 	<div class="flex flex-col md:flex-row gap-4">
-		<!-- Image Selection Area -->
 		<div class="flex flex-col items-center">
 			<button
 				class="relative flex-shrink-0 w-[150px] h-[150px] flex items-center justify-center group cursor-pointer rounded-md overflow-hidden"

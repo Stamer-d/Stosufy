@@ -30,15 +30,10 @@
 	}
 
 	$: if (open) {
-		// When modal opens, track previously focused element
 		previouslyFocused = document.activeElement;
-
-		// Add event listeners
 		setTimeout(() => {
 			document.addEventListener('keydown', handleKeydown);
 			document.addEventListener('mousedown', handleOutsideClick);
-
-			// Focus the first focusable element
 			const focusable = modal.querySelectorAll(
 				'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
 			);
@@ -47,11 +42,8 @@
 			}
 		}, 0);
 	} else {
-		// Remove event listeners when modal closes
 		document.removeEventListener('keydown', handleKeydown);
 		document.removeEventListener('mousedown', handleOutsideClick);
-
-		// Return focus to previously focused element
 		if (previouslyFocused) {
 			previouslyFocused.focus();
 		}
@@ -67,29 +59,29 @@
 
 {#if open}
 	<div
-		class="modal-backdrop fixed inset-0 bg-secondary-100/70 z-40 flex items-center justify-center px-4"
+		class="modal-backdrop fixed inset-0 bg-secondary-100/70 z-40 flex items-center justify-center p-4 overflow-y-auto"
 		role="presentation"
 	>
 		<div
-			class="modal bg-secondary-200 rounded-lg max-w-md z-50"
-			style="width: {width};"
+			class="modal bg-secondary-200 rounded-lg my-auto z-50 max-h-[90vh] flex flex-col"
+			style="width: {width}; max-width: 95vw;"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby={title ? 'modal-title' : undefined}
 			bind:this={modal}
 		>
-			<div class="modal-content">
+			<div class="modal-content flex flex-col max-h-[80vh]">
 				{#if title}
-					<div class="modal-header border-b border-secondary-200 p-3">
+					<div class="modal-header border-b border-secondary-200 p-3 flex-shrink-0">
 						<h2 id="modal-title" class="text-lg font-medium">{title}</h2>
 					</div>
 				{/if}
 
-				<div class="modal-body p-3">
+				<div class="modal-body p-3 overflow-y-auto">
 					<slot />
 				</div>
 
-				<div class="modal-footer p-4 flex justify-end gap-2">
+				<div class="modal-footer p-4 flex justify-end gap-2 flex-shrink-0">
 					<slot name="footer">
 						<Button
 							on:click={() => {
