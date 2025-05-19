@@ -1,5 +1,5 @@
 <script>
-// @ts-nocheck
+	// @ts-nocheck
 
 	import { onMount, onDestroy } from 'svelte';
 	import { settings } from '../stores/audio';
@@ -45,8 +45,8 @@
 		duration = $songQueue.audio.duration || 0;
 		progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 		if (progressPercent >= 100) {
-			console.log($songQueue)
-			if($songQueue.currentIndex == $songQueue.queue?.length - 1) {
+			console.log($songQueue);
+			if ($songQueue.currentIndex == $songQueue.queue?.length - 1) {
 				stopPlayback();
 			} else {
 				await skipForward();
@@ -117,40 +117,38 @@
 		setupTimeTracking();
 	}
 
-	onMount(async() => {
-
+	onMount(async () => {
 		await register('MEDIAPLAYPAUSE', (e) => {
-						console.log($currentSong.isPlaying)
+			console.log($currentSong.isPlaying);
 
-			if(e.state == "Pressed"){
+			if (e.state == 'Pressed') {
 				togglePlayback();
-			} 
-
+			}
 		});
 		await register('MEDIATRACKNEXT', async (e) => {
-			if(e.state == "Pressed") await skipForward();
+			if (e.state == 'Pressed') await skipForward();
 		});
-		await register('MEDIATRACKPREV', async(e) => {
-			if(e.state == "Pressed") await skipBackward();
+		await register('MEDIATRACKPREV', async (e) => {
+			if (e.state == 'Pressed') await skipBackward();
 		});
 		await register('F14', (e) => {
-			if(e.state == "Released") return 
+			if (e.state == 'Released') return;
 			if (volume + 0.01 >= 0.1) {
 				handleVolumeChange(0.1);
-				return
+				return;
 			}
 			handleVolumeChange(volume + 0.01);
 		});
 		await register('F13', (e) => {
-			if(e.state == "Released") return 
+			if (e.state == 'Released') return;
 			if (volume - 0.01 <= 0) {
-					handleVolumeChange(0.001);
-					return
-				}
-				handleVolumeChange(volume - 0.01);
+				handleVolumeChange(0.001);
+				return;
+			}
+			handleVolumeChange(volume - 0.01);
 		});
 	});
-	onDestroy(async() => {
+	onDestroy(async () => {
 		clearInterval(updateInterval);
 		if ($currentSong.isPlaying) {
 			stopPlayback();
@@ -178,7 +176,7 @@
 		</div>
 		<div class="w-full flex-col flex">
 			<div class="flex justify-center items-center gap-6 -my-2">
-				<Button type="ghost">
+				<Button type="ghost" disabled>
 					<span class="icon-[mingcute--shuffle-line] size-5" on:click={() => {}} />
 				</Button>
 				<Button type="ghost" on:click={async () => await skipBackward()}>
@@ -186,18 +184,19 @@
 				</Button>
 				<Button type="ghost" on:click={() => togglePlayback()}>
 					{#key $currentSong}
-					{#if $currentSong.isPlaying}
-						<span class="icon-[fa6-solid--circle-pause] size-8 hover:scale-[1.05] text-white"
-						></span>
-					{:else}
-						<span class="icon-[fa6-solid--circle-play] size-8 hover:scale-[1.05] text-white"></span>
-					{/if}
+						{#if $currentSong.isPlaying}
+							<span class="icon-[fa6-solid--circle-pause] size-8 hover:scale-[1.05] text-white"
+							></span>
+						{:else}
+							<span class="icon-[fa6-solid--circle-play] size-8 hover:scale-[1.05] text-white"
+							></span>
+						{/if}
 					{/key}
 				</Button>
 				<Button type="ghost" on:click={async () => await skipForward()}>
 					<span class="icon-[fa6-solid--forward-step] size-5" />
 				</Button>
-				<Button type="ghost">
+				<Button type="ghost" disabled>
 					<span class="icon-[fa6-solid--repeat] size-4" />
 				</Button>
 			</div>

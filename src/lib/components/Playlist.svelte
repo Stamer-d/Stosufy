@@ -2,7 +2,13 @@
 	import { keyStore, user } from '$lib/stores/auth';
 	import Button from './Button.svelte';
 	import { getImageUrl, mapDataStore } from '$lib/stores/data';
-	import { playlists, getPlaylists, createPlaylist, deletePlaylist } from '$lib/stores/playlist';
+	import {
+		playlists,
+		getPlaylists,
+		createPlaylist,
+		deletePlaylist,
+		loadAllPlaylistSongs
+	} from '$lib/stores/playlist';
 	import { goto } from '$app/navigation';
 	import ContextMenu from './ContextMenu.svelte';
 	import Modal from './Modal.svelte';
@@ -38,6 +44,7 @@
 		};
 
 		$playlists = [downloadedSongsPlaylist, ...playlist_list];
+		loadAllPlaylistSongs();
 	}
 
 	async function createNewPlaylist() {
@@ -112,7 +119,6 @@
 	// Replace the effect with this improved version
 	$effect(async () => {
 		if ($user?.id && (!playlistsLoaded || lastUserId !== $user.id)) {
-			console.log('Fetching playlists (should happen only once per session)');
 			lastUserId = $user.id;
 			await getPlaylist();
 			playlistsLoaded = true;

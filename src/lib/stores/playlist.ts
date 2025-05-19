@@ -1,7 +1,10 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { get, writable } from 'svelte/store';
 import { keyStore } from './auth';
+import { formatSongData, mapDataStore } from './data';
 export const playlists = writable([]);
+export const playlistSongsCache = writable({});
+export const playlistLoadingStatus = writable({});
 
 export async function getPlaylists(code) {
 	const response = await fetch('https://api.stamer-d.de/stosufy/playlist/', {
@@ -134,67 +137,161 @@ export async function removeSongFromPlaylist(playlistId, songId) {
 	return data;
 }
 
-export async function getPlaylistSongs(playlistId) {
-	// First, get the playlist songs from your API
-	const response = await fetch(`https://api.stamer-d.de/stosufy/playlist/${playlistId}`, {
-		method: 'GET',
-		headers: {
-			Authorization: `Bearer ${get(keyStore).access_token}`
+export async function getPlaylistSongs(playlistId, forceRefresh = false) {
+	if (!forceRefresh && get(playlistSongsCache)[playlistId]) {
+		return get(playlistSongsCache)[playlistId];
+	}
+	playlistLoadingStatus.update((status) => ({
+		...status,
+		[playlistId]: true
+	}));
+
+	try {
+		// Special case for downloaded songs playlist
+		if (playlistId == -1) {
+			const songs = formatSongData(get(mapDataStore));
+
+			playlistSongsCache.update((cache) => ({
+				...cache,
+				[playlistId]: { songs }
+			}));
+
+			return { songs };
 		}
-	});
 
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
-	}
-
-	// The response is the array of songs directly
-	const playlistSongs = await response.json();
-
-	// If there are no songs, return early
-	if (!playlistSongs || playlistSongs.length === 0 || playlistSongs[0].id === null) {
-		return { songs: [] };
-	}
-	// Extract map IDs from the playlist songs
-	const mapIds = playlistSongs.map((song) => song.map_id);
-	// Fetch detailed beatmap information from osu API
-	const osuResponse = await fetch(
-		`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${mapIds.join('&ids[]=')}`,
-		{
+		const response = await fetch(`https://api.stamer-d.de/stosufy/playlist/${playlistId}`, {
 			method: 'GET',
 			headers: {
-				Authorization: `Bearer ${get(keyStore).access_token}`,
-				'Content-Type': 'application/json'
+				Authorization: `Bearer ${get(keyStore).access_token}`
+			}
+		});
+
+		if (!response.ok) {
+			throw new Error(`HTTP error! status: ${response.status}`);
+		}
+
+		const playlistSongs = await response.json();
+
+		if (!playlistSongs || playlistSongs.length === 0 || playlistSongs[0].id === null) {
+			playlistSongsCache.update((cache) => ({
+				...cache,
+				[playlistId]: { songs: [] }
+			}));
+			return { songs: [] };
+		}
+
+		const mapIds = playlistSongs.map((song) => song.map_id);
+
+		// Process in chunks of 50
+		const chunkSize = 50;
+		const mapIdChunks = [];
+		for (let i = 0; i < mapIds.length; i += chunkSize) {
+			mapIdChunks.push(mapIds.slice(i, i + chunkSize));
+		}
+
+		const beatmapRequests = mapIdChunks.map((chunk) =>
+			fetch(`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${chunk.join('&ids[]=')}`, {
+				method: 'GET',
+				headers: {
+					Authorization: `Bearer ${get(keyStore).access_token}`,
+					'Content-Type': 'application/json'
+				}
+			})
+		);
+
+		const responses = await Promise.all(beatmapRequests);
+
+		for (let i = 0; i < responses.length; i++) {
+			if (!responses[i].ok) {
+				throw new Error(`OSU API error! status: ${responses[i].status} for chunk ${i + 1}`);
 			}
 		}
-	);
 
-	if (!osuResponse.ok) {
-		throw new Error(`OSU API error! status: ${osuResponse.status}`);
+		const responseDataPromises = responses.map((res) => res.json());
+		const responseData = await Promise.all(responseDataPromises);
+
+		let allBeatmaps = [];
+		for (const data of responseData) {
+			if (data.beatmaps) {
+				allBeatmaps = [...allBeatmaps, ...data.beatmaps];
+			}
+		}
+
+		const enhancedSongs = playlistSongs.map((song) => {
+			const beatmap = allBeatmaps.find((bm) => bm.id?.toString() === song.map_id?.toString());
+
+			return {
+				id: song.id,
+				set_id: song.set_id,
+				map_id: song.map_id,
+				position: song.position,
+				created_at: song.created_at,
+				updated_at: song.updated_at,
+				beatmap: beatmap || null
+			};
+		});
+
+		const beatmapsetGroups = {};
+
+		enhancedSongs.forEach((song) => {
+			if (!song.beatmap || !song.beatmap.beatmapset) return;
+
+			const beatmapsetId = song.beatmap.beatmapset.id;
+
+			if (!beatmapsetGroups[beatmapsetId]) {
+				beatmapsetGroups[beatmapsetId] = {
+					...song.beatmap.beatmapset,
+					songInfo: { ...song },
+					beatmaps: [],
+					// Store the position for sorting
+					position: song.position
+				};
+			}
+			beatmapsetGroups[beatmapsetId].beatmaps.push({
+				...song.beatmap
+			});
+		});
+
+		const structuredSongs = Object.values(beatmapsetGroups);
+
+		structuredSongs.sort((a, b) => {
+			return new Date(b.songInfo.created_at) - new Date(a.songInfo.created_at);
+		});
+
+		playlistSongsCache.update((cache) => ({
+			...cache,
+			[playlistId]: { songs: structuredSongs }
+		}));
+		return { songs: structuredSongs };
+	} catch (error) {
+		console.error(`Error loading playlist ${playlistId}:`, error);
+		return { songs: [], error: error.message };
+	} finally {
+		playlistLoadingStatus.update((status) => ({
+			...status,
+			[playlistId]: false
+		}));
+	}
+}
+
+export async function loadAllPlaylistSongs() {
+	const allPlaylists = get(playlists);
+
+	const concurrencyLimit = 3;
+	const playlistIds = allPlaylists.map((playlist) => playlist.id);
+
+	for (let i = 0; i < playlistIds.length; i += concurrencyLimit) {
+		const batch = playlistIds.slice(i, i + concurrencyLimit);
+		await Promise.all(batch.map((id) => getPlaylistSongs(id)));
 	}
 
-	const beatmapsResponse = await osuResponse.json();
-	console.log('Beatmaps response:', beatmapsResponse);
-	// The beatmaps API returns an object with a "beatmaps" property containing the array
-	const beatmapsData = beatmapsResponse.beatmaps || [];
+	return true;
+}
 
-	// Combine playlist data with OSU beatmap data
-	const enhancedSongs = playlistSongs.map((song) => {
-		// Find corresponding beatmap data
-		const beatmap = beatmapsData.find((bm) => bm.id?.toString() === song.map_id?.toString());
-
-		return {
-			id: song.id,
-			set_id: song.set_id,
-			map_id: song.map_id,
-			position: song.position,
-			created_at: song.created_at,
-			updated_at: song.updated_at,
-			beatmap: beatmap || null
-		};
+export function clearPlaylistCache(playlistId) {
+	playlistSongsCache.update((cache) => {
+		const newCache = { ...cache };
+		delete newCache[playlistId];
+		return newCache;
 	});
-
-	// Return structured playlist data
-	return {
-		songs: enhancedSongs
-	};
 }

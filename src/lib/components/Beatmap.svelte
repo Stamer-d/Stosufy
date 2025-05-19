@@ -8,6 +8,7 @@
 	import Button from './Button.svelte';
 	import { keyStore } from '$lib/stores/auth';
 	import { playlists } from '$lib/stores/playlist';
+	import { downloads } from '$lib/stores/data';
 
 	export let map;
 	export let isDownloaded = false;
@@ -19,22 +20,51 @@
 	let sortedBeatmaps = [];
 	let imgNotFound = false;
 
+	$: {
+		if ($downloads[map.id]) {
+			isDownloading = $downloads[map.id].isDownloading;
+			downloadProgress = $downloads[map.id].progress;
+		}
+	}
+
 	export let playMap = null;
 
 	function startDownload(mapData, mapId) {
-		isDownloading = true;
-		downloadProgress = 0;
+		downloads.update((state) => ({
+			...state,
+			[mapId]: { isDownloading: true, progress: 0 }
+		}));
+
 		downloadProgressInterval = setInterval(() => {
-			downloadProgress = Math.min(downloadProgress + 5 * Math.random(), 95);
+			downloads.update((state) => {
+				const currentProgress = state[mapId]?.progress || 0;
+				const newProgress = Math.min(currentProgress + 5 * Math.random(), 95);
+				return {
+					...state,
+					[mapId]: { ...state[mapId], progress: newProgress }
+				};
+			});
 		}, 200);
 		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
 			async () => {
-				downloadProgress = 100;
 				clearInterval(downloadProgressInterval);
+
+				downloads.update((state) => ({
+					...state,
+					[mapId]: { isDownloading: true, progress: 100 }
+				}));
+
 				setTimeout(() => {
-					isDownloading = false;
-					downloadProgress = 0;
+					downloads.update((state) => {
+						const newState = { ...state, [mapId]: { isDownloading: false, progress: 100 } };
+						return newState;
+					});
 				}, 500);
+				downloads.update((state) => {
+					const newState = { ...state };
+					delete newState[map.id];
+					return newState;
+				});
 				playlists.update((allPlaylists) => {
 					return allPlaylists.map((playlist) => {
 						if (playlist.id == -1) {
@@ -46,6 +76,7 @@
 						return playlist;
 					});
 				});
+
 				if ($songQueue.type == 'playlist' && $songQueue.playlistId == -1) {
 					await updateSongQueue(
 						$songQueue.currentIndex + 1,
@@ -144,6 +175,7 @@
 					togglePlayback();
 				} else {
 					playMap = map;
+					console.log('playMap', playMap);
 				}
 			}}
 			class="{getIcon()} cursor-pointer absolute size-12 text-primary-200/100 left-6.5 top-6.5 opacity-0 transition duration-75 group-hover:opacity-100"
@@ -173,7 +205,15 @@
 							? 'bg-lime-400'
 							: map.status == 'loved'
 								? 'bg-fuchsia-500'
-								: 'bg-cyan-500'} rounded-full p-0.5 text-[10px] text-stone-800 font-bold uppercase"
+								: map.status == 'graveyard'
+									? 'bg-gray-600 '
+									: map.status == 'pending'
+										? 'bg-yellow-400'
+										: map.status == 'wip'
+											? 'bg-orange-400'
+											: map.status == 'qualified'
+												? 'bg-blue-500'
+												: 'bg-cyan-500'} rounded-full p-0.5 text-[10px] text-stone-800 font-bold uppercase"
 					>
 						{map.status}
 					</span>
@@ -215,7 +255,7 @@
 			</span>
 			<span class=" icon-[fa6-solid--check] text-lime-400 size-4"></span>
 		</div>
-	{:else}
+	{:else if !isDownloading}
 		<div class="absolute right-1 bottom-0 z-10 flex gap-2 items-center">
 			<span class="group-hover:opacity-100 opacity-0 transition duration-100 text-red-400">
 				<Button

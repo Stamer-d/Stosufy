@@ -1,7 +1,7 @@
 <script>
 	// @ts-nocheck
 
-	import { songQueue, setSongQueue, updateSongQueue } from '../stores/audio';
+	import { songQueue, setSongQueue, updateSongQueue, currentSong } from '../stores/audio';
 	import { fetchMaps } from '../stores/data';
 	import Beatmap from './Beatmap.svelte';
 	import Input from './Input.svelte';
@@ -12,7 +12,7 @@
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
 	import { keyStore } from '../stores/auth';
-	import { playlists } from '$lib/stores/playlist';
+	import { getPlaylistSongs, playlists, playlistSongsCache } from '$lib/stores/playlist';
 	import { getImageUrl } from '$lib/stores/data';
 	import { addSongToPlaylist } from '$lib/stores/playlist';
 
@@ -33,11 +33,10 @@
 		map: null
 	});
 
-	let lastPlayMap = $state(null);
 	$effect(() => {
-		if (playMap !== lastPlayMap) {
+		if (playMap !== null) {
 			setQueue(playMap);
-			lastPlayMap = playMap;
+			playMap = null;
 		}
 	});
 
@@ -205,6 +204,15 @@
 									addPlaylistModal.map.id,
 									addPlaylistModal.map.beatmaps[0].id
 								);
+								await getPlaylistSongs(playlist.id, true);
+								if ($songQueue.playlistId == playlist.id) {
+									await updateSongQueue(
+										$songQueue.currentIndex + 1,
+										$playlistSongsCache[playlist.id].songs,
+										'playlist',
+										playlist.id
+									);
+								}
 							}}
 						>
 							<img

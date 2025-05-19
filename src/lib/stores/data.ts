@@ -15,7 +15,7 @@ import {
 import * as path from '@tauri-apps/api/path';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import JSZip from 'jszip';
-import { playlists } from './playlist';
+import { getPlaylistSongs, playlists } from './playlist';
 import { songQueue, stopPlayback, updateSongQueue } from './audio';
 
 let downloadInProgress = false;
@@ -25,6 +25,7 @@ let homeDir = '';
 let mapSetsDir = '';
 let mapDataFile = '';
 export let mapDataStore = writable({});
+export const downloads = writable({});
 
 (async function initialize() {
 	try {
@@ -90,7 +91,7 @@ export function isSongDownloaded(songId) {
 export async function fetchMaps(search = '', cursorString = '') {
 	try {
 		const response = await fetch(
-			`https://osu.ppy.sh/api/v2/beatmapsets/search?e=&c=&g=&l=&m=&nsfw=&played=&r=&sort=&s=&q=${search}&cursor_string=${cursorString}`,
+			`https://osu.ppy.sh/api/v2/beatmapsets/search?e=&c=&g=&l=&m=&nsfw=&played=&r=&sort=&s=any&q=${search}&cursor_string=${cursorString}`,
 			{
 				headers: {
 					Authorization: `Bearer ${get(keyStore).access_token}`,
@@ -166,26 +167,33 @@ export async function deleteSong(setId) {
 			}
 		}
 	}
+	await getPlaylistSongs(-1, true);
 }
 
 export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken) {
+	// If a download is already in progress, add to queue and return a promise
 	if (downloadInProgress) {
 		return new Promise((resolve, reject) => {
 			downloadQueue.push({ mapSetData, mapId, sessionKey, accessToken, resolve, reject });
+			console.log(`Download queued for ${mapSetData.id}`);
 		});
 	}
 
+	// Mark download as in progress
 	downloadInProgress = true;
+	console.log(`Starting download for ${mapSetData.id}`);
 
 	try {
 		const setId = mapSetData.id.toString();
-		// Check if we already have this audio cached
+
+		// Check for cached audio first
 		const cachedAudio = await getCachedAudio(setId, mapId);
 		if (cachedAudio) {
 			await updateMapsetData(mapSetData);
 			return await bufferToBase64(cachedAudio);
 		}
 
+		// Download the beatmap
 		const response = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
 			headers: {
 				Cookie: `osu_session=${sessionKey}`,
@@ -197,9 +205,10 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 		});
 
 		if (!response.ok) {
-			return null;
+			throw new Error(`Failed to download beatmap: ${response.status}`);
 		}
 
+		// Record download on server
 		await fetch('https://api.stamer-d.de/stosufy/addsong', {
 			method: 'POST',
 			headers: {
@@ -212,27 +221,32 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 			})
 		});
 
+		// Process the downloaded content
 		const buffer = await response.arrayBuffer();
 		const audioBuffer = await extractAudioFromBeatmap(buffer, mapId, setId, mapSetData);
 		await updateMapsetData(mapSetData);
+		await getPlaylistSongs(-1, true);
+
 		return audioBuffer.toString('base64');
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
-		return null;
+		throw error;
 	} finally {
 		downloadInProgress = false;
 
-		// Process next download in queue if any
 		if (downloadQueue.length > 0) {
 			const nextDownload = downloadQueue.shift();
-			downloadBeatmap(
-				nextDownload.mapSetData,
-				nextDownload.mapId,
-				nextDownload.sessionKey,
-				nextDownload.accessToken
-			)
-				.then(nextDownload.resolve)
-				.catch(nextDownload.reject);
+
+			setTimeout(() => {
+				downloadBeatmap(
+					nextDownload.mapSetData,
+					nextDownload.mapId,
+					nextDownload.sessionKey,
+					nextDownload.accessToken
+				)
+					.then(nextDownload.resolve)
+					.catch(nextDownload.reject);
+			}, 0);
 		}
 	}
 }

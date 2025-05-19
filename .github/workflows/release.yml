@@ -56,6 +56,6 @@ jobs:
         with:
           tagName: Stosufy-v__VERSION__
           releaseName: 'Stosufy v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
+          releaseBody: 'Download the latest version of Stosufy, currently only available for Windows'
           releaseDraft: false
           prerelease: false

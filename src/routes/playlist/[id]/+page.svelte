@@ -1,15 +1,13 @@
 <script>
-	import { onDestroy, onMount } from 'svelte';
 	import Button from '$lib/components/Button.svelte';
+	import { deleteSong, getImageUrl, isSongDownloaded, downloadBeatmap } from '$lib/stores/data';
 	import {
-		mapDataStore,
-		deleteSong,
-		getImageUrl,
-		formatSongData,
-		isSongDownloaded,
-		downloadBeatmap
-	} from '$lib/stores/data';
-	import { getPlaylistSongs, playlists, removeSongFromPlaylist } from '$lib/stores/playlist';
+		getPlaylistSongs,
+		playlistLoadingStatus,
+		playlists,
+		playlistSongsCache,
+		removeSongFromPlaylist
+	} from '$lib/stores/playlist';
 	import {
 		currentSong,
 		setSongQueue,
@@ -18,105 +16,88 @@
 		togglePlayback,
 		updateSongQueue
 	} from '$lib/stores/audio';
-	import { goto } from '$app/navigation';
+	import { downloads } from '$lib/stores/data';
 	import { page } from '$app/stores';
 	import { keyStore } from '$lib/stores/auth';
-	import { writable } from 'svelte/store';
 
-	let lastPlaylistId = null;
-	let isLoadingSongs = false;
-
-	// Modify your reactive declarations
 	$: playlistId = $page.params?.id;
 	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
-	$: if (
-		playlistId !== undefined &&
-		playlistData &&
-		!isLoadingSongs &&
-		lastPlaylistId !== playlistId
-	) {
-		loadPlaylistSongs();
+	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
+	$: songs = $playlistSongsCache[playlistId]?.songs || [];
+
+	$: if (playlistId && playlistData) {
+		loadSongs();
 	}
 
-	const downloadingMap = writable({});
-	const downloadProgressMap = writable({});
+	async function loadSongs(forceRefresh = false) {
+		if (playlistId) {
+			await getPlaylistSongs(playlistId, forceRefresh);
+		}
+	}
+
 	const downloadIntervalMap = {};
 
-	// Add this function to handle downloads with progress
 	async function startDownload(song, mapId) {
-		// Set initial states
-		downloadingMap.update((state) => ({ ...state, [song.id]: true }));
-		downloadProgressMap.update((state) => ({ ...state, [song.id]: 0 }));
+		downloads.update((state) => ({
+			...state,
+			[song.id]: { isDownloading: true, progress: 0 }
+		}));
 
-		// Create progress simulation interval
 		downloadIntervalMap[song.id] = setInterval(() => {
-			downloadProgressMap.update((state) => ({
-				...state,
-				[song.id]: Math.min((state[song.id] || 0) + 5 * Math.random(), 95)
-			}));
+			downloads.update((state) => {
+				const currentProgress = state[song.id]?.progress || 0;
+				const newProgress = Math.min(currentProgress + 5 * Math.random(), 95);
+				return {
+					...state,
+					[song.id]: { ...state[song.id], progress: newProgress }
+				};
+			});
 		}, 200);
 
 		try {
-			// Start actual download
 			await downloadBeatmap(song, mapId, $keyStore.sessionKey, $keyStore.access_token);
 
-			// Complete the progress
-			downloadProgressMap.update((state) => ({ ...state, [song.id]: 100 }));
+			downloads.update((state) => ({
+				...state,
+				[song.id]: { isDownloading: true, progress: 100 }
+			}));
+
 			clearInterval(downloadIntervalMap[song.id]);
 
-			// Reset after a delay
 			setTimeout(() => {
-				downloadingMap.update((state) => ({ ...state, [song.id]: false }));
-				downloadProgressMap.update((state) => ({ ...state, [song.id]: 0 }));
+				// Remove from downloads store when complete
+				downloads.update((state) => {
+					const newState = { ...state, [song.id]: { isDownloading: false, progress: 100 } };
+					return newState;
+				});
 				songs = [...songs];
 			}, 500);
+			downloads.update((state) => {
+				const newState = { ...state };
+				delete newState[song.id];
+				return newState;
+			});
+			playlists.update((allPlaylists) => {
+				return allPlaylists.map((playlist) => {
+					if (playlist.id == -1) {
+						return {
+							...playlist,
+							song_amount: playlist.song_amount + 1
+						};
+					}
+					return playlist;
+				});
+			});
 		} catch (error) {
 			console.error(`Failed to download map ${song.id}:`, error);
 
-			// Reset on error
 			clearInterval(downloadIntervalMap[song.id]);
-			downloadingMap.update((state) => ({ ...state, [song.id]: false }));
-			downloadProgressMap.update((state) => ({ ...state, [song.id]: 0 }));
-		}
-	}
-
-	async function loadPlaylistSongs() {
-		isLoadingSongs = true;
-		lastPlaylistId = playlistId;
-		if (playlistId == -1) {
-			songs = formatSongData($mapDataStore);
-		} else if (playlistData) {
-			songs = [];
-
-			const playlistSongs = await getPlaylistSongs(playlistId);
-
-			// Group songs by beatmapset_id
-			const beatmapsetGroups = {};
-
-			// First pass: create the beatmapset groups
-			playlistSongs.songs.forEach((song) => {
-				const beatmapsetId = song.beatmap.beatmapset.id;
-
-				if (!beatmapsetGroups[beatmapsetId]) {
-					// Create a new beatmapset entry with the right structure
-					beatmapsetGroups[beatmapsetId] = {
-						...song.beatmap.beatmapset,
-						songInfo: { ...song },
-
-						beatmaps: []
-					};
-				}
-				// Add this difficulty to the beatmaps array
-				beatmapsetGroups[beatmapsetId].beatmaps.push({
-					...song.beatmap
-				});
+			downloads.update((state) => {
+				const newState = { ...state };
+				delete newState[song.id];
+				return newState;
 			});
-
-			// Convert the grouped data to an array
-			songs = Object.values(beatmapsetGroups);
-			console.log('Structured songs:', songs);
 		}
-		isLoadingSongs = false;
 	}
 
 	function getDateString(timestamp) {
@@ -166,18 +147,26 @@
 			}
 			return p;
 		});
-		console.log(updatedPlaylists);
 
 		playlists.set(updatedPlaylists);
 
 		await removeSongFromPlaylist(playlistId, songId);
+
+		const currentIndex = $songQueue.currentIndex;
+		const deletedIndex = songs.findIndex((song) => song.songInfo.id == songId);
+		await loadSongs(true);
+
+		if (deletedIndex < currentIndex) {
+			await updateSongQueue(currentIndex - 1, songs, 'playlist', playlistId);
+		} else if (deletedIndex === currentIndex) {
+			if (songs.length > 0) {
+				const newIndex = Math.min(currentIndex, songs.length - 1);
+				await updateSongQueue(newIndex, songs, 'playlist', playlistId);
+			}
+		} else {
+			await updateSongQueue(currentIndex, songs, 'playlist', playlistId);
+		}
 	}
-
-	let songs;
-
-	onDestroy(() => {
-		songs = null;
-	});
 </script>
 
 {#if playlistData}
@@ -205,7 +194,7 @@
 			</div>
 		</div>
 		{#if songs?.length}
-			{#each songs as song, index}
+			{#each songs as song, index (song.id)}
 				{#if !isSongDownloaded(song.id)}
 					<button
 						class="cursor-pointer group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-200 rounded p-2 relative"
@@ -253,11 +242,11 @@
 							/>
 						</div>
 						<!-- Add progress bar -->
-						{#if $downloadingMap[song.id]}
+						{#if $downloads[song.id]?.isDownloading}
 							<div class="absolute bottom-0 left-0 right-0 h-1 bg-secondary-200 z-20 rounded">
 								<div
 									class="h-full bg-lime-400 transition-all duration-200 ease-out rounded"
-									style="width: {$downloadProgressMap[song.id] || 0}%;"
+									style="width: {$downloads[song.id]?.progress || 0}%;"
 								></div>
 							</div>
 						{/if}
@@ -335,6 +324,7 @@
 									event.stopPropagation();
 									if (playlistId == -1) {
 										await deleteSong(song.id);
+										songs = songs.filter((s) => s.id != song.id);
 									} else {
 										removeSong(song.songInfo.id);
 									}
