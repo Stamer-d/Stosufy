@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/59ae6b94-8230-45e5-9f71-ebae3c7f2ae3" width="128" alt="Stosufy Logo" />
+  <img src="https://i.imgur.com/ZTKDgna.png" width="128" alt="Stosufy Logo" />
 </p>
 
 <h1 align="center">🎵 Stosufy</h1>
