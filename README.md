@@ -31,7 +31,7 @@ Create custom playlists, manage your music, and enjoy your collection from any d
 ## 🚧 Status
 
 > **Work in progress** – Features are still being built, tested, and refined.  
-> ChatGPT is helping a lot 😅, and your feedback or contributions are more than welcome!
+> ChatGPT is helping a lot 😅, and your feedback is more than welcome!
 
 ---
 
