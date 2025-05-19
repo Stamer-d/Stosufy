@@ -185,10 +185,16 @@
 			<p class="text-sm leading-relaxed">Select a playlist to add the Song to</p>
 			<div class="flex flex-col gap-2 max-h-60 overflow-y-auto pr-2">
 				{#each $playlists as playlist}
+					{@const isSongInPlaylist = $playlistSongsCache[playlist.id].songs.some(
+						(song) => song.id === addPlaylistModal.map.id
+					)}
 					{#if playlist.id !== -1}
 						<button
-							class="p-2 rounded flex items-center gap-2 hover:bg-secondary-300 cursor-pointer"
+							class="p-2 rounded flex items-center gap-2 hover:bg-secondary-300 {isSongInPlaylist
+								? 'cursor-not-allowed opacity-50'
+								: 'cursor-pointer'} "
 							onclick={async () => {
+								if (isSongInPlaylist) return;
 								const updatedPlaylists = $playlists.map((p) => {
 									if (p.id === playlist.id) {
 										return { ...p, song_amount: p.song_amount + 1 };

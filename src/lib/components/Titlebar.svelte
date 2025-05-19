@@ -27,14 +27,14 @@
 		const update = await check();
 		if (update) {
 			updateModal.hasUpdate = true;
-			updateModal.update = update;
 		} else {
 			updateModal.hasUpdate = false;
 		}
 	}
 
 	async function updateApp() {
-		const update = updateModal.update;
+		const update = await check();
+
 		if (update) {
 			updating = true;
 			await update.downloadAndInstall();
