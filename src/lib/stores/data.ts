@@ -101,7 +101,6 @@ export async function fetchMaps(search = '', cursorString = '') {
 				}
 			}
 		);
-		console.log('Response:', await response);
 		return await response.json();
 	} catch (error) {
 		console.error('Error fetching maps:', error);
@@ -175,13 +174,11 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 	if (downloadInProgress) {
 		return new Promise((resolve, reject) => {
 			downloadQueue.push({ mapSetData, mapId, sessionKey, accessToken, resolve, reject });
-			console.log(`Download queued for ${mapSetData.id}`);
 		});
 	}
 
 	// Mark download as in progress
 	downloadInProgress = true;
-	console.log(`Starting download for ${mapSetData.id}`);
 
 	try {
 		const setId = mapSetData.id.toString();
@@ -343,7 +340,6 @@ async function extractAudioFromBeatmap(mapsetBuffer, mapId, setId, mapsetData) {
 			// Extract beatmap ID and audio filename
 			const beatmapIdMatch = content.match(/BeatmapID:(\d+)/);
 			const audioFileMatch = content.match(/AudioFilename:(.+)/);
-
 			if (beatmapIdMatch && audioFileMatch) {
 				const beatmapId = beatmapIdMatch[1].trim();
 				foundMapId = beatmapId;
@@ -397,11 +393,13 @@ async function extractAudioFromBeatmap(mapsetBuffer, mapId, setId, mapsetData) {
 		}
 		// Process beatmaps from the API data
 		if (mapsetData.beatmaps?.length) {
+			const defaultAudioFilePath = await path.join(mapSetsDir, `${setId}-${foundMapId}.opus`);
+
 			for (const beatmap of mapsetData.beatmaps) {
 				const currentMapId = beatmap.id.toString();
 				const audioFilePath = audioFileMap.get(currentMapId)
 					? await path.join(mapSetsDir, `${setId}-${foundMapId}.opus`)
-					: null;
+					: defaultAudioFilePath;
 
 				updatedMapData[setId].beatmaps[currentMapId] = {
 					...updatedMapData[setId].beatmaps[currentMapId],
@@ -530,6 +528,7 @@ async function updateMapsetData(mapsetData) {
 				updatedMapData[setId].beatmaps[currentMapId] = {};
 			}
 			const isDownloaded = updatedMapData[setId].beatmaps[currentMapId]?.downloaded || false;
+			const audioFile = updatedMapData[setId].beatmaps[currentMapId]?.audioFile || null;
 
 			updatedMapData[setId].beatmaps[currentMapId] = {
 				...updatedMapData[setId].beatmaps[currentMapId],
@@ -538,7 +537,8 @@ async function updateMapsetData(mapsetData) {
 				difficulty_rating: beatmap.difficulty_rating || 0,
 				mode: beatmap.mode || '',
 				total_length: beatmap.total_length || 0,
-				downloaded: isDownloaded
+				downloaded: isDownloaded,
+				audioFile: audioFile
 			};
 		});
 	}

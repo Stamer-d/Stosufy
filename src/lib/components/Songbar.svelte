@@ -133,8 +133,8 @@
 		});
 		await register('F14', (e) => {
 			if (e.state == 'Released') return;
-			if (volume + 0.01 >= 0.1) {
-				handleVolumeChange(0.1);
+			if (volume + 0.01 >= 0.2) {
+				handleVolumeChange(0.2);
 				return;
 			}
 			handleVolumeChange(volume + 0.01);
@@ -224,7 +224,7 @@
 					<Range
 						bind:value={volume}
 						min={0}
-						max={0.1}
+						max={0.2}
 						step={0.001}
 						on:change={(e) => handleVolumeChange(e.detail)}
 					/>
