@@ -25,11 +25,18 @@
 	import { downloads } from '$lib/stores/data';
 	import { page } from '$app/stores';
 	import { keyStore } from '$lib/stores/auth';
+	import ContextMenu from '$lib/components/ContextMenu.svelte';
+	import SongToPlaylistModal from '$lib/components/SongToPlaylistModal.svelte';
 
 	$: playlistId = $page.params?.id;
 	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
 	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
 	$: songs = $playlistSongsCache[playlistId]?.songs || [];
+
+	let addPlaylistModal = {
+		open: false,
+		map: null
+	};
 
 	$: if (playlistId && playlistData) {
 		loadSongs();
@@ -179,7 +186,7 @@
 				/>
 				{#if playlistId == -1}
 					<span
-						class="icon-[fa6-solid--circle-arrow-down] text-secondary-600 xl:size-25 size-18 absolute xl:top-15 xl:left-12.5 top-13 left-11"
+						class="icon-[fa6-solid--circle-arrow-down] text-white xl:size-25 size-18 absolute xl:top-15 xl:left-12.5 top-13 left-11"
 					></span>
 				{/if}
 			</div>
@@ -257,87 +264,107 @@
 						{/if}
 					</button>
 				{:else}
-					<button
-						class="cursor-pointer group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-200 rounded p-2"
-						on:click={async () => {
-							if ($songQueue.type !== 'playlist' || $songQueue.playlistId != playlistId) {
-								await setSongQueue(index, songs, 'playlist', playlistId);
-								return;
-							} else if ($songQueue.playlistId == playlistId && $currentSong?.song?.id != song.id) {
-								stopPlayback();
-								await updateSongQueue(index);
-								togglePlayback();
-								return;
-							}
-							if ($currentSong?.song?.id == song.id) {
-								togglePlayback();
-								return;
-							}
-						}}
-					>
-						<div class="relative flex justify-end mr-4">
-							{#if $currentSong?.song?.id == song.id && $currentSong?.isPlaying && $songQueue.type == 'playlist' && $songQueue.playlistId == playlistId}
-								<span
-									class="icon-[svg-spinners--bars-scale-middle] cursor-pointer absolute size-5 top-0.5 group-hover:opacity-0 {$currentSong
-										?.song?.id == song?.id
+					<ContextMenu disabled={playlistId != -1 ? true : false}>
+						<button
+							class="cursor-pointer w-full group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-200 rounded p-2"
+							on:click={async () => {
+								if ($songQueue.type !== 'playlist' || $songQueue.playlistId != playlistId) {
+									await setSongQueue(index, songs, 'playlist', playlistId);
+									return;
+								} else if (
+									$songQueue.playlistId == playlistId &&
+									$currentSong?.song?.id != song.id
+								) {
+									stopPlayback();
+									await updateSongQueue(index);
+									togglePlayback();
+									return;
+								}
+								if ($currentSong?.song?.id == song.id) {
+									togglePlayback();
+									return;
+								}
+							}}
+						>
+							<div class="relative flex justify-end mr-4">
+								{#if $currentSong?.song?.id == song.id && $currentSong?.isPlaying && $songQueue.type == 'playlist' && $songQueue.playlistId == playlistId}
+									<span
+										class="icon-[svg-spinners--bars-scale-middle] cursor-pointer absolute size-5 top-0.5 group-hover:opacity-0 {$currentSong
+											?.song?.id == song?.id
+											? 'text-primary-200'
+											: ''}"
+									></span>
+									<span
+										class="icon-[fa6-solid--pause] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
+									></span>
+								{:else}
+									<span
+										class=" icon-[fa6-solid--play] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
+									></span>
+								{/if}
+								<div
+									class="{$currentSong?.song?.id == song.id && $currentSong?.isPlaying
+										? 'opacity-0'
+										: ''} {$currentSong?.song?.id == song?.id && $songQueue.playlistId == playlistId
+										? 'text-primary-200'
+										: ''} group-hover:opacity-0 text-start"
+								>
+									{index + 1}
+								</div>
+							</div>
+							<img
+								src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
+								alt={song.title}
+								on:error={handleImageError}
+								class="size-14 rounded"
+							/>
+							<div class="flex flex-col text-start ml-4">
+								<h3
+									class="font-semibold {$currentSong?.song?.id == song?.id &&
+									$songQueue.playlistId == playlistId
 										? 'text-primary-200'
 										: ''}"
-								></span>
-								<span
-									class="icon-[fa6-solid--pause] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
-								></span>
-							{:else}
-								<span
-									class=" icon-[fa6-solid--play] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
-								></span>
-							{/if}
-							<div
-								class="{$currentSong?.song?.id == song.id && $currentSong?.isPlaying
-									? 'opacity-0'
-									: ''} {$currentSong?.song?.id == song?.id && $songQueue.playlistId == playlistId
-									? 'text-primary-200'
-									: ''} group-hover:opacity-0 text-start"
-							>
-								{index + 1}
+								>
+									{song.title}
+								</h3>
+								<p class="text-sm text-secondary-600 w-auto">{song.artist}</p>
 							</div>
-						</div>
-						<img
-							src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
-							alt={song.title}
-							on:error={handleImageError}
-							class="size-14 rounded"
-						/>
-						<div class="flex flex-col text-start ml-4">
-							<h3
-								class="font-semibold {$currentSong?.song?.id == song?.id &&
-								$songQueue.playlistId == playlistId
-									? 'text-primary-200'
-									: ''}"
-							>
-								{song.title}
-							</h3>
-							<p class="text-sm text-secondary-600 w-auto">{song.artist}</p>
-						</div>
-						<div class="flex text-start">
-							{getDateString(song?.created_at || song?.songInfo.created_at)}
-						</div>
-						<div>
+							<div class="flex text-start">
+								{getDateString(song?.created_at || song?.songInfo.created_at)}
+							</div>
+							<div>
+								<Button
+									class="group-hover:opacity-100 opacity-0 duration-0"
+									type="ghost"
+									icon={playlistId == -1
+										? 'icon-[fa6-solid--trash-can]'
+										: 'icon-[fa6-solid--xmark]'}
+									on:click={async (e) => {
+										event.stopPropagation();
+										if (playlistId == -1) {
+											await deleteSong(song.id);
+											songs = songs.filter((s) => s.id != song.id);
+										} else {
+											removeSong(song.songInfo.id);
+										}
+									}}
+								/>
+							</div>
+						</button>
+						<svelte:fragment slot="menu">
 							<Button
-								class="group-hover:opacity-100 opacity-0 duration-0"
 								type="ghost"
-								icon={playlistId == -1 ? 'icon-[fa6-solid--trash-can]' : 'icon-[fa6-solid--xmark]'}
-								on:click={async (e) => {
-									event.stopPropagation();
-									if (playlistId == -1) {
-										await deleteSong(song.id);
-										songs = songs.filter((s) => s.id != song.id);
-									} else {
-										removeSong(song.songInfo.id);
-									}
+								class="w-full py-3 rounded-sm hover:bg-secondary-300"
+								icon="icon-[fa6-solid--plus]"
+								on:click={() => {
+									addPlaylistModal.open = true;
+									addPlaylistModal.map = song;
 								}}
-							/>
-						</div>
-					</button>
+							>
+								Add to Playlist
+							</Button>
+						</svelte:fragment>
+					</ContextMenu>
 				{/if}
 			{/each}
 		{/if}
@@ -352,3 +379,5 @@
 		{/if}
 	</div>
 {/if}
+
+<SongToPlaylistModal bind:open={addPlaylistModal.open} bind:map={addPlaylistModal.map} />

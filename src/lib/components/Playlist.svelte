@@ -156,7 +156,7 @@
 							/>
 							{#if playlist.id == -1}
 								<span
-									class="icon-[fa6-solid--circle-arrow-down] text-secondary-600 absolute size-6 top-3.5 left-3"
+									class="icon-[fa6-solid--circle-arrow-down] text-white absolute size-6 top-3.5 left-3"
 								></span>
 							{/if}
 						</div>
