@@ -39,8 +39,8 @@
 								playlists.set(updatedPlaylists);
 
 								open = false;
-								await addSongToPlaylist(playlist.id, map.id, map.beatmaps[0].id);
-								await getPlaylistSongs(playlist.id, true);
+								await addSongToPlaylist(playlist.id, map);
+								await getPlaylistSongs(playlist.id);
 								if ($songQueue.playlistId == playlist.id) {
 									await updateSongQueue(
 										$songQueue.currentIndex + 1,
