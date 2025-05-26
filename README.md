@@ -9,7 +9,7 @@
 </p>
 
 > [!CAUTION]
-> Stosufy is still unstable at the moment. Expect Bugs to happen ([Please Report every bug you find](https://github.com/Stamer-d/Stosufy/issues/new))
+> Stosufy is still under development. Bugs may occur! ([Please report any issues you encounter](https://github.com/Stamer-d/Stosufy/issues/new))
 
 ---
 
