@@ -16,6 +16,9 @@
 			}
 		},
 		"updater": {
+			"windows": {
+				"installerType": "nsis"
+			},
 			"active": true,
 			"endpoints": ["https://github.com/Stamer-d/Stosufy/releases/latest/download/latest.json"],
 			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGQjQzOUZFMThEMTQ0QjcKUldTM1JORVkvam0wNzV5di9KWlgvcFo5dm9MeU1MbkgwLzA1ZWJMODdvaHM2L3dyNkxOOWZaZDAKdW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyNUFDM0M5N0EyODJEMTAKUldRUUxTaDZ5Y05hUW5TK1k2ZDY5Ykd3OExVZkJBaW1Eb0ovVEVJQXNrZmpXbUZvZUxSRHhhYjgK"
@@ -41,6 +44,7 @@
 		"createUpdaterArtifacts": true,
 		"active": true,
 		"targets": "all",
+
 		"icon": [
 			"icons/32x32.png",
 			"icons/128x128.png",

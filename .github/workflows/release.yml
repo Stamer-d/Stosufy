@@ -59,3 +59,4 @@ jobs:
           releaseBody: 'Download the latest version of Stosufy, currently only available for Windows'
           releaseDraft: false
           prerelease: false
+          updaterJsonPreferNsis: true
