@@ -233,8 +233,7 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 async function processWithWorker(buffer, mapSetData, mapId, setId) {
 	return new Promise((resolve, reject) => {
 		try {
-			const workerUrl = new URL('/src/lib/workers/song.ts', import.meta.url);
-			let worker = new Worker(workerUrl, { type: 'module' });
+			let worker = new Worker(new URL('../workers/song.ts', import.meta.url), { type: 'module' });
 			downloadWorkers[setId] = worker;
 			worker.onmessage = async (event) => {
 				const {

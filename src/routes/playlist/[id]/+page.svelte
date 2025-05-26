@@ -182,7 +182,7 @@
 						</div>
 
 						<div class="flex text-start">
-							{getDateString(song?.songInfo?.created_at || song?.created_at)}
+							{getDateString(song?.created_at || song?.songInfo?.created_at)}
 						</div>
 						<div>
 							<Button
@@ -275,7 +275,7 @@
 								<p class="text-sm text-secondary-600 w-auto">{song.artist}</p>
 							</div>
 							<div class="flex text-start">
-								{getDateString(song?.songInfo?.created_at || song?.created_at)}
+								{getDateString(song?.created_at || song?.songInfo?.created_at)}
 							</div>
 							<div>
 								<Button

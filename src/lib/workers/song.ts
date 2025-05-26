@@ -99,9 +99,10 @@ async function extractAudioFromBeatmap(
 		// Report progress
 		self.postMessage({ type: 'progress', progress: 30, setId });
 
-		// Create extraction directory
 		const extractDir = await fs.path.join(
-			homeDir + '/Stosufy/extract',
+			homeDir,
+			'Stosufy',
+			'extract',
 			`osu-extract-${Date.now()}`
 		);
 		await fs.mkdir(extractDir);
