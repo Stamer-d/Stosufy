@@ -136,7 +136,6 @@
 					togglePlayback();
 				} else {
 					playMap = map;
-					console.log('playMap', playMap);
 				}
 			}}
 			class="{getIcon()} cursor-pointer absolute size-12 text-primary-200/100 left-6.5 top-6.5 opacity-0 transition duration-75 group-hover:opacity-100"

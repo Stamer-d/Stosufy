@@ -12,7 +12,6 @@
 		if (count > 9) {
 			clearInterval(timer);
 		}
-		console.log('Access token valid:', accessTokenValid);
 		if (accessTokenValid.status) {
 			clearInterval(timer);
 			goto('/home');

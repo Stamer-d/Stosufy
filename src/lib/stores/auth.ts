@@ -160,7 +160,6 @@ export async function checkAccessToken(shouldPush = true, round = 0) {
 	}
 
 	let tokens = get(keyStore);
-	console.log('Checking access token', tokens);
 	if (!tokens.access_token) {
 		if (shouldPush) {
 			goto('/login');

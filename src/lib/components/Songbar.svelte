@@ -46,7 +46,6 @@
 		duration = $songQueue.audio.duration || 0;
 		progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 		if (progressPercent >= 100) {
-			console.log($songQueue);
 			if ($songQueue.currentIndex == $songQueue.queue?.length - 1) {
 				stopPlayback();
 			} else {
@@ -120,8 +119,6 @@
 
 	onMount(async () => {
 		await register('MEDIAPLAYPAUSE', (e) => {
-			console.log($currentSong.isPlaying);
-
 			if (e.state == 'Pressed') {
 				togglePlayback();
 			}

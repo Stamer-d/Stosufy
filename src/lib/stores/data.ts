@@ -71,7 +71,6 @@ async function saveMapData() {
 
 async function getCachedAudio(setId, mapId) {
 	const mapData = get(mapDataStore);
-	console.log(mapData[setId]);
 	if (!mapData[setId]) return null;
 
 	if (
@@ -230,7 +229,6 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 			delete newState[setId];
 			return newState;
 		});
-		console.log(1);
 		processNextDownload();
 
 		throw error;

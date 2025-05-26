@@ -81,7 +81,6 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 			} else {
 				newIndex = Math.max(1, index - 1);
 			}
-			console.log(newIndex);
 			await updateSongQueue(newIndex, queue, type, playlistId);
 			return;
 		}

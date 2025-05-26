@@ -23,7 +23,6 @@
 	onMount(async () => {
 		await startTokenRefresh();
 		updateShowUI();
-		console.log($keyStore);
 	});
 
 	// Setup effect to update when the page changes
