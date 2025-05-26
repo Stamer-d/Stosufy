@@ -43,9 +43,7 @@
 	}
 
 	async function loadSongs(forceRefresh = false) {
-		if (playlistId) {
-			await getPlaylistSongs(playlistId, forceRefresh);
-		}
+		await getPlaylistSongs(playlistId, forceRefresh);
 	}
 
 	async function startDownload(song, mapId) {
@@ -104,21 +102,9 @@
 	}
 
 	async function removeSong(songId) {
-		songs = songs.filter((song) => song.songInfo.id != songId);
-		const updatedPlaylists = $playlists.map((p) => {
-			if (p.id == playlistId) {
-				return { ...p, song_amount: Math.max(0, p.song_amount - 1) };
-			}
-			return p;
-		});
-
-		playlists.set(updatedPlaylists);
-
-		await removeSongFromPlaylist(playlistId, songId);
-
 		const currentIndex = $songQueue.currentIndex;
 		const deletedIndex = songs.findIndex((song) => song.songInfo.id == songId);
-		await loadSongs(true);
+		songs = songs.filter((song) => song.songInfo.id != songId);
 
 		if (deletedIndex < currentIndex) {
 			await updateSongQueue(currentIndex - 1, songs, 'playlist', playlistId);
@@ -130,6 +116,7 @@
 		} else {
 			await updateSongQueue(currentIndex, songs, 'playlist', playlistId);
 		}
+		await removeSongFromPlaylist(playlistId, songId);
 	}
 </script>
 
@@ -193,8 +180,9 @@
 							</h3>
 							<p class="text-sm text-secondary-600 w-auto">{song.artist}</p>
 						</div>
+
 						<div class="flex text-start">
-							{getDateString(song?.created_at || song?.songInfo.created_at)}
+							{getDateString(song?.songInfo?.created_at || song?.created_at)}
 						</div>
 						<div>
 							<Button
@@ -287,7 +275,7 @@
 								<p class="text-sm text-secondary-600 w-auto">{song.artist}</p>
 							</div>
 							<div class="flex text-start">
-								{getDateString(song?.created_at || song?.songInfo.created_at)}
+								{getDateString(song?.songInfo?.created_at || song?.created_at)}
 							</div>
 							<div>
 								<Button

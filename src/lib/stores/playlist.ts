@@ -63,8 +63,6 @@ export async function deletePlaylist(id) {
 }
 
 export async function editPlaylist(id, title, description, isPublic, imageFile = null) {
-	// Create FormData object
-	console.log(imageFile);
 	const formData = new FormData();
 
 	formData.append('id', id.toString());
@@ -92,8 +90,9 @@ export async function editPlaylist(id, title, description, isPublic, imageFile =
 	return data;
 }
 
-export async function addSongToPlaylist(playlistId, setId, mapId) {
-	console.log('Adding song to playlist:', playlistId, setId, mapId);
+export async function addSongToPlaylist(playlistId, mapSetData) {
+	const setId = mapSetData.id;
+	const mapId = mapSetData.beatmaps[0].id;
 	const response = await fetch(`https://api.stamer-d.de/stosufy/playlist/${playlistId}/addsong`, {
 		method: 'POST',
 		body: JSON.stringify({
@@ -111,10 +110,45 @@ export async function addSongToPlaylist(playlistId, setId, mapId) {
 	}
 
 	const data = await response.json();
+	playlistSongsCache.update((cache) => {
+		if (!cache[playlistId] || !cache[playlistId].songs) {
+			return cache;
+		}
+		const newSong = {
+			...mapSetData,
+			songInfo: data.song_data,
+			created_at: new Date().toISOString()
+		};
+		const updatedSongs = [newSong, ...cache[playlistId].songs];
+		return {
+			...cache,
+			[playlistId]: { songs: updatedSongs }
+		};
+	});
 	return data;
 }
 
 export async function removeSongFromPlaylist(playlistId, songId) {
+	const updatedPlaylists = get(playlists).map((p) => {
+		if (p.id == playlistId) {
+			return { ...p, song_amount: Math.max(0, p.song_amount - 1) };
+		}
+		return p;
+	});
+
+	playlists.set(updatedPlaylists);
+	playlistSongsCache.update((cache) => {
+		if (!cache[playlistId] || !cache[playlistId].songs) {
+			return cache;
+		}
+
+		const updatedSongs = cache[playlistId].songs.filter((song) => song.songInfo?.id !== songId);
+
+		return {
+			...cache,
+			[playlistId]: { songs: updatedSongs }
+		};
+	});
 	const response = await fetch(
 		`https://api.stamer-d.de/stosufy/playlist/${playlistId}/removesong`,
 		{
@@ -147,7 +181,6 @@ export async function getPlaylistSongs(playlistId, forceRefresh = false) {
 	}));
 
 	try {
-		// Special case for downloaded songs playlist
 		if (playlistId == -1) {
 			const songs = formatSongData(get(mapDataStore));
 

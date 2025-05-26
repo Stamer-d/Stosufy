@@ -57,6 +57,7 @@ export async function setSongQueue(index, queue, type, playlistId = null) {
 }
 
 export async function updateSongQueue(index, queue, type, playlistId = null) {
+	if (!get(songQueue).queue || !get(currentSong).song) return;
 	const current = get(songQueue);
 
 	let audio;
