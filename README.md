@@ -56,11 +56,3 @@ Use the **"Refresh Auth"** button in the app to manually reset authentication.
 This usually solves the problem:
 
 ![image](https://github.com/user-attachments/assets/ce7ee2c1-ff7e-4f28-822f-41fdb285a4c9)
-
----
-
-## 📄 License
-
-**MIT License** - free to use, modify, and distribute.
-
----
