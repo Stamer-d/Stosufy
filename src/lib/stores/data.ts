@@ -224,6 +224,13 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
 		downloadInProgress = false;
+		delete downloadWorkers[setId];
+		downloads.update((state) => {
+			const newState = { ...state };
+			delete newState[setId];
+			return newState;
+		});
+		console.log(1);
 		processNextDownload();
 
 		throw error;

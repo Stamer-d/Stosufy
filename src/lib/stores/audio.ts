@@ -43,7 +43,6 @@ export async function setSongQueue(index, queue, type, playlistId = null) {
 	stopPlayback();
 
 	let audio;
-	console.log(queue);
 	if (index !== null) audio = await getAudioBlob(index, queue, type);
 	songQueue.set({
 		currentIndex: index,
@@ -69,7 +68,23 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 	) {
 		console.log('Updating song queue');
 	} else if (index !== null) {
-		audio = await getAudioBlob(index, queue || current.queue, type || current.type);
+		try {
+			audio = await getAudioBlob(index, queue || current.queue, type || current.type);
+		} catch (e) {
+			let newIndex;
+			if (get(songQueue).currentIndex < index) {
+				if (index < get(songQueue).queue.length - 1) {
+					newIndex = index + 1;
+				} else {
+					newIndex = 0;
+				}
+			} else {
+				newIndex = Math.max(1, index - 1);
+			}
+			console.log(newIndex);
+			await updateSongQueue(newIndex, queue, type, playlistId);
+			return;
+		}
 
 		currentSong.set({
 			song: queue ? queue[index] : current.queue[index],
