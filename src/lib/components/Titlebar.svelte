@@ -25,7 +25,7 @@
 
 	async function checkForUpdates() {
 		const update = await check();
-		if (update) {
+		if (update?.available) {
 			updateModal.hasUpdate = true;
 		} else {
 			updateModal.hasUpdate = false;
