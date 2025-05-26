@@ -30,6 +30,7 @@ tauri-plugin-deep-link = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-drpc = "*"
 tauri-plugin-process = "2"
+tauri-plugin-prevent-default = "2.1.0"
 
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }

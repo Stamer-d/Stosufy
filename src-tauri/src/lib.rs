@@ -15,6 +15,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_drpc::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_prevent_default::debug())
          .setup(|app| {
             #[cfg(any(windows, target_os = "linux"))]
             {
