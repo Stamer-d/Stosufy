@@ -56,7 +56,7 @@
 	}
 </script>
 
-<div class="h-16 px-1 bg-secondary-100 grid grid-cols-3" data-tauri-drag-region>
+<div class="h-16 px-1 bg-secondary-50 grid grid-cols-3" data-tauri-drag-region>
 	<div data-tauri-drag-region class="flex items-center">
 		{#if $user?.username}
 			<Button

@@ -48,48 +48,13 @@
 		}
 	}
 
-	const downloadIntervalMap = {};
-
 	async function startDownload(song, mapId) {
-		downloads.update((state) => ({
-			...state,
-			[song.id]: { isDownloading: true, progress: 0 }
-		}));
-
-		downloadIntervalMap[song.id] = setInterval(() => {
-			downloads.update((state) => {
-				const currentProgress = state[song.id]?.progress || 0;
-				const newProgress = Math.min(currentProgress + 5 * Math.random(), 95);
-				return {
-					...state,
-					[song.id]: { ...state[song.id], progress: newProgress }
-				};
-			});
-		}, 200);
-
 		try {
 			await downloadBeatmap(song, mapId, $keyStore.sessionKey, $keyStore.access_token);
 
-			downloads.update((state) => ({
-				...state,
-				[song.id]: { isDownloading: true, progress: 100 }
-			}));
-
-			clearInterval(downloadIntervalMap[song.id]);
-
 			setTimeout(() => {
-				// Remove from downloads store when complete
-				downloads.update((state) => {
-					const newState = { ...state, [song.id]: { isDownloading: false, progress: 100 } };
-					return newState;
-				});
 				songs = [...songs];
 			}, 500);
-			downloads.update((state) => {
-				const newState = { ...state };
-				delete newState[song.id];
-				return newState;
-			});
 			playlists.update((allPlaylists) => {
 				return allPlaylists.map((playlist) => {
 					if (playlist.id == -1) {
@@ -103,13 +68,6 @@
 			});
 		} catch (error) {
 			console.error(`Failed to download map ${song.id}:`, error);
-
-			clearInterval(downloadIntervalMap[song.id]);
-			downloads.update((state) => {
-				const newState = { ...state };
-				delete newState[song.id];
-				return newState;
-			});
 		}
 	}
 
@@ -207,7 +165,7 @@
 				<!-- REMOVE IF AND CONTENT COMPLETLY AND MAKE ONE BUTTON OUT OF IT-->
 				{#if !isSongDownloaded(song.id)}
 					<button
-						class="cursor-pointer group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-200 rounded p-2 relative"
+						class="cursor-pointer group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-300 rounded p-2 relative"
 						on:click={async () => {
 							if ($downloads[song.id]?.isDownloading) {
 								return;
@@ -253,9 +211,8 @@
 								}}
 							/>
 						</div>
-						<!-- Add progress bar -->
 						{#if $downloads[song.id]?.isDownloading}
-							<div class="absolute bottom-0 left-0 right-0 h-1 bg-secondary-200 z-20 rounded">
+							<div class="absolute bottom-0 left-0 right-0 h-1 bg-secondary-400 z-20 rounded">
 								<div
 									class="h-full bg-lime-400 transition-all duration-200 ease-out rounded"
 									style="width: {$downloads[song.id]?.progress || 0}%;"
@@ -266,7 +223,7 @@
 				{:else}
 					<ContextMenu disabled={playlistId != -1 ? true : false}>
 						<button
-							class="cursor-pointer w-full group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-200 rounded p-2"
+							class="cursor-pointer w-full group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-300 rounded p-2"
 							on:click={async () => {
 								if ($songQueue.type !== 'playlist' || $songQueue.playlistId != playlistId) {
 									await setSongQueue(index, songs, 'playlist', playlistId);

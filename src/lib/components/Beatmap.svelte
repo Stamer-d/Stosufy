@@ -20,56 +20,21 @@
 	export let isDownloaded = false;
 
 	let isDownloading = false;
-	let downloadProgress = 0;
-	let downloadProgressInterval;
 
 	let sortedBeatmaps = [];
 
 	$: {
-		if ($downloads[map.id]) {
-			isDownloading = $downloads[map.id].isDownloading;
-			downloadProgress = $downloads[map.id].progress;
+		if ($downloads[map.beatmaps[0]?.id]) {
+			isDownloading = $downloads[map.beatmaps[0].id].isDownloading;
+			downloadProgress = $downloads[map.beatmaps[0].id].progress;
 		}
 	}
 
 	export let playMap = null;
 
 	function startDownload(mapData, mapId) {
-		downloads.update((state) => ({
-			...state,
-			[mapId]: { isDownloading: true, progress: 0 }
-		}));
-
-		downloadProgressInterval = setInterval(() => {
-			downloads.update((state) => {
-				const currentProgress = state[mapId]?.progress || 0;
-				const newProgress = Math.min(currentProgress + 5 * Math.random(), 95);
-				return {
-					...state,
-					[mapId]: { ...state[mapId], progress: newProgress }
-				};
-			});
-		}, 200);
 		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
 			async () => {
-				clearInterval(downloadProgressInterval);
-
-				downloads.update((state) => ({
-					...state,
-					[mapId]: { isDownloading: true, progress: 100 }
-				}));
-
-				setTimeout(() => {
-					downloads.update((state) => {
-						const newState = { ...state, [mapId]: { isDownloading: false, progress: 100 } };
-						return newState;
-					});
-				}, 500);
-				downloads.update((state) => {
-					const newState = { ...state };
-					delete newState[map.id];
-					return newState;
-				});
 				playlists.update((allPlaylists) => {
 					return allPlaylists.map((playlist) => {
 						if (playlist.id == -1) {
@@ -225,11 +190,11 @@
 			</div>
 		</div>
 
-		{#if isDownloading}
+		{#if $downloads[map.id]?.isDownloading}
 			<div class="absolute bottom-0 left-0 right-0 h-1 bg-secondary-200 z-20 rounded">
 				<div
 					class="h-full bg-lime-400 transition-all duration-200 ease-out rounded"
-					style="width: {downloadProgress}%;"
+					style="width: {$downloads[map.id].progress || 0}%;"
 				></div>
 			</div>
 		{/if}
@@ -251,7 +216,7 @@
 			</span>
 			<span class=" icon-[fa6-solid--check] text-lime-400 size-4"></span>
 		</div>
-	{:else if !isDownloading}
+	{:else if !$downloads[map.id]?.isDownloading}
 		<div class="absolute right-1 bottom-0 z-10 flex gap-2 items-center">
 			<span class="group-hover:opacity-100 opacity-0 transition duration-100 text-red-400">
 				<Button
@@ -259,7 +224,7 @@
 					type="ghost"
 					icon="icon-[fa6-solid--circle-arrow-down]"
 					on:click={async () => {
-						await startDownload(map, map.id);
+						await startDownload(map, map.beatmaps[0].id);
 					}}
 				/>
 			</span>

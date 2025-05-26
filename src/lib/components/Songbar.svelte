@@ -163,7 +163,7 @@
 </script>
 
 {#if $currentSong?.song?.id}
-	<div class="grid grid-cols-3 gap-2 py-3 px-2 bg-secondary-100">
+	<div class="grid grid-cols-3 gap-2 py-3 px-4 bg-secondary-50">
 		<div class="gap-3 flex items-center">
 			<img
 				src="https://assets.ppy.sh/beatmaps/{$currentSong.song?.id}/covers/list.jpg"

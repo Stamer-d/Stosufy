@@ -71,6 +71,7 @@ async function saveMapData() {
 
 async function getCachedAudio(setId, mapId) {
 	const mapData = get(mapDataStore);
+	console.log(mapData[setId]);
 	if (!mapData[setId]) return null;
 
 	if (
@@ -175,28 +176,21 @@ export async function deleteSong(setId) {
 	await getPlaylistSongs(-1, true);
 }
 
+const downloadWorkers = {};
+
 export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken) {
-	// If a download is already in progress, add to queue and return a promise
-	if (downloadInProgress) {
-		return new Promise((resolve, reject) => {
-			downloadQueue.push({ mapSetData, mapId, sessionKey, accessToken, resolve, reject });
-		});
-	}
-
-	// Mark download as in progress
-	downloadInProgress = true;
-
+	const setId = mapSetData.id.toString();
+	if (downloadWorkers[setId]) return;
 	try {
-		const setId = mapSetData.id.toString();
-
-		// Check for cached audio first
 		const cachedAudio = await getCachedAudio(setId, mapId);
 		if (cachedAudio) {
 			await updateMapsetData(mapSetData);
+			downloadInProgress = false;
+			processNextDownload();
+
 			return await bufferToBase64(cachedAudio);
 		}
-
-		// Download the beatmap
+		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 0 } }));
 		const response = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
 			headers: {
 				Cookie: `osu_session=${sessionKey}`,
@@ -210,8 +204,8 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 		if (!response.ok) {
 			throw new Error(`Failed to download beatmap: ${response.status}`);
 		}
+		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 20 } }));
 
-		// Record download on server
 		await fetch('https://api.stamer-d.de/stosufy/addsong', {
 			method: 'POST',
 			headers: {
@@ -219,229 +213,235 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 				Authorization: `Bearer ${accessToken}`
 			},
 			body: JSON.stringify({
-				setId: parseInt(mapSetData.id),
+				setId: parseInt(setId),
 				mapId: parseInt(mapId)
 			})
 		});
-
-		// Process the downloaded content
 		const buffer = await response.arrayBuffer();
-		const audioBuffer = await extractAudioFromBeatmap(buffer, mapId, setId, mapSetData);
-		await updateMapsetData(mapSetData);
-		await getPlaylistSongs(-1, true);
+		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 25 } }));
 
-		return audioBuffer.toString('base64');
+		return await processWithWorker(buffer, mapSetData, mapId, setId);
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
-		throw error;
-	} finally {
 		downloadInProgress = false;
+		processNextDownload();
 
-		if (downloadQueue.length > 0) {
-			const nextDownload = downloadQueue.shift();
-
-			setTimeout(() => {
-				downloadBeatmap(
-					nextDownload.mapSetData,
-					nextDownload.mapId,
-					nextDownload.sessionKey,
-					nextDownload.accessToken
-				)
-					.then(nextDownload.resolve)
-					.catch(nextDownload.reject);
-			}, 0);
-		}
+		throw error;
 	}
 }
 
-async function extractAudioFromBeatmap(mapsetBuffer, mapId, setId, mapsetData) {
-	try {
-		// Get current data from store
-		const mapData = get(mapDataStore);
-		const updatedMapData = { ...mapData };
+async function processWithWorker(buffer, mapSetData, mapId, setId) {
+	return new Promise((resolve, reject) => {
+		try {
+			const workerUrl = new URL('/src/lib/workers/song.ts', import.meta.url);
+			let worker = new Worker(workerUrl, { type: 'module' });
+			downloadWorkers[setId] = worker;
+			worker.onmessage = async (event) => {
+				const {
+					type,
+					requestId,
+					operation,
+					data,
+					progress,
+					audioBase64,
+					error,
+					setId: eventSetId
+				} = event.data;
 
-		// Create and set up temporary extraction directory
-		const extractDir = await path.join(homeDir + '/Stosufy/extract', `osu-extract-${Date.now()}`);
-		await mkdir(extractDir, { recursive: true });
-		const zipPath = await path.join(extractDir, 'beatmap.osz');
-		await writeFile(zipPath, new Uint8Array(mapsetBuffer));
-		const zip = await JSZip.loadAsync(await readFile(zipPath));
+				if (type === 'fs_request') {
+					try {
+						let result;
+						switch (operation) {
+							case 'mkdir':
+								await mkdir(data.dir, { recursive: true });
+								result = true;
+								break;
 
-		// Extract all files
-		const extractPromises = [];
-		const osuFiles = [];
+							case 'exists':
+								result = await exists(data.path, { baseDir: BaseDirectory.Home });
+								break;
 
-		const sanitizeFilename = (filename) => {
-			let sanitized = filename.replace(/[\\/:*?"<>|[\]]/g, '_');
+							case 'writeFile':
+								await writeFile(data.path, data.data, { baseDir: BaseDirectory.Home });
+								result = true;
+								break;
 
-			sanitized = sanitized.replace(/[\u2013\u2014\u2015\u2017\u2020\u2021]/g, '-');
+							case 'readFile':
+								result = await readFile(data.path, { baseDir: BaseDirectory.Home });
+								break;
 
-			sanitized = sanitized.replace(/[^\x00-\x7F]/g, '_');
+							case 'readTextFile':
+								result = await readTextFile(data.path, { baseDir: BaseDirectory.Home });
+								break;
 
-			if (sanitized.length > 150) {
-				const extension = sanitized.includes('.')
-					? sanitized.substring(sanitized.lastIndexOf('.'))
-					: '';
-				const basename = sanitized.includes('.')
-					? sanitized.substring(0, sanitized.lastIndexOf('.'))
-					: sanitized;
-				sanitized = basename.substring(0, 150 - extension.length) + extension;
-			}
+							case 'remove':
+								await remove(data.path, { baseDir: BaseDirectory.Home, recursive: true });
+								result = true;
+								break;
 
-			sanitized = sanitized.replace(/[_\-]{2,}/g, '_');
-			sanitized = sanitized.replace('', '');
-			return sanitized;
-		};
+							case 'path_join':
+								result = await path.join(...data.paths);
+								break;
 
-		const filenameMap = new Map();
+							case 'convertToOpus':
+								result = await convertToOpus(data.inputPath, data.targetPath);
+								break;
+						}
 
-		zip.forEach((relativePath, zipEntry) => {
-			if (!zipEntry.dir) {
-				const isOsuFile = relativePath.endsWith('.osu');
-				const isPotentialAudioFile = /\.(mp3|ogg|wav)$/i.test(relativePath);
-
-				// Skip files we don't need
-				if (!isOsuFile && !isPotentialAudioFile) {
+						worker.postMessage({
+							type: 'fs_response',
+							requestId,
+							result
+						});
+					} catch (err) {
+						worker.postMessage({
+							type: 'fs_response',
+							requestId,
+							error: err.message
+						});
+					}
 					return;
 				}
+				if (type === 'progress' && eventSetId === setId) {
+					downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: progress } }));
+					return;
+				}
+				if (type === 'extract-complete' && eventSetId === setId) {
+					try {
+						const audioPath = event.data.audioPath;
+						console.log('Worker completed extraction for:', setId, 'Audio path:', audioPath);
 
-				extractPromises.push(
-					(async () => {
-						// Sanitize the path for Windows compatibility
-						const sanitizedPath = sanitizeFilename(relativePath);
-						const extractPath = await path.join(extractDir, sanitizedPath);
-
-						// Keep track of original to sanitized mappings
-						filenameMap.set(relativePath, sanitizedPath);
-
-						// Keep track of .osu files
-						if (isOsuFile) {
-							osuFiles.push(extractPath);
-						}
-
-						// Create directories if needed
-						const lastSlashIndex = extractPath.lastIndexOf('/');
-						if (lastSlashIndex > 0) {
-							await mkdir(extractPath.substring(0, lastSlashIndex), {
-								recursive: true
+						if (audioPath) {
+							mapSetData.beatmaps.forEach((element) => {
+								element.audioFile = audioPath;
 							});
 						}
-						// Get file content and write it
-						await writeFile(extractPath, await zipEntry.async('uint8array'));
-					})()
-				);
-			}
-		});
 
-		// Wait for all extractions to complete
-		await Promise.all(extractPromises);
+						await updateMapsetData(mapSetData);
+						await getPlaylistSongs(-1, true);
+						downloads.update((state) => ({
+							...state,
+							[setId]: { isDownloading: true, progress: 100 }
+						}));
 
-		// Process .osu files to find audio files
-		const audioFileMap = new Map();
-		let foundMapId = 0;
+						setTimeout(() => {
+							downloads.update((state) => {
+								const newState = { ...state, [setId]: { isDownloading: false, progress: 100 } };
+								return newState;
+							});
+						}, 500);
+						downloads.update((state) => {
+							const newState = { ...state };
+							delete newState[setId];
+							return newState;
+						});
+						worker.terminate();
+						delete downloadWorkers[setId];
 
-		for (const osuFile of osuFiles) {
-			const content = await readTextFile(osuFile);
+						downloadInProgress = false;
+						processNextDownload();
 
-			// Extract beatmap ID and audio filename
-			const beatmapIdMatch = content.match(/BeatmapID:(\d+)/);
-			const audioFileMatch = content.match(/AudioFilename:(.+)/);
-			if (beatmapIdMatch && audioFileMatch) {
-				const beatmapId = beatmapIdMatch[1].trim();
-				foundMapId = beatmapId;
-				let audioFileName = audioFileMatch[1].trim();
+						resolve(await bufferToBase64(audioBase64));
+					} catch (err) {
+						console.error('Error processing extracted audio:', err);
 
-				// Check if this filename needed sanitization
-				// If the original filename exists in our map, use the sanitized version
-				for (const [original, sanitized] of filenameMap.entries()) {
-					if (original.endsWith(audioFileName)) {
-						audioFileName = sanitized.substring(sanitized.lastIndexOf('/') + 1);
-						break;
+						if (worker) {
+							worker.terminate();
+							worker = null;
+						}
+
+						downloadInProgress = false;
+						processNextDownload();
+
+						reject(err);
 					}
 				}
 
-				audioFileMap.set(beatmapId, audioFileName);
-			}
-		}
+				if (type === 'error' && eventSetId === setId) {
+					console.error('Worker reported error:', error);
 
-		// Convert all unique audio files to .opus
-		const convertedAudioFiles = new Set();
-		const uniqueAudioFiles = new Set(audioFileMap.values());
+					if (worker) {
+						worker.terminate();
+						worker = null;
+					}
 
-		for (const audioFileName of uniqueAudioFiles) {
-			// Use async path join
-			const audioFilePath = await path.join(extractDir, audioFileName);
+					downloadInProgress = false;
+					processNextDownload();
 
-			if (await exists(audioFilePath)) {
-				const targetPath = await path.join(mapSetsDir, `${setId}-${foundMapId}.opus`);
-				await convertToOpus(audioFilePath, targetPath);
-				convertedAudioFiles.add(targetPath);
-			}
-		}
-
-		// Initialize mapset entry if needed
-		if (!updatedMapData[setId]) {
-			updatedMapData[setId] = {
-				id: setId,
-				title: mapsetData.title || '',
-				artist: mapsetData.artist || '',
-				creator: mapsetData.creator || '',
-				covers: mapsetData.covers || {},
-				bpm: mapsetData.bpm || 0,
-				status: mapsetData.status || '',
-				tags: mapsetData.tags || '',
-				beatmaps: {},
-				created_at: Date.now()
+					reject(new Error(error));
+				}
 			};
-		}
-		if (!updatedMapData[setId].beatmaps) {
-			updatedMapData[setId].beatmaps = {};
-		}
-		// Process beatmaps from the API data
-		if (mapsetData.beatmaps?.length) {
-			const defaultAudioFilePath = await path.join(mapSetsDir, `${setId}-${foundMapId}.opus`);
 
-			for (const beatmap of mapsetData.beatmaps) {
-				const currentMapId = beatmap.id.toString();
-				const audioFilePath = audioFileMap.get(currentMapId)
-					? await path.join(mapSetsDir, `${setId}-${foundMapId}.opus`)
-					: defaultAudioFilePath;
+			worker.onerror = (err) => {
+				console.error('Worker error:', err);
+				if (worker) {
+					worker.terminate();
+					worker = null;
+				}
 
-				updatedMapData[setId].beatmaps[currentMapId] = {
-					...updatedMapData[setId].beatmaps[currentMapId],
-					id: currentMapId,
-					version: beatmap.version || '',
-					difficulty_rating: beatmap.difficulty_rating || 0,
-					mode: beatmap.mode || '',
-					total_length: beatmap.total_length || 0,
-					downloaded: true,
-					audioFile: audioFilePath
-				};
-			}
-		}
+				downloadInProgress = false;
+				processNextDownload();
 
-		// Mark if multiple audio files exist
-		updatedMapData[setId].multipleAudios = convertedAudioFiles.size > 1;
+				reject(err);
+			};
 
-		// Update the store with the new data
-		mapDataStore.set(updatedMapData);
-
-		await saveMapData();
-		await remove(extractDir, { recursive: true });
-
-		// Return the first converted audio file as base64 (or null if none)
-		if (convertedAudioFiles.size > 0) {
-			const firstAudioPath = [...convertedAudioFiles][0];
-			const audioData = await readFile(firstAudioPath, {
-				baseDir: BaseDirectory.Home
+			worker.postMessage({
+				type: 'extract',
+				data: {
+					buffer,
+					mapId,
+					setId,
+					mapSetData: {
+						id: mapSetData.id,
+						title: mapSetData.title || '',
+						artist: mapSetData.artist || '',
+						creator: mapSetData.creator || '',
+						covers: JSON.parse(JSON.stringify(mapSetData.covers || {})),
+						bpm: mapSetData.bpm || 0,
+						status: mapSetData.status || '',
+						tags: mapSetData.tags || '',
+						beatmaps: mapSetData.beatmaps
+							? mapSetData.beatmaps.map((beatmap) => ({
+									id: beatmap.id,
+									version: beatmap.version || '',
+									difficulty_rating: beatmap.difficulty_rating || 0,
+									mode: beatmap.mode || '',
+									total_length: beatmap.total_length || 0
+								}))
+							: []
+					},
+					homeDir,
+					mapSetsDir
+				}
 			});
-			return await bufferToBase64(audioData);
-		}
+		} catch (err) {
+			console.error('Error setting up worker:', err);
 
-		return null;
-	} catch (error) {
-		console.error('Error extracting audio from beatmap:', error);
-		return null;
+			downloadInProgress = false;
+			processNextDownload();
+
+			reject(err);
+		}
+	});
+}
+
+function processNextDownload() {
+	console.log('Processing next download, queue length:', downloadQueue.length);
+
+	if (downloadQueue.length > 0) {
+		const nextDownload = downloadQueue.shift();
+		console.log('Next download:', nextDownload.mapSetData.id);
+
+		setTimeout(() => {
+			downloadBeatmap(
+				nextDownload.mapSetData,
+				nextDownload.mapId,
+				nextDownload.sessionKey,
+				nextDownload.accessToken
+			)
+				.then(nextDownload.resolve)
+				.catch(nextDownload.reject);
+		}, 100);
 	}
 }
 
@@ -480,7 +480,6 @@ async function convertToOpus(inputPath, targetPath) {
 		`${now}.opus`
 	]);
 	let data = await ffmpeg.readFile(`${now}.opus`);
-	// Write the output file to the actual filesystem
 	await writeFile(targetPath, new Uint8Array(data), {
 		baseDir: BaseDirectory.Home
 	});
@@ -492,11 +491,9 @@ async function convertToOpus(inputPath, targetPath) {
 
 async function updateMapsetData(mapsetData) {
 	const setId = mapsetData.id.toString();
-	// Get current data from store
 	const currentMapData = get(mapDataStore);
 	const updatedMapData = { ...currentMapData };
 
-	// Initialize or update set metadata
 	if (!updatedMapData[setId]) {
 		updatedMapData[setId] = {
 			id: setId,
@@ -511,7 +508,6 @@ async function updateMapsetData(mapsetData) {
 			created_at: mapsetData.createdAt || Date.now()
 		};
 	} else {
-		// Update existing metadata
 		Object.assign(updatedMapData[setId], {
 			title: mapsetData.title || updatedMapData[setId].title,
 			artist: mapsetData.artist || updatedMapData[setId].artist,
@@ -534,7 +530,9 @@ async function updateMapsetData(mapsetData) {
 				updatedMapData[setId].beatmaps[currentMapId] = {};
 			}
 			const isDownloaded = updatedMapData[setId].beatmaps[currentMapId]?.downloaded || false;
-			const audioFile = updatedMapData[setId].beatmaps[currentMapId]?.audioFile || null;
+
+			const audioFile =
+				beatmap.audioFile || updatedMapData[setId].beatmaps[currentMapId]?.audioFile || null;
 
 			updatedMapData[setId].beatmaps[currentMapId] = {
 				...updatedMapData[setId].beatmaps[currentMapId],
@@ -549,7 +547,6 @@ async function updateMapsetData(mapsetData) {
 		});
 	}
 
-	// Update the store with the modified data
 	mapDataStore.set(updatedMapData);
 	await saveMapData();
 }
@@ -561,10 +558,8 @@ export function getImageUrl(imagePath) {
 
 export function formatSongData(songData) {
 	let songs = Object.entries(songData).map(([id, song]) => {
-		// Ensure beatmaps is always an array for consistent handling
 		const songCopy = { ...song };
 
-		// If beatmaps is an object with keys, convert it to an array
 		if (
 			songCopy.beatmaps &&
 			typeof songCopy.beatmaps === 'object' &&

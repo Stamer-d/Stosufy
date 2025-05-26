@@ -126,7 +126,7 @@
 	});
 </script>
 
-<div class="h-full flex flex-col text-white">
+<div class="h-full flex flex-col text-white bg-secondary-200">
 	<div class="flex items-center justify-between p-4 0">
 		<h2 class="text-xl font-bold">Playlists</h2>
 		<Button
@@ -138,14 +138,14 @@
 			}}
 		/>
 	</div>
-	<ul class="overflow-y-auto flex flex-col gap-2 pl-2">
+	<ul class="overflow-y-auto flex flex-col gap-2 px-2">
 		{#each $playlists as playlist}
 			<ContextMenu disabled={playlist.id == -1 ? true : false}>
 				<button
 					on:click={() => {
 						goto(`/playlist/${playlist?.id}`);
 					}}
-					class="group flex items-center p-2 rounded-md hover:bg-secondary-200 w-full cursor-pointer transition duration-100"
+					class="group flex items-center p-2 rounded-md hover:bg-secondary-300 w-full cursor-pointer transition duration-100"
 				>
 					<div class="w-12 h-12 mr-3 flex items-center">
 						<div class="relative w-12 h-12 aspect-square">

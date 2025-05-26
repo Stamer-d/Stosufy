@@ -1,4 +1,4 @@
-import { destroy, start, clearActivity } from 'tauri-plugin-drpc';
+import { destroy, start } from 'tauri-plugin-drpc';
 import { setActivity } from 'tauri-plugin-drpc';
 import { Activity, ActivityType } from 'tauri-plugin-drpc/activity';
 

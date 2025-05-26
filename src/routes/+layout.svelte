@@ -71,7 +71,7 @@
 
 <style lang="postcss">
 	:global(html) {
-		@apply bg-[#242227];
+		@apply bg-[#141414];
 		color: white;
 		user-select: none;
 	}
