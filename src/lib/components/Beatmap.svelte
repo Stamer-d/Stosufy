@@ -179,10 +179,19 @@
 					</span>
 
 					{#if sortedBeatmaps && sortedBeatmaps.length}
-						<div class="flex flex-wrap gap-0.5">
-							{#each sortedBeatmaps as beatmap (beatmap.id)}
-								<div class="{beatmap.difficultyColor} rounded px-1 py-1.5 flex items-center"></div>
-							{/each}
+						<div class="flex flex-wrap {sortedBeatmaps.length > 10 ? 'gap-1' : 'gap-0.5'}">
+							{#if sortedBeatmaps.length > 10}
+								<div class="flex items-center gap-1">
+									<div
+										class="rounded px-1 py-1.5 bg-secondary-500 ring-1 ring-inset ring-secondary-600"
+									></div>
+									<span class="text-sm">{sortedBeatmaps.length}</span>
+								</div>
+							{:else}
+								{#each sortedBeatmaps as beatmap (beatmap.id)}
+									<div class="{beatmap.difficultyColor} rounded px-1 py-1.5"></div>
+								{/each}
+							{/if}
 						</div>
 					{/if}
 				</div>

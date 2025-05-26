@@ -29,7 +29,7 @@
       ${!disabled ? hoverClasses[type] : ''}
       ${sizeClasses[size]} 
       rounded-lg font-medium transition flex gap-2
-      ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer '}
+      ${disabled ? 'cursor-not-allowed' : 'cursor-pointer '}
     `;
 </script>
 

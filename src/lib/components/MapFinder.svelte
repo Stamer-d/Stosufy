@@ -157,7 +157,7 @@
 						<Button
 							type="ghost"
 							icon="icon-[fa6-solid--plus]"
-							class="w-full py-3 rounded-sm hover:bg-secondary-300"
+							class="w-full py-3 rounded-sm hover:bg-secondary-400"
 							on:click={() => {
 								addPlaylistModal.open = true;
 								addPlaylistModal.map = map;

@@ -93,6 +93,28 @@ export async function editPlaylist(id, title, description, isPublic, imageFile =
 export async function addSongToPlaylist(playlistId, mapSetData) {
 	const setId = mapSetData.id;
 	const mapId = mapSetData.beatmaps[0].id;
+
+	playlistSongsCache.update((cache) => {
+		if (!cache[playlistId] || !cache[playlistId].songs) {
+			return cache;
+		}
+		const newSong = {
+			...mapSetData,
+			songInfo: {
+				id: null,
+				set_id: setId,
+				map_id: mapId,
+				created_at: new Date().toISOString()
+			},
+			created_at: new Date().toISOString()
+		};
+		const updatedSongs = [newSong, ...cache[playlistId].songs];
+		return {
+			...cache,
+			[playlistId]: { songs: updatedSongs }
+		};
+	});
+
 	const response = await fetch(`https://api.stamer-d.de/stosufy/playlist/${playlistId}/addsong`, {
 		method: 'POST',
 		body: JSON.stringify({
@@ -110,21 +132,28 @@ export async function addSongToPlaylist(playlistId, mapSetData) {
 	}
 
 	const data = await response.json();
+
 	playlistSongsCache.update((cache) => {
 		if (!cache[playlistId] || !cache[playlistId].songs) {
 			return cache;
 		}
-		const newSong = {
-			...mapSetData,
-			songInfo: data.song_data,
-			created_at: new Date().toISOString()
-		};
-		const updatedSongs = [newSong, ...cache[playlistId].songs];
+
+		const updatedSongs = cache[playlistId].songs.map((song, index) => {
+			if (index === 0 && song.id === mapSetData.id) {
+				return {
+					...song,
+					songInfo: data.song_data
+				};
+			}
+			return song;
+		});
+
 		return {
 			...cache,
 			[playlistId]: { songs: updatedSongs }
 		};
 	});
+
 	return data;
 }
 

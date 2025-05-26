@@ -89,7 +89,7 @@
 			transition:fly={{ y: 5, duration: 150 }}
 			use:adjustMenuPosition
 		>
-			<div class="bg-secondary-200 shadow-lg rounded-md py-2 min-w-64 p-1.5">
+			<div class="bg-secondary-300 shadow-lg rounded-md py-2 min-w-64 p-1.5">
 				<slot name="menu"></slot>
 			</div>
 		</div>

@@ -181,7 +181,7 @@
 					{#if playlist.id !== -1}
 						<Button
 							type="ghost"
-							class="w-full py-3 rounded-sm hover:bg-secondary-300"
+							class="w-full py-3 rounded-sm hover:bg-secondary-400"
 							icon="icon-[fa6-solid--pen]"
 							on:click={async (e) => {
 								e.preventDefault();
