@@ -105,18 +105,19 @@
 		const currentIndex = $songQueue.currentIndex;
 		const deletedIndex = songs.findIndex((song) => song.songInfo.id == songId);
 		songs = songs.filter((song) => song.songInfo.id != songId);
-
-		if (deletedIndex < currentIndex) {
-			await updateSongQueue(currentIndex - 1, songs, 'playlist', playlistId);
-		} else if (deletedIndex === currentIndex) {
-			if (songs.length > 0) {
-				const newIndex = Math.min(currentIndex, songs.length - 1);
-				await updateSongQueue(newIndex, songs, 'playlist', playlistId);
+		if ($songQueue?.type == 'playlist' && $songQueue?.playlistId == playlistId) {
+			if (deletedIndex < currentIndex) {
+				await updateSongQueue(currentIndex - 1, songs, 'playlist', playlistId);
+			} else if (deletedIndex === currentIndex) {
+				if (songs.length > 0) {
+					const newIndex = Math.min(currentIndex, songs.length - 1);
+					await updateSongQueue(newIndex, songs, 'playlist', playlistId);
+				}
+			} else {
+				await updateSongQueue(currentIndex, songs, 'playlist', playlistId);
 			}
-		} else {
-			await updateSongQueue(currentIndex, songs, 'playlist', playlistId);
+			await removeSongFromPlaylist(playlistId, songId);
 		}
-		await removeSongFromPlaylist(playlistId, songId);
 	}
 </script>
 
