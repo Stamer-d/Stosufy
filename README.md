@@ -34,8 +34,9 @@ Create custom playlists, manage your music, and enjoy your collection from any d
 ## 🚧 Status
 
 > **Work in progress** – Features are still being built, tested, and refined.  
-> ChatGPT is helping me a bit since this is my first time working with Tauri so please give any feedback if there is something to improve etc.😅.
+> This is my first time working with Tauri so please give me any feedback if there is something to improve 😅
 > Your feedback is more than welcome!
+> Just create a issue or add me on discord: Stamer_d
 
 ---
 
