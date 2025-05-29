@@ -137,6 +137,11 @@ export async function skipForward() {
 
 export async function skipBackward() {
 	const queue = get(songQueue);
+
+	if (queue.audio.currentTime > 2) {
+		queue.audio.currentTime = 0;
+		return;
+	}
 	if (queue.currentIndex === 0) return;
 	stopPlayback();
 
