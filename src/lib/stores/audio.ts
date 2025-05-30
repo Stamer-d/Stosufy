@@ -1,14 +1,10 @@
 // @ts-nocheck
 import { get, writable } from 'svelte/store';
-import { downloadBeatmap, settings } from './data';
+import { downloadBeatmap } from './data';
+import { userSettings } from './user';
 import { setRPCActivity } from './discord';
 export let songQueue = writable([]);
 export let currentSong = writable({ song: null, isPlaying: false });
-export const settings = writable(
-	JSON.parse(localStorage.getItem('appSettings')) || {
-		volume: 0.05
-	}
-);
 
 export function getAudioBlob64(base64Data) {
 	const byteCharacters = atob(base64Data);
@@ -20,7 +16,7 @@ export function getAudioBlob64(base64Data) {
 	const blob = new Blob([byteArray]);
 	const audioUrl = URL.createObjectURL(blob);
 	const audio = new Audio(audioUrl);
-	let appSettings = get(settings);
+	let appSettings = get(userSettings).settings;
 	audio.volume = appSettings.volume;
 	return audio;
 }
@@ -31,7 +27,7 @@ async function getAudioBlob(index, queue, type) {
 	if (type == 'preview') {
 		const previewUrl = `https:${queue[index].preview_url}`;
 		audio = new Audio(previewUrl);
-		audio.volume = get(settings).volume || 0.05;
+		audio.volume = get(userSettings).settings.volume || 0.05;
 	} else if (type == 'playlist') {
 		const base64Data = await downloadBeatmap(queue[index], queue[index].beatmaps[0].id);
 		audio = getAudioBlob64(base64Data);

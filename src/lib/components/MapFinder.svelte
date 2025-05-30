@@ -7,7 +7,7 @@
 	import Input from './Input.svelte';
 	import { onMount, onDestroy } from 'svelte';
 	import { mapDataStore } from '../stores/data';
-	import { user } from '../stores/auth';
+	import { user } from '../stores/user';
 	import ContextMenu from './ContextMenu.svelte';
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';

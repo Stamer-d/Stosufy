@@ -3,7 +3,7 @@
 
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Button from './Button.svelte';
-	import { user } from '$lib/stores/auth';
+	import { user } from '$lib/stores/user';
 	import Dropdown from './Dropdown.svelte';
 	import { refreshToken, keyStore } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';

@@ -14,12 +14,8 @@ import {
 } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import JSZip from 'jszip';
 import { getPlaylistSongs, playlists } from './playlist';
-import { songQueue, stopPlayback, updateSongQueue } from './audio';
-
-let downloadInProgress = false;
-const downloadQueue = [];
+import { songQueue, updateSongQueue } from './audio';
 
 let homeDir = '';
 let mapSetsDir = '';
@@ -184,9 +180,6 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 		const cachedAudio = await getCachedAudio(setId, mapId);
 		if (cachedAudio) {
 			await updateMapsetData(mapSetData);
-			downloadInProgress = false;
-			processNextDownload();
-
 			return await bufferToBase64(cachedAudio);
 		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 0 } }));
@@ -204,7 +197,7 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 			throw new Error(`Failed to download beatmap: ${response.status}`);
 		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 20 } }));
-
+		console.log(setId, mapId, 'Downloading beatmap...');
 		await fetch('https://api.stamer-d.de/stosufy/addsong', {
 			method: 'POST',
 			headers: {
@@ -222,15 +215,12 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 		return await processWithWorker(buffer, mapSetData, mapId, setId);
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
-		downloadInProgress = false;
 		delete downloadWorkers[setId];
 		downloads.update((state) => {
 			const newState = { ...state };
 			delete newState[setId];
 			return newState;
 		});
-		processNextDownload();
-
 		throw error;
 	}
 }
@@ -341,10 +331,6 @@ async function processWithWorker(buffer, mapSetData, mapId, setId) {
 						});
 						worker.terminate();
 						delete downloadWorkers[setId];
-
-						downloadInProgress = false;
-						processNextDownload();
-
 						resolve(await bufferToBase64(audioBase64));
 					} catch (err) {
 						console.error('Error processing extracted audio:', err);
@@ -353,10 +339,6 @@ async function processWithWorker(buffer, mapSetData, mapId, setId) {
 							worker.terminate();
 							worker = null;
 						}
-
-						downloadInProgress = false;
-						processNextDownload();
-
 						reject(err);
 					}
 				}
@@ -368,10 +350,6 @@ async function processWithWorker(buffer, mapSetData, mapId, setId) {
 						worker.terminate();
 						worker = null;
 					}
-
-					downloadInProgress = false;
-					processNextDownload();
-
 					reject(new Error(error));
 				}
 			};
@@ -382,10 +360,6 @@ async function processWithWorker(buffer, mapSetData, mapId, setId) {
 					worker.terminate();
 					worker = null;
 				}
-
-				downloadInProgress = false;
-				processNextDownload();
-
 				reject(err);
 			};
 
@@ -420,33 +394,9 @@ async function processWithWorker(buffer, mapSetData, mapId, setId) {
 			});
 		} catch (err) {
 			console.error('Error setting up worker:', err);
-
-			downloadInProgress = false;
-			processNextDownload();
-
 			reject(err);
 		}
 	});
-}
-
-function processNextDownload() {
-	console.log('Processing next download, queue length:', downloadQueue.length);
-
-	if (downloadQueue.length > 0) {
-		const nextDownload = downloadQueue.shift();
-		console.log('Next download:', nextDownload.mapSetData.id);
-
-		setTimeout(() => {
-			downloadBeatmap(
-				nextDownload.mapSetData,
-				nextDownload.mapId,
-				nextDownload.sessionKey,
-				nextDownload.accessToken
-			)
-				.then(nextDownload.resolve)
-				.catch(nextDownload.reject);
-		}, 100);
-	}
 }
 
 async function bufferToBase64(buffer) {

@@ -1,5 +1,6 @@
 <script>
-	import { keyStore, user } from '$lib/stores/auth';
+	import { keyStore } from '$lib/stores/auth';
+	import { user } from '$lib/stores/user';
 	import Button from './Button.svelte';
 	import { getImageUrl, mapDataStore } from '$lib/stores/data';
 	import {

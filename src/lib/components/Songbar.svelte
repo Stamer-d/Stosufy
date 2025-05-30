@@ -2,7 +2,6 @@
 	// @ts-nocheck
 
 	import { onMount, onDestroy } from 'svelte';
-	import { settings } from '../stores/audio';
 	import {
 		togglePlayback,
 		skipForward,
@@ -15,7 +14,7 @@
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
 	import { handleImageError } from '$lib/stores/data';
-
+	import { updateUserSettings, userSettings } from '$lib/stores/user';
 	// Track audio time
 	let currentTime = 0;
 	let duration = 0;
@@ -23,7 +22,7 @@
 	let updateInterval;
 
 	// Volume control
-	let volume = 1;
+	let volume = $userSettings.settings?.volume || 0.05;
 	let previousVolume = 1;
 	// Format time as MM:SS
 	function formatTime(seconds) {
@@ -74,7 +73,7 @@
 
 		volume = newVolume; // e.detail is already the volume value
 		$songQueue.audio.volume = volume;
-		$settings.volume = volume;
+		updateUserSettings({ volume: volume });
 		// If we adjust volume to above 0, make sure it's not muted
 		if (volume > 0 && $songQueue.audio.muted) {
 			$songQueue.audio.muted = false;

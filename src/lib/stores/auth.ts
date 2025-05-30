@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
 import { load } from '@tauri-apps/plugin-store';
 import { goto } from '$app/navigation';
-export const user = writable({});
+import { user } from './user';
 
 export const keyStore = writable({
 	access_token: '',
@@ -191,10 +191,7 @@ let refreshInterval;
 export async function startTokenRefresh() {
 	await initializeStores();
 	let diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
-
-	// Clear any existing interval first
 	if (refreshInterval) clearInterval(refreshInterval);
-	console.log('Starting token refresh');
 	if (get(keyStore).expiry_time < Date.now()) {
 		const refreshed = await refreshToken(get(keyStore).refresh_token);
 		if (refreshed == null) {
@@ -205,10 +202,13 @@ export async function startTokenRefresh() {
 	} else {
 		const valid = await checkAccessToken();
 		if (valid) goto('/home');
-		refreshInterval = setInterval(async () => {
-			await refreshToken(get(keyStore).refresh_token);
-			diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
-		}, diffInSeconds);
+		refreshInterval = setInterval(
+			async () => {
+				await refreshToken(get(keyStore).refresh_token);
+				diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
+			},
+			(diffInSeconds - 60) * 1000
+		);
 	}
 
 	return () => {
