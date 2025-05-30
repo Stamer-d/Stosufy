@@ -44,7 +44,6 @@ async function initializeStores() {
 			console.error('Error loading keyStore:', err);
 		});
 	const test = get(userSettings);
-	console.log('UserSettings initialized: ', test);
 	const queue = get(userSettings).currentQueue;
 	let setQueue = false;
 	if (queue && queue?.type == 'playlist') {
@@ -55,7 +54,6 @@ async function initializeStores() {
 
 			if (playlistLoaded && mapDataLoaded && !setQueue) {
 				setQueue = true;
-				console.log(queue);
 				await setSongQueue(
 					queue.index,
 					queue.queue,

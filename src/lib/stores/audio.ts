@@ -53,7 +53,6 @@ export async function setSongQueue(
 	currentSeconds = 0
 ) {
 	stopPlayback();
-	console.log(index);
 	let audio;
 	if (index !== null) audio = await getAudioBlob(index, queue, type, currentSeconds);
 	songQueue.set({
@@ -91,7 +90,6 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 		} catch (e) {
 			let newIndex;
 			if (get(songQueue).currentIndex < index) {
-				console.log(e);
 				if (index < targetQueue.length - 1) {
 					newIndex = index + 1;
 				} else {

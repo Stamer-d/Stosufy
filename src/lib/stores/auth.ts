@@ -33,7 +33,6 @@ async function initializeStores() {
 		.catch((err) => {
 			console.error('Error loading keyStore:', err);
 		});
-	console.log('KeyStore initialized: ', get(keyStore));
 }
 
 export async function checkSessionKey(sessionKey: string) {

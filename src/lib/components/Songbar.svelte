@@ -45,7 +45,6 @@
 		duration = $songQueue.audio.duration || 0;
 		progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 		const timeDifference = Math.abs(currentTime - lastUpdateTime);
-		console.log(currentTime || 0.001);
 
 		if (timeDifference >= 5 && $songQueue.type === 'playlist') {
 			lastUpdateTime = currentTime;
@@ -53,7 +52,6 @@
 				currentSeconds: currentTime || 0.001,
 				playlistId: $songQueue.playlistId
 			});
-			console.log('updating current queue', currentTime, $songQueue.playlistId);
 		}
 
 		if (progressPercent >= 100) {
