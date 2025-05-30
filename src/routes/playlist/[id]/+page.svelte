@@ -201,22 +201,18 @@
 			{#key [$songQueue, $currentSong, playlistId]}
 				<Button
 					type="ghost"
-					class="text-primary-200 hover:text-primary-300 active:text-primary-400 text-6xl"
+					class="{!songs.length
+						? 'text-secondary-500'
+						: 'text-primary-200 hover:text-primary-300 active:text-primary-400'} text-6xl"
+					disabled={!songs.length}
 					icon={$songQueue.playlistId == playlistId && $currentSong?.isPlaying
 						? 'icon-[fa6-solid--circle-pause]'
 						: 'icon-[fa6-solid--circle-play]'}
 					on:click={async () => {
-						if ($songQueue?.playlistId == playlistId && $currentSong?.isPlaying) {
-							// Currently playing this playlist - pause
+						if ($songQueue?.playlistId == playlistId) {
 							togglePlayback();
-						} else if ($songQueue?.playlistId == playlistId && !$currentSong?.isPlaying) {
-							// This playlist is loaded but paused - resume
-							togglePlayback();
-						} else {
-							// Not playing this playlist - start from beginning
-							if (songs.length > 0) {
-								await setSongQueue(0, songs, 'playlist', playlistId);
-							}
+						} else if (songs.length > 0) {
+							await setSongQueue(0, songs, 'playlist', playlistId);
 						}
 					}}
 				/>

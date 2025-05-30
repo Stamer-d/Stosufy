@@ -25,8 +25,8 @@
 	};
 	$: buttonClasses = `
 	  ${$$restProps?.class ?? ''}
+	  ${!disabled ? hoverClasses[type] : 'text-secondary-500'}
       ${typeClasses[type]} 
-      ${!disabled ? hoverClasses[type] : 'text-gray-600'}
       ${sizeClasses[size]} 
       rounded-lg font-medium transition flex gap-2
       ${disabled ? 'cursor-not-allowed' : 'cursor-pointer '}
