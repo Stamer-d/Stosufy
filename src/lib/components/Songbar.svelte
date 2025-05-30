@@ -9,7 +9,8 @@
 		currentSong,
 		skipBackward,
 		stopPlayback,
-		updateSongQueue
+		updateSongQueue,
+		shuffleQueue
 	} from '../stores/audio';
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
@@ -24,6 +25,7 @@
 	let lastUpdateTime = 0;
 	let volume = $userSettings.settings?.volume || 0.05;
 	let previousVolume = 1;
+	let shuffled = false;
 
 	function formatTime(seconds) {
 		if (!seconds) return '0:00';
@@ -43,10 +45,15 @@
 		duration = $songQueue.audio.duration || 0;
 		progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 		const timeDifference = Math.abs(currentTime - lastUpdateTime);
+		console.log(currentTime || 0.001);
 
 		if (timeDifference >= 5 && $songQueue.type === 'playlist') {
 			lastUpdateTime = currentTime;
-			updateCurrentQueue({ currentSeconds: currentTime, playlistId: $songQueue.playlistId });
+			updateCurrentQueue({
+				currentSeconds: currentTime || 0.001,
+				playlistId: $songQueue.playlistId
+			});
+			console.log('updating current queue', currentTime, $songQueue.playlistId);
 		}
 
 		if (progressPercent >= 100) {
@@ -161,6 +168,7 @@
 		await unregister('F14');
 		await unregister('F13');
 	});
+	$: shuffled = $userSettings.settings?.shuffle || false;
 </script>
 
 {#if $currentSong?.song?.id}
@@ -179,9 +187,20 @@
 		</div>
 		<div class="w-full flex-col flex">
 			<div class="flex justify-center items-center gap-6 -my-2">
-				<Button type="ghost" disabled>
-					<span class="icon-[mingcute--shuffle-line] size-5" on:click={() => {}} />
-				</Button>
+				{#key shuffled}
+					<Button
+						type="ghost"
+						disabled={$songQueue.type != 'playlist'}
+						class={shuffled ? 'text-primary-200 hover:text-primary-300' : ''}
+						on:click={async () => {
+							shuffled = !shuffled;
+							updateUserSettings({ shuffle: shuffled });
+							await shuffleQueue();
+						}}
+					>
+						<span class="icon-[mingcute--shuffle-line] size-5" />
+					</Button>
+				{/key}
 				<Button
 					type="ghost"
 					disabled={$songQueue.currentIndex == 0}

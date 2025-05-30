@@ -27,7 +27,7 @@
 	import { keyStore } from '$lib/stores/auth';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import SongToPlaylistModal from '$lib/components/SongToPlaylistModal.svelte';
-	import { get } from 'svelte/store';
+	import { userSettings } from '$lib/stores/user';
 
 	$: playlistId = $page.params?.id;
 	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
@@ -245,7 +245,6 @@
                 a 15.9155 15.9155 0 0 1 0 -31.831"
 								/>
 							</svg>
-							<!-- Stop button in center -->
 							<button
 								on:click={() => {
 									downloadingAll.abort = true;
@@ -349,9 +348,13 @@
 											$songQueue.playlistId == playlistId &&
 											$currentSong?.song?.id != song.id
 										) {
-											stopPlayback();
-											await updateSongQueue(index);
-											togglePlayback();
+											if ($userSettings.settings.shuffle) {
+												await setSongQueue(index, songs, 'playlist', playlistId);
+											} else {
+												stopPlayback();
+												await updateSongQueue(index, null, null, null);
+												togglePlayback();
+											}
 											return;
 										}
 										if ($currentSong?.song?.id == song.id) {

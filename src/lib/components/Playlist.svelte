@@ -172,7 +172,7 @@
 							icon="icon-[fa6-solid--trash]"
 							class="text-gray-400 hover:text-white ml-auto opacity-0 group-hover:opacity-100"
 							on:click={async (e) => {
-								e.preventDefault();
+								e.stopPropagation();
 								await deleteClickedPlaylist(playlist.id);
 							}}
 						/>

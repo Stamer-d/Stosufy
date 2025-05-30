@@ -108,7 +108,7 @@ export async function addSongToPlaylist(playlistId, mapSetData) {
 			},
 			created_at: new Date().toISOString()
 		};
-		const updatedSongs = [newSong, ...cache[playlistId].songs];
+		let updatedSongs = [...cache[playlistId].songs, newSong];
 		return {
 			...cache,
 			[playlistId]: { songs: updatedSongs }
@@ -139,7 +139,7 @@ export async function addSongToPlaylist(playlistId, mapSetData) {
 		}
 
 		const updatedSongs = cache[playlistId].songs.map((song, index) => {
-			if (index === 0 && song.id === mapSetData.id) {
+			if (index === cache[playlistId].songs.length - 1 && song.id === mapSetData.id) {
 				return {
 					...song,
 					songInfo: data.song_data
@@ -317,7 +317,7 @@ export async function getPlaylistSongs(playlistId, forceRefresh = false) {
 		const structuredSongs = Object.values(beatmapsetGroups);
 
 		structuredSongs.sort((a, b) => {
-			return new Date(b.songInfo.created_at) - new Date(a.songInfo.created_at);
+			return new Date(a.songInfo.created_at) - new Date(b.songInfo.created_at);
 		});
 
 		playlistSongsCache.update((cache) => ({

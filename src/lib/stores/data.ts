@@ -527,7 +527,7 @@ export function formatSongData(songData) {
 		return songCopy;
 	});
 	songs.sort((a, b) => {
-		return (b.created_at || 0) - (a.created_at || 0);
+		return (a.created_at || 0) - (b.created_at || 0);
 	});
 	return songs;
 }

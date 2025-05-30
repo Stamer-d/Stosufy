@@ -3,6 +3,7 @@ import { get, writable } from 'svelte/store';
 import { downloadBeatmap } from './data';
 import { updateCurrentQueue, userSettings } from './user';
 import { setRPCActivity } from './discord';
+import { playlistSongsCache } from './playlist';
 export let songQueue = writable([]);
 export let currentSong = writable({ song: null, isPlaying: false });
 
@@ -52,7 +53,7 @@ export async function setSongQueue(
 	currentSeconds = 0
 ) {
 	stopPlayback();
-
+	console.log(index);
 	let audio;
 	if (index !== null) audio = await getAudioBlob(index, queue, type, currentSeconds);
 	songQueue.set({
@@ -65,13 +66,18 @@ export async function setSongQueue(
 	currentSong.set({ song: queue[index], isPlaying: false });
 	updateCurrentQueue({ index, queue, type, playlistId, currentSeconds: currentSeconds });
 	if (playSong) togglePlayback();
+	const shuffle = get(userSettings).settings.shuffle || false;
+	if (shuffle && currentSeconds == 0) await shuffleQueue();
 }
 
 export async function updateSongQueue(index, queue, type, playlistId = null) {
 	if (!get(songQueue).queue || !get(currentSong).song) return;
 	const current = get(songQueue);
-
 	let audio;
+
+	let targetQueue = queue || current.queue;
+	let targetIndex = index;
+
 	if (
 		index != undefined &&
 		queue != undefined &&
@@ -79,44 +85,46 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 		playlistId == get(songQueue).playlistId
 	) {
 		console.log('Updating song queue');
-	} else if (index !== null) {
+	} else if (index !== null && targetIndex < targetQueue.length) {
 		try {
-			audio = await getAudioBlob(index, queue || current.queue, type || current.type);
+			audio = await getAudioBlob(targetIndex, targetQueue, type || current.type);
 		} catch (e) {
 			let newIndex;
 			if (get(songQueue).currentIndex < index) {
-				if (index < get(songQueue).queue.length - 1) {
+				console.log(e);
+				if (index < targetQueue.length - 1) {
 					newIndex = index + 1;
 				} else {
 					newIndex = 0;
 				}
 			} else {
-				newIndex = Math.max(1, index - 1);
+				newIndex = Math.max(0, index - 1);
 			}
 			await updateSongQueue(newIndex, queue, type, playlistId);
 			return;
 		}
 
 		currentSong.set({
-			song: queue ? queue[index] : current.queue[index],
+			song: targetQueue[targetIndex],
 			isPlaying: current.isPlaying
 		});
 	}
 
 	songQueue.set({
-		currentIndex: index != undefined ? index : current.currentIndex,
+		currentIndex: targetIndex != undefined ? targetIndex : current.currentIndex,
 		audio: audio || current.audio,
-		queue: queue || current.queue,
+		queue: targetQueue,
 		type: type || current.type,
 		playlistId: playlistId || current.playlistId
 	});
+
 	const newQueue = get(songQueue);
 	updateCurrentQueue({
 		index: newQueue.currentIndex || 0,
 		queue: newQueue.queue,
 		type: newQueue.type,
 		playlistId: newQueue.playlistId,
-		currentSeconds: 0
+		currentSeconds: 0.001
 	});
 }
 
@@ -147,24 +155,66 @@ export function togglePlayback() {
 		}
 	});
 }
+let isSkipping = false;
+
+// ...existing code...
 
 export async function skipForward() {
-	const queue = get(songQueue);
-	stopPlayback(true);
-	await updateSongQueue(queue.currentIndex + 1);
-	togglePlayback();
+	if (isSkipping) return; // Prevent concurrent skips
+	isSkipping = true;
+
+	try {
+		const queue = get(songQueue);
+		stopPlayback(true);
+		await updateSongQueue(queue.currentIndex + 1);
+		togglePlayback();
+	} finally {
+		isSkipping = false;
+	}
 }
 
 export async function skipBackward() {
-	const queue = get(songQueue);
+	if (isSkipping) return; // Prevent concurrent skips
+	isSkipping = true;
 
-	if (queue.audio.currentTime > 2) {
-		queue.audio.currentTime = 0;
-		return;
+	try {
+		const queue = get(songQueue);
+
+		if (queue.audio.currentTime > 2) {
+			queue.audio.currentTime = 0;
+			return;
+		}
+		if (queue.currentIndex === 0) return;
+		stopPlayback(true);
+
+		await updateSongQueue(queue.currentIndex - 1);
+		togglePlayback();
+	} finally {
+		isSkipping = false;
 	}
-	if (queue.currentIndex === 0) return;
-	stopPlayback(true);
+}
 
-	await updateSongQueue(queue.currentIndex - 1);
-	togglePlayback();
+export async function shuffleQueue() {
+	const current = get(songQueue);
+	const shuffle = get(userSettings).settings.shuffle;
+	if (!current || !current.queue || current.queue.length === 0) return;
+
+	if (shuffle) {
+		const currentSongData = current.queue[current.currentIndex];
+		const shuffledQueue = [...current.queue].sort(() => Math.random() - 0.5);
+		const currentSongShuffledIndex = shuffledQueue.findIndex(
+			(song) => song.id === currentSongData.id
+		);
+		if (currentSongShuffledIndex > 0) {
+			shuffledQueue.splice(currentSongShuffledIndex, 1);
+			shuffledQueue.unshift(currentSongData);
+		}
+
+		await updateSongQueue(0, shuffledQueue, current.type, current.playlistId);
+	} else {
+		const songs = get(playlistSongsCache)?.[current.playlistId].songs || [];
+		const currentSongData = current.queue[current.currentIndex];
+		const currentIndex = songs.findIndex((song) => song.id === currentSongData.id);
+		await updateSongQueue(currentIndex || 0, songs, 'playlist', current.playlistId);
+	}
 }

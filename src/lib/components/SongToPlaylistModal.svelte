@@ -7,6 +7,7 @@
 		playlistSongsCache,
 		playlists
 	} from '$lib/stores/playlist';
+	import { userSettings } from '$lib/stores/user';
 	import Modal from './Modal.svelte';
 
 	export let map;
@@ -19,7 +20,7 @@
 			<p class="text-sm leading-relaxed">Select a playlist to add the Song to</p>
 			<div class="flex flex-col gap-2 max-h-60 overflow-y-auto pr-2">
 				{#each $playlists as playlist}
-					{@const isSongInPlaylist = $playlistSongsCache[playlist.id].songs.some(
+					{@const isSongInPlaylist = $playlistSongsCache[playlist.id]?.songs.some(
 						(song) => song.id == map.id
 					)}
 					{#if playlist.id !== -1}
@@ -42,12 +43,22 @@
 								await addSongToPlaylist(playlist.id, map);
 								await getPlaylistSongs(playlist.id);
 								if ($songQueue.playlistId == playlist.id) {
-									await updateSongQueue(
-										$songQueue.currentIndex + 1,
-										$playlistSongsCache[playlist.id].songs,
-										'playlist',
-										playlist.id
-									);
+									const isShuffled = $userSettings.settings.shuffle || false;
+
+									if (isShuffled) {
+										const currentQueue = [...$songQueue.queue, map];
+										songQueue.update((queue) => ({
+											...queue,
+											queue: currentQueue
+										}));
+									} else {
+										await updateSongQueue(
+											$songQueue.currentIndex,
+											$playlistSongsCache[playlist.id].songs,
+											'playlist',
+											playlist.id
+										);
+									}
 								}
 							}}
 						>
