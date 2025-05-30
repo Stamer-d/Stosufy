@@ -171,7 +171,7 @@
 </script>
 
 {#if playlistData}
-	<div class="flex flex-col">
+	<div class="flex flex-col gap-3">
 		<div class="flex items-center gap-4 mb-2">
 			<div class="relative shrink-0">
 				<img
@@ -197,12 +197,30 @@
 				</div>
 			</div>
 		</div>
-		<div class="flex items-center gap-2">
-			<Button
-				type="ghost"
-				class="text-primary-200 hover:text-primary-300 active:text-primary-400 text-6xl"
-				icon="icon-[fa6-solid--circle-play]"
-			/>
+		<div class="flex items-center gap-1">
+			{#key [$songQueue, $currentSong, playlistId]}
+				<Button
+					type="ghost"
+					class="text-primary-200 hover:text-primary-300 active:text-primary-400 text-6xl"
+					icon={$songQueue.playlistId == playlistId && $currentSong?.isPlaying
+						? 'icon-[fa6-solid--circle-pause]'
+						: 'icon-[fa6-solid--circle-play]'}
+					on:click={async () => {
+						if ($songQueue?.playlistId == playlistId && $currentSong?.isPlaying) {
+							// Currently playing this playlist - pause
+							togglePlayback();
+						} else if ($songQueue?.playlistId == playlistId && !$currentSong?.isPlaying) {
+							// This playlist is loaded but paused - resume
+							togglePlayback();
+						} else {
+							// Not playing this playlist - start from beginning
+							if (songs.length > 0) {
+								await setSongQueue(0, songs, 'playlist', playlistId);
+							}
+						}
+					}}
+				/>
+			{/key}
 			{#key getNotDownloadedSongs().length}
 				{#if playlistId != -1}
 					{#if downloadingAll.downloading}
