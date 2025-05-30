@@ -43,7 +43,6 @@ async function initializeStores() {
 		.catch((err) => {
 			console.error('Error loading keyStore:', err);
 		});
-	const test = get(userSettings);
 	const queue = get(userSettings).currentQueue;
 	let setQueue = false;
 	if (queue && queue?.type == 'playlist') {

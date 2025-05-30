@@ -18,7 +18,7 @@ export function getAudioBlob64(base64Data) {
 	const audioUrl = URL.createObjectURL(blob);
 	const audio = new Audio(audioUrl);
 	let appSettings = get(userSettings).settings;
-	audio.volume = appSettings.volume;
+	audio.volume = appSettings.volume || 0.05;
 	return audio;
 }
 
