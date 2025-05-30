@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { get, writable } from 'svelte/store';
 import { downloadBeatmap } from './data';
-import { userSettings } from './user';
+import { updateCurrentQueue, userSettings } from './user';
 import { setRPCActivity } from './discord';
 export let songQueue = writable([]);
 export let currentSong = writable({ song: null, isPlaying: false });
@@ -21,7 +21,7 @@ export function getAudioBlob64(base64Data) {
 	return audio;
 }
 
-async function getAudioBlob(index, queue, type) {
+async function getAudioBlob(index, queue, type, currentSeconds = 0) {
 	let blob;
 	let audio = null;
 	if (type == 'preview') {
@@ -32,14 +32,29 @@ async function getAudioBlob(index, queue, type) {
 		const base64Data = await downloadBeatmap(queue[index], queue[index].beatmaps[0].id);
 		audio = getAudioBlob64(base64Data);
 	}
+	await new Promise((resolve) => {
+		audio.addEventListener('loadedmetadata', () => {
+			if (audio.duration > currentSeconds) {
+				audio.currentTime = currentSeconds;
+			}
+			resolve();
+		});
+	});
 	return audio;
 }
 
-export async function setSongQueue(index, queue, type, playlistId = null) {
+export async function setSongQueue(
+	index,
+	queue,
+	type,
+	playlistId = null,
+	playSong = true,
+	currentSeconds = 0
+) {
 	stopPlayback();
 
 	let audio;
-	if (index !== null) audio = await getAudioBlob(index, queue, type);
+	if (index !== null) audio = await getAudioBlob(index, queue, type, currentSeconds);
 	songQueue.set({
 		currentIndex: index,
 		audio: audio,
@@ -48,7 +63,8 @@ export async function setSongQueue(index, queue, type, playlistId = null) {
 		playlistId: playlistId
 	});
 	currentSong.set({ song: queue[index], isPlaying: false });
-	togglePlayback();
+	updateCurrentQueue({ index, queue, type, playlistId, currentSeconds: currentSeconds });
+	if (playSong) togglePlayback();
 }
 
 export async function updateSongQueue(index, queue, type, playlistId = null) {
@@ -93,6 +109,14 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 		queue: queue || current.queue,
 		type: type || current.type,
 		playlistId: playlistId || current.playlistId
+	});
+	const newQueue = get(songQueue);
+	updateCurrentQueue({
+		index: newQueue.currentIndex || 0,
+		queue: newQueue.queue,
+		type: newQueue.type,
+		playlistId: newQueue.playlistId,
+		currentSeconds: 0
 	});
 }
 

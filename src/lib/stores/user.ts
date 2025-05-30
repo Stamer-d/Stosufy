@@ -1,10 +1,13 @@
 import { load } from '@tauri-apps/plugin-store';
 import { get, writable } from 'svelte/store';
+import { playlistLoadingStatus } from './playlist';
+import { setSongQueue } from './audio';
+import { mapDataStore } from './data';
 
 export const user = writable({});
 export const userSettings = writable({
 	settings: {},
-	lastPlayedSong: null
+	currentQueue: null
 });
 
 export function updateUserSettings(newSettings: any) {
@@ -14,10 +17,11 @@ export function updateUserSettings(newSettings: any) {
 	}));
 }
 
-export function updateLastPlayedSong(song: any) {
+export function updateCurrentQueue(queue: any) {
+	if (!queue?.playlistId) return;
 	userSettings.update((currentUser) => ({
 		...currentUser,
-		lastPlayedSong: song
+		currentQueue: { ...currentUser.currentQueue, ...queue }
 	}));
 }
 
@@ -39,6 +43,32 @@ async function initializeStores() {
 		.catch((err) => {
 			console.error('Error loading keyStore:', err);
 		});
-	console.log('KeyStore initialized: ', get(user));
+
+	const queue = get(userSettings).currentQueue;
+	let setQueue = false;
+	if (queue && queue?.type == 'playlist') {
+		const checkIfReady = async () => {
+			const playlistLoaded = !get(playlistLoadingStatus)[queue.playlistId];
+			const mapData = get(mapDataStore);
+			const mapDataLoaded = mapData && Object.keys(mapData).length > 0;
+
+			if (playlistLoaded && mapDataLoaded && !setQueue) {
+				setQueue = true;
+				await setSongQueue(
+					queue.index,
+					queue.queue,
+					queue.type,
+					queue.playlistId,
+					false,
+					queue.currentSeconds
+				);
+				unsubscribePlaylist();
+				unsubscribeMapData();
+			}
+		};
+
+		const unsubscribePlaylist = playlistLoadingStatus.subscribe(checkIfReady);
+		const unsubscribeMapData = mapDataStore.subscribe(checkIfReady);
+	}
 }
 initializeStores();

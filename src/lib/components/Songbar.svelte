@@ -8,23 +8,23 @@
 		songQueue,
 		currentSong,
 		skipBackward,
-		stopPlayback
+		stopPlayback,
+		updateSongQueue
 	} from '../stores/audio';
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
 	import { handleImageError } from '$lib/stores/data';
-	import { updateUserSettings, userSettings } from '$lib/stores/user';
-	// Track audio time
+	import { updateUserSettings, userSettings, updateCurrentQueue } from '$lib/stores/user';
+
 	let currentTime = 0;
 	let duration = 0;
 	let progressPercent = 0;
 	let updateInterval;
-
-	// Volume control
+	let lastUpdateTime = 0;
 	let volume = $userSettings.settings?.volume || 0.05;
 	let previousVolume = 1;
-	// Format time as MM:SS
+
 	function formatTime(seconds) {
 		if (!seconds) return '0:00';
 		const mins = Math.floor(seconds / 60);
@@ -37,13 +37,18 @@
 		$songQueue.audio.currentTime = event.detail;
 	}
 
-	// Update time displays when audio is playing
 	async function updateTimeDisplay() {
 		if (!$songQueue?.audio) return;
-		if (!$currentSong.isPlaying) return;
 		currentTime = $songQueue.audio.currentTime;
 		duration = $songQueue.audio.duration || 0;
 		progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+		const timeDifference = Math.abs(currentTime - lastUpdateTime);
+
+		if (timeDifference >= 5 && $songQueue.type === 'playlist') {
+			lastUpdateTime = currentTime;
+			updateCurrentQueue({ currentSeconds: currentTime, playlistId: $songQueue.playlistId });
+		}
+
 		if (progressPercent >= 100) {
 			if ($songQueue.currentIndex == $songQueue.queue?.length - 1) {
 				stopPlayback();
