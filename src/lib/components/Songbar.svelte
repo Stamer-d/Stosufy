@@ -51,7 +51,7 @@
 
 		if (progressPercent >= 100) {
 			if ($songQueue.currentIndex == $songQueue.queue?.length - 1) {
-				stopPlayback();
+				stopPlayback(true);
 			} else {
 				await skipForward();
 			}

@@ -120,12 +120,12 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 	});
 }
 
-export function stopPlayback() {
+export function stopPlayback(onlyPause = false) {
 	songQueue.update((current) => {
 		if (!current || !current.audio) return current;
 		current.audio.pause();
 		setRPCActivity(null);
-		currentSong.update((cs) => ({ ...cs, isPlaying: false }));
+		if (!onlyPause) currentSong.update((cs) => ({ ...cs, isPlaying: false }));
 		return current;
 	});
 }
@@ -150,7 +150,7 @@ export function togglePlayback() {
 
 export async function skipForward() {
 	const queue = get(songQueue);
-	stopPlayback();
+	stopPlayback(true);
 	await updateSongQueue(queue.currentIndex + 1);
 	togglePlayback();
 }
@@ -163,7 +163,7 @@ export async function skipBackward() {
 		return;
 	}
 	if (queue.currentIndex === 0) return;
-	stopPlayback();
+	stopPlayback(true);
 
 	await updateSongQueue(queue.currentIndex - 1);
 	togglePlayback();
