@@ -182,7 +182,11 @@
 				<Button type="ghost" disabled>
 					<span class="icon-[mingcute--shuffle-line] size-5" on:click={() => {}} />
 				</Button>
-				<Button type="ghost" on:click={async () => await skipBackward()}>
+				<Button
+					type="ghost"
+					disabled={$songQueue.currentIndex == 0}
+					on:click={async () => await skipBackward()}
+				>
 					<span class="icon-[fa6-solid--backward-step] size-5" />
 				</Button>
 				<Button type="ghost" on:click={() => togglePlayback()}>
