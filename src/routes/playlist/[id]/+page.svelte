@@ -113,15 +113,39 @@
 		const deletedIndex = songs.findIndex((song) => song.songInfo.id == songId);
 		songs = songs.filter((song) => song.songInfo.id != songId);
 		if ($songQueue?.type == 'playlist' && $songQueue?.playlistId == playlistId) {
-			if (deletedIndex < currentIndex) {
-				await updateSongQueue(currentIndex - 1, songs, 'playlist', playlistId);
-			} else if (deletedIndex === currentIndex) {
-				if (songs.length > 0) {
-					const newIndex = Math.min(currentIndex, songs.length - 1);
-					await updateSongQueue(newIndex, songs, 'playlist', playlistId);
+			const isShuffled = $userSettings.settings.shuffle || false;
+
+			if (isShuffled) {
+				const currentQueue = $songQueue.queue.filter((song) => song.songInfo?.id !== songId);
+				const deletedQueueIndex = $songQueue.queue.findIndex(
+					(song) => song.songInfo?.id === songId
+				);
+
+				let newCurrentIndex = currentIndex;
+				if (deletedQueueIndex < currentIndex) {
+					newCurrentIndex = currentIndex - 1;
+				} else if (deletedQueueIndex === currentIndex) {
+					if (currentQueue.length > 0) {
+						newCurrentIndex = Math.min(currentIndex, currentQueue.length - 1);
+					}
 				}
+
+				songQueue.update((queue) => ({
+					...queue,
+					queue: currentQueue,
+					currentIndex: newCurrentIndex
+				}));
 			} else {
-				await updateSongQueue(currentIndex, songs, 'playlist', playlistId);
+				if (deletedIndex < currentIndex) {
+					await updateSongQueue(currentIndex - 1, songs, 'playlist', playlistId);
+				} else if (deletedIndex === currentIndex) {
+					if (songs.length > 0) {
+						const newIndex = Math.min(currentIndex, songs.length - 1);
+						await updateSongQueue(newIndex, songs, 'playlist', playlistId);
+					}
+				} else {
+					await updateSongQueue(currentIndex, songs, 'playlist', playlistId);
+				}
 			}
 		}
 		await removeSongFromPlaylist(playlistId, songId);
