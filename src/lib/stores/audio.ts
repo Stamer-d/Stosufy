@@ -195,7 +195,8 @@ export async function skipBackward() {
 export async function shuffleQueue() {
 	const current = get(songQueue);
 	const shuffle = get(userSettings).settings.shuffle;
-	if (!current || !current.queue || current.queue.length === 0) return;
+	if (!current || !current.queue || current.queue.length === 0 || current.type != 'playlist')
+		return;
 
 	if (shuffle) {
 		const currentSongData = current.queue[current.currentIndex];
