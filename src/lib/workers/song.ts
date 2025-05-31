@@ -194,8 +194,8 @@ async function extractAudioFromBeatmap(
 			const beatmapIdMatch = content.match(/BeatmapID:(\d+)/);
 			const audioFileMatch = content.match(/AudioFilename:(.+)/);
 
-			if (beatmapIdMatch && audioFileMatch) {
-				const beatmapId = beatmapIdMatch[1].trim();
+			if (audioFileMatch) {
+				const beatmapId = beatmapIdMatch ? beatmapIdMatch[1].trim() : mapId.toString();
 				foundMapId = beatmapId;
 				let audioFileName = audioFileMatch[1].trim();
 
