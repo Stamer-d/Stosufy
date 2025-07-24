@@ -98,7 +98,7 @@ export async function refreshToken(refreshToken) {
 }
 
 export async function verifyAccessToken(token) {
-	const response = await fetch('https://api.stamer-d.de/stosufy/login', {
+	const response = await fetch('https://api.stamer-d.de/v1/stosufy/login', {
 		method: 'GET',
 		headers: {
 			Authorization: `Bearer ${token}`
