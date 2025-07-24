@@ -7,7 +7,7 @@ export const playlistSongsCache = writable({});
 export const playlistLoadingStatus = writable({});
 
 export async function getPlaylists(code) {
-	const response = await fetch('https://api.stamer-d.de/stosufy/playlist/', {
+	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/', {
 		method: 'GET',
 		headers: {
 			Authorization: `Bearer ${code}`
@@ -23,7 +23,7 @@ export async function getPlaylists(code) {
 }
 
 export async function createPlaylist(title) {
-	const response = await fetch('https://api.stamer-d.de/stosufy/playlist/create', {
+	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/create', {
 		method: 'POST',
 		body: JSON.stringify({
 			title: title
@@ -43,7 +43,7 @@ export async function createPlaylist(title) {
 }
 
 export async function deletePlaylist(id) {
-	const response = await fetch('https://api.stamer-d.de/stosufy/playlist/delete', {
+	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/delete', {
 		method: 'POST',
 		body: JSON.stringify({
 			id: id
@@ -74,7 +74,7 @@ export async function editPlaylist(id, title, description, isPublic, imageFile =
 		formData.append('image', imageFile);
 	}
 
-	const response = await fetch('https://api.stamer-d.de/stosufy/playlist/edit', {
+	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/edit', {
 		method: 'POST',
 		body: formData,
 		headers: {
@@ -115,7 +115,7 @@ export async function addSongToPlaylist(playlistId, mapSetData) {
 		};
 	});
 
-	const response = await fetch(`https://api.stamer-d.de/stosufy/playlist/${playlistId}/addsong`, {
+	const response = await fetch(`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}/addsong`, {
 		method: 'POST',
 		body: JSON.stringify({
 			set_id: setId,
@@ -179,7 +179,7 @@ export async function removeSongFromPlaylist(playlistId, songId) {
 		};
 	});
 	const response = await fetch(
-		`https://api.stamer-d.de/stosufy/playlist/${playlistId}/removesong`,
+		`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}/removesong`,
 		{
 			method: 'POST',
 			body: JSON.stringify({
@@ -221,7 +221,7 @@ export async function getPlaylistSongs(playlistId, forceRefresh = false) {
 			return { songs };
 		}
 
-		const response = await fetch(`https://api.stamer-d.de/stosufy/playlist/${playlistId}`, {
+		const response = await fetch(`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}`, {
 			method: 'GET',
 			headers: {
 				Authorization: `Bearer ${get(keyStore).access_token}`

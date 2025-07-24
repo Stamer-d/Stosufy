@@ -198,7 +198,7 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 20 } }));
 		console.log(setId, mapId, 'Downloading beatmap...');
-		await fetch('https://api.stamer-d.de/stosufy/addsong', {
+		await fetch('https://api.stamer-d.de/v1/stosufy/addsong', {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
@@ -507,7 +507,7 @@ async function updateMapsetData(mapsetData) {
 
 export function getImageUrl(imagePath) {
 	if (!imagePath) return '/logo.png';
-	return `https://api.stamer-d.de/${imagePath}`;
+	return `https://api.stamer-d.de/v1/${imagePath}`;
 }
 
 export function formatSongData(songData) {
