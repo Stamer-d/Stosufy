@@ -26,7 +26,7 @@ async function getAudioBlob(index, queue, type, currentSeconds = 0) {
 	let blob;
 	let audio = null;
 	if (type == 'preview') {
-		const previewUrl = `https:${queue[index].preview_url}`;
+		const previewUrl = `${queue[index].preview_url}`;
 		audio = new Audio(previewUrl);
 		audio.volume = get(userSettings).settings.volume || 0.05;
 	} else if (type == 'playlist') {
