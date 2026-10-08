@@ -118,6 +118,17 @@
 		}
 	}
 
+	// Space toggles playback, unless the user is typing
+	function handleKeydown(event) {
+		if (event.code !== 'Space' || event.repeat || !$songQueue?.audio) return;
+		const target = event.target;
+		if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable]')) {
+			return;
+		}
+		event.preventDefault();
+		togglePlayback();
+	}
+
 	// Track changes to currentlyPlaying and set up time tracking
 	$: if ($songQueue?.audio) {
 		setupTimeTracking();
@@ -165,6 +176,8 @@
 	});
 	$: shuffled = $userSettings.settings?.shuffle || false;
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 {#if $currentSong?.song?.id}
 	<div class="grid grid-cols-3 gap-2 py-3 px-4 bg-secondary-50">

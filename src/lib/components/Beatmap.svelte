@@ -109,6 +109,7 @@
 		<img
 			src="https://assets.ppy.sh/beatmaps/{map.id}/covers/list.jpg"
 			on:error={handleImageError}
+			loading="lazy"
 			alt=""
 			class="h-full w-[100px] rounded-s object-cover"
 		/>

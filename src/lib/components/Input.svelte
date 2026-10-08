@@ -31,10 +31,10 @@
 	on:blur
 	on:change
 	on:input
+	{...$$restProps}
 	{disabled}
-	class={inputClasses}
+	class="{inputClasses} {$$restProps.class ?? ''}"
 	bind:value
 	{placeholder}
 	{type}
-	{...$$restProps}
 />

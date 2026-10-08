@@ -12,6 +12,7 @@
 		loadAllPlaylistSongs
 	} from '#lib/stores/playlist.ts';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import ContextMenu from './ContextMenu.svelte';
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
@@ -68,8 +69,12 @@
 		$playlists = $playlists.map((playlist) => (playlist.id === tempId ? newPlaylist : playlist));
 	}
 
+	let playlistToDelete = $state(null);
+	let deleteModalOpen = $state(false);
+
 	async function deleteClickedPlaylist(playlistId) {
 		$playlists = $playlists.filter((playlist) => playlist.id !== playlistId);
+		if (page.params?.id == playlistId) goto('/home');
 		await deletePlaylist(playlistId);
 	}
 
@@ -138,12 +143,16 @@
 	</div>
 	<ul class="overflow-y-auto flex flex-col gap-2 px-2">
 		{#each $playlists as playlist}
+			{@const isActive = page.params?.id == playlist.id}
 			<ContextMenu disabled={playlist.id == -1}>
 				<button
 					onclick={() => {
 						goto(`/playlist/${playlist?.id}`);
 					}}
-					class="group flex items-center p-2 rounded-md hover:bg-secondary-300 w-full cursor-pointer transition duration-100"
+					aria-current={isActive ? 'page' : undefined}
+					class="group flex items-center p-2 rounded-md hover:bg-secondary-300 w-full cursor-pointer transition duration-100 {isActive
+						? 'bg-secondary-300'
+						: ''}"
 				>
 					<div class="w-12 h-12 mr-3 flex items-center">
 						<div class="relative w-12 h-12 aspect-square">
@@ -160,17 +169,23 @@
 						</div>
 					</div>
 					<div class="overflow-hidden text-start">
-						<h3 class="font-medium truncate">{playlist.title}</h3>
-						<p class="">{playlist.song_amount || 0} Songs</p>
+						<h3 class="font-medium truncate {isActive ? 'text-primary-500' : ''}">
+							{playlist.title}
+						</h3>
+						<p class="text-sm text-secondary-600">
+							{playlist.song_amount || 0}
+							{playlist.song_amount === 1 ? 'Song' : 'Songs'}
+						</p>
 					</div>
 					{#if playlist.id !== -1}
 						<Button
 							type="ghost"
 							icon="icon-[fa6-solid--trash]"
 							class="text-gray-400 hover:text-white ml-auto opacity-0 group-hover:opacity-100"
-							on:click={async (e) => {
+							on:click={(e) => {
 								e.stopPropagation();
-								await deleteClickedPlaylist(playlist.id);
+								playlistToDelete = playlist;
+								deleteModalOpen = true;
 							}}
 						/>
 					{/if}
@@ -201,6 +216,31 @@
 		{/each}
 	</ul>
 </div>
+
+<Modal title="Delete Playlist" width="420px" bind:open={deleteModalOpen}>
+	<p>
+		Do you really want to delete <strong>{playlistToDelete?.title}</strong>? This cannot be undone.
+	</p>
+	<svelte:fragment slot="footer">
+		<Button
+			on:click={() => {
+				deleteModalOpen = false;
+			}}
+		>
+			Cancel
+		</Button>
+		<Button
+			type="primary"
+			class="bg-red-500! hover:bg-red-600! active:bg-red-700!"
+			on:click={async () => {
+				deleteModalOpen = false;
+				await deleteClickedPlaylist(playlistToDelete.id);
+			}}
+		>
+			Delete
+		</Button>
+	</svelte:fragment>
+</Modal>
 
 <Modal title="Edit Playlist" bind:open={editPlaylistModal.open}>
 	<div class="flex flex-col md:flex-row gap-4">

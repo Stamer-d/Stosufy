@@ -220,7 +220,7 @@
 					{playlistData.description}
 				</div>
 				<div>
-					{playlistData.song_amount} Song{playlistData.song_amount > 1 ? 's' : ''}
+					{playlistData.song_amount} Song{playlistData.song_amount === 1 ? '' : 's'}
 				</div>
 			</div>
 		</div>
@@ -325,6 +325,7 @@
 									src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
 									alt={song.title}
 									on:error={handleImageError}
+									loading="lazy"
 									class="size-14 rounded"
 								/>
 								<div class="flex flex-col text-start ml-4">
@@ -422,6 +423,7 @@
 										src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
 										alt={song.title}
 										on:error={handleImageError}
+										loading="lazy"
 										class="size-14 rounded"
 									/>
 									<div class="flex flex-col text-start ml-4">

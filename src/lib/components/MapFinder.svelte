@@ -13,8 +13,10 @@
 	let initialTokenLoad = $state(true);
 
 	let search = $state('');
+	let searching = $state(false);
 	let osuMapsSearch = $state(null);
 	let searchTimeout = null;
+	let searchRequestId = 0;
 	let allMaps = $state([]);
 
 	let endOfContent = $state(null);
@@ -44,13 +46,29 @@
 		);
 	}
 
-	function debouncedSearch(args) {
-		if (searchTimeout) clearTimeout(searchTimeout);
+	async function runSearch(query) {
+		// Ignore responses of outdated searches that finish after a newer one
+		const requestId = ++searchRequestId;
+		searching = true;
+		try {
+			const result = await fetchMaps(query);
+			if (requestId !== searchRequestId) return;
+			osuMapsSearch = result;
+			allMaps = result.beatmapsets;
+		} finally {
+			if (requestId === searchRequestId) searching = false;
+		}
+	}
 
-		searchTimeout = setTimeout(async () => {
-			osuMapsSearch = await fetchMaps(args);
-			allMaps = osuMapsSearch.beatmapsets;
-		}, 500);
+	function debouncedSearch(query) {
+		if (searchTimeout) clearTimeout(searchTimeout);
+		searchTimeout = setTimeout(() => runSearch(query), 500);
+	}
+
+	function clearSearch() {
+		if (searchTimeout) clearTimeout(searchTimeout);
+		search = '';
+		runSearch('');
 	}
 
 	function isMapDownloaded(setId) {
@@ -123,20 +141,47 @@
 	});
 </script>
 
-<div class="flex w-full items-center gap-2 mb-2">
+<div class="text-2xl font-semibold mb-3">
+	Welcome back{$user?.username ? `, ${$user.username}` : ''}
+</div>
+<div class="relative flex w-full items-center mb-4">
+	<span
+		class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
+	></span>
 	<Input
 		bind:value={search}
 		on:input={(e) => {
 			debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
 		}}
-		placeholder="Search"
+		placeholder="Search beatmaps by title, artist or mapper"
+		class="pl-9 pr-9"
 	/>
+	{#if searching}
+		<span
+			class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
+		></span>
+	{:else if search}
+		<button
+			aria-label="Clear search"
+			class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
+			onclick={clearSearch}
+		>
+			<span class="icon-[fa6-solid--xmark] size-4"></span>
+		</button>
+	{/if}
 </div>
-<div class="text-2xl flex gap-1">
-	Welcome back {$user?.username}
-</div>
-{#if osuMapsSearch}
-	<div class="grid xl:grid-cols-3 md:grid-cols-2 gap-2 grid-cols-1">
+{#if osuMapsSearch && !allMaps?.length}
+	<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
+		<span class="icon-[fa6-solid--music] size-10"></span>
+		<p class="text-xl">No beatmaps found{search ? ` for "${search}"` : ''}</p>
+		<p>Try a different search term</p>
+	</div>
+{:else if osuMapsSearch}
+	<div
+		class="grid xl:grid-cols-3 md:grid-cols-2 gap-2 grid-cols-1 transition-opacity {searching
+			? 'opacity-50'
+			: ''}"
+	>
 		{#key allMaps}
 			{#each allMaps as map}
 				<ContextMenu>
