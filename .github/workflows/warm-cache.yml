@@ -1,0 +1,41 @@
+name: Warm Rust cache
+# Builds the Rust side on main so release runs (triggered by tags) can reuse the
+# compiled dependencies. Caches from the default branch are visible to all tags.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src-tauri/**'
+      - 'package-lock.json'
+      - '.github/workflows/warm-cache.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+jobs:
+  warm-cache:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: tauri-release
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Same build command tauri-action runs, so the cached artifacts match; skips bundling and signing
+      - name: Build
+        run: npx tauri build --no-bundle
