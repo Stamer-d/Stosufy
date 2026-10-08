@@ -1,19 +1,19 @@
 <script>
-	import Button from '$lib/components/Button.svelte';
+	import Button from '#lib/components/Button.svelte';
 	import {
 		deleteSong,
 		getImageUrl,
 		isSongDownloaded,
 		downloadBeatmap,
 		handleImageError
-	} from '$lib/stores/data';
+	} from '#lib/stores/data.ts';
 	import {
 		getPlaylistSongs,
 		playlistLoadingStatus,
 		playlists,
 		playlistSongsCache,
 		removeSongFromPlaylist
-	} from '$lib/stores/playlist';
+	} from '#lib/stores/playlist.ts';
 	import {
 		currentSong,
 		setSongQueue,
@@ -21,15 +21,17 @@
 		stopPlayback,
 		togglePlayback,
 		updateSongQueue
-	} from '$lib/stores/audio';
-	import { downloads } from '$lib/stores/data';
-	import { page } from '$app/stores';
-	import { keyStore } from '$lib/stores/auth';
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
-	import SongToPlaylistModal from '$lib/components/SongToPlaylistModal.svelte';
-	import { userSettings } from '$lib/stores/user';
+	} from '#lib/stores/audio.ts';
+	import { downloads } from '#lib/stores/data.ts';
+	import { page } from '$app/state';
+	import { toStore } from 'svelte/store';
+	import { keyStore } from '#lib/stores/auth.ts';
+	import ContextMenu from '#lib/components/ContextMenu.svelte';
+	import SongToPlaylistModal from '#lib/components/SongToPlaylistModal.svelte';
+	import { userSettings } from '#lib/stores/user.ts';
 
-	$: playlistId = $page.params?.id;
+	const pagePlaylistId = toStore(() => page.params?.id);
+	$: playlistId = $pagePlaylistId;
 	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
 	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
 	$: songs = $playlistSongsCache[playlistId]?.songs || [];

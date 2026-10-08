@@ -1,20 +1,20 @@
 <script>
 	// @ts-nocheck
 
-	import { songQueue } from '$lib/stores/audio';
-	import { togglePlayback, currentSong, updateSongQueue } from '$lib/stores/audio';
+	import { songQueue } from '#lib/stores/audio.ts';
+	import { togglePlayback, currentSong, updateSongQueue } from '#lib/stores/audio.ts';
 	import {
 		downloadBeatmap,
 		deleteSong,
 		mapDataStore,
 		formatSongData,
 		handleImageError
-	} from '$lib/stores/data';
+	} from '#lib/stores/data.ts';
 	import { onMount } from 'svelte';
 	import Button from './Button.svelte';
-	import { keyStore } from '$lib/stores/auth';
-	import { playlists } from '$lib/stores/playlist';
-	import { downloads } from '$lib/stores/data';
+	import { keyStore } from '#lib/stores/auth.ts';
+	import { playlists } from '#lib/stores/playlist.ts';
+	import { downloads } from '#lib/stores/data.ts';
 
 	export let map;
 	export let isDownloaded = false;

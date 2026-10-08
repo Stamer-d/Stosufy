@@ -1,7 +1,7 @@
 <script>
 	import { onDestroy, onMount } from 'svelte';
-	import Button from '$lib/components/Button.svelte';
-	import { verifyAccessToken, exchangeCode, keyStore } from '$lib/stores/auth';
+	import Button from '#lib/components/Button.svelte';
+	import { verifyAccessToken, exchangeCode, keyStore } from '#lib/stores/auth.ts';
 	import { goto } from '$app/navigation';
 	let timer = null;
 	let count = 0;

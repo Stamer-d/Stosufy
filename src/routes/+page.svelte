@@ -1,6 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import { startDiscord } from '$lib/stores/discord';
+	import { startDiscord } from '#lib/stores/discord.ts';
 
 	onMount(async () => {
 		await startDiscord();

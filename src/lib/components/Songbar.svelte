@@ -15,8 +15,8 @@
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
-	import { handleImageError } from '$lib/stores/data';
-	import { updateUserSettings, userSettings, updateCurrentQueue } from '$lib/stores/user';
+	import { handleImageError } from '#lib/stores/data.ts';
+	import { updateUserSettings, userSettings, updateCurrentQueue } from '#lib/stores/user.ts';
 
 	let currentTime = 0;
 	let duration = 0;

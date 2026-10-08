@@ -1,12 +1,12 @@
 <script>
 	let { children } = $props();
 	import '../app.css';
-	import Songbar from '$lib/components/Songbar.svelte';
-	import Playlist from '$lib/components/Playlist.svelte';
+	import Songbar from '#lib/components/Songbar.svelte';
+	import Playlist from '#lib/components/Playlist.svelte';
 	import { onDestroy, onMount } from 'svelte';
-	import { page } from '$app/stores';
-	import { keyStore, startTokenRefresh } from '$lib/stores/auth';
-	import Titlebar from '$lib/components/Titlebar.svelte';
+	import { page } from '$app/state';
+	import { keyStore, startTokenRefresh } from '#lib/stores/auth.ts';
+	import Titlebar from '#lib/components/Titlebar.svelte';
 
 	let showUI = $state(false);
 
@@ -27,7 +27,7 @@
 
 	// Setup effect to update when the page changes
 	$effect(() => {
-		if ($page) {
+		if (page.url) {
 			updateShowUI();
 		}
 	});

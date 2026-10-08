@@ -1,12 +1,23 @@
+/// <reference types="node" />
 import { defineConfig } from 'vite';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+import adapter from '@sveltejs/adapter-static';
 import tailwindcss from '@tailwindcss/vite';
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
 export default defineConfig({
-	plugins: [sveltekit(), tailwindcss()],
+	plugins: [
+		sveltekit({
+			preprocess: vitePreprocess(),
+			adapter: adapter({
+				fallback: 'index.html'
+			})
+		}),
+		tailwindcss()
+	],
 	optimizeDeps: {
 		exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
 	},
@@ -16,18 +27,6 @@ export default defineConfig({
 		rollupOptions: {
 			output: {
 				format: 'es'
-			}
-		}
-	},
-	build: {
-		rollupOptions: {
-			output: {
-				// Ensure workers are properly emitted
-				manualChunks: (id) => {
-					if (id.includes('workers')) {
-						return 'workers';
-					}
-				}
 			}
 		}
 	},

@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 
-	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Modal from '$lib/components/Modal.svelte';
-	import { checkSessionKey, exchangeCode, keyStore } from '$lib/stores/auth';
+	import Button from '#lib/components/Button.svelte';
+	import Input from '#lib/components/Input.svelte';
+	import Modal from '#lib/components/Modal.svelte';
+	import { checkSessionKey, exchangeCode, keyStore } from '#lib/stores/auth.ts';
 	import { open } from '@tauri-apps/plugin-shell';
 	import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 	import { goto } from '$app/navigation';

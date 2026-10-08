@@ -434,7 +434,7 @@ async function convertToOpus(inputPath, targetPath) {
 		`${now}.opus`
 	]);
 	let data = await ffmpeg.readFile(`${now}.opus`);
-	await writeFile(targetPath, new Uint8Array(data), {
+	await writeFile(targetPath, new Uint8Array(data as Uint8Array), {
 		baseDir: BaseDirectory.Home
 	});
 	await ffmpeg.deleteFile(inputFileName);

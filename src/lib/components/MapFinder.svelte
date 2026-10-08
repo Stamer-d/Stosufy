@@ -12,9 +12,9 @@
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
 	import { keyStore } from '../stores/auth';
-	import { getPlaylistSongs, playlists, playlistSongsCache } from '$lib/stores/playlist';
-	import { getImageUrl } from '$lib/stores/data';
-	import { addSongToPlaylist } from '$lib/stores/playlist';
+	import { getPlaylistSongs, playlists, playlistSongsCache } from '#lib/stores/playlist.ts';
+	import { getImageUrl } from '#lib/stores/data.ts';
+	import { addSongToPlaylist } from '#lib/stores/playlist.ts';
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
 
 	let initialTokenLoad = $state(true);

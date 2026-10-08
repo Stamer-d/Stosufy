@@ -1,13 +1,13 @@
 <script>
-	import { songQueue, updateSongQueue } from '$lib/stores/audio';
-	import { getImageUrl } from '$lib/stores/data';
+	import { songQueue, updateSongQueue } from '#lib/stores/audio.ts';
+	import { getImageUrl } from '#lib/stores/data.ts';
 	import {
 		addSongToPlaylist,
 		getPlaylistSongs,
 		playlistSongsCache,
 		playlists
-	} from '$lib/stores/playlist';
-	import { userSettings } from '$lib/stores/user';
+	} from '#lib/stores/playlist.ts';
+	import { userSettings } from '#lib/stores/user.ts';
 	import Modal from './Modal.svelte';
 
 	export let map;

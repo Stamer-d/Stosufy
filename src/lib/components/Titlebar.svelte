@@ -3,9 +3,9 @@
 
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Button from './Button.svelte';
-	import { user } from '$lib/stores/user';
+	import { user } from '#lib/stores/user.ts';
 	import Dropdown from './Dropdown.svelte';
-	import { refreshToken, keyStore } from '$lib/stores/auth';
+	import { refreshToken, keyStore } from '#lib/stores/auth.ts';
 	import { goto } from '$app/navigation';
 	import Modal from './Modal.svelte';
 	import { check } from '@tauri-apps/plugin-updater';

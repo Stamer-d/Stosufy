@@ -1,21 +1,21 @@
 <script>
-	import { keyStore } from '$lib/stores/auth';
-	import { user } from '$lib/stores/user';
+	import { keyStore } from '#lib/stores/auth.ts';
+	import { user } from '#lib/stores/user.ts';
 	import Button from './Button.svelte';
-	import { getImageUrl, mapDataStore } from '$lib/stores/data';
+	import { getImageUrl, mapDataStore } from '#lib/stores/data.ts';
 	import {
 		playlists,
 		getPlaylists,
 		createPlaylist,
 		deletePlaylist,
 		loadAllPlaylistSongs
-	} from '$lib/stores/playlist';
+	} from '#lib/stores/playlist.ts';
 	import { goto } from '$app/navigation';
 	import ContextMenu from './ContextMenu.svelte';
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
 	import { writable } from 'svelte/store';
-	import { editPlaylist } from '$lib/stores/playlist';
+	import { editPlaylist } from '#lib/stores/playlist.ts';
 
 	let fileInput;
 	let uploadedImage = writable(null);
