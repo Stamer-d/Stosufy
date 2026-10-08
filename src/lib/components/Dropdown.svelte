@@ -2,7 +2,6 @@
 	import { onMount, createEventDispatcher } from 'svelte';
 
 	export let isOpen = false;
-	export let buttonClass = '';
 	export let menuClass = '';
 
 	let dropdownContainer;
@@ -31,7 +30,7 @@
 </script>
 
 <div class="relative inline-block" bind:this={dropdownContainer}>
-	<div on:click={toggleDropdown} class="cursor-pointer">
+	<div on:click={toggleDropdown} role="presentation" class="cursor-pointer">
 		<slot name="trigger" />
 	</div>
 

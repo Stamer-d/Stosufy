@@ -22,13 +22,13 @@ Create custom playlists, manage your music, and enjoy your collection from any d
 
 ## ✨ Features
 
-| Feature | Description |
-|--------|-------------|
-| 🎧 | **Play osu! songs** - Instantly stream tracks from osu! beatmaps |
-| 🕹️ | **Create playlists** - Organize your favorite tracks your way |
-| 🛠️ | **Actively developed** - Frequent updates, expect occasional bugs and new features |
-| 🔁 | **Built-in updater** - Keep Stosufy up-to-date from within the app |
-| 👀 | **[YouTube Channel](https://www.youtube.com/@Stosufy)** - Watch Stosufy videos (not my channel!) |
+| Feature | Description                                                                                      |
+| ------- | ------------------------------------------------------------------------------------------------ |
+| 🎧      | **Play osu! songs** - Instantly stream tracks from osu! beatmaps                                 |
+| 🕹️      | **Create playlists** - Organize your favorite tracks your way                                    |
+| 🛠️      | **Actively developed** - Frequent updates, expect occasional bugs and new features               |
+| 🔁      | **Built-in updater** - Keep Stosufy up-to-date from within the app                               |
+| 👀      | **[YouTube Channel](https://www.youtube.com/@Stosufy)** - Watch Stosufy videos (not my channel!) |
 
 ---
 

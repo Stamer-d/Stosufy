@@ -1,12 +1,13 @@
 <script>
-	let { children } = $props();
 	import '../app.css';
 	import Songbar from '#lib/components/Songbar.svelte';
 	import Playlist from '#lib/components/Playlist.svelte';
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { keyStore, startTokenRefresh } from '#lib/stores/auth.ts';
+	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
+
+	let { children } = $props();
 
 	let showUI = $state(false);
 
@@ -19,21 +20,16 @@
 		showUI = !url.includes('login') && !url.includes('callback') && path !== '/' && path !== '';
 	}
 
-	// Initial check when mounted
 	onMount(async () => {
 		await startTokenRefresh();
 		updateShowUI();
 	});
 
-	// Setup effect to update when the page changes
+	// Update when the page changes
 	$effect(() => {
 		if (page.url) {
 			updateShowUI();
 		}
-	});
-
-	onDestroy(async () => {
-		await startTokenRefresh();
 	});
 </script>
 

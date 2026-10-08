@@ -3,8 +3,10 @@
 	export let size: 'sm' | 'md' | 'lg' = 'md';
 	export let disabled = false;
 	export let icon: string | null = null;
-	export let iconLeft = icon;
+	export let iconLeft: string | null = null;
 	export let iconRight: string | null = null;
+
+	$: leftIcon = iconLeft ?? icon;
 
 	const typeClasses = {
 		normal: 'bg-secondary-300/40 text-white',
@@ -34,9 +36,9 @@
 </script>
 
 <button class={buttonClasses} on:click {disabled} on:mouseover on:focus on:blur>
-	{#if iconLeft?.includes('icon-')}
+	{#if leftIcon?.includes('icon-')}
 		<span class="flex-none inline-grid" aria-hidden="true">
-			<span class="place-self-center opacity-75 {iconLeft}" />
+			<span class="place-self-center opacity-75 {leftIcon}"></span>
 		</span>
 	{/if}
 	{#if $$slots.default}
@@ -44,7 +46,7 @@
 	{/if}
 	{#if iconRight?.includes('icon-')}
 		<span class="flex-none inline-grid" aria-hidden="true">
-			<span class="place-self-center opacity-75 {iconRight}" />
+			<span class="place-self-center opacity-75 {iconRight}"></span>
 		</span>
 	{/if}
 </button>

@@ -1,6 +1,4 @@
 <script>
-	// @ts-nocheck
-
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Button from './Button.svelte';
 	import { user } from '#lib/stores/user.ts';
@@ -72,7 +70,7 @@
 	<div data-tauri-drag-region></div>
 	<div class="flex items-center justify-end group" data-tauri-drag-region>
 		<Dropdown>
-			<svelte:fragment slot="trigger" class="group">
+			<svelte:fragment slot="trigger">
 				<button class="mr-4 cursor-pointer flex items-center hover:scale-[1.05] rounded-full">
 					<img src={$user?.avatar_url ?? '/logo.png'} class=" size-11 rounded-full" alt="" />
 				</button>

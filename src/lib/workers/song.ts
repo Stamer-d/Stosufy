@@ -1,14 +1,18 @@
-// This is a dedicated worker for processing beatmaps using ES modules
+// Dedicated module worker that extracts the audio of a downloaded beatmap set.
+// File system access and the opus conversion are delegated to the main thread.
 
 import JSZip from 'jszip';
 
 // Message counter to track request/response pairs
 let messageId = 0;
-const pendingRequests = new Map();
+const pendingRequests = new Map<
+	number,
+	{ resolve: (value: any) => void; reject: (error: Error) => void }
+>();
 
-// Helper function to send a request to the main thread and wait for response
-async function sendRequestToMain(type, data) {
-	return new Promise((resolve, reject) => {
+// Sends a request to the main thread and waits for its response
+function sendRequestToMain<T>(type: string, data: Record<string, unknown>): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
 		const id = messageId++;
 		pendingRequests.set(id, { resolve, reject });
 		self.postMessage({ type: 'fs_request', requestId: id, operation: type, data });
@@ -36,15 +40,16 @@ self.onmessage = async function (event) {
 	// Handle extraction request
 	if (type === 'extract') {
 		try {
-			// Extract the beatmap
 			const result = await extractAudioFromBeatmap(
 				data.buffer,
 				data.mapId,
 				data.setId,
-				data.mapsetData,
 				data.homeDir,
 				data.mapSetsDir
 			);
+			if (!result) {
+				throw new Error('No audio file found in beatmap set');
+			}
 
 			self.postMessage(
 				{
@@ -54,7 +59,7 @@ self.onmessage = async function (event) {
 					beatmapId: result.mapId,
 					setId: data.setId
 				},
-				[result.audioData.buffer]
+				{ transfer: [result.audioData.buffer] }
 			);
 		} catch (error) {
 			console.error('Worker error:', error);
@@ -67,33 +72,32 @@ self.onmessage = async function (event) {
 	}
 };
 
-// Mock file system APIs that communicate with main thread
+// File system APIs that are executed by the main thread
 const fs = {
-	mkdir: async (dir) => sendRequestToMain('mkdir', { dir }),
-	exists: async (path) => sendRequestToMain('exists', { path }),
-	writeFile: async (path, data) => sendRequestToMain('writeFile', { path, data }),
-	readFile: async (path) => sendRequestToMain('readFile', { path }),
-	readTextFile: async (path) => sendRequestToMain('readTextFile', { path }),
-	remove: async (path) => sendRequestToMain('remove', { path }),
+	mkdir: (dir: string) => sendRequestToMain<boolean>('mkdir', { dir }),
+	exists: (path: string) => sendRequestToMain<boolean>('exists', { path }),
+	writeFile: (path: string, data: ArrayBuffer | Uint8Array) =>
+		sendRequestToMain<boolean>('writeFile', { path, data }),
+	readFile: (path: string) => sendRequestToMain<Uint8Array<ArrayBuffer>>('readFile', { path }),
+	readTextFile: (path: string) => sendRequestToMain<string>('readTextFile', { path }),
+	remove: (path: string) => sendRequestToMain<boolean>('remove', { path }),
 	path: {
-		join: async (...paths) => sendRequestToMain('path_join', { paths })
+		join: (...paths: string[]) => sendRequestToMain<string>('path_join', { paths })
 	}
 };
 
 // FFmpeg wrapper that sends conversion requests to main thread
 const ffmpeg = {
-	convertToOpus: async (inputPath, targetPath) =>
-		sendRequestToMain('convertToOpus', { inputPath, targetPath })
+	convertToOpus: (inputPath: string, targetPath: string) =>
+		sendRequestToMain<boolean>('convertToOpus', { inputPath, targetPath })
 };
 
-// Now implement the full extraction logic
 async function extractAudioFromBeatmap(
-	mapsetBuffer,
-	mapId,
-	setId,
-	mapsetData,
-	homeDir,
-	mapSetsDir
+	mapsetBuffer: ArrayBuffer,
+	mapId: number | string,
+	setId: string,
+	homeDir: string,
+	mapSetsDir: string
 ) {
 	try {
 		// Report progress
@@ -118,13 +122,11 @@ async function extractAudioFromBeatmap(
 		self.postMessage({ type: 'progress', progress: 50, setId });
 
 		// Extract all files
-		const extractPromises = [];
-		const osuFiles = [];
-		const filenameMap = new Map();
+		const extractPromises: Promise<void>[] = [];
+		const osuFiles: string[] = [];
+		const filenameMap = new Map<string, string>();
 
-		// Sanitize function
-		const sanitizeFilename = (filename) => {
-			// Your sanitization logic from data.ts
+		const sanitizeFilename = (filename: string) => {
 			let sanitized = filename.replace(/[\\/:*?"<>|[\]]/g, '_');
 			sanitized = sanitized.replace(/[\u2013\u2014\u2015\u2017\u2020\u2021]/g, '-');
 			sanitized = sanitized.replace(/[^\x00-\x7F]/g, '_');
@@ -140,7 +142,6 @@ async function extractAudioFromBeatmap(
 			}
 
 			sanitized = sanitized.replace(/[_\-]{2,}/g, '_');
-			sanitized = sanitized.replace('', '');
 			return sanitized;
 		};
 
@@ -184,8 +185,8 @@ async function extractAudioFromBeatmap(
 		self.postMessage({ type: 'progress', progress: 60, setId });
 
 		// Process .osu files to find audio files
-		const audioFileMap = new Map();
-		let foundMapId = 0;
+		const audioFileMap = new Map<string, string>();
+		let foundMapId = '0';
 
 		for (const osuFile of osuFiles) {
 			const content = await fs.readTextFile(osuFile);
@@ -214,7 +215,7 @@ async function extractAudioFromBeatmap(
 		self.postMessage({ type: 'progress', progress: 70, setId });
 
 		// Convert audio files
-		const convertedAudioFiles = new Set();
+		const convertedAudioFiles = new Set<string>();
 		const uniqueAudioFiles = new Set(audioFileMap.values());
 
 		for (const audioFileName of uniqueAudioFiles) {
@@ -236,8 +237,8 @@ async function extractAudioFromBeatmap(
 			const audioData = await fs.readFile(firstAudioPath);
 			return {
 				audioData,
-				audioPath: firstAudioPath, // Add the path
-				mapId: foundMapId // Add the map ID that this audio belongs to
+				audioPath: firstAudioPath,
+				mapId: foundMapId
 			};
 		}
 
@@ -248,5 +249,4 @@ async function extractAudioFromBeatmap(
 	}
 }
 
-// Explicitly mark as module worker
 export {};

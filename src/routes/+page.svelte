@@ -13,6 +13,3 @@
 		<h1 class="text-4xl font-bold mt-4 text-white">Stosufy</h1>
 	</div>
 </main>
-
-<style>
-</style>

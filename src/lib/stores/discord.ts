@@ -1,6 +1,6 @@
-import { destroy, start } from 'tauri-plugin-drpc';
-import { setActivity } from 'tauri-plugin-drpc';
+import { setActivity, start } from 'tauri-plugin-drpc';
 import { Activity, ActivityType } from 'tauri-plugin-drpc/activity';
+import type { MapSet } from '../types';
 
 const defaultActivity = new Activity()
 	.setDetails('Idle')
@@ -13,9 +13,8 @@ export async function startDiscord() {
 	console.log('Discord RPC started');
 }
 
-export async function setRPCActivity(songData) {
+export async function setRPCActivity(songData: MapSet | null) {
 	if (!songData) {
-		console.log('No song data provided, clearing activity.');
 		await setActivity(defaultActivity);
 		return;
 	}
@@ -25,8 +24,4 @@ export async function setRPCActivity(songData) {
 		.setState(songData?.artist)
 		.setActivity(ActivityType.Listening);
 	await setActivity(activity);
-}
-
-export async function stopDiscord() {
-	await destroy();
 }

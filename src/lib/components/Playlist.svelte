@@ -8,17 +8,16 @@
 		getPlaylists,
 		createPlaylist,
 		deletePlaylist,
+		editPlaylist,
 		loadAllPlaylistSongs
 	} from '#lib/stores/playlist.ts';
 	import { goto } from '$app/navigation';
 	import ContextMenu from './ContextMenu.svelte';
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
-	import { writable } from 'svelte/store';
-	import { editPlaylist } from '#lib/stores/playlist.ts';
 
 	let fileInput;
-	let uploadedImage = writable(null);
+	let uploadedImage = $state(null);
 
 	let editPlaylistModal = $state({
 		open: false,
@@ -92,7 +91,7 @@
 			}
 			editPlaylistModal.selectedFile = file;
 			const imageUrl = URL.createObjectURL(file);
-			$uploadedImage = imageUrl;
+			uploadedImage = imageUrl;
 		}
 	}
 
@@ -114,15 +113,13 @@
 		editPlaylistModal.open = false;
 	}
 
-	let playlistsLoaded = false;
 	let lastUserId = null;
 
-	// Replace the effect with this improved version
-	$effect(async () => {
-		if ($user?.id && (!playlistsLoaded || lastUserId !== $user.id)) {
+	// Load the playlists once a user is logged in or the user changed
+	$effect(() => {
+		if ($user?.id && lastUserId !== $user.id) {
 			lastUserId = $user.id;
-			await getPlaylist();
-			playlistsLoaded = true;
+			getPlaylist();
 		}
 	});
 </script>
@@ -141,9 +138,9 @@
 	</div>
 	<ul class="overflow-y-auto flex flex-col gap-2 px-2">
 		{#each $playlists as playlist}
-			<ContextMenu disabled={playlist.id == -1 ? true : false}>
+			<ContextMenu disabled={playlist.id == -1}>
 				<button
-					on:click={() => {
+					onclick={() => {
 						goto(`/playlist/${playlist?.id}`);
 					}}
 					class="group flex items-center p-2 rounded-md hover:bg-secondary-300 w-full cursor-pointer transition duration-100"
@@ -192,7 +189,7 @@
 								editPlaylistModal.description = playlist.description || '';
 								editPlaylistModal.isPublic = playlist.public || false;
 								editPlaylistModal.selectedFile = null;
-								$uploadedImage = null;
+								uploadedImage = null;
 								editPlaylistModal.imageError = '';
 							}}
 						>
@@ -210,14 +207,14 @@
 		<div class="flex flex-col items-center">
 			<button
 				class="relative flex-shrink-0 w-[150px] h-[150px] flex items-center justify-center group cursor-pointer rounded-md overflow-hidden"
-				on:click={() => fileInput.click()}
+				onclick={() => fileInput.click()}
 			>
 				<input
 					type="file"
 					bind:this={fileInput}
 					accept="image/*"
 					class="hidden"
-					on:change={handleImageSelect}
+					onchange={handleImageSelect}
 				/>
 
 				<div
@@ -231,7 +228,7 @@
 				<div class="w-[150px] h-[150px] bg-secondary-300">
 					<img
 						class="w-full h-full object-cover"
-						src={$uploadedImage || getImageUrl(editPlaylistModal.playlist?.image_path)}
+						src={uploadedImage || getImageUrl(editPlaylistModal.playlist?.image_path)}
 						alt="Playlist cover"
 					/>
 				</div>

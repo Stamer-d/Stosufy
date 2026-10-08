@@ -1,39 +1,36 @@
-// @ts-nocheck
 import { get, writable } from 'svelte/store';
 import { downloadBeatmap } from './data';
 import { updateCurrentQueue, userSettings } from './user';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
-export let songQueue = writable([]);
-export let currentSong = writable({ song: null, isPlaying: false });
+import type { CurrentSong, MapSet, PlaylistId, QueueType, SongQueue } from '../types';
 
-export function getAudioBlob64(base64Data) {
+export const songQueue = writable<SongQueue>({});
+export const currentSong = writable<CurrentSong>({ song: null, isPlaying: false });
+
+function getAudioFromBase64(base64Data: string) {
 	const byteCharacters = atob(base64Data);
 	const byteNumbers = new Array(byteCharacters.length);
 	for (let i = 0; i < byteCharacters.length; i++) {
 		byteNumbers[i] = byteCharacters.charCodeAt(i);
 	}
-	const byteArray = new Uint8Array(byteNumbers);
-	const blob = new Blob([byteArray]);
-	const audioUrl = URL.createObjectURL(blob);
-	const audio = new Audio(audioUrl);
-	let appSettings = get(userSettings).settings;
-	audio.volume = appSettings.volume || 0.05;
+	const blob = new Blob([new Uint8Array(byteNumbers)]);
+	const audio = new Audio(URL.createObjectURL(blob));
+	audio.volume = get(userSettings).settings.volume || 0.05;
 	return audio;
 }
 
-async function getAudioBlob(index, queue, type, currentSeconds = 0) {
-	let blob;
-	let audio = null;
+async function getAudio(index: number, queue: MapSet[], type: QueueType, currentSeconds = 0) {
+	let audio: HTMLAudioElement = null;
 	if (type == 'preview') {
 		const previewUrl = `${queue[index].preview_url}`;
 		audio = new Audio(previewUrl);
 		audio.volume = get(userSettings).settings.volume || 0.05;
 	} else if (type == 'playlist') {
 		const base64Data = await downloadBeatmap(queue[index], queue[index].beatmaps[0].id);
-		audio = getAudioBlob64(base64Data);
+		audio = getAudioFromBase64(base64Data);
 	}
-	await new Promise((resolve) => {
+	await new Promise<void>((resolve) => {
 		audio.addEventListener('loadedmetadata', () => {
 			if (audio.duration > currentSeconds) {
 				audio.currentTime = currentSeconds;
@@ -45,16 +42,16 @@ async function getAudioBlob(index, queue, type, currentSeconds = 0) {
 }
 
 export async function setSongQueue(
-	index,
-	queue,
-	type,
-	playlistId = null,
+	index: number,
+	queue: MapSet[],
+	type: QueueType,
+	playlistId: PlaylistId | null = null,
 	playSong = true,
 	currentSeconds = 0
 ) {
 	stopPlayback();
-	let audio;
-	if (index !== null) audio = await getAudioBlob(index, queue, type, currentSeconds);
+	let audio: HTMLAudioElement;
+	if (index !== null) audio = await getAudio(index, queue, type, currentSeconds);
 	songQueue.set({
 		currentIndex: index,
 		audio: audio,
@@ -69,13 +66,18 @@ export async function setSongQueue(
 	if (shuffle && currentSeconds == 0) await shuffleQueue();
 }
 
-export async function updateSongQueue(index, queue, type, playlistId = null) {
+export async function updateSongQueue(
+	index: number | null,
+	queue?: MapSet[] | null,
+	type?: QueueType | null,
+	playlistId: PlaylistId | null = null
+) {
 	if (!get(songQueue).queue || !get(currentSong).song) return;
 	const current = get(songQueue);
-	let audio;
+	let audio: HTMLAudioElement;
 
-	let targetQueue = queue || current.queue;
-	let targetIndex = index;
+	const targetQueue = queue || current.queue;
+	const targetIndex = index;
 
 	if (
 		index != undefined &&
@@ -86,8 +88,8 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 		console.log('Updating song queue');
 	} else if (index !== null && targetIndex < targetQueue.length) {
 		try {
-			audio = await getAudioBlob(targetIndex, targetQueue, type || current.type);
-		} catch (e) {
+			audio = await getAudio(targetIndex, targetQueue, type || current.type);
+		} catch {
 			let newIndex;
 			if (get(songQueue).currentIndex < index) {
 				if (index < targetQueue.length - 1) {
@@ -104,7 +106,7 @@ export async function updateSongQueue(index, queue, type, playlistId = null) {
 
 		currentSong.set({
 			song: targetQueue[targetIndex],
-			isPlaying: current.isPlaying
+			isPlaying: false
 		});
 	}
 
@@ -154,8 +156,6 @@ export function togglePlayback() {
 	});
 }
 let isSkipping = false;
-
-// ...existing code...
 
 export async function skipForward() {
 	if (isSkipping) return; // Prevent concurrent skips
@@ -211,7 +211,7 @@ export async function shuffleQueue() {
 
 		await updateSongQueue(0, shuffledQueue, current.type, current.playlistId);
 	} else {
-		const songs = get(playlistSongsCache)?.[current.playlistId].songs || [];
+		const songs = get(playlistSongsCache)[current.playlistId]?.songs || [];
 		const currentSongData = current.queue[current.currentIndex];
 		const currentIndex = songs.findIndex((song) => song.id === currentSongData.id);
 		await updateSongQueue(currentIndex || 0, songs, 'playlist', current.playlistId);

@@ -1,10 +1,15 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 
 	import Button from '#lib/components/Button.svelte';
 	import Input from '#lib/components/Input.svelte';
 	import Modal from '#lib/components/Modal.svelte';
-	import { checkSessionKey, exchangeCode, keyStore } from '#lib/stores/auth.ts';
+	import {
+		checkSessionKey,
+		exchangeCode,
+		keyStore,
+		type SessionKeyCheck
+	} from '#lib/stores/auth.ts';
 	import { open } from '@tauri-apps/plugin-shell';
 	import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 	import { goto } from '$app/navigation';
@@ -14,7 +19,7 @@
 	const scope = 'public';
 	const authUrl = `https://osu.ppy.sh/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=code&scope=${scope}`;
 
-	let sessionKeyValid = {
+	let sessionKeyValid: Pick<SessionKeyCheck, 'status' | 'status_code'> = {
 		status: false
 	};
 	let showInfo = false;
@@ -67,8 +72,6 @@
 			on:blur={async () => {
 				if ($keyStore?.sessionKey?.startsWith('ey')) {
 					sessionKeyValid = await checkSessionKey($keyStore?.sessionKey);
-					if (sessionKeyValid.status) {
-					}
 				} else {
 					sessionKeyValid.status = false;
 				}
@@ -91,10 +94,10 @@
 		<div>
 			<h1 class="text-lg font-bold">🟣 What is a Session Key?</h1>
 			<p class="text-sm leading-relaxed">
-				A <strong>Session Key</strong> is a small piece of data that osu! uses to keep you logged in
-				while browsing their website. It’s stored in your browser as a cookie and identifies your account
-				during your session. Think of it as a temporary pass that tells the osu! website, “Hey, this
-				user is already logged in.”
+				A <strong>Session Key</strong> is a small piece of data that osu! uses to keep you logged in while
+				browsing their website. It’s stored in your browser as a cookie and identifies your account during
+				your session. Think of it as a temporary pass that tells the osu! website, “Hey, this user is
+				already logged in.”
 			</p>
 			<p class="text-sm leading-relaxed mt-2">
 				It usually looks like a random string of letters and numbers and is stored under a cookie

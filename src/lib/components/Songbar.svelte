@@ -1,6 +1,4 @@
 <script>
-	// @ts-nocheck
-
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		togglePlayback,
@@ -9,9 +7,8 @@
 		currentSong,
 		skipBackward,
 		stopPlayback,
-		updateSongQueue,
 		shuffleQueue
-	} from '../stores/audio';
+	} from '#lib/stores/audio.ts';
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
@@ -196,7 +193,7 @@
 							await shuffleQueue();
 						}}
 					>
-						<span class="icon-[mingcute--shuffle-line] size-5" />
+						<span class="icon-[mingcute--shuffle-line] size-5"></span>
 					</Button>
 				{/key}
 				<Button
@@ -204,7 +201,7 @@
 					disabled={$songQueue.currentIndex == 0}
 					on:click={async () => await skipBackward()}
 				>
-					<span class="icon-[fa6-solid--backward-step] size-5" />
+					<span class="icon-[fa6-solid--backward-step] size-5"></span>
 				</Button>
 				<Button type="ghost" on:click={() => togglePlayback()}>
 					{#key $currentSong}
@@ -218,10 +215,10 @@
 					{/key}
 				</Button>
 				<Button type="ghost" on:click={async () => await skipForward()}>
-					<span class="icon-[fa6-solid--forward-step] size-5" />
+					<span class="icon-[fa6-solid--forward-step] size-5"></span>
 				</Button>
 				<Button type="ghost" disabled>
-					<span class="icon-[fa6-solid--repeat] size-4" />
+					<span class="icon-[fa6-solid--repeat] size-4"></span>
 				</Button>
 			</div>
 			<div class="flex items-center gap-2 mt-3">
@@ -241,7 +238,7 @@
 			<!-- Volume control -->
 			<div class="flex items-center justify-start gap-2 relative">
 				<Button type="ghost" on:click={toggleMute}>
-					<span class="{getVolumeIcon()} size-4" />
+					<span class="{getVolumeIcon()} size-4"></span>
 				</Button>
 
 				<div class="w-24">

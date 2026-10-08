@@ -1,36 +1,24 @@
 <script>
-	// @ts-nocheck
-
-	import { songQueue } from '#lib/stores/audio.ts';
-	import { togglePlayback, currentSong, updateSongQueue } from '#lib/stores/audio.ts';
+	import { songQueue, togglePlayback, currentSong, updateSongQueue } from '#lib/stores/audio.ts';
 	import {
 		downloadBeatmap,
 		deleteSong,
+		downloads,
 		mapDataStore,
 		formatSongData,
 		handleImageError
 	} from '#lib/stores/data.ts';
-	import { onMount } from 'svelte';
 	import Button from './Button.svelte';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import { playlists } from '#lib/stores/playlist.ts';
-	import { downloads } from '#lib/stores/data.ts';
 
+	/** @type {import('#lib/types.ts').MapSet} */
 	export let map;
 	export let isDownloaded = false;
-
-	let isDownloading = false;
-
-	let sortedBeatmaps = [];
-
-	$: {
-		if ($downloads[map.beatmaps[0]?.id]) {
-			isDownloading = $downloads[map.beatmaps[0].id].isDownloading;
-			downloadProgress = $downloads[map.beatmaps[0].id].progress;
-		}
-	}
-
+	/** @type {import('#lib/types.ts').MapSet | null} */
 	export let playMap = null;
+
+	$: sortedBeatmaps = sortAndColorDifficulties(map.beatmaps);
 
 	function startDownload(mapData, mapId) {
 		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
@@ -80,7 +68,7 @@
 	function sortAndColorDifficulties(beatmaps) {
 		if (!beatmaps) return [];
 
-		let beatmapsArray = Array.isArray(beatmaps) ? beatmaps : Object.values(beatmaps);
+		const beatmapsArray = Array.isArray(beatmaps) ? [...beatmaps] : Object.values(beatmaps);
 
 		if (!beatmapsArray.length) return [];
 
@@ -88,7 +76,7 @@
 			.sort((a, b) => a.difficulty_rating - b.difficulty_rating)
 			.map((beatmap) => {
 				const rating = beatmap.difficulty_rating;
-				let color, name;
+				let color;
 				if (rating < 2.0) {
 					color = 'bg-blue-500';
 				} else if (rating < 2.7) {
@@ -110,14 +98,10 @@
 				}
 				return {
 					...beatmap,
-					difficultyColor: color,
-					difficultyName: name
+					difficultyColor: color
 				};
 			});
 	}
-	onMount(() => {
-		sortedBeatmaps = sortAndColorDifficulties(map.beatmaps);
-	});
 </script>
 
 <div class="rounded group hover:ring-2 ring-primary-300 transition duration-100 relative">
@@ -128,9 +112,8 @@
 			alt=""
 			class="h-full w-[100px] rounded-s object-cover"
 		/>
-		<!-- svelte-ignore a11y_consider_explicit_label -->
-		<!-- svelte-ignore element_invalid_self_closing_tag -->
 		<button
+			aria-label="Play preview"
 			on:click={() => {
 				if ($currentSong.song?.id == map.id && $songQueue.type != 'playlist') {
 					togglePlayback();
@@ -139,7 +122,7 @@
 				}
 			}}
 			class="{getIcon()} cursor-pointer absolute size-12 text-primary-200/100 left-6.5 top-6.5 opacity-0 transition duration-75 group-hover:opacity-100"
-		/>
+		></button>
 		{#if $currentSong.song?.id === map.id && $currentSong.isPlaying}
 			<span
 				class="icon-[svg-spinners--bars-scale-middle] cursor-pointer absolute size-12 text-primary-200/100 left-6.5 top-6.5 group-hover:hidden"

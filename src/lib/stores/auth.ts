@@ -3,8 +3,9 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { load } from '@tauri-apps/plugin-store';
 import { goto } from '$app/navigation';
 import { user } from './user';
+import type { Keys, User } from '../types';
 
-export const keyStore = writable({
+export const keyStore = writable<Keys>({
 	access_token: '',
 	refresh_token: '',
 	expiry_time: 0,
@@ -18,7 +19,7 @@ const redirectUrl = 'stosufynew://callback';
 async function initializeStores() {
 	await load('keyStore.json')
 		.then((keyData) => {
-			return keyData.get('store');
+			return keyData.get<Keys>('store');
 		})
 		.then((storedData) => {
 			if (storedData) {
@@ -35,7 +36,13 @@ async function initializeStores() {
 		});
 }
 
-export async function checkSessionKey(sessionKey: string) {
+export interface SessionKeyCheck {
+	status: boolean;
+	status_code?: number;
+	session_key: string | null;
+}
+
+export async function checkSessionKey(sessionKey: string): Promise<SessionKeyCheck> {
 	if (!sessionKey)
 		return {
 			status: false,
@@ -50,7 +57,6 @@ export async function checkSessionKey(sessionKey: string) {
 		},
 		credentials: 'include'
 	});
-	let newToken = response.headers.get('set-cookie');
 	if (!response.ok) {
 		return {
 			status_code: response.status,
@@ -59,13 +65,14 @@ export async function checkSessionKey(sessionKey: string) {
 		};
 	}
 
+	const newToken = response.headers.get('set-cookie')?.match(/osu_session=([^;]+)/)?.[1];
 	return {
 		status: true,
-		session_key: newToken.match(/osu_session=([^;]+)/)[1]
+		session_key: newToken ?? sessionKey
 	};
 }
 
-export async function refreshToken(refreshToken) {
+export async function refreshToken(refreshToken: string) {
 	try {
 		const response = await fetch('https://osu.ppy.sh/oauth/token', {
 			method: 'POST',
@@ -97,7 +104,9 @@ export async function refreshToken(refreshToken) {
 	}
 }
 
-export async function verifyAccessToken(token) {
+export async function verifyAccessToken(
+	token: string
+): Promise<{ status: boolean; userData: User | null }> {
 	const response = await fetch('https://api.stamer-d.de/v1/stosufy/login', {
 		method: 'GET',
 		headers: {
@@ -121,7 +130,7 @@ export async function verifyAccessToken(token) {
 	};
 }
 
-export async function exchangeCode(code) {
+export async function exchangeCode(code: string) {
 	try {
 		const response = await fetch('https://osu.ppy.sh/oauth/token', {
 			method: 'POST',
@@ -149,7 +158,7 @@ export async function exchangeCode(code) {
 	}
 }
 
-export async function checkAccessToken(shouldPush = true, round = 0) {
+export async function checkAccessToken(shouldPush = true, round = 0): Promise<boolean> {
 	if (round > 1) {
 		console.log('Token refresh failed');
 		if (shouldPush) {
@@ -166,51 +175,52 @@ export async function checkAccessToken(shouldPush = true, round = 0) {
 		return false;
 	}
 
-	//Check if token is valid
-	let isValid = await verifyAccessToken(tokens.access_token);
+	const isValid = await verifyAccessToken(tokens.access_token);
 	if (isValid.status) {
 		return true;
 	}
 
-	//Token is invalid - try to refresh
-	let isRefreshed;
-	isRefreshed = await refreshToken(tokens.refresh_token);
+	// Token is invalid - try to refresh it and check again
+	const isRefreshed = await refreshToken(tokens.refresh_token);
 	if (!isRefreshed) {
 		if (shouldPush) {
 			goto('/login');
 		}
 		return false;
-	} else {
-		checkAccessToken(shouldPush, round + 1);
 	}
+	return checkAccessToken(shouldPush, round + 1);
 }
 
-let refreshInterval;
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Refreshes the access token one minute before it expires, retrying every minute on failure
+function scheduleTokenRefresh() {
+	clearTimeout(refreshTimer);
+	const refreshIn = Math.max(get(keyStore).expiry_time - Date.now() - 60 * 1000, 0);
+	refreshTimer = setTimeout(async () => {
+		try {
+			if (await refreshToken(get(keyStore).refresh_token)) {
+				scheduleTokenRefresh();
+				return;
+			}
+		} catch {
+			// refreshToken already logs the error
+		}
+		refreshTimer = setTimeout(scheduleTokenRefresh, 60 * 1000);
+	}, refreshIn);
+}
 
 export async function startTokenRefresh() {
 	await initializeStores();
-	let diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
-	if (refreshInterval) clearInterval(refreshInterval);
 	if (get(keyStore).expiry_time < Date.now()) {
 		const refreshed = await refreshToken(get(keyStore).refresh_token);
 		if (refreshed == null) {
 			goto('/login');
-		} else {
-			goto('/home');
+			return;
 		}
-	} else {
-		const valid = await checkAccessToken();
-		if (valid) goto('/home');
-		refreshInterval = setInterval(
-			async () => {
-				await refreshToken(get(keyStore).refresh_token);
-				diffInSeconds = Math.floor((get(keyStore).expiry_time - Date.now()) / 1000);
-			},
-			(diffInSeconds - 60) * 1000
-		);
+	} else if (!(await checkAccessToken())) {
+		return;
 	}
-
-	return () => {
-		if (refreshInterval) clearInterval(refreshInterval);
-	};
+	goto('/home');
+	scheduleTokenRefresh();
 }

@@ -16,12 +16,16 @@ import * as path from '@tauri-apps/api/path';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { getPlaylistSongs, playlists } from './playlist';
 import { songQueue, updateSongQueue } from './audio';
+import type { Beatmap, DownloadState, MapSet, StoredMapSet } from '../types';
+
+const BROWSER_USER_AGENT =
+	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 let homeDir = '';
 let mapSetsDir = '';
 let mapDataFile = '';
-export let mapDataStore = writable({});
-export const downloads = writable({});
+export const mapDataStore = writable<Record<string, StoredMapSet>>({});
+export const downloads = writable<Record<string, DownloadState>>({});
 
 (async function initialize() {
 	try {
@@ -53,10 +57,11 @@ export const downloads = writable({});
 	}
 })();
 
-export function handleImageError(event) {
-	event.target.src = '/logo.png';
-	event.target.style.filter = 'grayscale(100%)';
-	event.target.style.opacity = '0.7';
+export function handleImageError(event: Event) {
+	const image = event.target as HTMLImageElement;
+	image.src = '/logo.png';
+	image.style.filter = 'grayscale(100%)';
+	image.style.opacity = '0.7';
 }
 
 async function saveMapData() {
@@ -65,29 +70,16 @@ async function saveMapData() {
 	});
 }
 
-async function getCachedAudio(setId, mapId) {
-	const mapData = get(mapDataStore);
-	if (!mapData[setId]) return null;
-
-	if (
-		mapData[setId].beatmaps[mapId]?.audioFile &&
-		(await exists(mapData[setId].beatmaps[mapId]?.audioFile, {
-			baseDir: BaseDirectory.Home
-		}))
-	) {
-		return readFile(mapData[setId].beatmaps[mapId]?.audioFile, {
-			baseDir: BaseDirectory.Home
-		});
+async function getCachedAudio(setId: string, mapId: number | string) {
+	const audioFile = get(mapDataStore)[setId]?.beatmaps[mapId]?.audioFile;
+	if (audioFile && (await exists(audioFile, { baseDir: BaseDirectory.Home }))) {
+		return readFile(audioFile, { baseDir: BaseDirectory.Home });
 	}
 	return null;
 }
 
-export function isSongDownloaded(songId) {
-	// Check if the song exists in mapDataStore
-	const mapData = get(mapDataStore);
-	// Convert songId to string for consistent comparison
-	const songIdStr = songId.toString();
-	return Object.prototype.hasOwnProperty.call(mapData, songIdStr);
+export function isSongDownloaded(songId: number | string) {
+	return Object.prototype.hasOwnProperty.call(get(mapDataStore), songId.toString());
 }
 
 export async function fetchMaps(search = '', cursorString = '') {
@@ -98,8 +90,7 @@ export async function fetchMaps(search = '', cursorString = '') {
 				headers: {
 					Authorization: `Bearer ${get(keyStore).access_token}`,
 					Referer: 'https://osu.ppy.sh/beatmapsets',
-					'User-Agent':
-						'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+					'User-Agent': BROWSER_USER_AGENT
 				}
 			}
 		);
@@ -111,7 +102,7 @@ export async function fetchMaps(search = '', cursorString = '') {
 }
 
 // TODO - Adjust to remove specific beatmap songs
-export async function deleteSong(setId) {
+export async function deleteSong(setId: number | string) {
 	const mapData = get(mapDataStore);
 
 	if (!mapData[setId]?.beatmaps) return null;
@@ -171,9 +162,14 @@ export async function deleteSong(setId) {
 	await getPlaylistSongs(-1, true);
 }
 
-const downloadWorkers = {};
+const downloadWorkers: Record<string, Worker> = {};
 
-export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken) {
+export async function downloadBeatmap(
+	mapSetData: MapSet,
+	mapId: number | string,
+	sessionKey?: string,
+	accessToken?: string
+): Promise<string> {
 	const setId = mapSetData.id.toString();
 	if (downloadWorkers[setId]) return;
 	try {
@@ -187,8 +183,7 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 			headers: {
 				Cookie: `osu_session=${sessionKey}`,
 				Referer: `https://osu.ppy.sh/beatmapsets/${setId}`,
-				'User-Agent':
-					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+				'User-Agent': BROWSER_USER_AGENT
 			},
 			redirect: 'follow'
 		});
@@ -206,7 +201,7 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 			},
 			body: JSON.stringify({
 				setId: parseInt(setId),
-				mapId: parseInt(mapId)
+				mapId: parseInt(mapId.toString())
 			})
 		});
 		const buffer = await response.arrayBuffer();
@@ -225,7 +220,12 @@ export async function downloadBeatmap(mapSetData, mapId, sessionKey, accessToken
 	}
 }
 
-async function processWithWorker(buffer, mapSetData, mapId, setId) {
+async function processWithWorker(
+	buffer: ArrayBuffer,
+	mapSetData: MapSet,
+	mapId: number | string,
+	setId: string
+): Promise<string> {
 	return new Promise((resolve, reject) => {
 		try {
 			let worker = new Worker(new URL('../workers/song.ts', import.meta.url), { type: 'module' });
@@ -291,7 +291,7 @@ async function processWithWorker(buffer, mapSetData, mapId, setId) {
 						worker.postMessage({
 							type: 'fs_response',
 							requestId,
-							error: err.message
+							error: err instanceof Error ? err.message : String(err)
 						});
 					}
 					return;
@@ -399,17 +399,16 @@ async function processWithWorker(buffer, mapSetData, mapId, setId) {
 	});
 }
 
-async function bufferToBase64(buffer) {
-	const base64url = await new Promise((r) => {
+async function bufferToBase64(buffer: Uint8Array<ArrayBuffer>) {
+	const base64url = await new Promise<string>((r) => {
 		const reader = new FileReader();
-		reader.onload = () => r(reader.result);
+		reader.onload = () => r(reader.result as string);
 		reader.readAsDataURL(new Blob([buffer]));
 	});
 	return base64url.slice(base64url.indexOf(',') + 1);
 }
 
-// TODO - ADD FILE NAMES
-async function convertToOpus(inputPath, targetPath) {
+async function convertToOpus(inputPath: string, targetPath: string) {
 	const ffmpeg = new FFmpeg();
 	await ffmpeg.load();
 	const ext = inputPath.split('.').pop().toLowerCase();
@@ -433,8 +432,8 @@ async function convertToOpus(inputPath, targetPath) {
 		'-vn',
 		`${now}.opus`
 	]);
-	let data = await ffmpeg.readFile(`${now}.opus`);
-	await writeFile(targetPath, new Uint8Array(data as Uint8Array), {
+	const data = (await ffmpeg.readFile(`${now}.opus`)) as Uint8Array;
+	await writeFile(targetPath, data, {
 		baseDir: BaseDirectory.Home
 	});
 	await ffmpeg.deleteFile(inputFileName);
@@ -443,10 +442,9 @@ async function convertToOpus(inputPath, targetPath) {
 	return true;
 }
 
-async function updateMapsetData(mapsetData) {
+async function updateMapsetData(mapsetData: MapSet) {
 	const setId = mapsetData.id.toString();
-	const currentMapData = get(mapDataStore);
-	const updatedMapData = { ...currentMapData };
+	const updatedMapData = { ...get(mapDataStore) };
 
 	if (!updatedMapData[setId]) {
 		updatedMapData[setId] = {
@@ -480,23 +478,17 @@ async function updateMapsetData(mapsetData) {
 	if (mapsetData.beatmaps && Array.isArray(mapsetData.beatmaps)) {
 		mapsetData.beatmaps.forEach((beatmap) => {
 			const currentMapId = beatmap.id.toString();
-			if (!updatedMapData[setId].beatmaps[currentMapId]) {
-				updatedMapData[setId].beatmaps[currentMapId] = {};
-			}
-			const isDownloaded = updatedMapData[setId].beatmaps[currentMapId]?.downloaded || false;
-
-			const audioFile =
-				beatmap.audioFile || updatedMapData[setId].beatmaps[currentMapId]?.audioFile || null;
+			const existing = updatedMapData[setId].beatmaps[currentMapId];
 
 			updatedMapData[setId].beatmaps[currentMapId] = {
-				...updatedMapData[setId].beatmaps[currentMapId],
+				...existing,
 				id: currentMapId,
 				version: beatmap.version || '',
 				difficulty_rating: beatmap.difficulty_rating || 0,
 				mode: beatmap.mode || '',
 				total_length: beatmap.total_length || 0,
-				downloaded: isDownloaded,
-				audioFile: audioFile
+				downloaded: existing?.downloaded || false,
+				audioFile: beatmap.audioFile || existing?.audioFile || null
 			};
 		});
 	}
@@ -505,29 +497,17 @@ async function updateMapsetData(mapsetData) {
 	await saveMapData();
 }
 
-export function getImageUrl(imagePath) {
+export function getImageUrl(imagePath: string | null | undefined) {
 	if (!imagePath) return '/logo.png';
 	return `https://api.stamer-d.de/v1/${imagePath}`;
 }
 
-export function formatSongData(songData) {
-	let songs = Object.entries(songData).map(([id, song]) => {
-		const songCopy = { ...song };
-
-		if (
-			songCopy.beatmaps &&
-			typeof songCopy.beatmaps === 'object' &&
-			!Array.isArray(songCopy.beatmaps)
-		) {
-			songCopy.beatmaps = Object.values(songCopy.beatmaps);
-		} else if (!songCopy.beatmaps) {
-			songCopy.beatmaps = [];
-		}
-
-		return songCopy;
-	});
-	songs.sort((a, b) => {
-		return (a.created_at || 0) - (b.created_at || 0);
-	});
+/** Converts the stored map data into a list of map sets, sorted by download date */
+export function formatSongData(songData: Record<string, StoredMapSet>): MapSet[] {
+	const songs = Object.values(songData).map((song) => ({
+		...song,
+		beatmaps: song.beatmaps ? Object.values<Beatmap>(song.beatmaps) : []
+	}));
+	songs.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
 	return songs;
 }

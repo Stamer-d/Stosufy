@@ -5,6 +5,7 @@
 		getImageUrl,
 		isSongDownloaded,
 		downloadBeatmap,
+		downloads,
 		handleImageError
 	} from '#lib/stores/data.ts';
 	import {
@@ -22,7 +23,6 @@
 		togglePlayback,
 		updateSongQueue
 	} from '#lib/stores/audio.ts';
-	import { downloads } from '#lib/stores/data.ts';
 	import { page } from '$app/state';
 	import { toStore } from 'svelte/store';
 	import { keyStore } from '#lib/stores/auth.ts';
@@ -32,6 +32,8 @@
 
 	const pagePlaylistId = toStore(() => page.params?.id);
 	$: playlistId = $pagePlaylistId;
+	// The "Downloaded Songs" playlist has the id -1
+	$: isDownloadedPlaylist = playlistId === '-1';
 	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
 	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
 	$: songs = $playlistSongsCache[playlistId]?.songs || [];
@@ -82,8 +84,7 @@
 		const date =
 			timestamp.toString().length > 10 ? new Date(timestamp) : new Date(timestamp * 1000);
 
-		const now = new Date();
-		const diffMs = now - date;
+		const diffMs = Date.now() - date.getTime();
 
 		const plural = (value, unit) => `${value} ${unit}${value !== 1 ? 's' : ''} ago`;
 
@@ -201,11 +202,11 @@
 		<div class="flex items-center gap-4 mb-2">
 			<div class="relative shrink-0">
 				<img
-					src={playlistId != -1 ? getImageUrl(playlistData.image_path) : '/NoLetterLogo.png'}
+					src={isDownloadedPlaylist ? '/NoLetterLogo.png' : getImageUrl(playlistData.image_path)}
 					alt=""
 					class="xl:size-50 size-40 bg-secondary-200 rounded-md object-cover"
 				/>
-				{#if playlistId == -1}
+				{#if isDownloadedPlaylist}
 					<span
 						class="icon-[fa6-solid--circle-arrow-down] text-white xl:size-25 size-18 absolute xl:top-15 xl:left-12.5 top-13 left-11"
 					></span>
@@ -244,7 +245,7 @@
 				/>
 			{/key}
 			{#key getNotDownloadedSongs().length}
-				{#if playlistId != -1}
+				{#if !isDownloadedPlaylist}
 					{#if downloadingAll.downloading}
 						<div class="relative w-12 h-12">
 							<!-- Gray background circle -->
@@ -272,6 +273,7 @@
 								/>
 							</svg>
 							<button
+								aria-label="Stop downloading"
 								on:click={() => {
 									downloadingAll.abort = true;
 									downloadingAll.downloading = false;
@@ -339,13 +341,13 @@
 									<Button
 										class="group-hover:opacity-100 opacity-0 duration-0"
 										type="ghost"
-										disabled={playlistId != -1 && !song?.songInfo?.id}
-										icon={playlistId == -1
+										disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
+										icon={isDownloadedPlaylist
 											? 'icon-[fa6-solid--trash-can]'
 											: 'icon-[fa6-solid--xmark]'}
 										on:click={async (e) => {
-											event.stopPropagation();
-											if (playlistId == -1) {
+											e.stopPropagation();
+											if (isDownloadedPlaylist) {
 												await deleteSong(song.id);
 											} else {
 												removeSong(song.songInfo.id);
@@ -363,7 +365,7 @@
 								{/if}
 							</button>
 						{:else}
-							<ContextMenu disabled={playlistId != -1 ? true : false}>
+							<ContextMenu disabled={!isDownloadedPlaylist}>
 								<button
 									class="cursor-pointer w-full group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-300 rounded p-2"
 									on:click={async () => {
@@ -440,13 +442,13 @@
 										<Button
 											class="group-hover:opacity-100 opacity-0 duration-0"
 											type="ghost"
-											disabled={playlistId != -1 && !song?.songInfo?.id}
-											icon={playlistId == -1
+											disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
+											icon={isDownloadedPlaylist
 												? 'icon-[fa6-solid--trash-can]'
 												: 'icon-[fa6-solid--xmark]'}
 											on:click={async (e) => {
-												event.stopPropagation();
-												if (playlistId == -1) {
+												e.stopPropagation();
+												if (isDownloadedPlaylist) {
 													await deleteSong(song.id);
 													songs = songs.filter((s) => s.id != song.id);
 												} else {

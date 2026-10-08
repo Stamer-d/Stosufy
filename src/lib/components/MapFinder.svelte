@@ -1,20 +1,13 @@
 <script>
-	// @ts-nocheck
-
-	import { songQueue, setSongQueue, updateSongQueue, currentSong } from '../stores/audio';
-	import { fetchMaps } from '../stores/data';
+	import { songQueue, setSongQueue, updateSongQueue } from '#lib/stores/audio.ts';
+	import { fetchMaps, mapDataStore } from '#lib/stores/data.ts';
+	import { user } from '#lib/stores/user.ts';
+	import { keyStore } from '#lib/stores/auth.ts';
 	import Beatmap from './Beatmap.svelte';
 	import Input from './Input.svelte';
-	import { onMount, onDestroy } from 'svelte';
-	import { mapDataStore } from '../stores/data';
-	import { user } from '../stores/user';
+	import { onDestroy } from 'svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import Button from './Button.svelte';
-	import Modal from './Modal.svelte';
-	import { keyStore } from '../stores/auth';
-	import { getPlaylistSongs, playlists, playlistSongsCache } from '#lib/stores/playlist.ts';
-	import { getImageUrl } from '#lib/stores/data.ts';
-	import { addSongToPlaylist } from '#lib/stores/playlist.ts';
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
 
 	let initialTokenLoad = $state(true);
@@ -41,13 +34,6 @@
 		}
 	});
 
-	// Function to handle the async operation
-	function handlePlayMapChange(map) {
-		if (!map) return;
-
-		// Call your async function
-		setQueue(map);
-	}
 	async function setQueue(map) {
 		await setSongQueue(
 			allMaps.findIndex((beatmap) => {
@@ -119,18 +105,20 @@
 		}
 	});
 
-	$effect(async () => {
+	$effect(() => {
 		if ($keyStore.access_token && initialTokenLoad) {
-			osuMapsSearch = await fetchMaps();
-			allMaps = osuMapsSearch.beatmapsets;
-			loading = false;
 			initialTokenLoad = false;
+			fetchMaps().then((result) => {
+				osuMapsSearch = result;
+				allMaps = result.beatmapsets;
+				loading = false;
+			});
 		}
 	});
 
 	onDestroy(() => {
 		if (searchTimeout) clearTimeout(searchTimeout);
-
+		observer?.disconnect();
 		observer = null;
 	});
 </script>
@@ -139,7 +127,7 @@
 	<Input
 		bind:value={search}
 		on:input={(e) => {
-			debouncedSearch(e.target.value);
+			debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
 		}}
 		placeholder="Search"
 	/>

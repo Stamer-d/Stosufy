@@ -3,21 +3,22 @@ import { get, writable } from 'svelte/store';
 import { playlistLoadingStatus } from './playlist';
 import { setSongQueue } from './audio';
 import { mapDataStore } from './data';
+import type { Settings, StoredQueue, User, UserSettings } from '../types';
 
-export const user = writable({});
-export const userSettings = writable({
+export const user = writable<User>({});
+export const userSettings = writable<UserSettings>({
 	settings: {},
 	currentQueue: null
 });
 
-export function updateUserSettings(newSettings: any) {
+export function updateUserSettings(newSettings: Settings) {
 	userSettings.update((currentUser) => ({
 		...currentUser,
 		settings: { ...currentUser.settings, ...newSettings }
 	}));
 }
 
-export function updateCurrentQueue(queue: any) {
+export function updateCurrentQueue(queue: StoredQueue) {
 	if (!queue?.playlistId) return;
 	userSettings.update((currentUser) => ({
 		...currentUser,
@@ -28,7 +29,7 @@ export function updateCurrentQueue(queue: any) {
 async function initializeStores() {
 	await load('userData.json')
 		.then((data) => {
-			return data.get('user');
+			return data.get<UserSettings>('user');
 		})
 		.then((storedData) => {
 			if (storedData) {
@@ -41,7 +42,7 @@ async function initializeStores() {
 			});
 		})
 		.catch((err) => {
-			console.error('Error loading keyStore:', err);
+			console.error('Error loading user settings:', err);
 		});
 	const queue = get(userSettings).currentQueue;
 	let setQueue = false;
@@ -71,4 +72,3 @@ async function initializeStores() {
 	}
 }
 initializeStores();
- 

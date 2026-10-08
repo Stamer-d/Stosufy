@@ -2,11 +2,13 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { get, writable } from 'svelte/store';
 import { keyStore } from './auth';
 import { formatSongData, mapDataStore } from './data';
-export const playlists = writable([]);
-export const playlistSongsCache = writable({});
-export const playlistLoadingStatus = writable({});
+import type { MapSet, Playlist, PlaylistId } from '../types';
 
-export async function getPlaylists(code) {
+export const playlists = writable<Playlist[]>([]);
+export const playlistSongsCache = writable<Record<string, { songs: MapSet[] }>>({});
+export const playlistLoadingStatus = writable<Record<string, boolean>>({});
+
+export async function getPlaylists(code: string): Promise<Playlist[]> {
 	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/', {
 		method: 'GET',
 		headers: {
@@ -22,7 +24,7 @@ export async function getPlaylists(code) {
 	return data;
 }
 
-export async function createPlaylist(title) {
+export async function createPlaylist(title: string): Promise<Playlist> {
 	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/create', {
 		method: 'POST',
 		body: JSON.stringify({
@@ -42,7 +44,7 @@ export async function createPlaylist(title) {
 	return data;
 }
 
-export async function deletePlaylist(id) {
+export async function deletePlaylist(id: PlaylistId) {
 	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/delete', {
 		method: 'POST',
 		body: JSON.stringify({
@@ -62,7 +64,13 @@ export async function deletePlaylist(id) {
 	return data;
 }
 
-export async function editPlaylist(id, title, description, isPublic, imageFile = null) {
+export async function editPlaylist(
+	id: PlaylistId,
+	title: string,
+	description: string,
+	isPublic: boolean,
+	imageFile: File | null = null
+): Promise<Playlist> {
 	const formData = new FormData();
 
 	formData.append('id', id.toString());
@@ -90,7 +98,7 @@ export async function editPlaylist(id, title, description, isPublic, imageFile =
 	return data;
 }
 
-export async function addSongToPlaylist(playlistId, mapSetData) {
+export async function addSongToPlaylist(playlistId: PlaylistId, mapSetData: MapSet) {
 	const setId = mapSetData.id;
 	const mapId = mapSetData.beatmaps[0].id;
 
@@ -115,17 +123,20 @@ export async function addSongToPlaylist(playlistId, mapSetData) {
 		};
 	});
 
-	const response = await fetch(`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}/addsong`, {
-		method: 'POST',
-		body: JSON.stringify({
-			set_id: setId,
-			map_id: mapId
-		}),
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${get(keyStore).access_token}`
+	const response = await fetch(
+		`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}/addsong`,
+		{
+			method: 'POST',
+			body: JSON.stringify({
+				set_id: setId,
+				map_id: mapId
+			}),
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${get(keyStore).access_token}`
+			}
 		}
-	});
+	);
 
 	if (!response.ok) {
 		throw new Error(`HTTP error! status: ${response.status}`);
@@ -157,7 +168,7 @@ export async function addSongToPlaylist(playlistId, mapSetData) {
 	return data;
 }
 
-export async function removeSongFromPlaylist(playlistId, songId) {
+export async function removeSongFromPlaylist(playlistId: PlaylistId, songId: number) {
 	const updatedPlaylists = get(playlists).map((p) => {
 		if (p.id == playlistId) {
 			return { ...p, song_amount: Math.max(0, p.song_amount - 1) };
@@ -200,7 +211,10 @@ export async function removeSongFromPlaylist(playlistId, songId) {
 	return data;
 }
 
-export async function getPlaylistSongs(playlistId, forceRefresh = false) {
+export async function getPlaylistSongs(
+	playlistId: PlaylistId,
+	forceRefresh = false
+): Promise<{ songs: MapSet[]; error?: string }> {
 	if (!forceRefresh && get(playlistSongsCache)[playlistId]) {
 		return get(playlistSongsCache)[playlistId];
 	}
@@ -272,7 +286,7 @@ export async function getPlaylistSongs(playlistId, forceRefresh = false) {
 		const responseDataPromises = responses.map((res) => res.json());
 		const responseData = await Promise.all(responseDataPromises);
 
-		let allBeatmaps = [];
+		let allBeatmaps: any[] = [];
 		for (const data of responseData) {
 			if (data.beatmaps) {
 				allBeatmaps = [...allBeatmaps, ...data.beatmaps];
@@ -293,7 +307,7 @@ export async function getPlaylistSongs(playlistId, forceRefresh = false) {
 			};
 		});
 
-		const beatmapsetGroups = {};
+		const beatmapsetGroups: Record<string, MapSet> = {};
 
 		enhancedSongs.forEach((song) => {
 			if (!song.beatmap || !song.beatmap.beatmapset) return;
@@ -316,9 +330,10 @@ export async function getPlaylistSongs(playlistId, forceRefresh = false) {
 
 		const structuredSongs = Object.values(beatmapsetGroups);
 
-		structuredSongs.sort((a, b) => {
-			return new Date(a.songInfo.created_at) - new Date(b.songInfo.created_at);
-		});
+		structuredSongs.sort(
+			(a, b) =>
+				new Date(a.songInfo.created_at).getTime() - new Date(b.songInfo.created_at).getTime()
+		);
 
 		playlistSongsCache.update((cache) => ({
 			...cache,
@@ -327,7 +342,7 @@ export async function getPlaylistSongs(playlistId, forceRefresh = false) {
 		return { songs: structuredSongs };
 	} catch (error) {
 		console.error(`Error loading playlist ${playlistId}:`, error);
-		return { songs: [], error: error.message };
+		return { songs: [], error: error instanceof Error ? error.message : String(error) };
 	} finally {
 		playlistLoadingStatus.update((status) => ({
 			...status,
@@ -348,12 +363,4 @@ export async function loadAllPlaylistSongs() {
 	}
 
 	return true;
-}
-
-export function clearPlaylistCache(playlistId) {
-	playlistSongsCache.update((cache) => {
-		const newCache = { ...cache };
-		delete newCache[playlistId];
-		return newCache;
-	});
 }
