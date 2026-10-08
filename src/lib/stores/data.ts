@@ -16,6 +16,7 @@ import * as path from '@tauri-apps/api/path';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { getPlaylistSongs, playlists } from './playlist';
 import { songQueue, updateSongQueue } from './audio';
+import { addSong } from '../api';
 import type { Beatmap, DownloadState, MapSet, StoredMapSet } from '../types';
 
 const BROWSER_USER_AGENT =
@@ -193,17 +194,7 @@ export async function downloadBeatmap(
 		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 20 } }));
 		console.log(setId, mapId, 'Downloading beatmap...');
-		await fetch('https://api.stamer-d.de/v1/stosufy/addsong', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${accessToken}`
-			},
-			body: JSON.stringify({
-				setId: parseInt(setId),
-				mapId: parseInt(mapId.toString())
-			})
-		});
+		await addSong(accessToken, parseInt(setId), parseInt(mapId.toString()));
 		const buffer = await response.arrayBuffer();
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 25 } }));
 
@@ -497,9 +488,8 @@ async function updateMapsetData(mapsetData: MapSet) {
 	await saveMapData();
 }
 
-export function getImageUrl(imagePath: string | null | undefined) {
-	if (!imagePath) return '/logo.png';
-	return `https://api.stamer-d.de/v1/${imagePath}`;
+export function getImageUrl(imageUrl: string | null | undefined) {
+	return imageUrl || '/logo.png';
 }
 
 /** Converts the stored map data into a list of map sets, sorted by download date */

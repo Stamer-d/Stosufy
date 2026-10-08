@@ -202,7 +202,7 @@
 		<div class="flex items-center gap-4 mb-2">
 			<div class="relative shrink-0">
 				<img
-					src={isDownloadedPlaylist ? '/NoLetterLogo.png' : getImageUrl(playlistData.image_path)}
+					src={isDownloadedPlaylist ? '/NoLetterLogo.png' : getImageUrl(playlistData.image_url)}
 					alt=""
 					class="xl:size-50 size-40 bg-secondary-200 rounded-md object-cover"
 				/>

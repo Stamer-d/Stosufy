@@ -37,7 +37,7 @@
 			id: -1,
 			title: 'Downloaded Songs',
 			description: 'Your downloaded music collection',
-			image_path: null,
+			image_url: null,
 			song_amount: Object.keys($mapDataStore).length,
 			created_at: null,
 			updated_at: null,
@@ -60,7 +60,7 @@
 			id: tempId,
 			title: `My Playlist Nr.${amount}`,
 			song_amount: 0,
-			image_path: null,
+			image_url: null,
 			created_by: $user?.stosufy_id
 		};
 
@@ -157,7 +157,7 @@
 					<div class="w-12 h-12 mr-3 flex items-center">
 						<div class="relative w-12 h-12 aspect-square">
 							<img
-								src={playlist.id !== -1 ? getImageUrl(playlist.image_path) : '/NoLetterLogo.png'}
+								src={playlist.id !== -1 ? getImageUrl(playlist.image_url) : '/NoLetterLogo.png'}
 								alt={playlist.title}
 								class="w-full h-full object-cover rounded-md aspect-square"
 							/>
@@ -268,7 +268,7 @@
 				<div class="w-[150px] h-[150px] bg-secondary-300">
 					<img
 						class="w-full h-full object-cover"
-						src={uploadedImage || getImageUrl(editPlaylistModal.playlist?.image_path)}
+						src={uploadedImage || getImageUrl(editPlaylistModal.playlist?.image_url)}
 						alt="Playlist cover"
 					/>
 				</div>

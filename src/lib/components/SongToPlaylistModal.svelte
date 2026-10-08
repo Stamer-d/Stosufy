@@ -63,7 +63,7 @@
 							}}
 						>
 							<img
-								src={playlist.id !== -1 ? getImageUrl(playlist.image_path) : '/NoLetterLogo.png'}
+								src={playlist.id !== -1 ? getImageUrl(playlist.image_url) : '/NoLetterLogo.png'}
 								alt={playlist.title}
 								class="size-12 object-cover rounded-md"
 							/>

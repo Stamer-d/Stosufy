@@ -52,7 +52,7 @@ export interface Playlist {
 	id: PlaylistId;
 	title: string;
 	description?: string;
-	image_path?: string | null;
+	image_url?: string | null;
 	song_amount: number;
 	public?: boolean;
 	created_by?: number;

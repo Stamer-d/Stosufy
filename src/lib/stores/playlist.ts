@@ -2,66 +2,25 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { get, writable } from 'svelte/store';
 import { keyStore } from './auth';
 import { formatSongData, mapDataStore } from './data';
+import * as api from '../api';
 import type { MapSet, Playlist, PlaylistId } from '../types';
 
 export const playlists = writable<Playlist[]>([]);
 export const playlistSongsCache = writable<Record<string, { songs: MapSet[] }>>({});
 export const playlistLoadingStatus = writable<Record<string, boolean>>({});
 
-export async function getPlaylists(code: string): Promise<Playlist[]> {
-	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/', {
-		method: 'GET',
-		headers: {
-			Authorization: `Bearer ${code}`
-		}
-	});
+const token = () => get(keyStore).access_token;
 
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
-	}
-
-	const data = await response.json();
-	return data;
+export async function getPlaylists(accessToken: string): Promise<Playlist[]> {
+	return api.getPlaylists(accessToken);
 }
 
 export async function createPlaylist(title: string): Promise<Playlist> {
-	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/create', {
-		method: 'POST',
-		body: JSON.stringify({
-			title: title
-		}),
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${get(keyStore).access_token}`
-		}
-	});
-
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
-	}
-
-	const data = await response.json();
-	return data;
+	return api.createPlaylist(token(), title);
 }
 
 export async function deletePlaylist(id: PlaylistId) {
-	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/delete', {
-		method: 'POST',
-		body: JSON.stringify({
-			id: id
-		}),
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${get(keyStore).access_token}`
-		}
-	});
-
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
-	}
-
-	const data = await response.json();
-	return data;
+	await api.deletePlaylist(token(), Number(id));
 }
 
 export async function editPlaylist(
@@ -71,31 +30,11 @@ export async function editPlaylist(
 	isPublic: boolean,
 	imageFile: File | null = null
 ): Promise<Playlist> {
-	const formData = new FormData();
-
-	formData.append('id', id.toString());
-	formData.append('title', title);
-	formData.append('description', description);
-	formData.append('public', isPublic.toString());
-
-	if (imageFile) {
-		formData.append('image', imageFile);
-	}
-
-	const response = await fetch('https://api.stamer-d.de/v1/stosufy/playlist/edit', {
-		method: 'POST',
-		body: formData,
-		headers: {
-			Authorization: `Bearer ${get(keyStore).access_token}`
-		}
-	});
-
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
-	}
-
-	const data = await response.json();
-	return data;
+	return api.editPlaylist(
+		token(),
+		{ id: Number(id), title, description, public: isPublic },
+		imageFile
+	);
 }
 
 export async function addSongToPlaylist(playlistId: PlaylistId, mapSetData: MapSet) {
@@ -123,26 +62,12 @@ export async function addSongToPlaylist(playlistId: PlaylistId, mapSetData: MapS
 		};
 	});
 
-	const response = await fetch(
-		`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}/addsong`,
-		{
-			method: 'POST',
-			body: JSON.stringify({
-				set_id: setId,
-				map_id: mapId
-			}),
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${get(keyStore).access_token}`
-			}
-		}
+	const songInfo = await api.addSongToPlaylist(
+		token(),
+		Number(playlistId),
+		Number(setId),
+		Number(mapId)
 	);
-
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
-	}
-
-	const data = await response.json();
 
 	playlistSongsCache.update((cache) => {
 		if (!cache[playlistId] || !cache[playlistId].songs) {
@@ -153,7 +78,7 @@ export async function addSongToPlaylist(playlistId: PlaylistId, mapSetData: MapS
 			if (index === cache[playlistId].songs.length - 1 && song.id === mapSetData.id) {
 				return {
 					...song,
-					songInfo: data.song_data
+					songInfo
 				};
 			}
 			return song;
@@ -165,7 +90,7 @@ export async function addSongToPlaylist(playlistId: PlaylistId, mapSetData: MapS
 		};
 	});
 
-	return data;
+	return songInfo;
 }
 
 export async function removeSongFromPlaylist(playlistId: PlaylistId, songId: number) {
@@ -189,26 +114,7 @@ export async function removeSongFromPlaylist(playlistId: PlaylistId, songId: num
 			[playlistId]: { songs: updatedSongs }
 		};
 	});
-	const response = await fetch(
-		`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}/removesong`,
-		{
-			method: 'POST',
-			body: JSON.stringify({
-				song_id: songId
-			}),
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${get(keyStore).access_token}`
-			}
-		}
-	);
-
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
-	}
-
-	const data = await response.json();
-	return data;
+	await api.removeSongFromPlaylist(token(), Number(playlistId), songId);
 }
 
 export async function getPlaylistSongs(
@@ -235,20 +141,9 @@ export async function getPlaylistSongs(
 			return { songs };
 		}
 
-		const response = await fetch(`https://api.stamer-d.de/v1/stosufy/playlist/${playlistId}`, {
-			method: 'GET',
-			headers: {
-				Authorization: `Bearer ${get(keyStore).access_token}`
-			}
-		});
+		const playlistSongs = await api.getPlaylistSongs(token(), Number(playlistId));
 
-		if (!response.ok) {
-			throw new Error(`HTTP error! status: ${response.status}`);
-		}
-
-		const playlistSongs = await response.json();
-
-		if (!playlistSongs || playlistSongs.length === 0 || playlistSongs[0].id === null) {
+		if (playlistSongs.length === 0) {
 			playlistSongsCache.update((cache) => ({
 				...cache,
 				[playlistId]: { songs: [] }

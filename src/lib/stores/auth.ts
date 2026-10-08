@@ -3,6 +3,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { load } from '@tauri-apps/plugin-store';
 import { goto } from '$app/navigation';
 import { user } from './user';
+import { getStosufyUser } from '../api';
 import type { Keys, User } from '../types';
 
 export const keyStore = writable<Keys>({
@@ -107,27 +108,13 @@ export async function refreshToken(refreshToken: string) {
 export async function verifyAccessToken(
 	token: string
 ): Promise<{ status: boolean; userData: User | null }> {
-	const response = await fetch('https://api.stamer-d.de/v1/stosufy/login', {
-		method: 'GET',
-		headers: {
-			Authorization: `Bearer ${token}`
-		}
-	});
-
-	if (response.ok) {
-		const data = await response.json();
-
-		user.set(data);
-		return {
-			status: true,
-			userData: data
-		};
+	try {
+		const userData = await getStosufyUser(token);
+		user.set(userData);
+		return { status: true, userData };
+	} catch {
+		return { status: false, userData: null };
 	}
-
-	return {
-		status: false,
-		userData: null
-	};
 }
 
 export async function exchangeCode(code: string) {
