@@ -1,7 +1,8 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import type { Playlist, PlaylistSongInfo, User } from './types';
 
-const API_URL = 'https://api.stamer-d.de/v2';
+// Trailing slash: nginx redirects /v2 to /v2/, which turns the POST into a GET
+const API_URL = 'https://api.stamer-d.de/v2/';
 
 /**
  * Sends a GraphQL request to the Stamer API, authenticated with the osu! access token.
