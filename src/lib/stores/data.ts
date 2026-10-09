@@ -89,14 +89,14 @@ export async function fetchMaps(search = '', cursorString = '') {
 			`https://osu.ppy.sh/api/v2/beatmapsets/search?e=&c=&g=&l=&m=&nsfw=&played=&r=&sort=&s=any&q=${search}&cursor_string=${cursorString}`,
 			{
 				headers: {
-					Authorization: `Bearer ${get(keyStore).access_token}`,
-					Referer: 'https://osu.ppy.sh/beatmapsets',
-					'User-Agent': BROWSER_USER_AGENT
+					Authorization: `Bearer ${get(keyStore).access_token}`
 				}
 			}
 		);
 		if (!response.ok) {
-			throw new Error(`osu! API error (HTTP ${response.status})`);
+			// Include the start of the body to tell an osu! API error from a Cloudflare block
+			const body = (await response.text()).replace(/\s+/g, ' ').slice(0, 120);
+			throw new Error(`osu! API error (HTTP ${response.status}): ${body}`);
 		}
 		return await response.json();
 	} catch (error) {
