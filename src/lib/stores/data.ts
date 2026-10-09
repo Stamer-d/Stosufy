@@ -95,6 +95,9 @@ export async function fetchMaps(search = '', cursorString = '') {
 				}
 			}
 		);
+		if (!response.ok) {
+			throw new Error(`osu! API error (HTTP ${response.status})`);
+		}
 		return await response.json();
 	} catch (error) {
 		console.error('Error fetching maps:', error);

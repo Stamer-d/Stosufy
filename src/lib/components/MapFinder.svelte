@@ -10,10 +10,9 @@
 	import Button from './Button.svelte';
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
 
-	let initialTokenLoad = $state(true);
-
 	let search = $state('');
 	let searching = $state(false);
+	let searchError = $state(null);
 	let osuMapsSearch = $state(null);
 	let searchTimeout = null;
 	let searchRequestId = 0;
@@ -54,9 +53,17 @@
 			const result = await fetchMaps(query);
 			if (requestId !== searchRequestId) return;
 			osuMapsSearch = result;
-			allMaps = result.beatmapsets;
+			allMaps = result.beatmapsets ?? [];
+			searchError = null;
+		} catch (error) {
+			if (requestId === searchRequestId) {
+				searchError = error instanceof Error ? error.message : String(error);
+			}
 		} finally {
-			if (requestId === searchRequestId) searching = false;
+			if (requestId === searchRequestId) {
+				searching = false;
+				loading = false;
+			}
 		}
 	}
 
@@ -123,14 +130,14 @@
 		}
 	});
 
+	// Load the maps once logged in, and again whenever the token changes (e.g. after it
+	// was refreshed) as long as nothing could be loaded yet
+	let loadedWithToken = null;
 	$effect(() => {
-		if ($keyStore.access_token && initialTokenLoad) {
-			initialTokenLoad = false;
-			fetchMaps().then((result) => {
-				osuMapsSearch = result;
-				allMaps = result.beatmapsets;
-				loading = false;
-			});
+		const token = $keyStore.access_token;
+		if (token && token !== loadedWithToken && !allMaps?.length) {
+			loadedWithToken = token;
+			runSearch(search);
 		}
 	});
 
@@ -170,7 +177,14 @@
 		</button>
 	{/if}
 </div>
-{#if osuMapsSearch && !allMaps?.length}
+{#if searchError && !allMaps?.length}
+	<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">
+		<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
+		<p class="text-xl">Couldn't load beatmaps</p>
+		<p class="text-sm">{searchError}</p>
+		<Button type="primary" on:click={() => runSearch(search)}>Try again</Button>
+	</div>
+{:else if osuMapsSearch && !allMaps?.length}
 	<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
 		<span class="icon-[fa6-solid--music] size-10"></span>
 		<p class="text-xl">No beatmaps found{search ? ` for "${search}"` : ''}</p>
@@ -207,7 +221,7 @@
 	<div bind:this={endOfContent} class=""></div>
 {/if}
 
-{#if loading}
+{#if loading && !searchError}
 	<div class="w-full text-center">
 		<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
 	</div>
