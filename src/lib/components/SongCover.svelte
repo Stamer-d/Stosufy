@@ -11,7 +11,6 @@
 
 	$effect(() => {
 		const id = setId;
-		url = null;
 		thumbnailUrl(id).then((result) => {
 			if (setId === id) url = result;
 		});

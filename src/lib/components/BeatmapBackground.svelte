@@ -13,18 +13,23 @@
 	let urls = $state([]);
 	let attempt = $state(0);
 	let url = $derived(urls[attempt] ?? null);
+	// Only this set's saved background, so other changes to the song data don't reload it
+	let localPath = $derived(setId != null ? ($mapDataStore[setId]?.background ?? null) : null);
 
 	$effect(() => {
 		const id = setId;
-		// Reload when the original gets saved, e.g. after the download or the backfill
-		void $mapDataStore[id]?.background;
-		attempt = 0;
+		void localPath;
 		if (id == null) {
 			urls = [];
+			attempt = 0;
 			return;
 		}
 		backgroundUrls(id).then((result) => {
-			if (setId === id) urls = result;
+			if (setId !== id) return;
+			// Keep showing the current image when the candidates didn't change
+			if (result.join() === urls.join()) return;
+			urls = result;
+			attempt = 0;
 		});
 	});
 </script>
