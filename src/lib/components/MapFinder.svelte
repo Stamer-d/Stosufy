@@ -36,6 +36,47 @@
 
 	let editingWidgets = $state(false);
 	let widgetStoreOpen = $state(false);
+
+	// The desktop controls only show while the mouse moves over the desktop, like on macOS,
+	// so they don't sit on top of the widgets
+	const CONTROLS_HIDE_DELAY = 2000;
+	let controlsActive = $state(false);
+	let controlsHovered = $state(false);
+	let controlsTimer;
+	let showControls = $derived(controlsActive || controlsHovered || editingWidgets);
+
+	// Right-click menu of the desktop
+	let desktopMenu = $derived([
+		{
+			icon: 'icon-[mingcute--layout-4-line]',
+			label: editingWidgets ? 'Done editing' : 'Edit widgets',
+			action: () => (editingWidgets = !editingWidgets)
+		},
+		{
+			icon: 'icon-[mingcute--add-line]',
+			label: 'Add widgets',
+			action: () => {
+				editingWidgets = true;
+				widgetStoreOpen = true;
+			}
+		},
+		{
+			icon: 'icon-[mingcute--fullscreen-line]',
+			label: 'Focus mode',
+			action: () => focusMode.set(true)
+		},
+		{
+			icon: 'icon-[mingcute--palette-line]',
+			label: 'Customize',
+			action: () => (customizeOpen = true)
+		}
+	]);
+
+	function revealControls() {
+		controlsActive = true;
+		clearTimeout(controlsTimer);
+		controlsTimer = setTimeout(() => (controlsActive = false), CONTROLS_HIDE_DELAY);
+	}
 	import { wallpaper } from '#lib/stores/home.ts';
 	import { DEFAULT_HOME } from '#lib/stores/user.ts';
 
@@ -463,51 +504,82 @@
 
 {#if homeSettings.layout === 'desktop'}
 	<!-- Desktop: the beatmap background as wallpaper with widgets on it -->
-	<section class="relative h-full min-h-[34rem] overflow-hidden">
-		<BeatmapBackground
-			setId={$wallpaper.song?.id ?? null}
-			title={$wallpaper.song?.title}
-			class="absolute inset-0"
-			video
-		/>
-		<div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60"></div>
-		<DesktopCanvas editing={editingWidgets} />
-		<div class="absolute top-6 right-6 z-30 flex gap-2">
-			{#if editingWidgets}
-				{@render desktopButton(
-					'icon-[mingcute--add-line]',
-					'Add widgets',
-					() => (widgetStoreOpen = true)
-				)}
-				<button
-					class="flex items-center gap-2 px-4 h-9 rounded-full text-sm font-bold bg-white text-black hover:bg-white/90 cursor-pointer transition"
-					onclick={() => (editingWidgets = false)}
-				>
-					Done
-				</button>
-			{:else}
-				{@render desktopButton(
-					'icon-[mingcute--layout-4-line]',
-					'Edit widgets',
-					() => (editingWidgets = true)
-				)}
-				{@render desktopButton('icon-[mingcute--fullscreen-line]', 'Focus', () =>
-					focusMode.set(true)
-				)}
-				{@render customizeButton(true)}
-			{/if}
-		</div>
-		<button
-			class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 text-sm font-semibold text-white/70 hover:text-white cursor-pointer drop-shadow"
-			onclick={(e) =>
-				e.currentTarget
-					.closest('[data-scroll-container]')
-					?.scrollTo({ top: e.currentTarget.closest('section').offsetHeight, behavior: 'smooth' })}
+	<ContextMenu class="h-full">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<section
+			class="relative h-full min-h-[34rem] overflow-hidden"
+			onpointermove={revealControls}
+			onpointerleave={() => (controlsActive = false)}
 		>
-			Browse beatmaps
-			<span class="icon-[mingcute--arrow-down-line] size-4"></span>
-		</button>
-	</section>
+			<BeatmapBackground
+				setId={$wallpaper.song?.id ?? null}
+				title={$wallpaper.song?.title}
+				class="absolute inset-0"
+				video
+			/>
+			<div
+				class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60"
+			></div>
+			<DesktopCanvas editing={editingWidgets} />
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="absolute top-6 right-6 z-30 flex gap-2 transition-opacity duration-300 focus-within:opacity-100 {showControls
+					? 'opacity-100'
+					: 'opacity-0 pointer-events-none'}"
+				onpointerenter={() => (controlsHovered = true)}
+				onpointerleave={() => (controlsHovered = false)}
+			>
+				{#if editingWidgets}
+					{@render desktopButton(
+						'icon-[mingcute--add-line]',
+						'Add widgets',
+						() => (widgetStoreOpen = true)
+					)}
+					<button
+						class="flex items-center gap-2 px-4 h-9 rounded-full text-sm font-bold bg-white text-black hover:bg-white/90 cursor-pointer transition"
+						onclick={() => (editingWidgets = false)}
+					>
+						Done
+					</button>
+				{:else}
+					{@render desktopButton(
+						'icon-[mingcute--layout-4-line]',
+						'Edit widgets',
+						() => (editingWidgets = true)
+					)}
+					{@render desktopButton('icon-[mingcute--fullscreen-line]', 'Focus', () =>
+						focusMode.set(true)
+					)}
+					{@render customizeButton(true)}
+				{/if}
+			</div>
+			<button
+				class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 text-sm font-semibold text-white/70 hover:text-white cursor-pointer drop-shadow transition-opacity duration-300 focus-visible:opacity-100 {showControls
+					? 'opacity-100'
+					: 'opacity-0'}"
+				onclick={(e) =>
+					e.currentTarget.closest('[data-scroll-container]')?.scrollTo({
+						top: e.currentTarget.closest('section').offsetHeight,
+						behavior: 'smooth'
+					})}
+			>
+				Browse beatmaps
+				<span class="icon-[mingcute--arrow-down-line] size-4"></span>
+			</button>
+		</section>
+		<svelte:fragment slot="menu">
+			{#each desktopMenu as item (item.label)}
+				<Button
+					type="ghost"
+					icon={item.icon}
+					class="w-full rounded-md text-sm hover:bg-secondary-400"
+					on:click={item.action}
+				>
+					{item.label}
+				</Button>
+			{/each}
+		</svelte:fragment>
+	</ContextMenu>
 
 	<div class="px-6 pt-8 pb-10 flex flex-col gap-10">
 		{#each homeSettings.sections.filter((section) => section.visible && section.id !== 'hero') as section (section.id)}

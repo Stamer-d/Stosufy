@@ -6,6 +6,8 @@
 	let y = 0;
 	let showMenu = false;
 	export let disabled = false;
+	let className = '';
+	export { className as class };
 
 	const dispatch = createEventDispatcher();
 
@@ -79,7 +81,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="context-menu-container block" on:contextmenu={handleContextMenu}>
+<div class="context-menu-container block {className}" on:contextmenu={handleContextMenu}>
 	<slot></slot>
 
 	{#if showMenu}
