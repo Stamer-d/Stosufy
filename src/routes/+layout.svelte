@@ -3,9 +3,13 @@
 	import Songbar from '#lib/components/Songbar.svelte';
 	import Playlist from '#lib/components/Playlist.svelte';
 	import { onMount } from 'svelte';
+	import { fly } from 'svelte/transition';
 	import { page } from '$app/state';
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
+	import QueuePanel from '#lib/components/QueuePanel.svelte';
+	import Toasts from '#lib/components/Toasts.svelte';
+	import { queuePanelOpen } from '#lib/stores/audio.ts';
 
 	let { children } = $props();
 
@@ -50,12 +54,19 @@
 				<div class="flex-1 p-4 overflow-y-auto">
 					{@render children()}
 				</div>
+
+				{#if $queuePanelOpen}
+					<div class="h-full" transition:fly={{ x: 320, duration: 150 }}>
+						<QueuePanel />
+					</div>
+				{/if}
 			</div>
 
 			<div class="w-full">
 				<Songbar />
 			</div>
 		</main>
+		<Toasts />
 	{:else}
 		<div class="fixed top-0 left-0 right-0 z-30">
 			<Titlebar />

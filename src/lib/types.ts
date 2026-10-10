@@ -35,6 +35,8 @@ interface MapSetInfo {
 	preview_url?: string;
 	created_at?: number | string;
 	songInfo?: PlaylistSongInfo;
+	/** Set on songs added to the queue by the user; they always play the full song */
+	queued?: boolean;
 	[key: string]: any;
 }
 
@@ -73,9 +75,20 @@ export interface CurrentSong {
 	isPlaying: boolean;
 }
 
+export type RepeatMode = 'off' | 'all' | 'one';
+
+export interface SearchFilters {
+	/** osu! beatmap status filter (the `s` search parameter) */
+	status: string;
+	/** osu! sort order (the `sort` search parameter), empty for relevance */
+	sort: string;
+}
+
 export interface Settings {
 	volume?: number;
 	shuffle?: boolean;
+	repeat?: RepeatMode;
+	searchFilters?: SearchFilters;
 }
 
 /** Queue state persisted between app starts */

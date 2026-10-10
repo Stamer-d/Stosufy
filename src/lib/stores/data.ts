@@ -17,7 +17,7 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { getPlaylistSongs, playlists } from './playlist';
 import { songQueue, updateSongQueue } from './audio';
 import { addSong } from '../api';
-import type { Beatmap, DownloadState, MapSet, StoredMapSet } from '../types';
+import type { Beatmap, DownloadState, MapSet, SearchFilters, StoredMapSet } from '../types';
 
 const BROWSER_USER_AGENT =
 	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -83,16 +83,25 @@ export function isSongDownloaded(songId: number | string) {
 	return Object.prototype.hasOwnProperty.call(get(mapDataStore), songId.toString());
 }
 
-export async function fetchMaps(search = '', cursorString = '') {
+export const DEFAULT_SEARCH_FILTERS: SearchFilters = { status: 'any', sort: '' };
+
+export async function fetchMaps(
+	search = '',
+	cursorString = '',
+	filters: SearchFilters = DEFAULT_SEARCH_FILTERS
+) {
+	const params = new URLSearchParams({
+		q: search,
+		s: filters.status,
+		sort: filters.sort,
+		cursor_string: cursorString ?? ''
+	});
 	try {
-		const response = await fetch(
-			`https://osu.ppy.sh/api/v2/beatmapsets/search?e=&c=&g=&l=&m=&nsfw=&played=&r=&sort=&s=any&q=${search}&cursor_string=${cursorString}`,
-			{
-				headers: {
-					Authorization: `Bearer ${get(keyStore).access_token}`
-				}
+		const response = await fetch(`https://osu.ppy.sh/api/v2/beatmapsets/search?${params}`, {
+			headers: {
+				Authorization: `Bearer ${get(keyStore).access_token}`
 			}
-		);
+		});
 		if (!response.ok) {
 			// Include the start of the body to tell an osu! API error from a Cloudflare block
 			const body = (await response.text()).replace(/\s+/g, ' ').slice(0, 120);

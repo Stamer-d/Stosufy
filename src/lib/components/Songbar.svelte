@@ -7,7 +7,11 @@
 		currentSong,
 		skipBackward,
 		stopPlayback,
-		shuffleQueue
+		shuffleQueue,
+		cycleRepeatMode,
+		hasNext,
+		upNext,
+		queuePanelOpen
 	} from '#lib/stores/audio.ts';
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
@@ -17,7 +21,6 @@
 
 	let currentTime = 0;
 	let duration = 0;
-	let progressPercent = 0;
 	let updateInterval;
 	let lastUpdateTime = 0;
 	let volume = $userSettings.settings?.volume || 0.05;
@@ -40,7 +43,6 @@
 		if (!$songQueue?.audio) return;
 		currentTime = $songQueue.audio.currentTime;
 		duration = $songQueue.audio.duration || 0;
-		progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 		const timeDifference = Math.abs(currentTime - lastUpdateTime);
 
 		if (timeDifference >= 5 && $songQueue.type === 'playlist') {
@@ -49,14 +51,6 @@
 				currentSeconds: currentTime || 0.001,
 				playlistId: $songQueue.playlistId
 			});
-		}
-
-		if (progressPercent >= 100) {
-			if ($songQueue.currentIndex == $songQueue.queue?.length - 1) {
-				stopPlayback(true);
-			} else {
-				await skipForward();
-			}
 		}
 	}
 
@@ -175,6 +169,14 @@
 		await unregister('F13');
 	});
 	$: shuffled = $userSettings.settings?.shuffle || false;
+	$: repeat = $userSettings.settings?.repeat ?? 'off';
+	$: canSkipForward = hasNext($songQueue, $upNext, repeat);
+
+	const repeatTitles = {
+		off: 'Enable repeat',
+		all: 'Enable repeat one',
+		one: 'Disable repeat'
+	};
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -199,6 +201,8 @@
 					<Button
 						type="ghost"
 						disabled={$songQueue.type != 'playlist'}
+						title={shuffled ? 'Disable shuffle' : 'Enable shuffle'}
+						aria-pressed={shuffled}
 						class={shuffled ? 'text-primary-200 hover:text-primary-300' : ''}
 						on:click={async () => {
 							shuffled = !shuffled;
@@ -209,14 +213,14 @@
 						<span class="icon-[mingcute--shuffle-line] size-5"></span>
 					</Button>
 				{/key}
-				<Button
-					type="ghost"
-					disabled={$songQueue.currentIndex == 0}
-					on:click={async () => await skipBackward()}
-				>
+				<Button type="ghost" title="Previous" on:click={async () => await skipBackward()}>
 					<span class="icon-[fa6-solid--backward-step] size-5"></span>
 				</Button>
-				<Button type="ghost" on:click={() => togglePlayback()}>
+				<Button
+					type="ghost"
+					title={$currentSong.isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+					on:click={() => togglePlayback()}
+				>
 					{#key $currentSong}
 						{#if $currentSong.isPlaying}
 							<span class="icon-[fa6-solid--circle-pause] size-8 hover:scale-[1.05] text-white"
@@ -227,12 +231,34 @@
 						{/if}
 					{/key}
 				</Button>
-				<Button type="ghost" on:click={async () => await skipForward()}>
+				<Button
+					type="ghost"
+					title="Next"
+					disabled={!canSkipForward}
+					on:click={async () => await skipForward()}
+				>
 					<span class="icon-[fa6-solid--forward-step] size-5"></span>
 				</Button>
-				<Button type="ghost" disabled>
-					<span class="icon-[fa6-solid--repeat] size-4"></span>
-				</Button>
+				{#key repeat}
+					<Button
+						type="ghost"
+						title={repeatTitles[repeat]}
+						aria-label={repeatTitles[repeat]}
+						class="relative {repeat !== 'off' ? 'text-primary-200 hover:text-primary-300' : ''}"
+						on:click={cycleRepeatMode}
+					>
+						<span
+							class="{repeat === 'one'
+								? 'icon-[mingcute--repeat-one-line]'
+								: 'icon-[mingcute--repeat-line]'} size-5"
+						></span>
+						{#if repeat !== 'off'}
+							<span
+								class="absolute bottom-0 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary-200"
+							></span>
+						{/if}
+					</Button>
+				{/key}
 			</div>
 			<div class="flex items-center gap-2 mt-3">
 				<span class="text-sm text-secondary-500">{formatTime(currentTime)}</span>
@@ -248,6 +274,23 @@
 			</div>
 		</div>
 		<div class="justify-end flex items-center gap-3">
+			<Button
+				type="ghost"
+				title="Queue"
+				aria-label="Queue"
+				aria-pressed={$queuePanelOpen}
+				class="relative {$queuePanelOpen ? 'text-primary-200 hover:text-primary-300' : ''}"
+				on:click={() => queuePanelOpen.update((open) => !open)}
+			>
+				<span class="icon-[mingcute--playlist-2-line] size-5"></span>
+				{#if $upNext.length}
+					<span
+						class="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-primary-200 text-white text-[10px] leading-4 text-center"
+					>
+						{$upNext.length}
+					</span>
+				{/if}
+			</Button>
 			<!-- Volume control -->
 			<div class="flex items-center justify-start gap-2 relative">
 				<Button type="ghost" on:click={toggleMute}>

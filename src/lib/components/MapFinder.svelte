@@ -1,7 +1,7 @@
 <script>
 	import { songQueue, setSongQueue, updateSongQueue } from '#lib/stores/audio.ts';
-	import { fetchMaps, mapDataStore } from '#lib/stores/data.ts';
-	import { user } from '#lib/stores/user.ts';
+	import { DEFAULT_SEARCH_FILTERS, fetchMaps, mapDataStore } from '#lib/stores/data.ts';
+	import { user, userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import Beatmap from './Beatmap.svelte';
 	import Input from './Input.svelte';
@@ -9,6 +9,32 @@
 	import ContextMenu from './ContextMenu.svelte';
 	import Button from './Button.svelte';
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
+	import QueueMenuItems from './QueueMenuItems.svelte';
+
+	const STATUS_OPTIONS = [
+		{ value: 'any', label: 'All' },
+		{ value: 'ranked', label: 'Ranked' },
+		{ value: 'loved', label: 'Loved' },
+		{ value: 'qualified', label: 'Qualified' },
+		{ value: 'pending', label: 'Pending' },
+		{ value: 'graveyard', label: 'Graveyard' }
+	];
+	const SORT_OPTIONS = [
+		{ value: '', label: 'Relevance' },
+		{ value: 'plays_desc', label: 'Most played' },
+		{ value: 'favourites_desc', label: 'Most favourited' },
+		{ value: 'rating_desc', label: 'Highest rated' },
+		{ value: 'ranked_desc', label: 'Newest' },
+		{ value: 'title_asc', label: 'Title (A-Z)' }
+	];
+
+	let filters = $derived($userSettings.settings?.searchFilters ?? DEFAULT_SEARCH_FILTERS);
+
+	function setFilter(change) {
+		updateUserSettings({ searchFilters: { ...filters, ...change } });
+		if (searchTimeout) clearTimeout(searchTimeout);
+		runSearch(search);
+	}
 
 	let search = $state('');
 	let searching = $state(false);
@@ -50,7 +76,7 @@
 		const requestId = ++searchRequestId;
 		searching = true;
 		try {
-			const result = await fetchMaps(query);
+			const result = await fetchMaps(query, '', filters);
 			if (requestId !== searchRequestId) return;
 			osuMapsSearch = result;
 			allMaps = result.beatmapsets ?? [];
@@ -101,7 +127,7 @@
 			if (entry.isIntersecting) {
 				loading = true;
 				try {
-					osuMapsSearch = await fetchMaps(search, osuMapsSearch?.cursor_string);
+					osuMapsSearch = await fetchMaps(search, osuMapsSearch?.cursor_string, filters);
 
 					// Safely check that beatmapsets exists and is an array
 					if (osuMapsSearch && Array.isArray(osuMapsSearch.beatmapsets)) {
@@ -177,6 +203,36 @@
 		</button>
 	{/if}
 </div>
+<div class="flex flex-wrap items-center gap-2 mb-4">
+	<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Beatmap status">
+		{#each STATUS_OPTIONS as option (option.value)}
+			{@const active = filters.status === option.value}
+			<button
+				role="radio"
+				aria-checked={active}
+				class="px-3 py-1 rounded-full text-sm font-medium cursor-pointer transition {active
+					? 'bg-primary-200 text-white'
+					: 'bg-secondary-300 text-secondary-600 hover:text-white hover:bg-secondary-400'}"
+				onclick={() => !active && setFilter({ status: option.value })}
+			>
+				{option.label}
+			</button>
+		{/each}
+	</div>
+	<label class="ml-auto flex items-center gap-2 text-sm text-secondary-600">
+		<span class="icon-[fa6-solid--arrow-down-short-wide] size-4"></span>
+		<span class="sr-only">Sort by</span>
+		<select
+			class="bg-secondary-300 text-white rounded-md px-2 py-1 outline-none cursor-pointer hover:bg-secondary-400 focus:ring-1 focus:ring-secondary-600"
+			value={filters.sort}
+			onchange={(e) => setFilter({ sort: e.currentTarget.value })}
+		>
+			{#each SORT_OPTIONS as option (option.value)}
+				<option value={option.value}>{option.label}</option>
+			{/each}
+		</select>
+	</label>
+</div>
 {#if searchError && !allMaps?.length}
 	<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">
 		<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
@@ -188,7 +244,11 @@
 	<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
 		<span class="icon-[fa6-solid--music] size-10"></span>
 		<p class="text-xl">No beatmaps found{search ? ` for "${search}"` : ''}</p>
-		<p>Try a different search term</p>
+		<p>
+			{filters.status !== 'any'
+				? 'Try a different search term or status'
+				: 'Try a different search term'}
+		</p>
 	</div>
 {:else if osuMapsSearch}
 	<div
@@ -201,6 +261,9 @@
 				<ContextMenu>
 					<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
 					<svelte:fragment slot="menu">
+						{#if isMapDownloaded(map.id.toString())}
+							<QueueMenuItems song={map} />
+						{/if}
 						<Button
 							type="ghost"
 							icon="icon-[fa6-solid--plus]"

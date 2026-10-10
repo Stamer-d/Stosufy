@@ -35,7 +35,7 @@
     `;
 </script>
 
-<button class={buttonClasses} on:click {disabled} on:mouseover on:focus on:blur>
+<button {...$$restProps} class={buttonClasses} on:click {disabled} on:mouseover on:focus on:blur>
 	{#if leftIcon?.includes('icon-')}
 		<span class="flex-none inline-grid" aria-hidden="true">
 			<span class="place-self-center opacity-75 {leftIcon}"></span>

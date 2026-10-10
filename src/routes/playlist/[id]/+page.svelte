@@ -28,6 +28,7 @@
 	import { keyStore } from '#lib/stores/auth.ts';
 	import ContextMenu from '#lib/components/ContextMenu.svelte';
 	import SongToPlaylistModal from '#lib/components/SongToPlaylistModal.svelte';
+	import QueueMenuItems from '#lib/components/QueueMenuItems.svelte';
 	import { userSettings } from '#lib/stores/user.ts';
 
 	const pagePlaylistId = toStore(() => page.params?.id);
@@ -366,7 +367,7 @@
 								{/if}
 							</button>
 						{:else}
-							<ContextMenu disabled={!isDownloadedPlaylist}>
+							<ContextMenu>
 								<button
 									class="cursor-pointer w-full group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-300 rounded p-2"
 									on:click={async () => {
@@ -461,6 +462,7 @@
 									</div>
 								</button>
 								<svelte:fragment slot="menu">
+									<QueueMenuItems {song} />
 									<Button
 										type="ghost"
 										class="w-full py-3 rounded-sm hover:bg-secondary-400"

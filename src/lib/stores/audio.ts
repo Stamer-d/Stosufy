@@ -3,10 +3,15 @@ import { downloadBeatmap } from './data';
 import { updateCurrentQueue, userSettings } from './user';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
-import type { CurrentSong, MapSet, PlaylistId, QueueType, SongQueue } from '../types';
+import type { CurrentSong, MapSet, PlaylistId, QueueType, RepeatMode, SongQueue } from '../types';
 
 export const songQueue = writable<SongQueue>({});
 export const currentSong = writable<CurrentSong>({ song: null, isPlaying: false });
+/** Songs the user queued with "Play next" / "Add to queue"; they play before the rest of the queue */
+export const upNext = writable<MapSet[]>([]);
+export const queuePanelOpen = writable(false);
+
+const repeatMode = (): RepeatMode => get(userSettings).settings.repeat ?? 'off';
 
 function getAudioFromBase64(base64Data: string) {
 	const byteCharacters = atob(base64Data);
@@ -22,14 +27,18 @@ function getAudioFromBase64(base64Data: string) {
 
 async function getAudio(index: number, queue: MapSet[], type: QueueType, currentSeconds = 0) {
 	let audio: HTMLAudioElement = null;
-	if (type == 'preview') {
-		const previewUrl = `${queue[index].preview_url}`;
-		audio = new Audio(previewUrl);
+	const song = queue[index];
+	if (type == 'preview' && !song.queued) {
+		audio = new Audio(`${song.preview_url}`);
 		audio.volume = get(userSettings).settings.volume || 0.05;
-	} else if (type == 'playlist') {
-		const base64Data = await downloadBeatmap(queue[index], queue[index].beatmaps[0].id);
+	} else {
+		const base64Data = await downloadBeatmap(song, song.beatmaps[0].id);
 		audio = getAudioFromBase64(base64Data);
 	}
+	audio.addEventListener('ended', () => {
+		// Ignore songs that were replaced in the meantime
+		if (get(songQueue).audio === audio) handleSongEnded();
+	});
 	await new Promise<void>((resolve) => {
 		audio.addEventListener('loadedmetadata', () => {
 			if (audio.duration > currentSeconds) {
@@ -155,6 +164,36 @@ export function togglePlayback() {
 		}
 	});
 }
+/** Loads and plays the song at `index` of `queue`, skipping songs that can't be loaded */
+async function playAt(index: number, queue: MapSet[], direction: 1 | -1 = 1) {
+	const current = get(songQueue);
+	stopPlayback(true);
+	let audio: HTMLAudioElement;
+	try {
+		audio = await getAudio(index, queue, current.type);
+	} catch {
+		const next = index + direction;
+		if (next >= 0 && next < queue.length) await playAt(next, queue, direction);
+		return;
+	}
+	songQueue.set({ ...current, currentIndex: index, audio, queue });
+	currentSong.set({ song: queue[index], isPlaying: false });
+	updateCurrentQueue({
+		index,
+		queue,
+		type: current.type,
+		playlistId: current.playlistId,
+		currentSeconds: 0.001
+	});
+	togglePlayback();
+}
+
+/** Whether there is a song to skip forward to */
+export function hasNext(queue: SongQueue, queuedSongs: MapSet[], repeat: RepeatMode) {
+	if (!queue.queue?.length) return false;
+	return queuedSongs.length > 0 || queue.currentIndex < queue.queue.length - 1 || repeat === 'all';
+}
+
 let isSkipping = false;
 
 export async function skipForward() {
@@ -162,10 +201,25 @@ export async function skipForward() {
 	isSkipping = true;
 
 	try {
-		const queue = get(songQueue);
-		stopPlayback(true);
-		await updateSongQueue(queue.currentIndex + 1);
-		togglePlayback();
+		const current = get(songQueue);
+		if (!current.queue?.length) return;
+		const [queuedSong, ...rest] = get(upNext);
+
+		if (queuedSong) {
+			// Play the queued song right after the current one, so "back" still works
+			upNext.set(rest);
+			const queue = [...current.queue];
+			queue.splice(current.currentIndex + 1, 0, { ...queuedSong, queued: true });
+			await playAt(current.currentIndex + 1, queue);
+			return;
+		}
+
+		let next = current.currentIndex + 1;
+		if (next >= current.queue.length) {
+			if (repeatMode() !== 'all') return;
+			next = 0;
+		}
+		await playAt(next, current.queue);
 	} finally {
 		isSkipping = false;
 	}
@@ -176,20 +230,64 @@ export async function skipBackward() {
 	isSkipping = true;
 
 	try {
-		const queue = get(songQueue);
+		const current = get(songQueue);
 
-		if (queue.audio.currentTime > 2) {
-			queue.audio.currentTime = 0;
+		if (current.audio.currentTime > 2 || current.currentIndex === 0) {
+			current.audio.currentTime = 0;
 			return;
 		}
-		if (queue.currentIndex === 0) return;
-		stopPlayback(true);
-
-		await updateSongQueue(queue.currentIndex - 1);
-		togglePlayback();
+		await playAt(current.currentIndex - 1, current.queue, -1);
 	} finally {
 		isSkipping = false;
 	}
+}
+
+/** Plays the song at `index` of the current queue (used by the queue panel) */
+export async function jumpTo(index: number) {
+	const current = get(songQueue);
+	if (!current.queue?.[index]) return;
+	await playAt(index, current.queue);
+}
+
+async function handleSongEnded() {
+	const current = get(songQueue);
+	if (repeatMode() === 'one') {
+		current.audio.currentTime = 0;
+		current.audio.play();
+		return;
+	}
+	if (hasNext(current, get(upNext), repeatMode())) {
+		await skipForward();
+	} else {
+		// End of the queue: stop and rewind, so pressing play starts the song again
+		stopPlayback();
+		current.audio.currentTime = 0;
+	}
+}
+
+export function cycleRepeatMode() {
+	const order: RepeatMode[] = ['off', 'all', 'one'];
+	const next = order[(order.indexOf(repeatMode()) + 1) % order.length];
+	userSettings.update((u) => ({ ...u, settings: { ...u.settings, repeat: next } }));
+}
+
+/** Adds a song to the queue; `next` puts it in front of the other queued songs */
+export async function queueSong(song: MapSet, next = false) {
+	const current = get(songQueue);
+	if (!current.queue?.length) {
+		// Nothing is playing yet: just play the song
+		await setSongQueue(0, [{ ...song, queued: true }], 'playlist');
+		return;
+	}
+	upNext.update((songs) => (next ? [song, ...songs] : [...songs, song]));
+}
+
+export function removeQueuedSong(index: number) {
+	upNext.update((songs) => songs.filter((_, i) => i !== index));
+}
+
+export function clearQueuedSongs() {
+	upNext.set([]);
 }
 
 export async function shuffleQueue() {
@@ -214,6 +312,7 @@ export async function shuffleQueue() {
 		const songs = get(playlistSongsCache)[current.playlistId]?.songs || [];
 		const currentSongData = current.queue[current.currentIndex];
 		const currentIndex = songs.findIndex((song) => song.id === currentSongData.id);
-		await updateSongQueue(currentIndex || 0, songs, 'playlist', current.playlistId);
+		// A queued song that isn't part of the playlist keeps playing; continue from the start
+		await updateSongQueue(Math.max(currentIndex, 0), songs, 'playlist', current.playlistId);
 	}
 }
