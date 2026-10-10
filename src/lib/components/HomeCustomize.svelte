@@ -71,6 +71,24 @@
 	}
 </script>
 
+{#snippet toggle(label, description, checked, onchange)}
+	<label class="flex items-center justify-between gap-4 cursor-pointer mt-3 first-of-type:mt-0">
+		<span>
+			<span class="block font-semibold text-white">{label}</span>
+			<span class="block text-xs text-secondary-600">{description}</span>
+		</span>
+		<input
+			type="checkbox"
+			class="peer sr-only"
+			{checked}
+			onchange={(e) => onchange(e.currentTarget.checked)}
+		/>
+		<span
+			class="relative w-10 h-6 shrink-0 rounded-full bg-secondary-500 transition peer-checked:bg-primary-300 peer-focus-visible:ring-2 peer-focus-visible:ring-primary-400 after:absolute after:top-1 after:left-1 after:size-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4"
+		></span>
+	</label>
+{/snippet}
+
 {#snippet heading(text)}
 	<h3 class="text-xs font-bold uppercase tracking-wider text-secondary-600 mb-2">{text}</h3>
 {/snippet}
@@ -201,23 +219,18 @@
 
 		<section>
 			{@render heading('Background')}
-			<label class="flex items-center justify-between gap-4 cursor-pointer">
-				<span>
-					<span class="block font-semibold text-white">Show beatmap background</span>
-					<span class="block text-xs text-secondary-600">
-						The background of the current song behind the app
-					</span>
-				</span>
-				<input
-					type="checkbox"
-					class="peer sr-only"
-					checked={appearance.background}
-					onchange={(e) => updateAppearance({ background: e.currentTarget.checked })}
-				/>
-				<span
-					class="relative w-10 h-6 shrink-0 rounded-full bg-secondary-500 transition peer-checked:bg-primary-300 peer-focus-visible:ring-2 peer-focus-visible:ring-primary-400 after:absolute after:top-1 after:left-1 after:size-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4"
-				></span>
-			</label>
+			{@render toggle(
+				'Show beatmap background',
+				'The background of the current song behind the app',
+				appearance.background,
+				(checked) => updateAppearance({ background: checked })
+			)}
+			{@render toggle(
+				'Play beatmap videos',
+				'Maps with a video play it instead of the background',
+				appearance.video,
+				(checked) => updateAppearance({ video: checked })
+			)}
 			<div class="mt-4 {appearance.background ? '' : 'opacity-40 pointer-events-none'}">
 				<div class="flex justify-between text-sm mb-2">
 					<span class="font-semibold text-white">Background dim</span>

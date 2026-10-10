@@ -56,6 +56,7 @@
 				title={$currentSong.song.title}
 				class="absolute inset-0"
 				imageClass="blur-2xl scale-110"
+				video
 			/>
 			<div class="absolute inset-0 bg-app" style="opacity: {appearance.dim / 100}"></div>
 		</div>

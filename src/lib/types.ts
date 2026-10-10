@@ -45,6 +45,10 @@ interface MapSetInfo {
 	thumbnail?: string | null;
 	/** The small cover could not be loaded for this set, so it is not retried */
 	thumbnailUnavailable?: boolean;
+	/** Path of the beatmap video saved in the songs folder */
+	video?: string | null;
+	/** When the video starts, in ms relative to the audio */
+	videoOffset?: number;
 	[key: string]: any;
 }
 
@@ -121,6 +125,8 @@ export interface AppearanceSettings {
 	background: boolean;
 	/** Background dim in percent, like osu!'s "Background dim" */
 	dim: number;
+	/** Play the videos of beatmaps that have one instead of the background */
+	video?: boolean;
 }
 
 export type AccentColor = 'violet' | 'pink' | 'blue' | 'teal' | 'orange';

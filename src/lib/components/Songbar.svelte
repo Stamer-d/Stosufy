@@ -16,7 +16,13 @@
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
-	import { updateUserSettings, userSettings, updateCurrentQueue } from '#lib/stores/user.ts';
+	import {
+		updateUserSettings,
+		userSettings,
+		updateCurrentQueue,
+		updateAppearance
+	} from '#lib/stores/user.ts';
+	import { mapDataStore } from '#lib/stores/data.ts';
 
 	let currentTime = 0;
 	let duration = 0;
@@ -25,6 +31,9 @@
 	let volume = $userSettings.settings?.volume || 0.05;
 	let previousVolume = 1;
 	let shuffled = false;
+
+	$: hasVideo = !!$mapDataStore[$currentSong.song?.id]?.video;
+	$: videoOn = $userSettings.settings?.appearance?.video ?? true;
 
 	function formatTime(seconds) {
 		if (!seconds) return '0:00';
@@ -273,6 +282,21 @@
 		</div>
 
 		<div class="flex items-center justify-end gap-2">
+			{#if hasVideo}
+				<button
+					title={videoOn ? 'Hide beatmap video' : 'Play beatmap video'}
+					aria-label="Beatmap video"
+					aria-pressed={videoOn}
+					class="{ICON_BUTTON} {videoOn ? 'text-primary-500' : 'text-white/60 hover:text-white'}"
+					on:click={() => updateAppearance({ video: !videoOn })}
+				>
+					<span
+						class="{videoOn
+							? 'icon-[mingcute--video-line]'
+							: 'icon-[mingcute--video-off-line]'} size-5"
+					></span>
+				</button>
+			{/if}
 			<button
 				title="Queue"
 				aria-label="Queue"

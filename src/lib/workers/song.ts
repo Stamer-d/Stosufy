@@ -57,6 +57,7 @@ self.onmessage = async function (event) {
 					audioBase64: result.audioData,
 					audioPath: result.audioPath,
 					backgroundPath: result.backgroundPath,
+					video: result.video,
 					beatmapId: result.mapId,
 					setId: data.setId
 				},
@@ -92,6 +93,13 @@ const ffmpeg = {
 	convertToOpus: (inputPath: string, targetPath: string) =>
 		sendRequestToMain<boolean>('convertToOpus', { inputPath, targetPath })
 };
+
+/** The video of a beatmap and its start in ms: the `Video,offset,"file"` line in [Events] */
+export function findVideo(osuFileContent: string): { file: string; offset: number } | null {
+	const events = osuFileContent.split(/^\[Events\]\s*$/m)[1]?.split(/^\[/m)[0];
+	const match = events?.match(/^(?:Video|1)\s*,\s*(-?\d+)\s*,\s*"?([^",\r\n]+)"?/m);
+	return match ? { file: match[2].trim().replace(/\\/g, '/'), offset: Number(match[1]) } : null;
+}
 
 /** The background image of a beatmap: the `0,0,"file"` line in the [Events] section */
 export function findBackground(osuFileContent: string): string | null {
@@ -196,6 +204,7 @@ async function extractAudioFromBeatmap(
 		const audioFileMap = new Map<string, string>();
 		let foundMapId = '0';
 		let backgroundName: string | null = null;
+		let video: { file: string; offset: number } | null = null;
 
 		for (const osuFile of osuFiles) {
 			const content = await fs.readTextFile(osuFile);
@@ -221,6 +230,7 @@ async function extractAudioFromBeatmap(
 			}
 
 			backgroundName ??= findBackground(content);
+			video ??= findVideo(content);
 		}
 
 		self.postMessage({ type: 'progress', progress: 70, setId });
@@ -252,6 +262,20 @@ async function extractAudioFromBeatmap(
 			}
 		}
 
+		// Save the video as it is; formats the webview can't play are converted afterwards
+		let savedVideo: { path: string; offset: number } | null = null;
+		if (video) {
+			const entry = Object.values(zip.files).find(
+				(file) => !file.dir && file.name.toLowerCase() === video.file.toLowerCase()
+			);
+			const extension = video.file.split('.').pop().toLowerCase();
+			if (entry && /^[a-z0-9]{2,4}$/.test(extension)) {
+				const videoPath = await fs.path.join(mapSetsDir, `${setId}-video.${extension}`);
+				await fs.writeFile(videoPath, await entry.async('uint8array'));
+				savedVideo = { path: videoPath, offset: video.offset };
+			}
+		}
+
 		// Clean up
 		await fs.remove(extractDir);
 
@@ -263,6 +287,7 @@ async function extractAudioFromBeatmap(
 				audioData,
 				audioPath: firstAudioPath,
 				backgroundPath,
+				video: savedVideo,
 				mapId: foundMapId
 			};
 		}

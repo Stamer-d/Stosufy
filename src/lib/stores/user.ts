@@ -95,7 +95,8 @@ export const DEFAULT_HOME: HomeSettings = {
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
 	accent: 'violet',
 	background: true,
-	dim: 75
+	dim: 75,
+	video: true
 };
 
 export function updateHomeSettings(change: Partial<HomeSettings>) {

@@ -18,7 +18,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="fixed inset-0 z-40 flex flex-col bg-app" transition:fade={{ duration: 200 }}>
-	<BeatmapBackground setId={song?.id ?? null} title={song?.title} class="absolute inset-0" />
+	<BeatmapBackground setId={song?.id ?? null} title={song?.title} class="absolute inset-0" video />
 	<div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/70"></div>
 
 	<div class="relative">

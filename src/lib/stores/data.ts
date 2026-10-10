@@ -140,7 +140,8 @@ export async function deleteSong(setId: number | string) {
 			recursive: true
 		});
 	}
-	for (const imagePath of [mapData[setId].background, mapData[setId].thumbnail]) {
+	const { background, thumbnail, video } = mapData[setId];
+	for (const imagePath of [background, thumbnail, video]) {
 		if (imagePath && (await exists(imagePath, { baseDir: BaseDirectory.Home }))) {
 			await remove(imagePath, { baseDir: BaseDirectory.Home });
 		}
@@ -339,6 +340,12 @@ async function processWithWorker(
 						if (event.data.backgroundPath) {
 							mapSetData = { ...mapSetData, background: event.data.backgroundPath };
 						}
+						const video = event.data.video;
+						if (video && isPlayableVideo(video.path)) {
+							mapSetData = { ...mapSetData, video: video.path, videoOffset: video.offset };
+						} else if (video) {
+							queueVideoConversion(setId, video.path, video.offset);
+						}
 						console.log('Worker completed extraction for:', setId, 'Audio path:', audioPath);
 
 						if (audioPath) {
@@ -444,6 +451,62 @@ async function bufferToBase64(buffer: Uint8Array<ArrayBuffer>) {
 	return base64url.slice(base64url.indexOf(',') + 1);
 }
 
+/** Video formats the webview plays directly; others (mostly .avi and .flv) are converted */
+function isPlayableVideo(videoPath: string) {
+	return /\.(mp4|m4v|webm|mov)$/i.test(videoPath);
+}
+
+let videoConversions = Promise.resolve();
+
+/**
+ * Converts a video to mp4 in the background, one at a time: it takes a while and the song
+ * can be played without it in the meantime.
+ */
+function queueVideoConversion(setId: string, sourcePath: string, offset: number) {
+	videoConversions = videoConversions.then(async () => {
+		const targetPath = sourcePath.replace(/\.[^.]+$/, '.mp4');
+		try {
+			const ffmpeg = new FFmpeg();
+			await ffmpeg.load();
+			const input = `input.${sourcePath.split('.').pop()}`;
+			await ffmpeg.writeFile(input, await readFile(sourcePath, { baseDir: BaseDirectory.Home }));
+			// Muted 720p H.264; quick to encode and plays everywhere
+			await ffmpeg.exec([
+				'-i',
+				input,
+				'-an',
+				'-vf',
+				"scale=-2:'min(720,ih)'",
+				'-c:v',
+				'libx264',
+				'-preset',
+				'ultrafast',
+				'-crf',
+				'26',
+				'-pix_fmt',
+				'yuv420p',
+				'-movflags',
+				'+faststart',
+				'output.mp4'
+			]);
+			const data = (await ffmpeg.readFile('output.mp4')) as Uint8Array;
+			ffmpeg.terminate();
+			if (!data.length) throw new Error('empty output');
+			await writeFile(targetPath, data, { baseDir: BaseDirectory.Home });
+			mapDataStore.update((all) =>
+				all[setId]
+					? { ...all, [setId]: { ...all[setId], video: targetPath, videoOffset: offset } }
+					: all
+			);
+			await saveMapData();
+		} catch (error) {
+			console.warn('Could not convert the video of', setId, error);
+		} finally {
+			await remove(sourcePath, { baseDir: BaseDirectory.Home }).catch(() => {});
+		}
+	});
+}
+
 async function convertToOpus(inputPath: string, targetPath: string) {
 	const ffmpeg = new FFmpeg();
 	await ffmpeg.load();
@@ -493,6 +556,8 @@ async function updateMapsetData(mapsetData: MapSet) {
 			status: mapsetData.status || '',
 			tags: mapsetData.tags || '',
 			background: mapsetData.background || null,
+			video: mapsetData.video || null,
+			videoOffset: mapsetData.videoOffset || 0,
 			beatmaps: {},
 			created_at: mapsetData.createdAt || Date.now()
 		};
@@ -505,7 +570,9 @@ async function updateMapsetData(mapsetData: MapSet) {
 			covers: mapsetData.covers || updatedMapData[setId].covers,
 			bpm: mapsetData.bpm || updatedMapData[setId].bpm,
 			tags: mapsetData.tags || updatedMapData[setId].tags,
-			background: mapsetData.background || updatedMapData[setId].background || null
+			background: mapsetData.background || updatedMapData[setId].background || null,
+			video: mapsetData.video || updatedMapData[setId].video || null,
+			videoOffset: mapsetData.videoOffset ?? updatedMapData[setId].videoOffset ?? 0
 		});
 	}
 

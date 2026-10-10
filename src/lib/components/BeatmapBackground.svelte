@@ -1,12 +1,14 @@
 <script>
 	import { fade } from 'svelte/transition';
+	import BeatmapVideo from './BeatmapVideo.svelte';
 	import { backgroundUrls, colorFromString, mapDataStore } from '#lib/stores/data.ts';
 
 	/**
-	 * Shows the background of a beatmap set, cross-fading when it changes.
-	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string }}
+	 * Shows the background of a beatmap set, cross-fading when it changes. With `video`, the
+	 * beatmap video plays on top of it while the set is the current song.
+	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string, video?: boolean }}
 	 */
-	let { setId, title = '', class: className = '', imageClass = '' } = $props();
+	let { setId, title = '', class: className = '', imageClass = '', video = false } = $props();
 
 	let urls = $state([]);
 	let attempt = $state(0);
@@ -42,4 +44,7 @@
 			/>
 		{/if}
 	{/key}
+	{#if video}
+		<BeatmapVideo {setId} class={imageClass} />
+	{/if}
 </div>
