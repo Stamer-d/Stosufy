@@ -45,3 +45,71 @@
 		outline-offset: 2px;
 	}
 }
+
+/* Accent colors, chosen in the customization settings (data-accent on <html>) */
+@layer base {
+	:root[data-accent='pink'] {
+		--color-primary-100: oklch(0.32 0.1 355);
+		--color-primary-200: oklch(0.5 0.17 355);
+		--color-primary-300: oklch(0.66 0.2 355);
+		--color-primary-400: oklch(0.73 0.18 355);
+		--color-primary-500: oklch(0.81 0.13 355);
+		--color-primary-600: oklch(0.89 0.07 355);
+	}
+	:root[data-accent='blue'] {
+		--color-primary-100: oklch(0.32 0.09 240);
+		--color-primary-200: oklch(0.48 0.14 240);
+		--color-primary-300: oklch(0.6 0.16 240);
+		--color-primary-400: oklch(0.69 0.14 236);
+		--color-primary-500: oklch(0.8 0.11 232);
+		--color-primary-600: oklch(0.89 0.06 230);
+	}
+	:root[data-accent='teal'] {
+		--color-primary-100: oklch(0.32 0.06 185);
+		--color-primary-200: oklch(0.48 0.1 185);
+		--color-primary-300: oklch(0.6 0.12 185);
+		--color-primary-400: oklch(0.7 0.12 182);
+		--color-primary-500: oklch(0.81 0.1 180);
+		--color-primary-600: oklch(0.9 0.05 180);
+	}
+	:root[data-accent='orange'] {
+		--color-primary-100: oklch(0.34 0.08 55);
+		--color-primary-200: oklch(0.52 0.14 52);
+		--color-primary-300: oklch(0.66 0.17 50);
+		--color-primary-400: oklch(0.73 0.15 55);
+		--color-primary-500: oklch(0.82 0.11 60);
+		--color-primary-600: oklch(0.9 0.06 65);
+	}
+}
+
+/* Approach circle of the hit circle play button */
+@keyframes approach {
+	0% {
+		transform: scale(1.7);
+		opacity: 0;
+	}
+	30% {
+		opacity: 0.8;
+	}
+	100% {
+		transform: scale(1);
+		opacity: 0;
+	}
+}
+
+/* Triangles drifting upwards, like the osu!lazer backgrounds */
+@keyframes triangle-rise {
+	from {
+		top: 100%;
+	}
+	to {
+		top: -40%;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.animate-approach,
+	.animate-triangle {
+		animation: none !important;
+	}
+}

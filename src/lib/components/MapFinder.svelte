@@ -8,7 +8,6 @@
 	} from '#lib/stores/audio.ts';
 	import {
 		DEFAULT_SEARCH_FILTERS,
-		colorFromString,
 		fetchMaps,
 		formatSongData,
 		mapDataStore
@@ -27,11 +26,46 @@
 	import { playlists } from '#lib/stores/playlist.ts';
 	import { goto } from '$app/navigation';
 	import { BEATMAP_STATUS } from '#lib/beatmapStatus.ts';
+	import BeatmapBackground from './BeatmapBackground.svelte';
+	import Triangles from './Triangles.svelte';
+	import HitCircle from './HitCircle.svelte';
+	import HomeCustomize from './HomeCustomize.svelte';
+	import { DEFAULT_HOME } from '#lib/stores/user.ts';
+
+	let customizeOpen = $state(false);
+	let homeSettings = $derived({ ...DEFAULT_HOME, ...$userSettings.settings?.home });
+
+	// Picked once per visit, so the banner doesn't change while browsing
+	const randomPick = Math.random();
+
+	let hero = $derived.by(() => {
+		const downloaded = formatSongData($mapDataStore);
+		const randomSong = downloaded.length
+			? downloaded[Math.floor(randomPick * downloaded.length)]
+			: null;
+		const isDownloaded = (song) => !!$mapDataStore[song?.id];
+		if (homeSettings.heroBackground === 'pinned') {
+			const pinned = downloaded.find((song) => song.id == homeSettings.pinnedSetId);
+			if (pinned) return { song: pinned, label: 'Pinned', downloaded: true };
+		}
+		if (homeSettings.heroBackground === 'current' && $currentSong.song) {
+			return {
+				song: $currentSong.song,
+				label: $currentSong.isPlaying ? 'Now playing' : 'Paused',
+				downloaded: isDownloaded($currentSong.song)
+			};
+		}
+		return { song: randomSong, label: 'From your downloads', downloaded: true };
+	});
+	let heroPlaying = $derived($currentSong.song?.id == hero.song?.id && $currentSong.isPlaying);
+
+	function playHero() {
+		if ($currentSong.song?.id == hero.song.id) togglePlayback();
+		else playDownloaded(hero.song);
+	}
 
 	const hour = new Date().getHours();
 	const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-
-	let failedCovers = $state({});
 
 	// Newest downloads first
 	let downloadedSongs = $derived(formatSongData($mapDataStore).reverse());
@@ -211,13 +245,50 @@
 	});
 </script>
 
-<div class="px-6 pt-6 pb-10">
-	<h1 class="text-3xl font-bold tracking-tight mb-5">
-		{greeting}{$user?.username ? `, ${$user.username}` : ''}
-	</h1>
+{#snippet heroSection()}
+	{#if hero.song}
+		<section class="relative h-64 xl:h-72 rounded-xl overflow-hidden">
+			<BeatmapBackground setId={hero.song.id} title={hero.song.title} class="absolute inset-0" />
+			<!-- Keeps the text readable on bright backgrounds -->
+			<div class="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/5"></div>
+			<Triangles count={14} seed={Number(hero.song.id)} />
+			<div class="relative h-full flex flex-col justify-end gap-2 p-6 max-w-2xl">
+				<span
+					class="w-fit px-2 py-0.5 rounded bg-primary-300 text-[11px] font-bold uppercase tracking-wide"
+				>
+					{hero.label}
+				</span>
+				<h2
+					class="text-4xl font-extrabold tracking-tight leading-tight line-clamp-2 drop-shadow-lg"
+				>
+					{hero.song.title}
+				</h2>
+				<p class="text-white/80 font-medium truncate">
+					{hero.song.artist}{hero.song.creator ? ` · mapped by ${hero.song.creator}` : ''}
+				</p>
+				<div class="mt-3 flex items-center gap-4">
+					<HitCircle
+						playing={heroPlaying}
+						label={heroPlaying ? 'Pause' : `Play ${hero.song.title}`}
+						onclick={playHero}
+					/>
+					{#if hero.downloaded}
+						<button
+							class="px-4 h-9 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold cursor-pointer transition"
+							onclick={() => goto('/playlist/-1')}
+						>
+							Open downloads
+						</button>
+					{/if}
+				</div>
+			</div>
+		</section>
+	{/if}
+{/snippet}
 
+{#snippet playlistsSection()}
 	{#if $playlists.length}
-		<div class="grid grid-cols-2 xl:grid-cols-3 gap-2 mb-8">
+		<div class="grid grid-cols-2 xl:grid-cols-3 gap-2">
 			{#each $playlists.slice(0, 6) as playlist (playlist.id)}
 				{@const playingThis = $songQueue.playlistId == playlist.id && $currentSong.isPlaying}
 				<button
@@ -234,9 +305,11 @@
 			{/each}
 		</div>
 	{/if}
+{/snippet}
 
+{#snippet recentSection()}
 	{#if downloadedSongs.length}
-		<section class="mb-10">
+		<section>
 			<div class="flex items-baseline justify-between mb-3">
 				<h2 class="text-xl font-bold tracking-tight">Recently downloaded</h2>
 				<a
@@ -250,20 +323,11 @@
 				{#each downloadedSongs.slice(0, 6) as song, index (song.id)}
 					{@const playingThis = $currentSong.song?.id == song.id && $currentSong.isPlaying}
 					<div class="group min-w-0 {index >= 3 ? 'hidden xl:block' : ''}">
-						<div
-							class="relative aspect-square rounded-md overflow-hidden mb-2"
-							style="background-color: {colorFromString(song.title)}"
-						>
-							<img
-								src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list@2x.jpg"
-								alt=""
-								loading="lazy"
-								class="size-full object-cover {failedCovers[song.id] ? 'invisible' : ''}"
-								onerror={() => (failedCovers[song.id] = true)}
-							/>
+						<div class="relative aspect-square rounded-md overflow-hidden mb-2">
+							<BeatmapBackground setId={song.id} title={song.title} class="absolute inset-0" />
 							<button
 								aria-label="Play {song.title}"
-								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
+								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white ring-2 ring-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
 									? 'opacity-100'
 									: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
 								onclick={() => (playingThis ? togglePlayback() : playDownloaded(song))}
@@ -284,105 +348,138 @@
 			</div>
 		</section>
 	{/if}
+{/snippet}
 
-	<h2 class="text-xl font-bold tracking-tight mb-3">Discover beatmaps</h2>
-	<div class="flex flex-wrap items-center gap-2 mb-4">
-		<div class="relative flex flex-1 min-w-64 items-center">
-			<span
-				class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
-			></span>
-			<Input
-				bind:value={search}
-				on:input={(e) => {
-					debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
-				}}
-				placeholder="Search beatmaps by title, artist or mapper"
-				class="pl-9 pr-9"
-			/>
-			{#if searching}
+{#snippet discoverSection()}
+	<section>
+		<h2 class="text-xl font-bold tracking-tight mb-3">Discover beatmaps</h2>
+		<div class="flex flex-wrap items-center gap-2 mb-4">
+			<div class="relative flex flex-1 min-w-64 items-center">
 				<span
-					class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
+					class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
 				></span>
-			{:else if search}
-				<button
-					aria-label="Clear search"
-					class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
-					onclick={clearSearch}
-				>
-					<span class="icon-[fa6-solid--xmark] size-4"></span>
-				</button>
-			{/if}
+				<Input
+					bind:value={search}
+					on:input={(e) => {
+						debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
+					}}
+					placeholder="Search beatmaps by title, artist or mapper"
+					class="pl-9 pr-9"
+				/>
+				{#if searching}
+					<span
+						class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
+					></span>
+				{:else if search}
+					<button
+						aria-label="Clear search"
+						class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
+						onclick={clearSearch}
+					>
+						<span class="icon-[fa6-solid--xmark] size-4"></span>
+					</button>
+				{/if}
+			</div>
+			<Select
+				label="Status"
+				options={STATUS_OPTIONS}
+				value={filters.status}
+				onchange={(status) => setFilter({ status })}
+			/>
+			<Select
+				label="Sort"
+				icon="icon-[fa6-solid--arrow-down-short-wide]"
+				options={SORT_OPTIONS}
+				value={filters.sort}
+				onchange={(sort) => setFilter({ sort })}
+			/>
 		</div>
-		<Select
-			label="Status"
-			options={STATUS_OPTIONS}
-			value={filters.status}
-			onchange={(status) => setFilter({ status })}
-		/>
-		<Select
-			label="Sort"
-			icon="icon-[fa6-solid--arrow-down-short-wide]"
-			options={SORT_OPTIONS}
-			value={filters.sort}
-			onchange={(sort) => setFilter({ sort })}
-		/>
-	</div>
-	{#if searchError && !allMaps?.length}
-		<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">
-			<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
-			<p class="text-xl">Couldn't load beatmaps</p>
-			<p class="text-sm">{searchError}</p>
-			<Button type="primary" on:click={() => runSearch(search)}>Try again</Button>
-		</div>
-	{:else if osuMapsSearch && !allMaps?.length}
-		<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
-			<span class="icon-[fa6-solid--music] size-10"></span>
-			<p class="text-xl">No beatmaps found{search ? ` for "${search}"` : ''}</p>
-			<p>
-				{filters.status !== 'any'
-					? 'Try a different search term or status'
-					: 'Try a different search term'}
-			</p>
-		</div>
-	{:else if osuMapsSearch}
-		<div
-			class="grid xl:grid-cols-3 md:grid-cols-2 gap-4 grid-cols-1 transition-opacity {searching
-				? 'opacity-50'
-				: ''}"
+		{#if searchError && !allMaps?.length}
+			<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">
+				<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
+				<p class="text-xl">Couldn't load beatmaps</p>
+				<p class="text-sm">{searchError}</p>
+				<Button type="primary" on:click={() => runSearch(search)}>Try again</Button>
+			</div>
+		{:else if osuMapsSearch && !allMaps?.length}
+			<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
+				<span class="icon-[fa6-solid--music] size-10"></span>
+				<p class="text-xl">No beatmaps found{search ? ` for "${search}"` : ''}</p>
+				<p>
+					{filters.status !== 'any'
+						? 'Try a different search term or status'
+						: 'Try a different search term'}
+				</p>
+			</div>
+		{:else if osuMapsSearch}
+			<div
+				class="grid xl:grid-cols-3 md:grid-cols-2 gap-4 grid-cols-1 transition-opacity {searching
+					? 'opacity-50'
+					: ''}"
+			>
+				{#key allMaps}
+					{#each allMaps as map}
+						<ContextMenu>
+							<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
+							<svelte:fragment slot="menu">
+								{#if isMapDownloaded(map.id.toString())}
+									<QueueMenuItems song={map} />
+								{/if}
+								<Button
+									type="ghost"
+									icon="icon-[mingcute--add-circle-line]"
+									class="w-full rounded-md text-sm hover:bg-secondary-400"
+									on:click={() => {
+										addPlaylistModal.open = true;
+										addPlaylistModal.map = map;
+									}}
+								>
+									Add to Playlist
+								</Button>
+							</svelte:fragment>
+						</ContextMenu>
+					{/each}
+				{/key}
+			</div>
+
+			<div bind:this={endOfContent} class=""></div>
+		{/if}
+
+		{#if loading && !searchError}
+			<div class="w-full text-center">
+				<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
+			</div>
+		{/if}
+	</section>
+{/snippet}
+
+<div class="px-6 pt-6 pb-10 flex flex-col gap-10">
+	<div class="flex items-center justify-between gap-4 -mb-4">
+		<h1 class="text-3xl font-bold tracking-tight">
+			{greeting}{$user?.username ? `, ${$user.username}` : ''}
+		</h1>
+		<button
+			class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer transition"
+			onclick={() => (customizeOpen = true)}
 		>
-			{#key allMaps}
-				{#each allMaps as map}
-					<ContextMenu>
-						<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
-						<svelte:fragment slot="menu">
-							{#if isMapDownloaded(map.id.toString())}
-								<QueueMenuItems song={map} />
-							{/if}
-							<Button
-								type="ghost"
-								icon="icon-[mingcute--add-circle-line]"
-								class="w-full rounded-md text-sm hover:bg-secondary-400"
-								on:click={() => {
-									addPlaylistModal.open = true;
-									addPlaylistModal.map = map;
-								}}
-							>
-								Add to Playlist
-							</Button>
-						</svelte:fragment>
-					</ContextMenu>
-				{/each}
-			{/key}
-		</div>
+			<span class="icon-[mingcute--palette-line] size-[18px]"></span>
+			Customize
+		</button>
+	</div>
 
-		<div bind:this={endOfContent} class=""></div>
-	{/if}
-
-	{#if loading && !searchError}
-		<div class="w-full text-center">
-			<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
-		</div>
-	{/if}
+	{#each homeSettings.sections.filter((section) => section.visible) as section (section.id)}
+		{#if section.id === 'hero'}
+			{@render heroSection()}
+		{:else if section.id === 'playlists'}
+			{@render playlistsSection()}
+		{:else if section.id === 'recent'}
+			{@render recentSection()}
+		{:else if section.id === 'discover'}
+			{@render discoverSection()}
+		{/if}
+	{/each}
 </div>
+
+<HomeCustomize bind:open={customizeOpen} />
 
 <SongToPlaylistModal bind:open={addPlaylistModal.open} bind:map={addPlaylistModal.map} />

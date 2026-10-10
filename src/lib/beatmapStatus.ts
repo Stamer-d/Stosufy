@@ -18,3 +18,33 @@ export function beatmapStatus(status: string) {
 		}
 	);
 }
+
+// osu!'s star rating color spectrum
+const DIFFICULTY_SPECTRUM: [number, [number, number, number]][] = [
+	[0.1, [66, 144, 251]],
+	[1.25, [79, 192, 255]],
+	[2, [79, 255, 213]],
+	[2.5, [124, 255, 79]],
+	[3.3, [246, 240, 92]],
+	[4.2, [255, 128, 104]],
+	[4.9, [255, 78, 111]],
+	[5.8, [198, 69, 184]],
+	[6.7, [101, 99, 222]],
+	[7.7, [24, 21, 142]],
+	[9, [0, 0, 0]]
+];
+
+/** Color of a star rating, as osu! shows it */
+export function difficultyColor(stars: number) {
+	if (stars <= DIFFICULTY_SPECTRUM[0][0]) return 'rgb(170 170 170)';
+	for (let i = 1; i < DIFFICULTY_SPECTRUM.length; i++) {
+		const [to, toColor] = DIFFICULTY_SPECTRUM[i];
+		if (stars <= to) {
+			const [from, fromColor] = DIFFICULTY_SPECTRUM[i - 1];
+			const t = (stars - from) / (to - from);
+			const [r, g, b] = fromColor.map((c, j) => Math.round(c + (toColor[j] - c) * t));
+			return `rgb(${r} ${g} ${b})`;
+		}
+	}
+	return 'rgb(0 0 0)';
+}

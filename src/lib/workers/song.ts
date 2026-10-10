@@ -56,6 +56,7 @@ self.onmessage = async function (event) {
 					type: 'extract-complete',
 					audioBase64: result.audioData,
 					audioPath: result.audioPath,
+					backgroundPath: result.backgroundPath,
 					beatmapId: result.mapId,
 					setId: data.setId
 				},
@@ -91,6 +92,13 @@ const ffmpeg = {
 	convertToOpus: (inputPath: string, targetPath: string) =>
 		sendRequestToMain<boolean>('convertToOpus', { inputPath, targetPath })
 };
+
+/** The background image of a beatmap: the `0,0,"file"` line in the [Events] section */
+export function findBackground(osuFileContent: string): string | null {
+	const events = osuFileContent.split(/^\[Events\]\s*$/m)[1]?.split(/^\[/m)[0];
+	const match = events?.match(/^0\s*,\s*0\s*,\s*"?([^",\r\n]+)"?/m);
+	return match ? match[1].trim().replace(/\\/g, '/') : null;
+}
 
 async function extractAudioFromBeatmap(
 	mapsetBuffer: ArrayBuffer,
@@ -187,6 +195,7 @@ async function extractAudioFromBeatmap(
 		// Process .osu files to find audio files
 		const audioFileMap = new Map<string, string>();
 		let foundMapId = '0';
+		let backgroundName: string | null = null;
 
 		for (const osuFile of osuFiles) {
 			const content = await fs.readTextFile(osuFile);
@@ -210,6 +219,8 @@ async function extractAudioFromBeatmap(
 
 				audioFileMap.set(beatmapId, audioFileName);
 			}
+
+			backgroundName ??= findBackground(content);
 		}
 
 		self.postMessage({ type: 'progress', progress: 70, setId });
@@ -228,6 +239,19 @@ async function extractAudioFromBeatmap(
 			}
 		}
 
+		// Save the background image next to the audio
+		let backgroundPath: string | null = null;
+		if (backgroundName) {
+			const entry = Object.values(zip.files).find(
+				(file) => !file.dir && file.name.toLowerCase() === backgroundName.toLowerCase()
+			);
+			const extension = backgroundName.split('.').pop().toLowerCase();
+			if (entry && ['jpg', 'jpeg', 'png'].includes(extension)) {
+				backgroundPath = await fs.path.join(mapSetsDir, `${setId}-bg.${extension}`);
+				await fs.writeFile(backgroundPath, await entry.async('uint8array'));
+			}
+		}
+
 		// Clean up
 		await fs.remove(extractDir);
 
@@ -238,6 +262,7 @@ async function extractAudioFromBeatmap(
 			return {
 				audioData,
 				audioPath: firstAudioPath,
+				backgroundPath,
 				mapId: foundMapId
 			};
 		}

@@ -30,6 +30,8 @@
 	import SongToPlaylistModal from '#lib/components/SongToPlaylistModal.svelte';
 	import QueueMenuItems from '#lib/components/QueueMenuItems.svelte';
 	import PlaylistCover from '#lib/components/PlaylistCover.svelte';
+	import HitCircle from '#lib/components/HitCircle.svelte';
+	import Triangles from '#lib/components/Triangles.svelte';
 	import { colorFromImage, colorFromString } from '#lib/stores/data.ts';
 	import { shuffleQueue } from '#lib/stores/audio.ts';
 	import { user, updateUserSettings } from '#lib/stores/user.ts';
@@ -247,13 +249,14 @@
 		style="background: linear-gradient(to bottom, {headerColor ??
 			'transparent'} 0, transparent 26rem)"
 	>
-		<header class="flex items-end gap-6 px-6 pt-14 pb-6">
+		<header class="relative flex items-end gap-6 px-6 pt-14 pb-6 overflow-hidden">
+			<Triangles count={16} seed={Number(playlistId) || 7} />
 			<PlaylistCover
 				playlist={playlistData}
-				class="size-44 xl:size-52 rounded-md shadow-2xl shadow-black/50"
+				class="relative size-44 xl:size-52 rounded-md shadow-2xl shadow-black/50"
 				iconClass="size-16"
 			/>
-			<div class="min-w-0 pb-1">
+			<div class="relative min-w-0 pb-1">
 				<p class="text-sm font-semibold">
 					{isDownloadedPlaylist
 						? 'On this device'
@@ -283,24 +286,17 @@
 		</header>
 
 		<div class="flex items-center gap-5 px-6 py-4 bg-black/10">
-			<button
-				aria-label={isPlayingThis ? 'Pause' : 'Play'}
+			<HitCircle
+				playing={isPlayingThis}
 				disabled={!songs.length}
-				class="size-14 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/30 cursor-pointer transition hover:scale-105 hover:bg-primary-400 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
-				on:click={async () => {
+				onclick={async () => {
 					if ($songQueue?.playlistId == playlistId) {
 						togglePlayback();
 					} else if (songs.length > 0) {
 						await setSongQueue(0, songs, 'playlist', playlistId);
 					}
 				}}
-			>
-				<span
-					class="{isPlayingThis
-						? 'icon-[mingcute--pause-fill]'
-						: 'icon-[mingcute--play-fill]'} size-7"
-				></span>
-			</button>
+			/>
 
 			<button
 				title={shuffleOn ? 'Disable shuffle' : 'Enable shuffle'}

@@ -306,6 +306,9 @@ async function processWithWorker(
 				if (type === 'extract-complete' && eventSetId === setId) {
 					try {
 						const audioPath = event.data.audioPath;
+						if (event.data.backgroundPath) {
+							mapSetData = { ...mapSetData, background: event.data.backgroundPath };
+						}
 						console.log('Worker completed extraction for:', setId, 'Audio path:', audioPath);
 
 						if (audioPath) {
@@ -459,6 +462,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 			bpm: mapsetData.bpm || 0,
 			status: mapsetData.status || '',
 			tags: mapsetData.tags || '',
+			background: mapsetData.background || null,
 			beatmaps: {},
 			created_at: mapsetData.createdAt || Date.now()
 		};
@@ -470,7 +474,8 @@ async function updateMapsetData(mapsetData: MapSet) {
 			status: mapsetData.status || updatedMapData[setId].status,
 			covers: mapsetData.covers || updatedMapData[setId].covers,
 			bpm: mapsetData.bpm || updatedMapData[setId].bpm,
-			tags: mapsetData.tags || updatedMapData[setId].tags
+			tags: mapsetData.tags || updatedMapData[setId].tags,
+			background: mapsetData.background || updatedMapData[setId].background || null
 		});
 	}
 
@@ -557,4 +562,29 @@ export function colorFromImage(url: string): Promise<string | null> {
 		);
 	}
 	return imageColorCache.get(url);
+}
+
+const localBackgrounds = new Map<string, Promise<string | null>>();
+
+/** Online banner of a beatmap set, made from its background */
+export function coverUrl(setId: number | string) {
+	return `https://assets.ppy.sh/beatmaps/${setId}/covers/cover@2x.jpg`;
+}
+
+/**
+ * The background of a beatmap set: the image saved with the download (full size, works
+ * offline) or the online banner.
+ */
+export function backgroundUrl(setId: number | string): Promise<string> {
+	const path = get(mapDataStore)[setId]?.background;
+	if (!path) return Promise.resolve(coverUrl(setId));
+	if (!localBackgrounds.has(path)) {
+		localBackgrounds.set(
+			path,
+			readFile(path, { baseDir: BaseDirectory.Home })
+				.then((data) => URL.createObjectURL(new Blob([data])))
+				.catch(() => null)
+		);
+	}
+	return localBackgrounds.get(path).then((url) => url ?? coverUrl(setId));
 }

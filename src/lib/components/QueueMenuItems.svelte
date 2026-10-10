@@ -2,6 +2,7 @@
 	import Button from './Button.svelte';
 	import { queueSong } from '#lib/stores/audio.ts';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { updateHomeSettings } from '#lib/stores/user.ts';
 
 	/** @type {{ song: import('#lib/types.ts').MapSet }} */
 	let { song } = $props();
@@ -27,4 +28,15 @@
 	on:click={() => add(false)}
 >
 	Add to queue
+</Button>
+<Button
+	type="ghost"
+	class="w-full rounded-md text-sm hover:bg-secondary-400"
+	icon="icon-[mingcute--pin-line]"
+	on:click={() => {
+		updateHomeSettings({ heroBackground: 'pinned', pinnedSetId: song.id });
+		showToast(`Pinned "${song.title}" to the home page`);
+	}}
+>
+	Pin to home
 </Button>

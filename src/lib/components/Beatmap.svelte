@@ -8,7 +8,7 @@
 		formatSongData,
 		colorFromString
 	} from '#lib/stores/data.ts';
-	import { beatmapStatus } from '#lib/beatmapStatus.ts';
+	import { beatmapStatus, difficultyColor } from '#lib/beatmapStatus.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import { playlists } from '#lib/stores/playlist.ts';
 
@@ -60,40 +60,13 @@
 
 	function sortAndColorDifficulties(beatmaps) {
 		if (!beatmaps) return [];
-
 		const beatmapsArray = Array.isArray(beatmaps) ? [...beatmaps] : Object.values(beatmaps);
-
-		if (!beatmapsArray.length) return [];
-
 		return beatmapsArray
 			.sort((a, b) => a.difficulty_rating - b.difficulty_rating)
-			.map((beatmap) => {
-				const rating = beatmap.difficulty_rating;
-				let color;
-				if (rating < 2.0) {
-					color = 'bg-blue-500';
-				} else if (rating < 2.7) {
-					color = 'bg-green-500';
-				} else if (rating < 4.0) {
-					color = 'bg-yellow-400';
-				} else if (rating < 5.3) {
-					color = 'bg-red-400';
-				} else if (rating < 6.0) {
-					color = 'bg-pink-500';
-				} else if (rating < 6.5) {
-					color = 'bg-purple-600';
-				} else if (rating < 7.5) {
-					color = 'bg-indigo-700';
-				} else if (rating < 8.0) {
-					color = 'bg-violet-950';
-				} else {
-					color = 'bg-stone-950';
-				}
-				return {
-					...beatmap,
-					difficultyColor: color
-				};
-			});
+			.map((beatmap) => ({
+				...beatmap,
+				difficultyColor: difficultyColor(beatmap.difficulty_rating)
+			}));
 	}
 </script>
 
@@ -131,7 +104,7 @@
 
 		<button
 			aria-label={isPlaying ? `Pause preview of ${map.title}` : `Play preview of ${map.title}`}
-			class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {isPlaying
+			class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white ring-2 ring-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {isPlaying
 				? 'opacity-100 translate-y-0'
 				: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
 			on:click={() => {
@@ -160,7 +133,11 @@
 						title="{sortedBeatmaps.length} difficulties"
 					>
 						{#each sortedBeatmaps.slice(0, 8) as beatmap (beatmap.id)}
-							<span class="w-1.5 h-3 rounded-full {beatmap.difficultyColor}"></span>
+							<span
+								class="w-1.5 h-3 rounded-full ring-1 ring-black/30"
+								style="background-color: {beatmap.difficultyColor}"
+								title="{beatmap.version} ({beatmap.difficulty_rating?.toFixed(2)}★)"
+							></span>
 						{/each}
 						{#if sortedBeatmaps.length > 8}
 							<span class="ml-0.5">+{sortedBeatmaps.length - 8}</span>

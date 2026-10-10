@@ -3,7 +3,14 @@ import { get, writable } from 'svelte/store';
 import { playlistLoadingStatus } from './playlist';
 import { setSongQueue } from './audio';
 import { mapDataStore } from './data';
-import type { Settings, StoredQueue, User, UserSettings } from '../types';
+import type {
+	AppearanceSettings,
+	HomeSettings,
+	Settings,
+	StoredQueue,
+	User,
+	UserSettings
+} from '../types';
 
 export const user = writable<User>({});
 export const userSettings = writable<UserSettings>({
@@ -72,3 +79,37 @@ async function initializeStores() {
 	}
 }
 initializeStores();
+
+export const DEFAULT_HOME: HomeSettings = {
+	sections: [
+		{ id: 'hero', visible: true },
+		{ id: 'playlists', visible: true },
+		{ id: 'recent', visible: true },
+		{ id: 'discover', visible: true }
+	],
+	heroBackground: 'current',
+	pinnedSetId: null
+};
+
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+	accent: 'violet',
+	background: true,
+	dim: 75
+};
+
+export function updateHomeSettings(change: Partial<HomeSettings>) {
+	userSettings.update((u) => ({
+		...u,
+		settings: { ...u.settings, home: { ...DEFAULT_HOME, ...u.settings.home, ...change } }
+	}));
+}
+
+export function updateAppearance(change: Partial<AppearanceSettings>) {
+	userSettings.update((u) => ({
+		...u,
+		settings: {
+			...u.settings,
+			appearance: { ...DEFAULT_APPEARANCE, ...u.settings.appearance, ...change }
+		}
+	}));
+}

@@ -54,7 +54,7 @@
 	}
 </script>
 
-<header class="h-12 shrink-0 flex items-center bg-app" data-tauri-drag-region>
+<header class="h-12 shrink-0 flex items-center" data-tauri-drag-region>
 	<div class="flex items-center gap-1 pl-3" data-tauri-drag-region>
 		<img src="/NoLetterLogo.png" alt="" class="size-6 mr-2 pointer-events-none" />
 		{#if $user?.username}

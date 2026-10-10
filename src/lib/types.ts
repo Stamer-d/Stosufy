@@ -84,11 +84,33 @@ export interface SearchFilters {
 	sort: string;
 }
 
+export type HomeSectionId = 'hero' | 'playlists' | 'recent' | 'discover';
+
+export interface HomeSettings {
+	/** Sections of the home page in display order */
+	sections: { id: HomeSectionId; visible: boolean }[];
+	/** Which beatmap background the hero banner shows */
+	heroBackground: 'current' | 'random' | 'pinned';
+	pinnedSetId?: number | string | null;
+}
+
+export interface AppearanceSettings {
+	accent: AccentColor;
+	/** Show the background of the current song behind the app */
+	background: boolean;
+	/** Background dim in percent, like osu!'s "Background dim" */
+	dim: number;
+}
+
+export type AccentColor = 'violet' | 'pink' | 'blue' | 'teal' | 'orange';
+
 export interface Settings {
 	volume?: number;
 	shuffle?: boolean;
 	repeat?: RepeatMode;
 	searchFilters?: SearchFilters;
+	home?: HomeSettings;
+	appearance?: AppearanceSettings;
 }
 
 /** Queue state persisted between app starts */
