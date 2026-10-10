@@ -94,6 +94,17 @@ export interface HomeSettings {
 	/** Which beatmap background the hero banner shows */
 	heroBackground: 'current' | 'random' | 'pinned';
 	pinnedSetId?: number | string | null;
+	/** Widgets on the desktop home page */
+	widgets?: PlacedWidget[];
+}
+
+export interface PlacedWidget {
+	uid: string;
+	/** Key in the widget registry */
+	type: string;
+	/** Position of the top left corner as a fraction of the desktop (0 to 1) */
+	x: number;
+	y: number;
 }
 
 export interface AppearanceSettings {

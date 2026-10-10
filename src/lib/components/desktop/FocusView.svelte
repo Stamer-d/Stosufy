@@ -1,8 +1,8 @@
 <script>
 	import { fade } from 'svelte/transition';
 	import BeatmapBackground from '../BeatmapBackground.svelte';
-	import ClockWidget from './ClockWidget.svelte';
-	import NowPlayingWidget from './NowPlayingWidget.svelte';
+	import ClockWidget from '../widgets/MinimalClock.svelte';
+	import NowPlayingWidget from '../widgets/MacNowPlaying.svelte';
 	import Titlebar from '../Titlebar.svelte';
 	import { focusMode, currentSong } from '#lib/stores/audio.ts';
 	import { wallpaper } from '#lib/stores/home.ts';
@@ -28,9 +28,9 @@
 	<div class="relative flex-1 flex flex-col justify-between p-12">
 		<ClockWidget size="lg" />
 		<div class="flex items-end justify-between gap-6">
-			<NowPlayingWidget class="w-full max-w-md" />
+			<NowPlayingWidget />
 			<button
-				class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/45 backdrop-blur-md ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer transition"
+				class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer transition"
 				onclick={() => focusMode.set(false)}
 			>
 				<span class="icon-[mingcute--fullscreen-exit-line] size-[18px]"></span>

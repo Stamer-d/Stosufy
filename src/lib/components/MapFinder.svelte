@@ -31,10 +31,11 @@
 	import Triangles from './Triangles.svelte';
 	import PlayButton from './PlayButton.svelte';
 	import HomeCustomize from './HomeCustomize.svelte';
-	import ClockWidget from './desktop/ClockWidget.svelte';
-	import NowPlayingWidget from './desktop/NowPlayingWidget.svelte';
-	import FetchWidget from './desktop/FetchWidget.svelte';
-	import PlaylistDock from './desktop/PlaylistDock.svelte';
+	import DesktopCanvas from './DesktopCanvas.svelte';
+	import WidgetStore from './WidgetStore.svelte';
+
+	let editingWidgets = $state(false);
+	let widgetStoreOpen = $state(false);
 	import { wallpaper } from '#lib/stores/home.ts';
 	import { DEFAULT_HOME } from '#lib/stores/user.ts';
 
@@ -438,10 +439,20 @@
 	</section>
 {/snippet}
 
+{#snippet desktopButton(icon, label, onclick)}
+	<button
+		class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer transition"
+		{onclick}
+	>
+		<span class="{icon} size-[18px]"></span>
+		{label}
+	</button>
+{/snippet}
+
 {#snippet customizeButton(onWallpaper)}
 	<button
 		class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold cursor-pointer transition {onWallpaper
-			? 'bg-black/45 backdrop-blur-md ring-1 ring-white/10 text-white/80 hover:text-white'
+			? 'bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 text-white/80 hover:text-white'
 			: 'text-secondary-600 hover:text-white hover:bg-white/10'}"
 		onclick={() => (customizeOpen = true)}
 	>
@@ -459,41 +470,42 @@
 			class="absolute inset-0"
 		/>
 		<div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60"></div>
-		<div class="relative h-full flex flex-col justify-between gap-6 p-8">
-			<div class="flex items-start justify-between gap-6">
-				<ClockWidget />
-				<div class="flex flex-col items-end gap-3">
-					<div class="flex gap-2">
-						<button
-							class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold bg-black/45 backdrop-blur-md ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer transition"
-							onclick={() => focusMode.set(true)}
-						>
-							<span class="icon-[mingcute--fullscreen-line] size-[18px]"></span>
-							Focus
-						</button>
-						{@render customizeButton(true)}
-					</div>
-					<div class="hidden lg:block w-80"><FetchWidget /></div>
-				</div>
-			</div>
-			<div class="flex items-end justify-between gap-6">
-				<NowPlayingWidget class="w-full max-w-sm" />
-				<div class="flex flex-col items-end gap-4">
-					<PlaylistDock />
-					<button
-						class="flex items-center gap-1.5 text-sm font-semibold text-white/70 hover:text-white cursor-pointer drop-shadow"
-						onclick={(e) =>
-							e.currentTarget.closest('[data-scroll-container]')?.scrollTo({
-								top: e.currentTarget.closest('section').offsetHeight,
-								behavior: 'smooth'
-							})}
-					>
-						Browse beatmaps
-						<span class="icon-[mingcute--arrow-down-line] size-4"></span>
-					</button>
-				</div>
-			</div>
+		<DesktopCanvas editing={editingWidgets} />
+		<div class="absolute top-6 right-6 z-30 flex gap-2">
+			{#if editingWidgets}
+				{@render desktopButton(
+					'icon-[mingcute--add-line]',
+					'Add widgets',
+					() => (widgetStoreOpen = true)
+				)}
+				<button
+					class="flex items-center gap-2 px-4 h-9 rounded-full text-sm font-bold bg-white text-black hover:bg-white/90 cursor-pointer transition"
+					onclick={() => (editingWidgets = false)}
+				>
+					Done
+				</button>
+			{:else}
+				{@render desktopButton(
+					'icon-[mingcute--layout-4-line]',
+					'Edit widgets',
+					() => (editingWidgets = true)
+				)}
+				{@render desktopButton('icon-[mingcute--fullscreen-line]', 'Focus', () =>
+					focusMode.set(true)
+				)}
+				{@render customizeButton(true)}
+			{/if}
 		</div>
+		<button
+			class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 text-sm font-semibold text-white/70 hover:text-white cursor-pointer drop-shadow"
+			onclick={(e) =>
+				e.currentTarget
+					.closest('[data-scroll-container]')
+					?.scrollTo({ top: e.currentTarget.closest('section').offsetHeight, behavior: 'smooth' })}
+		>
+			Browse beatmaps
+			<span class="icon-[mingcute--arrow-down-line] size-4"></span>
+		</button>
 	</section>
 
 	<div class="px-6 pt-8 pb-10 flex flex-col gap-10">
@@ -531,5 +543,6 @@
 {/if}
 
 <HomeCustomize bind:open={customizeOpen} />
+<WidgetStore bind:open={widgetStoreOpen} />
 
 <SongToPlaylistModal bind:open={addPlaylistModal.open} bind:map={addPlaylistModal.map} />

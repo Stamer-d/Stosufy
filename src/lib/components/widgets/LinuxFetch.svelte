@@ -1,5 +1,5 @@
 <script>
-	import Widget from './Widget.svelte';
+	import TerminalWindow from './TerminalWindow.svelte';
 	import { user } from '#lib/stores/user.ts';
 	import { mapDataStore, formatSongData } from '#lib/stores/data.ts';
 	import { playlists } from '#lib/stores/playlist.ts';
@@ -37,22 +37,23 @@
 	];
 </script>
 
-<Widget class="p-5 font-mono text-sm">
+<TerminalWindow title="~ : stosufetch" class="w-80">
+	<p class="text-white/50"><span class="text-primary-500">$</span> stosufetch</p>
 	<p>
 		<span class="font-bold text-primary-500">{$user?.username?.toLowerCase() ?? 'user'}</span><span
 			class="text-white/60">@</span
 		><span class="font-bold text-primary-500">stosufy</span>
 	</p>
 	<p class="text-white/40">{'-'.repeat(($user?.username?.length ?? 4) + 8)}</p>
-	<dl class="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3">
+	<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3">
 		{#each rows as [key, value] (key)}
 			<dt class="font-bold text-primary-500">{key}</dt>
-			<dd class="text-white/85 truncate">{value}</dd>
+			<dd class="truncate">{value}</dd>
 		{/each}
 	</dl>
-	<div class="mt-3 flex">
+	<div class="mt-2 flex">
 		{#each PALETTE as color (color)}
-			<span class="size-4 {color}"></span>
+			<span class="size-3.5 {color}"></span>
 		{/each}
 	</div>
-</Widget>
+</TerminalWindow>
