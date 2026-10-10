@@ -17,10 +17,8 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { getPlaylistSongs, playlists } from './playlist';
 import { songQueue, updateSongQueue } from './audio';
 import { addSong } from '../api';
+import { showToast } from './toast';
 import type { Beatmap, DownloadState, MapSet, SearchFilters, StoredMapSet } from '../types';
-
-const BROWSER_USER_AGENT =
-	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 let homeDir = '';
 let mapSetsDir = '';
@@ -57,7 +55,7 @@ export const downloads = writable<Record<string, DownloadState>>({});
 			const mapData = JSON.parse(await readTextFile(mapDataFile, { baseDir: BaseDirectory.Home }));
 			mapDataStore.set(mapData);
 		}
-		setTimeout(backfillBackgrounds, BACKFILL_START_DELAY);
+		setTimeout(backfillImages, BACKFILL_START_DELAY);
 	} catch (error) {
 		console.error('Error initializing data store:', error);
 	}
@@ -142,9 +140,10 @@ export async function deleteSong(setId: number | string) {
 			recursive: true
 		});
 	}
-	const backgroundPath = mapData[setId].background;
-	if (backgroundPath && (await exists(backgroundPath, { baseDir: BaseDirectory.Home }))) {
-		await remove(backgroundPath, { baseDir: BaseDirectory.Home });
+	for (const imagePath of [mapData[setId].background, mapData[setId].thumbnail]) {
+		if (imagePath && (await exists(imagePath, { baseDir: BaseDirectory.Home }))) {
+			await remove(imagePath, { baseDir: BaseDirectory.Home });
+		}
 	}
 	delete mapData[setId];
 	mapDataStore.set(mapData);
@@ -204,24 +203,46 @@ export async function downloadBeatmap(
 		const response = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
 			headers: {
 				Cookie: `osu_session=${sessionKey}`,
-				Referer: `https://osu.ppy.sh/beatmapsets/${setId}`,
-				'User-Agent': BROWSER_USER_AGENT
+				Referer: `https://osu.ppy.sh/beatmapsets/${setId}`
 			},
 			redirect: 'follow'
 		});
 
 		if (!response.ok) {
-			throw new Error(`Failed to download beatmap: ${response.status}`);
+			throw new Error(
+				response.status === 401 || response.status === 403
+					? `osu! refused the download (HTTP ${response.status}). Your osu_session cookie may have expired, log in again.`
+					: `osu! answered with HTTP ${response.status}`
+			);
 		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 20 } }));
 		console.log(setId, mapId, 'Downloading beatmap...');
-		await addSong(accessToken, parseInt(setId), parseInt(mapId.toString()));
+		// Only statistics: a failing backend must not break the download
+		addSong(accessToken, parseInt(setId), parseInt(mapId.toString())).catch((error) =>
+			console.warn('Could not register the download:', error)
+		);
 		const buffer = await response.arrayBuffer();
+		// .osz files are zip archives; anything else is usually the osu! login page
+		const magic = new Uint8Array(buffer, 0, Math.min(2, buffer.byteLength));
+		if (magic[0] !== 0x50 || magic[1] !== 0x4b) {
+			throw new Error(
+				'osu! did not send a beatmap file. Your osu_session cookie has probably expired, log in again.'
+			);
+		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 25 } }));
 
-		return await processWithWorker(buffer, mapSetData, mapId, setId);
+		const audio = await processWithWorker(buffer, mapSetData, mapId, setId);
+		saveLocalImage(setId, 'thumbnail').catch((error) =>
+			console.warn('Could not save the cover of', setId, error)
+		);
+		return audio;
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
+		showToast(
+			`Download failed: ${error instanceof Error ? error.message : error}`,
+			'icon-[mingcute--warning-line]',
+			7000
+		);
 		delete downloadWorkers[setId];
 		downloads.update((state) => {
 			const newState = { ...state };
@@ -573,64 +594,113 @@ export function colorFromImage(url: string): Promise<string | null> {
 	return imageColorCache.get(url);
 }
 
-/**
- * Songs downloaded before backgrounds were saved only have the online banner. Loads their
- * full size background one at a time with a pause in between, so the osu! servers are not
- * hammered. Backs off when rate limited and never retries a set without a background.
- */
-async function backfillBackgrounds() {
-	const missing = Object.values(get(mapDataStore)).filter(
-		(set) => !set.background && !set.backgroundMissing
+/** The images saved next to the audio of a downloaded set */
+const LOCAL_IMAGES = {
+	// Full size background, used for wallpapers
+	background: { urls: (setId: string) => fullBackgroundUrls(setId) },
+	// Small square cover, used in lists and the song bar
+	thumbnail: {
+		urls: (setId: string) => [`https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`]
+	}
+} as const;
+type LocalImage = keyof typeof LOCAL_IMAGES;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Saves an image of a set from the osu! servers. Returns the HTTP status. */
+async function saveLocalImage(setId: string, kind: LocalImage): Promise<number> {
+	let response: Response;
+	for (const url of LOCAL_IMAGES[kind].urls(setId)) {
+		response = await fetch(url);
+		if (response.ok || response.status === 429) break;
+	}
+	if (response.status === 429) return 429;
+	let change: Partial<StoredMapSet> = { [`${kind}Unavailable`]: true };
+	if (response.ok) {
+		const name = `${setId}-${kind === 'background' ? 'bg' : 'thumb'}.jpg`;
+		const imagePath = await path.join(mapSetsDir, name);
+		await writeFile(imagePath, new Uint8Array(await response.arrayBuffer()), {
+			baseDir: BaseDirectory.Home
+		});
+		change = { [kind]: imagePath };
+	}
+	mapDataStore.update((data) =>
+		data[setId] ? { ...data, [setId]: { ...data[setId], ...change } } : data
 	);
-	for (const set of missing) {
-		const setId = set.id.toString();
+	await saveMapData();
+	return response.status;
+}
+
+/**
+ * Songs downloaded before images were saved only have them online. Loads them one request at
+ * a time with a pause in between, so the osu! servers are not hammered. Backs off when rate
+ * limited and never retries an image that does not exist.
+ */
+async function backfillImages() {
+	const jobs = Object.values(get(mapDataStore)).flatMap((set) =>
+		(Object.keys(LOCAL_IMAGES) as LocalImage[])
+			.filter((kind) => !set[kind] && !set[`${kind}Unavailable`])
+			.map((kind) => [set.id.toString(), kind] as const)
+	);
+	for (const [setId, kind] of jobs) {
 		try {
-			const response = await fetch(`https://assets.ppy.sh/beatmaps/${setId}/covers/raw.jpg`);
-			if (response.status === 429) {
-				await new Promise((resolve) => setTimeout(resolve, BACKFILL_RATE_LIMIT_DELAY));
+			if ((await saveLocalImage(setId, kind)) === 429) {
+				await wait(BACKFILL_RATE_LIMIT_DELAY);
 				continue;
 			}
-			let change: Partial<StoredMapSet> = { backgroundMissing: true };
-			if (response.ok) {
-				const backgroundPath = await path.join(mapSetsDir, `${setId}-bg.jpg`);
-				const data = new Uint8Array(await response.arrayBuffer());
-				await writeFile(backgroundPath, data, { baseDir: BaseDirectory.Home });
-				change = { background: backgroundPath };
-			}
-			mapDataStore.update((data) =>
-				data[setId] ? { ...data, [setId]: { ...data[setId], ...change } } : data
-			);
-			await saveMapData();
 		} catch (error) {
 			// Offline or similar: try again on the next start
-			console.warn('Could not load background for', setId, error);
+			console.warn(`Could not load the ${kind} of`, setId, error);
 			return;
 		}
-		await new Promise((resolve) => setTimeout(resolve, BACKFILL_REQUEST_DELAY));
+		await wait(BACKFILL_REQUEST_DELAY);
 	}
 }
 
-const localBackgrounds = new Map<string, Promise<string | null>>();
+const localImages = new Map<string, Promise<string | null>>();
 
-/** Online banner of a beatmap set, made from its background */
-export function coverUrl(setId: number | string) {
-	return `https://assets.ppy.sh/beatmaps/${setId}/covers/cover@2x.jpg`;
-}
-
-/**
- * The background of a beatmap set: the image saved with the download (full size, works
- * offline) or the online banner.
- */
-export function backgroundUrl(setId: number | string): Promise<string> {
-	const path = get(mapDataStore)[setId]?.background;
-	if (!path) return Promise.resolve(coverUrl(setId));
-	if (!localBackgrounds.has(path)) {
-		localBackgrounds.set(
-			path,
-			readFile(path, { baseDir: BaseDirectory.Home })
+/** A blob URL for an image saved in the songs folder, or null if it can't be read */
+function localImageUrl(imagePath: string) {
+	if (!localImages.has(imagePath)) {
+		localImages.set(
+			imagePath,
+			readFile(imagePath, { baseDir: BaseDirectory.Home })
 				.then((data) => URL.createObjectURL(new Blob([data])))
 				.catch(() => null)
 		);
 	}
-	return localBackgrounds.get(path).then((url) => url ?? coverUrl(setId));
+	return localImages.get(imagePath);
+}
+
+/**
+ * The background of a beatmap set in full size on the osu! servers, best first: the original
+ * upload and the optimized full size copy.
+ */
+function fullBackgroundUrls(setId: number | string) {
+	const base = `https://assets.ppy.sh/beatmaps/${setId}/covers`;
+	return [`${base}/raw.jpg`, `${base}/fullsize.jpg`];
+}
+
+/**
+ * Candidate URLs for the background of a beatmap set, to try in order: the original saved in
+ * the songs folder (works offline), else the full size image online and, as a last resort,
+ * the 1800x500 banner.
+ */
+export async function backgroundUrls(setId: number | string): Promise<string[]> {
+	const imagePath = get(mapDataStore)[setId]?.background;
+	const local = imagePath && (await localImageUrl(imagePath));
+	if (local) return [local];
+	return [
+		...fullBackgroundUrls(setId),
+		`https://assets.ppy.sh/beatmaps/${setId}/covers/cover@2x.jpg`
+	];
+}
+
+/** The small square cover of a beatmap set: saved in the songs folder or online */
+export async function thumbnailUrl(setId: number | string): Promise<string> {
+	const imagePath = get(mapDataStore)[setId]?.thumbnail;
+	return (
+		(imagePath && (await localImageUrl(imagePath))) ||
+		`https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`
+	);
 }

@@ -1,6 +1,6 @@
 <script>
 	import { fade } from 'svelte/transition';
-	import { backgroundUrl, colorFromString } from '#lib/stores/data.ts';
+	import { backgroundUrls, colorFromString, mapDataStore } from '#lib/stores/data.ts';
 
 	/**
 	 * Shows the background of a beatmap set, cross-fading when it changes.
@@ -8,18 +8,21 @@
 	 */
 	let { setId, title = '', class: className = '', imageClass = '' } = $props();
 
-	let url = $state(null);
-	let failed = $state(false);
+	let urls = $state([]);
+	let attempt = $state(0);
+	let url = $derived(urls[attempt] ?? null);
 
 	$effect(() => {
 		const id = setId;
-		failed = false;
+		// Reload when the original gets saved, e.g. after the download or the backfill
+		void $mapDataStore[id]?.background;
+		attempt = 0;
 		if (id == null) {
-			url = null;
+			urls = [];
 			return;
 		}
-		backgroundUrl(id).then((result) => {
-			if (setId === id) url = result;
+		backgroundUrls(id).then((result) => {
+			if (setId === id) urls = result;
 		});
 	});
 </script>
@@ -29,13 +32,13 @@
 	style="background-color: {colorFromString(title || String(setId ?? ''))}"
 >
 	{#key url}
-		{#if url && !failed}
+		{#if url}
 			<img
 				src={url}
 				alt=""
 				class="absolute inset-0 size-full object-cover {imageClass}"
 				transition:fade={{ duration: 400 }}
-				onerror={() => (failed = true)}
+				onerror={() => attempt++}
 			/>
 		{/if}
 	{/key}

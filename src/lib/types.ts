@@ -40,7 +40,11 @@ interface MapSetInfo {
 	/** Path of the full size background saved in the songs folder */
 	background?: string | null;
 	/** The full size background could not be loaded for this set, so it is not retried */
-	backgroundMissing?: boolean;
+	backgroundUnavailable?: boolean;
+	/** Path of the small square cover saved in the songs folder */
+	thumbnail?: string | null;
+	/** The small cover could not be loaded for this set, so it is not retried */
+	thumbnailUnavailable?: boolean;
 	[key: string]: any;
 }
 

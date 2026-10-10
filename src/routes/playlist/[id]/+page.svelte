@@ -1,12 +1,12 @@
 <script>
+	import SongCover from '#lib/components/SongCover.svelte';
 	import Button from '#lib/components/Button.svelte';
 	import {
 		deleteSong,
 		getImageUrl,
 		isSongDownloaded,
 		downloadBeatmap,
-		downloads,
-		handleImageError
+		downloads
 	} from '#lib/stores/data.ts';
 	import {
 		getPlaylistSongs,
@@ -442,13 +442,7 @@
 							</div>
 
 							<div class="flex items-center gap-3 min-w-0 {downloaded ? '' : 'opacity-50'}">
-								<img
-									src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
-									alt=""
-									on:error={handleImageError}
-									loading="lazy"
-									class="size-10 rounded object-cover shrink-0"
-								/>
+								<SongCover setId={song.id} title={song.title} class="size-10 rounded" lazy />
 								<div class="min-w-0">
 									<h3 class="font-semibold truncate {current ? 'text-primary-500' : ''}">
 										{song.title}

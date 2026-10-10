@@ -1,4 +1,5 @@
 <script>
+	import SongCover from './SongCover.svelte';
 	import {
 		songQueue,
 		currentSong,
@@ -10,7 +11,6 @@
 		clearQueuedSongs
 	} from '#lib/stores/audio.ts';
 	import { playlists } from '#lib/stores/playlist.ts';
-	import { handleImageError } from '#lib/stores/data.ts';
 
 	const MAX_SHOWN = 50;
 
@@ -29,13 +29,7 @@
 {#snippet songRow(song, onclick, removeLabel = null, onremove = null)}
 	<div class="group flex items-center gap-3 rounded-md p-1.5 hover:bg-white/[0.06]">
 		<button class="flex flex-1 min-w-0 items-center gap-3 text-start cursor-pointer" {onclick}>
-			<img
-				src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
-				alt=""
-				loading="lazy"
-				class="size-10 rounded object-cover shrink-0"
-				onerror={handleImageError}
-			/>
+			<SongCover setId={song.id} title={song.title} class="size-10 rounded" lazy />
 			<div class="min-w-0">
 				<div class="truncate text-sm font-medium">{song.title}</div>
 				<div class="truncate text-xs text-secondary-600">{song.artist}</div>
@@ -71,11 +65,10 @@
 			<section>
 				<h3 class="px-1.5 mb-1 text-sm font-bold">Now playing</h3>
 				<div class="flex items-center gap-3 p-1.5">
-					<img
-						src="https://assets.ppy.sh/beatmaps/{$currentSong.song.id}/covers/list.jpg"
-						alt=""
-						class="size-10 rounded object-cover shrink-0"
-						onerror={handleImageError}
+					<SongCover
+						setId={$currentSong.song.id}
+						title={$currentSong.song.title}
+						class="size-10 rounded"
 					/>
 					<div class="min-w-0">
 						<div class="truncate text-sm font-medium text-primary-500">

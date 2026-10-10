@@ -1,4 +1,5 @@
 <script>
+	import SongCover from './SongCover.svelte';
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		togglePlayback,
@@ -15,7 +16,6 @@
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
-	import { handleImageError } from '#lib/stores/data.ts';
 	import { updateUserSettings, userSettings, updateCurrentQueue } from '#lib/stores/user.ts';
 
 	let currentTime = 0;
@@ -178,11 +178,10 @@
 {#if $currentSong?.song?.id}
 	<footer class="h-20 shrink-0 grid grid-cols-[1fr_minmax(0,40rem)_1fr] items-center gap-4 px-4">
 		<div class="flex items-center gap-3 min-w-0">
-			<img
-				src="https://assets.ppy.sh/beatmaps/{$currentSong.song?.id}/covers/list.jpg"
-				class="size-14 rounded-md object-cover shrink-0"
-				alt=""
-				on:error={handleImageError}
+			<SongCover
+				setId={$currentSong.song.id}
+				title={$currentSong.song.title}
+				class="size-14 rounded-md"
 			/>
 			<div class="min-w-0">
 				<div class="text-sm font-semibold truncate">{$currentSong.song?.title}</div>

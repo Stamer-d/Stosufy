@@ -173,7 +173,8 @@
 				aria-label="Download {map.title}"
 				class="size-8 shrink-0 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-400 cursor-pointer transition"
 				on:click={async () => {
-					await startDownload(map, map.beatmaps[0].id);
+					// Errors are shown as a toast by downloadBeatmap
+					await startDownload(map, map.beatmaps[0].id).catch(() => {});
 				}}
 			>
 				<span class="icon-[mingcute--download-2-line] size-5"></span>
