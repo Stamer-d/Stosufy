@@ -25,6 +25,9 @@
 					"url": "https://osu.ppy.sh/*"
 				},
 				{
+					"url": "https://assets.ppy.sh/*"
+				},
+				{
 					"url": "https://api.stamer-d.de/*"
 				}
 			],

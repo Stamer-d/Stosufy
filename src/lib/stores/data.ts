@@ -25,6 +25,10 @@ const BROWSER_USER_AGENT =
 let homeDir = '';
 let mapSetsDir = '';
 let mapDataFile = '';
+const BACKFILL_START_DELAY = 10_000;
+const BACKFILL_REQUEST_DELAY = 2_000;
+const BACKFILL_RATE_LIMIT_DELAY = 60_000;
+
 export const mapDataStore = writable<Record<string, StoredMapSet>>({});
 export const downloads = writable<Record<string, DownloadState>>({});
 
@@ -53,6 +57,7 @@ export const downloads = writable<Record<string, DownloadState>>({});
 			const mapData = JSON.parse(await readTextFile(mapDataFile, { baseDir: BaseDirectory.Home }));
 			mapDataStore.set(mapData);
 		}
+		setTimeout(backfillBackgrounds, BACKFILL_START_DELAY);
 	} catch (error) {
 		console.error('Error initializing data store:', error);
 	}
@@ -136,6 +141,10 @@ export async function deleteSong(setId: number | string) {
 			baseDir: BaseDirectory.Home,
 			recursive: true
 		});
+	}
+	const backgroundPath = mapData[setId].background;
+	if (backgroundPath && (await exists(backgroundPath, { baseDir: BaseDirectory.Home }))) {
+		await remove(backgroundPath, { baseDir: BaseDirectory.Home });
 	}
 	delete mapData[setId];
 	mapDataStore.set(mapData);
@@ -562,6 +571,43 @@ export function colorFromImage(url: string): Promise<string | null> {
 		);
 	}
 	return imageColorCache.get(url);
+}
+
+/**
+ * Songs downloaded before backgrounds were saved only have the online banner. Loads their
+ * full size background one at a time with a pause in between, so the osu! servers are not
+ * hammered. Backs off when rate limited and never retries a set without a background.
+ */
+async function backfillBackgrounds() {
+	const missing = Object.values(get(mapDataStore)).filter(
+		(set) => !set.background && !set.backgroundMissing
+	);
+	for (const set of missing) {
+		const setId = set.id.toString();
+		try {
+			const response = await fetch(`https://assets.ppy.sh/beatmaps/${setId}/covers/raw.jpg`);
+			if (response.status === 429) {
+				await new Promise((resolve) => setTimeout(resolve, BACKFILL_RATE_LIMIT_DELAY));
+				continue;
+			}
+			let change: Partial<StoredMapSet> = { backgroundMissing: true };
+			if (response.ok) {
+				const backgroundPath = await path.join(mapSetsDir, `${setId}-bg.jpg`);
+				const data = new Uint8Array(await response.arrayBuffer());
+				await writeFile(backgroundPath, data, { baseDir: BaseDirectory.Home });
+				change = { background: backgroundPath };
+			}
+			mapDataStore.update((data) =>
+				data[setId] ? { ...data, [setId]: { ...data[setId], ...change } } : data
+			);
+			await saveMapData();
+		} catch (error) {
+			// Offline or similar: try again on the next start
+			console.warn('Could not load background for', setId, error);
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, BACKFILL_REQUEST_DELAY));
+	}
 }
 
 const localBackgrounds = new Map<string, Promise<string | null>>();

@@ -37,6 +37,10 @@ interface MapSetInfo {
 	songInfo?: PlaylistSongInfo;
 	/** Set on songs added to the queue by the user; they always play the full song */
 	queued?: boolean;
+	/** Path of the full size background saved in the songs folder */
+	background?: string | null;
+	/** The full size background could not be loaded for this set, so it is not retried */
+	backgroundMissing?: boolean;
 	[key: string]: any;
 }
 
