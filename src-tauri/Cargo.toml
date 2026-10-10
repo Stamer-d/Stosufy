@@ -28,6 +28,8 @@ reqwest = { version = "0.13", features = ["cookies"] }
 tauri-plugin-shell = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-persisted-scope = "2"
 tauri-plugin-drpc = "*"
 tauri-plugin-process = "2"
 tauri-plugin-prevent-default = "6.0.1"

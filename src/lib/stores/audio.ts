@@ -1,9 +1,20 @@
 import { get, writable } from 'svelte/store';
-import { downloadBeatmap } from './data';
-import { updateCurrentQueue, userSettings } from './user';
+import { downloadBeatmap, mapDataStore, saveMapData } from './data';
+import { updateCurrentQueue, updateUserSettings, userSettings } from './user';
+import { applyMod, prepareBeats, startBeats } from './mods';
+import { track, untrack, setFade, setGain, rampGain } from './mixer';
+import { measureLoudness, gainFor } from './loudness';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
-import type { CurrentSong, MapSet, PlaylistId, QueueType, RepeatMode, SongQueue } from '../types';
+import type {
+	CurrentSong,
+	MapSet,
+	PlaybackMod,
+	PlaylistId,
+	QueueType,
+	RepeatMode,
+	SongQueue
+} from '../types';
 
 export const songQueue = writable<SongQueue>({});
 export const currentSong = writable<CurrentSong>({ song: null, isPlaying: false });
@@ -28,29 +39,56 @@ if (typeof window !== 'undefined') {
 }
 
 const repeatMode = (): RepeatMode => get(userSettings).settings.repeat ?? 'off';
+const crossfadeSeconds = () => get(userSettings).settings?.crossfade ?? 0;
 
-function getAudioFromBase64(base64Data: string) {
-	const byteCharacters = atob(base64Data);
-	const byteNumbers = new Array(byteCharacters.length);
-	for (let i = 0; i < byteCharacters.length; i++) {
-		byteNumbers[i] = byteCharacters.charCodeAt(i);
-	}
-	const blob = new Blob([new Uint8Array(byteNumbers)]);
-	const audio = new Audio(URL.createObjectURL(blob));
-	audio.volume = get(userSettings).settings.volume || 0.05;
-	return audio;
+function bytesFromBase64(base64Data: string) {
+	const characters = atob(base64Data);
+	const bytes = new Uint8Array(characters.length);
+	for (let i = 0; i < characters.length; i++) bytes[i] = characters.charCodeAt(i);
+	return bytes;
 }
+
+let measurements = Promise.resolve();
+
+/**
+ * Loudness normalization: songs measured before get their volume right away; others are
+ * measured in the background (one at a time) and adjusted smoothly once that's done.
+ */
+function normalize(audio: HTMLAudioElement, song: MapSet, file: Uint8Array) {
+	const setId = String(song.id);
+	const stored = get(mapDataStore)[setId];
+	if (!stored) return;
+	if (stored.loudness != null) {
+		setGain(audio, gainFor(stored.loudness));
+		return;
+	}
+	measurements = measurements.then(async () => {
+		const loudness = await measureLoudness(file);
+		if (loudness == null) return;
+		mapDataStore.update((data) =>
+			data[setId] ? { ...data, [setId]: { ...data[setId], loudness } } : data
+		);
+		await saveMapData();
+		rampGain(audio, gainFor(loudness));
+	});
+}
+
+// Set while the next song is loaded for a crossfade, so it starts silent
+let fadeInNext = false;
 
 async function getAudio(index: number, queue: MapSet[], type: QueueType, currentSeconds = 0) {
 	let audio: HTMLAudioElement = null;
 	const song = queue[index];
 	if (type == 'preview' && !song.queued) {
 		audio = new Audio(`${song.preview_url}`);
-		audio.volume = get(userSettings).settings.volume || 0.05;
+		track(audio, fadeInNext ? 0 : 1);
 	} else {
-		const base64Data = await downloadBeatmap(song, song.beatmaps[0].id);
-		audio = getAudioFromBase64(base64Data);
+		const file = bytesFromBase64(await downloadBeatmap(song, song.beatmaps[0].id));
+		audio = new Audio(URL.createObjectURL(new Blob([file])));
+		track(audio, fadeInNext ? 0 : 1);
+		normalize(audio, song, file);
 	}
+	applyMod(audio);
 	audio.addEventListener('ended', () => {
 		// Ignore songs that were replaced in the meantime
 		if (get(songQueue).audio === audio) handleSongEnded();
@@ -156,7 +194,11 @@ export async function updateSongQueue(
 export function stopPlayback(onlyPause = false) {
 	songQueue.update((current) => {
 		if (!current || !current.audio) return current;
-		current.audio.pause();
+		// The song fading out of a crossfade keeps playing until the fade is done
+		if (current.audio !== fadingOut) {
+			finishCrossfade();
+			current.audio.pause();
+		}
 		setRPCActivity(null);
 		if (!onlyPause) currentSong.update((cs) => ({ ...cs, isPlaying: false }));
 		return current;
@@ -167,6 +209,8 @@ export function togglePlayback() {
 	songQueue.update((current) => {
 		if (!current || !current.audio) return current;
 		if (current.audio.paused) {
+			// Playback starts with a click, so the Nightcore beat may create its audio now
+			if (get(userSettings).settings?.mod === 'NC') prepareBeats();
 			current.audio.play().then(() => {
 				currentSong.update((cs) => ({ ...cs, isPlaying: true }));
 			});
@@ -331,4 +375,71 @@ export async function shuffleQueue() {
 		// A queued song that isn't part of the playlist keeps playing; continue from the start
 		await updateSongQueue(Math.max(currentIndex, 0), songs, 'playlist', current.playlistId);
 	}
+}
+
+/** Selects a speed mod; it applies right away and to every following song */
+export function setPlaybackMod(mod: PlaybackMod) {
+	updateUserSettings({ mod });
+	if (mod === 'NC') prepareBeats();
+	for (const audio of [get(songQueue).audio, fadingOut]) if (audio) applyMod(audio, mod);
+}
+
+// --- Crossfade --------------------------------------------------------------------------
+
+let fadingOut: HTMLAudioElement | null = null;
+let fadeTimer: ReturnType<typeof setInterval> | null = null;
+
+function finishCrossfade() {
+	if (fadeTimer) clearInterval(fadeTimer);
+	fadeTimer = null;
+	if (fadingOut) {
+		fadingOut.pause();
+		untrack(fadingOut);
+		fadingOut = null;
+	}
+}
+
+/** Starts the next song while this one fades out, with equal-power curves */
+async function startCrossfade(audio: HTMLAudioElement, seconds: number) {
+	fadingOut = audio;
+	fadeInNext = true;
+	try {
+		await skipForward();
+	} finally {
+		fadeInNext = false;
+	}
+	const next = get(songQueue).audio;
+	if (next === audio) {
+		// The next song couldn't be loaded: let this one end normally
+		fadingOut = null;
+		return;
+	}
+	const start = performance.now();
+	fadeTimer = setInterval(() => {
+		const progress = Math.min(1, (performance.now() - start) / (seconds * 1000));
+		setFade(audio, Math.cos((progress * Math.PI) / 2));
+		setFade(next, Math.sin((progress * Math.PI) / 2));
+		if (progress === 1) finishCrossfade();
+	}, 50);
+}
+
+if (typeof window !== 'undefined') {
+	setInterval(() => {
+		const current = get(songQueue);
+		const audio = current.audio;
+		const seconds = crossfadeSeconds();
+		if (!seconds || !audio || audio.paused || fadingOut || isSkipping) return;
+		if (current.type === 'preview' || !Number.isFinite(audio.duration)) return;
+		if (repeatMode() === 'one' || !hasNext(current, get(upNext), repeatMode())) return;
+		// Remaining time in real seconds, so speed mods are taken into account
+		const length = audio.duration / audio.playbackRate;
+		const remaining = (audio.duration - audio.currentTime) / audio.playbackRate;
+		const fade = Math.min(seconds, length / 2);
+		if (remaining <= fade) startCrossfade(audio, fade);
+	}, 100);
+
+	startBeats(() => ({
+		audio: get(songQueue).audio ?? null,
+		setId: get(currentSong).song?.id?.toString() ?? null
+	}));
 }

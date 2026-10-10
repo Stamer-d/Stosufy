@@ -2,7 +2,7 @@
 // File system access and the opus conversion are delegated to the main thread.
 
 import JSZip from 'jszip';
-import { findBackground, findVideo } from '../osuFile.ts';
+import { findBackground, findVideo, parseTimingPoints, type TimingPoint } from '../osuFile.ts';
 
 // Message counter to track request/response pairs
 let messageId = 0;
@@ -59,6 +59,7 @@ self.onmessage = async function (event) {
 					audioPath: result.audioPath,
 					backgroundPath: result.backgroundPath,
 					video: result.video,
+					timing: result.timing,
 					beatmapId: result.mapId,
 					setId: data.setId
 				},
@@ -192,6 +193,7 @@ async function extractAudioFromBeatmap(
 		let foundMapId = '0';
 		let backgroundName: string | null = null;
 		let video: { file: string; offset: number } | null = null;
+		let timing: TimingPoint[] | null = null;
 
 		for (const osuFile of osuFiles) {
 			const content = await fs.readTextFile(osuFile);
@@ -218,6 +220,7 @@ async function extractAudioFromBeatmap(
 
 			backgroundName ??= findBackground(content);
 			video ??= findVideo(content);
+			timing ??= parseTimingPoints(content);
 		}
 
 		self.postMessage({ type: 'progress', progress: 70, setId });
@@ -275,6 +278,7 @@ async function extractAudioFromBeatmap(
 				audioPath: firstAudioPath,
 				backgroundPath,
 				video: savedVideo,
+				timing,
 				mapId: foundMapId
 			};
 		}

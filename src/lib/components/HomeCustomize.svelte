@@ -2,14 +2,35 @@
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
+	import { refresh as refreshVolume } from '#lib/stores/mixer.ts';
 	import {
 		userSettings,
+		updateUserSettings,
 		updateHomeSettings,
 		updateAppearance,
 		DEFAULT_HOME,
 		DEFAULT_APPEARANCE
 	} from '#lib/stores/user.ts';
 	import { mapDataStore, videoFetch, fetchMissingVideos } from '#lib/stores/data.ts';
+	import {
+		osuImport,
+		importOsuFolder,
+		pickOsuSongsFolder,
+		defaultOsuSongsFolder
+	} from '#lib/stores/osuImport.ts';
+
+	let osuFolder = $state(null);
+	defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
+
+	async function chooseOsuFolder() {
+		const folder = await pickOsuSongsFolder();
+		if (folder) {
+			osuFolder = folder;
+			importOsuFolder(folder);
+		}
+	}
+	let crossfade = $derived($userSettings.settings?.crossfade ?? 0);
+	let importing = $derived(['scanning', 'details'].includes($osuImport.state));
 
 	/** @type {{ open: boolean }} */
 	let { open = $bindable(false) } = $props();
@@ -271,6 +292,75 @@
 					step={5}
 					on:change={(e) => updateAppearance({ dim: e.detail })}
 				/>
+			</div>
+		</section>
+
+		<section>
+			{@render heading('Playback')}
+			{@render toggle(
+				'Normalize volume',
+				'Plays every song at the same loudness',
+				$userSettings.settings?.normalize ?? true,
+				(checked) => {
+					updateUserSettings({ normalize: checked });
+					refreshVolume();
+				}
+			)}
+			<div class="mt-4">
+				<div class="flex justify-between text-sm mb-2">
+					<span class="font-semibold text-white">Crossfade</span>
+					<span class="tabular-nums text-secondary-600">
+						{crossfade ? `${crossfade} s` : 'Off'}
+					</span>
+				</div>
+				<Range
+					value={crossfade}
+					min={0}
+					max={12}
+					step={1}
+					on:change={(e) => updateUserSettings({ crossfade: e.detail })}
+				/>
+			</div>
+		</section>
+
+		<section>
+			{@render heading('Library')}
+			<div class="flex items-center justify-between gap-4 p-3 rounded-lg bg-white/[0.04]">
+				<span class="min-w-0">
+					<span class="block font-semibold text-white">Import from osu!</span>
+					<span class="block text-xs text-secondary-600 break-words" aria-live="polite">
+						{#if $osuImport.state === 'scanning'}
+							Reading your songs: {$osuImport.done} of {$osuImport.total} folders,
+							{$osuImport.added} new.
+						{:else if $osuImport.state === 'details'}
+							Added {$osuImport.added} songs. Loading star ratings and lengths…
+						{:else if $osuImport.state === 'done'}
+							Added {$osuImport.added}
+							{$osuImport.added === 1 ? 'song' : 'songs'}{$osuImport.skipped
+								? `, skipped ${$osuImport.skipped} (already added or without ID)`
+								: ''}.
+						{:else if $osuImport.state === 'error'}
+							<span class="text-red-400">{$osuImport.message}</span>
+						{:else if osuFolder}
+							Plays the songs from <span class="text-white/80">{osuFolder}</span> without copying them.
+						{:else}
+							Pick your osu! Songs folder. The songs play from there, nothing is copied.
+						{/if}
+					</span>
+				</span>
+				{#if importing}
+					<span class="icon-[mingcute--loading-line] size-5 shrink-0 animate-spin text-primary-500"
+					></span>
+				{:else}
+					<div class="flex gap-2 shrink-0">
+						{#if osuFolder}
+							<Button type="ghost" on:click={chooseOsuFolder}>Other folder</Button>
+							<Button type="normal" on:click={() => importOsuFolder(osuFolder)}>Import</Button>
+						{:else}
+							<Button type="normal" on:click={chooseOsuFolder}>Choose folder</Button>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</section>
 	</div>

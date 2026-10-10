@@ -23,6 +23,8 @@
 		updateAppearance
 	} from '#lib/stores/user.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
+	import { setVolume } from '#lib/stores/mixer.ts';
+	import ModSelect from './ModSelect.svelte';
 
 	let currentTime = 0;
 	let duration = 0;
@@ -32,7 +34,9 @@
 	let previousVolume = 1;
 	let shuffled = false;
 
-	$: hasVideo = !!$mapDataStore[$currentSong.song?.id]?.video;
+	$: hasVideo = !!(
+		$mapDataStore[$currentSong.song?.id]?.video || $mapDataStore[$currentSong.song?.id]?.videoSource
+	);
 	$: videoOn = $userSettings.settings?.appearance?.video ?? true;
 
 	function formatTime(seconds) {
@@ -71,8 +75,8 @@
 			updateInterval = setInterval(async () => {
 				updateTimeDisplay();
 			}, 500);
-			// Initialize volume from audio element
-			volume = $songQueue.audio.volume;
+			// The audio's own volume includes normalization and fades, so use the setting
+			volume = $userSettings.settings?.volume ?? volume;
 		}
 	}
 
@@ -81,7 +85,7 @@
 		if (!$songQueue?.audio) return;
 
 		volume = newVolume; // e.detail is already the volume value
-		$songQueue.audio.volume = volume;
+		setVolume(volume);
 		updateUserSettings({ volume: volume });
 		// If we adjust volume to above 0, make sure it's not muted
 		if (volume > 0 && $songQueue.audio.muted) {
@@ -98,11 +102,11 @@
 		if ($songQueue.audio.muted) {
 			$songQueue.audio.muted = false;
 			volume = previousVolume > 0 ? previousVolume : 0.05;
-			$songQueue.audio.volume = volume;
+			setVolume(volume);
 		} else {
 			previousVolume = volume;
 			volume = 0.0;
-			$songQueue.audio.volume = volume;
+			setVolume(volume);
 			$songQueue.audio.muted = true;
 		}
 	}
@@ -282,6 +286,7 @@
 		</div>
 
 		<div class="flex items-center justify-end gap-2">
+			<ModSelect />
 			{#if hasVideo}
 				<button
 					title={videoOn ? 'Hide beatmap video' : 'Play beatmap video'}

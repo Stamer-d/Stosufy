@@ -70,7 +70,7 @@ export function handleImageError(event: Event) {
 	image.style.opacity = '0.7';
 }
 
-async function saveMapData() {
+export async function saveMapData() {
 	await writeTextFile(mapDataFile, JSON.stringify(get(mapDataStore)), {
 		baseDir: BaseDirectory.Home
 	});
@@ -136,16 +136,12 @@ export async function deleteSong(setId: number | string) {
 	if (beatmapIds.length === 0) return null;
 	const firstBeatmapId = beatmapIds[0];
 	const audioFilePath = mapData[setId].beatmaps[firstBeatmapId].audioFile;
-	if (audioFilePath && (await exists(audioFilePath, { baseDir: BaseDirectory.Home }))) {
-		await remove(audioFilePath, {
-			baseDir: BaseDirectory.Home,
-			recursive: true
-		});
-	}
 	const { background, thumbnail, video } = mapData[setId];
-	for (const imagePath of [background, thumbnail, video]) {
-		if (imagePath && (await exists(imagePath, { baseDir: BaseDirectory.Home }))) {
-			await remove(imagePath, { baseDir: BaseDirectory.Home });
+	// Only files in Stosufy's own folder: songs imported from osu! keep their files
+	for (const filePath of [audioFilePath, background, thumbnail, video]) {
+		if (!filePath?.startsWith(mapSetsDir)) continue;
+		if (await exists(filePath, { baseDir: BaseDirectory.Home })) {
+			await remove(filePath, { baseDir: BaseDirectory.Home });
 		}
 	}
 	delete mapData[setId];
@@ -343,7 +339,7 @@ async function processWithWorker(
 							mapSetData = { ...mapSetData, background: event.data.backgroundPath };
 						}
 						const video = event.data.video;
-						mapSetData = { ...mapSetData, hasVideo: !!video };
+						mapSetData = { ...mapSetData, hasVideo: !!video, timing: event.data.timing ?? [] };
 						if (video && isPlayableVideo(video.path)) {
 							mapSetData = { ...mapSetData, video: video.path, videoOffset: video.offset };
 						} else if (video) {
@@ -511,7 +507,9 @@ export async function fetchMissingVideos() {
 		}
 
 		// 2. Download the sets with a video again, one at a time
-		const missing = Object.values(get(mapDataStore)).filter((set) => set.hasVideo && !set.video);
+		const missing = Object.values(get(mapDataStore)).filter(
+			(set) => set.hasVideo && !set.video && !set.videoSource
+		);
 		videoFetch.set({ state: 'downloading', done: 0, total: missing.length });
 		for (const [index, set] of missing.entries()) {
 			const setId = set.id.toString();
@@ -584,9 +582,16 @@ let videoConversions = Promise.resolve();
  * Converts a video to mp4 in the background, one at a time: it takes a while and the song
  * can be played without it in the meantime.
  */
-function queueVideoConversion(setId: string, sourcePath: string, offset: number) {
+function queueVideoConversion(
+	setId: string,
+	sourcePath: string,
+	offset: number,
+	removeSource = true
+) {
 	videoConversions = videoConversions.then(async () => {
-		const targetPath = sourcePath.replace(/\.[^.]+$/, '.mp4');
+		const targetPath = removeSource
+			? sourcePath.replace(/\.[^.]+$/, '.mp4')
+			: await path.join(mapSetsDir, `${setId}-video.mp4`);
 		try {
 			const ffmpeg = new FFmpeg();
 			await ffmpeg.load();
@@ -624,9 +629,29 @@ function queueVideoConversion(setId: string, sourcePath: string, offset: number)
 		} catch (error) {
 			console.warn('Could not convert the video of', setId, error);
 		} finally {
-			await remove(sourcePath, { baseDir: BaseDirectory.Home }).catch(() => {});
+			if (removeSource) {
+				await remove(sourcePath, { baseDir: BaseDirectory.Home }).catch(() => {});
+			}
 		}
 	});
+}
+
+const convertingVideos = new Set<string>();
+
+/**
+ * Makes the video of an imported song playable: plays it from the osu! folder when the
+ * webview supports the format, else converts a copy into Stosufy's folder (once).
+ */
+export function ensureVideo(setId: string) {
+	const set = get(mapDataStore)[setId];
+	if (!set?.videoSource || set.video || convertingVideos.has(setId)) return;
+	if (isPlayableVideo(set.videoSource)) {
+		setStoredFields(setId, { video: set.videoSource });
+		saveMapData();
+		return;
+	}
+	convertingVideos.add(setId);
+	queueVideoConversion(setId, set.videoSource, set.videoOffset ?? 0, false);
 }
 
 async function convertToOpus(inputPath: string, targetPath: string) {
@@ -681,6 +706,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 			video: mapsetData.video || null,
 			videoOffset: mapsetData.videoOffset || 0,
 			hasVideo: mapsetData.hasVideo,
+			timing: mapsetData.timing,
 			beatmaps: {},
 			created_at: mapsetData.createdAt || Date.now()
 		};
@@ -696,7 +722,8 @@ async function updateMapsetData(mapsetData: MapSet) {
 			background: mapsetData.background || updatedMapData[setId].background || null,
 			video: mapsetData.video || updatedMapData[setId].video || null,
 			videoOffset: mapsetData.videoOffset ?? updatedMapData[setId].videoOffset ?? 0,
-			hasVideo: mapsetData.hasVideo ?? updatedMapData[setId].hasVideo
+			hasVideo: mapsetData.hasVideo ?? updatedMapData[setId].hasVideo,
+			timing: mapsetData.timing ?? updatedMapData[setId].timing
 		});
 	}
 
@@ -827,7 +854,19 @@ async function saveLocalImage(setId: string, kind: LocalImage): Promise<number> 
  * a time with a pause in between, so the osu! servers are not hammered. Backs off when rate
  * limited and never retries an image that does not exist.
  */
-async function backfillImages() {
+let backfillRunning = false;
+
+export async function backfillImages() {
+	if (backfillRunning) return;
+	backfillRunning = true;
+	try {
+		await runBackfill();
+	} finally {
+		backfillRunning = false;
+	}
+}
+
+async function runBackfill() {
 	const jobs = Object.values(get(mapDataStore)).flatMap((set) =>
 		(Object.keys(LOCAL_IMAGES) as LocalImage[])
 			.filter((kind) => !set[kind] && !set[`${kind}Unavailable`])

@@ -2,7 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
 	import { songQueue, currentSong } from '#lib/stores/audio.ts';
-	import { mapDataStore } from '#lib/stores/data.ts';
+	import { mapDataStore, ensureVideo } from '#lib/stores/data.ts';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
 
 	/**
@@ -20,6 +20,11 @@
 	let stored = $derived(isCurrent ? $mapDataStore[setId] : null);
 	let videoPath = $derived(enabled ? (stored?.video ?? null) : null);
 	let offset = $derived((stored?.videoOffset ?? 0) / 1000);
+
+	// Imported songs keep the video in the osu! folder; make it playable when it's needed
+	$effect(() => {
+		if (enabled && stored?.videoSource && !stored.video) ensureVideo(String(setId));
+	});
 
 	let url = $state(null);
 	let video = $state(null);
@@ -56,6 +61,8 @@
 			if (!video.paused) video.pause();
 			return;
 		}
+		// Speed mods change the speed of the song, the video follows
+		if (video.playbackRate !== audio.playbackRate) video.playbackRate = audio.playbackRate;
 		if (Math.abs(video.currentTime - time) > MAX_DRIFT) video.currentTime = time;
 		if (audio.paused && !video.paused) video.pause();
 		else if (!audio.paused && video.paused) video.play().catch(() => {});

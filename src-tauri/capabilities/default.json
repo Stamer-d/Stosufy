@@ -41,6 +41,7 @@
 		"shell:default",
 		"deep-link:default",
 		"fs:default",
+		"dialog:allow-open",
 		{
 			"identifier": "fs:allow-home-read",
 			"allow": [{ "path": "$HOME/**" }]

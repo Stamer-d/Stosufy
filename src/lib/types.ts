@@ -51,6 +51,14 @@ interface MapSetInfo {
 	videoOffset?: number;
 	/** Whether the set has a video on osu!; unknown for songs downloaded before videos were saved */
 	hasVideo?: boolean;
+	/** Video in a format the webview can't play, converted when the song is played */
+	videoSource?: string | null;
+	/** Uninherited timing points of the first difficulty (for Nightcore beats) */
+	timing?: import('./osuFile').TimingPoint[];
+	/** 'osu' for songs imported from an osu! installation; their files belong to osu! */
+	source?: 'osu';
+	/** Integrated loudness in LUFS, measured the first time the song plays */
+	loudness?: number;
 	[key: string]: any;
 }
 
@@ -140,7 +148,16 @@ export interface Settings {
 	searchFilters?: SearchFilters;
 	home?: HomeSettings;
 	appearance?: AppearanceSettings;
+	/** Bring every song to the same loudness */
+	normalize?: boolean;
+	/** Seconds the end of a song and the start of the next overlap; 0 turns crossfade off */
+	crossfade?: number;
+	/** Speed mod applied to the playback, like in osu! */
+	mod?: PlaybackMod;
 }
+
+/** No mod, Half Time, Daycore, Double Time or Nightcore */
+export type PlaybackMod = 'NM' | 'HT' | 'DC' | 'DT' | 'NC';
 
 /** Queue state persisted between app starts */
 export interface StoredQueue {

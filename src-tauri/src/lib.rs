@@ -6,6 +6,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
+        // Remembers folders the user picked (e.g. the osu! Songs folder) across restarts
+        .plugin(tauri_plugin_persisted_scope::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|_app, argv, _cwd| {
           println!("a new app instance was opened with {argv:?} and the deep link event was already triggered");
         }))
