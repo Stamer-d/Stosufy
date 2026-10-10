@@ -3,7 +3,6 @@
 	import Songbar from '#lib/components/Songbar.svelte';
 	import Playlist from '#lib/components/Playlist.svelte';
 	import { onMount } from 'svelte';
-	import { fly } from 'svelte/transition';
 	import { page } from '$app/state';
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
@@ -55,11 +54,15 @@
 					{@render children()}
 				</div>
 
-				{#if $queuePanelOpen}
-					<div class="h-full" transition:fly={{ x: 320, duration: 150 }}>
-						<QueuePanel />
-					</div>
-				{/if}
+				<!-- The width animates, so the content next to it shrinks smoothly instead of jumping -->
+				<div
+					class="h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out {$queuePanelOpen
+						? 'w-80'
+						: 'w-0'}"
+					inert={!$queuePanelOpen}
+				>
+					<QueuePanel />
+				</div>
 			</div>
 
 			<div class="w-full">

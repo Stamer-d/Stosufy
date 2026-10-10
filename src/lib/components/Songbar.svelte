@@ -197,22 +197,21 @@
 		</div>
 		<div class="w-full flex-col flex">
 			<div class="flex justify-center items-center gap-6 -my-2">
-				{#key shuffled}
-					<Button
-						type="ghost"
-						disabled={$songQueue.type != 'playlist'}
-						title={shuffled ? 'Disable shuffle' : 'Enable shuffle'}
-						aria-pressed={shuffled}
-						class={shuffled ? 'text-primary-200 hover:text-primary-300' : ''}
-						on:click={async () => {
-							shuffled = !shuffled;
-							updateUserSettings({ shuffle: shuffled });
-							await shuffleQueue();
-						}}
-					>
-						<span class="icon-[mingcute--shuffle-line] size-5"></span>
-					</Button>
-				{/key}
+				<Button
+					type="ghost"
+					disabled={$songQueue.type != 'playlist'}
+					title={shuffled ? 'Disable shuffle' : 'Enable shuffle'}
+					aria-pressed={shuffled}
+					class={shuffled ? 'text-primary-200 hover:text-primary-300' : ''}
+					on:click={async () => {
+						shuffled = !shuffled;
+						updateUserSettings({ shuffle: shuffled });
+						await shuffleQueue();
+					}}
+				>
+					<span class="icon-[mingcute--shuffle-line] size-5"></span>
+				</Button>
+
 				<Button type="ghost" title="Previous" on:click={async () => await skipBackward()}>
 					<span class="icon-[fa6-solid--backward-step] size-5"></span>
 				</Button>
@@ -221,15 +220,12 @@
 					title={$currentSong.isPlaying ? 'Pause (Space)' : 'Play (Space)'}
 					on:click={() => togglePlayback()}
 				>
-					{#key $currentSong}
-						{#if $currentSong.isPlaying}
-							<span class="icon-[fa6-solid--circle-pause] size-8 hover:scale-[1.05] text-white"
-							></span>
-						{:else}
-							<span class="icon-[fa6-solid--circle-play] size-8 hover:scale-[1.05] text-white"
-							></span>
-						{/if}
-					{/key}
+					{#if $currentSong.isPlaying}
+						<span class="icon-[fa6-solid--circle-pause] size-8 hover:scale-[1.05] text-white"
+						></span>
+					{:else}
+						<span class="icon-[fa6-solid--circle-play] size-8 hover:scale-[1.05] text-white"></span>
+					{/if}
 				</Button>
 				<Button
 					type="ghost"
@@ -239,26 +235,24 @@
 				>
 					<span class="icon-[fa6-solid--forward-step] size-5"></span>
 				</Button>
-				{#key repeat}
-					<Button
-						type="ghost"
-						title={repeatTitles[repeat]}
-						aria-label={repeatTitles[repeat]}
-						class="relative {repeat !== 'off' ? 'text-primary-200 hover:text-primary-300' : ''}"
-						on:click={cycleRepeatMode}
-					>
+				<Button
+					type="ghost"
+					title={repeatTitles[repeat]}
+					aria-label={repeatTitles[repeat]}
+					class="relative {repeat !== 'off' ? 'text-primary-200 hover:text-primary-300' : ''}"
+					on:click={cycleRepeatMode}
+				>
+					<span
+						class="{repeat === 'one'
+							? 'icon-[mingcute--repeat-one-line]'
+							: 'icon-[mingcute--repeat-line]'} size-5"
+					></span>
+					{#if repeat !== 'off'}
 						<span
-							class="{repeat === 'one'
-								? 'icon-[mingcute--repeat-one-line]'
-								: 'icon-[mingcute--repeat-line]'} size-5"
+							class="absolute bottom-0 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary-200"
 						></span>
-						{#if repeat !== 'off'}
-							<span
-								class="absolute bottom-0 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary-200"
-							></span>
-						{/if}
-					</Button>
-				{/key}
+					{/if}
+				</Button>
 			</div>
 			<div class="flex items-center gap-2 mt-3">
 				<span class="text-sm text-secondary-500">{formatTime(currentTime)}</span>

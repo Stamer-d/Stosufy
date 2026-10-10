@@ -10,22 +10,24 @@
 	import Button from './Button.svelte';
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
 	import QueueMenuItems from './QueueMenuItems.svelte';
+	import Select from './Select.svelte';
 
+	// Colors match the status badges on the beatmap cards
 	const STATUS_OPTIONS = [
-		{ value: 'any', label: 'All' },
-		{ value: 'ranked', label: 'Ranked' },
-		{ value: 'loved', label: 'Loved' },
-		{ value: 'qualified', label: 'Qualified' },
-		{ value: 'pending', label: 'Pending' },
-		{ value: 'graveyard', label: 'Graveyard' }
+		{ value: 'any', label: 'All', icon: 'icon-[fa6-solid--layer-group]' },
+		{ value: 'ranked', label: 'Ranked', color: 'bg-lime-400' },
+		{ value: 'loved', label: 'Loved', color: 'bg-fuchsia-500' },
+		{ value: 'qualified', label: 'Qualified', color: 'bg-blue-500' },
+		{ value: 'pending', label: 'Pending', color: 'bg-yellow-400' },
+		{ value: 'graveyard', label: 'Graveyard', color: 'bg-gray-600' }
 	];
 	const SORT_OPTIONS = [
-		{ value: '', label: 'Relevance' },
-		{ value: 'plays_desc', label: 'Most played' },
-		{ value: 'favourites_desc', label: 'Most favourited' },
-		{ value: 'rating_desc', label: 'Highest rated' },
-		{ value: 'ranked_desc', label: 'Newest' },
-		{ value: 'title_asc', label: 'Title (A-Z)' }
+		{ value: '', label: 'Relevance', icon: 'icon-[fa6-solid--wand-magic-sparkles]' },
+		{ value: 'plays_desc', label: 'Most played', icon: 'icon-[fa6-solid--play]' },
+		{ value: 'favourites_desc', label: 'Most favourited', icon: 'icon-[fa6-solid--heart]' },
+		{ value: 'rating_desc', label: 'Highest rated', icon: 'icon-[fa6-solid--star]' },
+		{ value: 'ranked_desc', label: 'Newest', icon: 'icon-[fa6-solid--clock]' },
+		{ value: 'title_asc', label: 'Title (A-Z)', icon: 'icon-[fa6-solid--arrow-down-a-z]' }
 	];
 
 	let filters = $derived($userSettings.settings?.searchFilters ?? DEFAULT_SEARCH_FILTERS);
@@ -177,61 +179,46 @@
 <div class="text-2xl font-semibold mb-3">
 	Welcome back{$user?.username ? `, ${$user.username}` : ''}
 </div>
-<div class="relative flex w-full items-center mb-4">
-	<span
-		class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
-	></span>
-	<Input
-		bind:value={search}
-		on:input={(e) => {
-			debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
-		}}
-		placeholder="Search beatmaps by title, artist or mapper"
-		class="pl-9 pr-9"
-	/>
-	{#if searching}
-		<span
-			class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
-		></span>
-	{:else if search}
-		<button
-			aria-label="Clear search"
-			class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
-			onclick={clearSearch}
-		>
-			<span class="icon-[fa6-solid--xmark] size-4"></span>
-		</button>
-	{/if}
-</div>
 <div class="flex flex-wrap items-center gap-2 mb-4">
-	<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Beatmap status">
-		{#each STATUS_OPTIONS as option (option.value)}
-			{@const active = filters.status === option.value}
+	<div class="relative flex flex-1 min-w-64 items-center">
+		<span
+			class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
+		></span>
+		<Input
+			bind:value={search}
+			on:input={(e) => {
+				debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
+			}}
+			placeholder="Search beatmaps by title, artist or mapper"
+			class="pl-9 pr-9"
+		/>
+		{#if searching}
+			<span
+				class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
+			></span>
+		{:else if search}
 			<button
-				role="radio"
-				aria-checked={active}
-				class="px-3 py-1 rounded-full text-sm font-medium cursor-pointer transition {active
-					? 'bg-primary-200 text-white'
-					: 'bg-secondary-300 text-secondary-600 hover:text-white hover:bg-secondary-400'}"
-				onclick={() => !active && setFilter({ status: option.value })}
+				aria-label="Clear search"
+				class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
+				onclick={clearSearch}
 			>
-				{option.label}
+				<span class="icon-[fa6-solid--xmark] size-4"></span>
 			</button>
-		{/each}
+		{/if}
 	</div>
-	<label class="ml-auto flex items-center gap-2 text-sm text-secondary-600">
-		<span class="icon-[fa6-solid--arrow-down-short-wide] size-4"></span>
-		<span class="sr-only">Sort by</span>
-		<select
-			class="bg-secondary-300 text-white rounded-md px-2 py-1 outline-none cursor-pointer hover:bg-secondary-400 focus:ring-1 focus:ring-secondary-600"
-			value={filters.sort}
-			onchange={(e) => setFilter({ sort: e.currentTarget.value })}
-		>
-			{#each SORT_OPTIONS as option (option.value)}
-				<option value={option.value}>{option.label}</option>
-			{/each}
-		</select>
-	</label>
+	<Select
+		label="Status"
+		options={STATUS_OPTIONS}
+		value={filters.status}
+		onchange={(status) => setFilter({ status })}
+	/>
+	<Select
+		label="Sort"
+		icon="icon-[fa6-solid--arrow-down-short-wide]"
+		options={SORT_OPTIONS}
+		value={filters.sort}
+		onchange={(sort) => setFilter({ sort })}
+	/>
 </div>
 {#if searchError && !allMaps?.length}
 	<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">

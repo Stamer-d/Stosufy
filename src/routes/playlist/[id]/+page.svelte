@@ -226,25 +226,24 @@
 			</div>
 		</div>
 		<div class="flex items-center gap-1">
-			{#key [$songQueue, $currentSong, playlistId]}
-				<Button
-					type="ghost"
-					class="{!songs.length
-						? 'text-secondary-500'
-						: 'text-primary-200 hover:text-primary-300 active:text-primary-400'} text-6xl"
-					disabled={!songs.length}
-					icon={$songQueue.playlistId == playlistId && $currentSong?.isPlaying
-						? 'icon-[fa6-solid--circle-pause]'
-						: 'icon-[fa6-solid--circle-play]'}
-					on:click={async () => {
-						if ($songQueue?.playlistId == playlistId) {
-							togglePlayback();
-						} else if (songs.length > 0) {
-							await setSongQueue(0, songs, 'playlist', playlistId);
-						}
-					}}
-				/>
-			{/key}
+			<Button
+				type="ghost"
+				class="{!songs.length
+					? 'text-secondary-500'
+					: 'text-primary-200 hover:text-primary-300 active:text-primary-400'} text-6xl"
+				disabled={!songs.length}
+				icon={$songQueue.playlistId == playlistId && $currentSong?.isPlaying
+					? 'icon-[fa6-solid--circle-pause]'
+					: 'icon-[fa6-solid--circle-play]'}
+				on:click={async () => {
+					if ($songQueue?.playlistId == playlistId) {
+						togglePlayback();
+					} else if (songs.length > 0) {
+						await setSongQueue(0, songs, 'playlist', playlistId);
+					}
+				}}
+			/>
+
 			{#key getNotDownloadedSongs().length}
 				{#if !isDownloadedPlaylist}
 					{#if downloadingAll.downloading}
