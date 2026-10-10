@@ -49,6 +49,8 @@ interface MapSetInfo {
 	video?: string | null;
 	/** When the video starts, in ms relative to the audio */
 	videoOffset?: number;
+	/** Whether the set has a video on osu!; unknown for songs downloaded before videos were saved */
+	hasVideo?: boolean;
 	[key: string]: any;
 }
 

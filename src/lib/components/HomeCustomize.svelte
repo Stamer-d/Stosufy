@@ -9,7 +9,7 @@
 		DEFAULT_HOME,
 		DEFAULT_APPEARANCE
 	} from '#lib/stores/user.ts';
-	import { mapDataStore } from '#lib/stores/data.ts';
+	import { mapDataStore, videoFetch, fetchMissingVideos } from '#lib/stores/data.ts';
 
 	/** @type {{ open: boolean }} */
 	let { open = $bindable(false) } = $props();
@@ -231,6 +231,34 @@
 				appearance.video,
 				(checked) => updateAppearance({ video: checked })
 			)}
+			<div class="flex items-center justify-between gap-4 mt-3 p-3 rounded-lg bg-white/[0.04]">
+				<span class="min-w-0">
+					<span class="block font-semibold text-white">Videos for downloaded songs</span>
+					<span class="block text-xs text-secondary-600" aria-live="polite">
+						{#if $videoFetch.state === 'checking'}
+							Checking which songs have a video…
+						{:else if $videoFetch.state === 'downloading'}
+							Adding videos: {$videoFetch.done} of {$videoFetch.total}. You can close this window.
+						{:else if $videoFetch.state === 'done'}
+							{$videoFetch.total
+								? `Added ${$videoFetch.done} ${$videoFetch.done === 1 ? 'video' : 'videos'}.`
+								: 'All your songs are up to date.'}
+						{:else if $videoFetch.state === 'error'}
+							<span class="text-red-400">{$videoFetch.message}</span>
+						{:else}
+							Songs downloaded before videos were supported get theirs. Nothing else changes.
+						{/if}
+					</span>
+				</span>
+				{#if $videoFetch.state === 'checking' || $videoFetch.state === 'downloading'}
+					<span class="icon-[mingcute--loading-line] size-5 shrink-0 animate-spin text-primary-500"
+					></span>
+				{:else}
+					<Button type="normal" on:click={fetchMissingVideos}>
+						{$videoFetch.state === 'error' ? 'Retry' : 'Get videos'}
+					</Button>
+				{/if}
+			</div>
 			<div class="mt-4 {appearance.background ? '' : 'opacity-40 pointer-events-none'}">
 				<div class="flex justify-between text-sm mb-2">
 					<span class="font-semibold text-white">Background dim</span>

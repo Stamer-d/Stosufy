@@ -2,6 +2,7 @@
 // File system access and the opus conversion are delegated to the main thread.
 
 import JSZip from 'jszip';
+import { findBackground, findVideo } from '../osuFile.ts';
 
 // Message counter to track request/response pairs
 let messageId = 0;
@@ -93,20 +94,6 @@ const ffmpeg = {
 	convertToOpus: (inputPath: string, targetPath: string) =>
 		sendRequestToMain<boolean>('convertToOpus', { inputPath, targetPath })
 };
-
-/** The video of a beatmap and its start in ms: the `Video,offset,"file"` line in [Events] */
-export function findVideo(osuFileContent: string): { file: string; offset: number } | null {
-	const events = osuFileContent.split(/^\[Events\]\s*$/m)[1]?.split(/^\[/m)[0];
-	const match = events?.match(/^(?:Video|1)\s*,\s*(-?\d+)\s*,\s*"?([^",\r\n]+)"?/m);
-	return match ? { file: match[2].trim().replace(/\\/g, '/'), offset: Number(match[1]) } : null;
-}
-
-/** The background image of a beatmap: the `0,0,"file"` line in the [Events] section */
-export function findBackground(osuFileContent: string): string | null {
-	const events = osuFileContent.split(/^\[Events\]\s*$/m)[1]?.split(/^\[/m)[0];
-	const match = events?.match(/^0\s*,\s*0\s*,\s*"?([^",\r\n]+)"?/m);
-	return match ? match[1].trim().replace(/\\/g, '/') : null;
-}
 
 async function extractAudioFromBeatmap(
 	mapsetBuffer: ArrayBuffer,

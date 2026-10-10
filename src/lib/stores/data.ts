@@ -1,6 +1,8 @@
 import { get, writable } from 'svelte/store';
 import { keyStore } from './auth';
 import { fetch } from '@tauri-apps/plugin-http';
+import JSZip from 'jszip';
+import { findVideo } from '../osuFile';
 import {
 	writeTextFile,
 	exists,
@@ -341,6 +343,7 @@ async function processWithWorker(
 							mapSetData = { ...mapSetData, background: event.data.backgroundPath };
 						}
 						const video = event.data.video;
+						mapSetData = { ...mapSetData, hasVideo: !!video };
 						if (video && isPlayableVideo(video.path)) {
 							mapSetData = { ...mapSetData, video: video.path, videoOffset: video.offset };
 						} else if (video) {
@@ -451,6 +454,125 @@ async function bufferToBase64(buffer: Uint8Array<ArrayBuffer>) {
 	return base64url.slice(base64url.indexOf(',') + 1);
 }
 
+export interface VideoFetchState {
+	state: 'idle' | 'checking' | 'downloading' | 'done' | 'error';
+	/** Sets whose video was added */
+	done: number;
+	/** Sets that have a video on osu! but not locally */
+	total: number;
+	message?: string;
+}
+
+export const videoFetch = writable<VideoFetchState>({ state: 'idle', done: 0, total: 0 });
+
+const VIDEO_CHECK_BATCH = 50;
+const VIDEO_CHECK_DELAY = 1_000;
+const VIDEO_DOWNLOAD_DELAY = 10_000;
+
+function setStoredFields(setId: string, change: Partial<StoredMapSet>) {
+	mapDataStore.update((data) =>
+		data[setId] ? { ...data, [setId]: { ...data[setId], ...change } } : data
+	);
+}
+
+/**
+ * Adds the videos of downloaded songs that were saved without one: asks the osu! API which
+ * sets have a video (50 per request), then downloads those sets again one at a time with a
+ * pause in between and keeps only the video. Nothing else of the songs changes.
+ */
+export async function fetchMissingVideos() {
+	if (['checking', 'downloading'].includes(get(videoFetch).state)) return;
+	const { access_token: token, sessionKey } = get(keyStore);
+	const fail = (message: string) => videoFetch.update((s) => ({ ...s, state: 'error', message }));
+	try {
+		videoFetch.set({ state: 'checking', done: 0, total: 0 });
+
+		// 1. Which sets have a video; the answer is remembered, so this only runs once per set
+		const unchecked = Object.values(get(mapDataStore)).filter(
+			(set) => !set.video && set.hasVideo === undefined && Object.keys(set.beatmaps ?? {}).length
+		);
+		for (let i = 0; i < unchecked.length; i += VIDEO_CHECK_BATCH) {
+			const batch = unchecked.slice(i, i + VIDEO_CHECK_BATCH);
+			const ids = batch.map((set) => Object.keys(set.beatmaps)[0]);
+			const response = await fetch(
+				`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${ids.join('&ids[]=')}`,
+				{ headers: { Authorization: `Bearer ${token}` } }
+			);
+			if (!response.ok) return fail(`osu! API error (HTTP ${response.status})`);
+			const { beatmaps } = await response.json();
+			const withVideo = new Set(
+				beatmaps.filter((map) => map.beatmapset?.video).map((map) => String(map.beatmapset_id))
+			);
+			for (const set of batch) {
+				setStoredFields(set.id.toString(), { hasVideo: withVideo.has(set.id.toString()) });
+			}
+			await saveMapData();
+			await wait(VIDEO_CHECK_DELAY);
+		}
+
+		// 2. Download the sets with a video again, one at a time
+		const missing = Object.values(get(mapDataStore)).filter((set) => set.hasVideo && !set.video);
+		videoFetch.set({ state: 'downloading', done: 0, total: missing.length });
+		for (const [index, set] of missing.entries()) {
+			const setId = set.id.toString();
+			const response = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
+				headers: {
+					Cookie: `osu_session=${sessionKey}`,
+					Referer: `https://osu.ppy.sh/beatmapsets/${setId}`
+				}
+			});
+			if (response.status === 429) {
+				return fail('osu! limits the downloads right now, try again later.');
+			}
+			if (!response.ok) return fail(`osu! refused the download (HTTP ${response.status}).`);
+			const buffer = await response.arrayBuffer();
+			const magic = new Uint8Array(buffer, 0, Math.min(2, buffer.byteLength));
+			if (magic[0] !== 0x50 || magic[1] !== 0x4b) {
+				return fail(
+					'osu! did not send a beatmap file. Your osu_session cookie has probably expired.'
+				);
+			}
+			await saveVideoFromSet(setId, buffer);
+			videoFetch.update((s) => ({ ...s, done: s.done + 1 }));
+			if (index < missing.length - 1) await wait(VIDEO_DOWNLOAD_DELAY);
+		}
+		videoFetch.update((s) => ({ ...s, state: 'done' }));
+	} catch (error) {
+		console.error('Could not fetch videos:', error);
+		fail(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/** Saves only the video of a downloaded beatmap set (.osz) */
+async function saveVideoFromSet(setId: string, buffer: ArrayBuffer) {
+	const zip = await JSZip.loadAsync(buffer);
+	let video: { file: string; offset: number } | null = null;
+	for (const entry of Object.values(zip.files)) {
+		if (entry.dir || !entry.name.endsWith('.osu')) continue;
+		video = findVideo(await entry.async('string'));
+		if (video) break;
+	}
+	const entry =
+		video &&
+		Object.values(zip.files).find(
+			(file) => !file.dir && file.name.toLowerCase() === video.file.toLowerCase()
+		);
+	if (!entry) {
+		setStoredFields(setId, { hasVideo: false });
+		await saveMapData();
+		return;
+	}
+	const extension = video.file.split('.').pop().toLowerCase();
+	const videoPath = await path.join(mapSetsDir, `${setId}-video.${extension}`);
+	await writeFile(videoPath, await entry.async('uint8array'), { baseDir: BaseDirectory.Home });
+	if (isPlayableVideo(videoPath)) {
+		setStoredFields(setId, { video: videoPath, videoOffset: video.offset });
+		await saveMapData();
+	} else {
+		queueVideoConversion(setId, videoPath, video.offset);
+	}
+}
+
 /** Video formats the webview plays directly; others (mostly .avi and .flv) are converted */
 function isPlayableVideo(videoPath: string) {
 	return /\.(mp4|m4v|webm|mov)$/i.test(videoPath);
@@ -558,6 +680,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 			background: mapsetData.background || null,
 			video: mapsetData.video || null,
 			videoOffset: mapsetData.videoOffset || 0,
+			hasVideo: mapsetData.hasVideo,
 			beatmaps: {},
 			created_at: mapsetData.createdAt || Date.now()
 		};
@@ -572,7 +695,8 @@ async function updateMapsetData(mapsetData: MapSet) {
 			tags: mapsetData.tags || updatedMapData[setId].tags,
 			background: mapsetData.background || updatedMapData[setId].background || null,
 			video: mapsetData.video || updatedMapData[setId].video || null,
-			videoOffset: mapsetData.videoOffset ?? updatedMapData[setId].videoOffset ?? 0
+			videoOffset: mapsetData.videoOffset ?? updatedMapData[setId].videoOffset ?? 0,
+			hasVideo: mapsetData.hasVideo ?? updatedMapData[setId].hasVideo
 		});
 	}
 
