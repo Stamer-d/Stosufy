@@ -14,7 +14,7 @@
 	export let open;
 </script>
 
-<Modal title="Add Song to Playlist" bind:open>
+<Modal title="Add to playlist" bind:open>
 	<div class="flex flex-col gap-4">
 		<div>
 			<p class="text-sm leading-relaxed">Select a playlist to add the Song to</p>

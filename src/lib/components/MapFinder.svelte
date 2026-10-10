@@ -1,6 +1,18 @@
 <script>
-	import { songQueue, setSongQueue, updateSongQueue } from '#lib/stores/audio.ts';
-	import { DEFAULT_SEARCH_FILTERS, fetchMaps, mapDataStore } from '#lib/stores/data.ts';
+	import {
+		songQueue,
+		setSongQueue,
+		updateSongQueue,
+		togglePlayback,
+		currentSong
+	} from '#lib/stores/audio.ts';
+	import {
+		DEFAULT_SEARCH_FILTERS,
+		colorFromString,
+		fetchMaps,
+		formatSongData,
+		mapDataStore
+	} from '#lib/stores/data.ts';
 	import { user, userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import Beatmap from './Beatmap.svelte';
@@ -11,15 +23,38 @@
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
 	import QueueMenuItems from './QueueMenuItems.svelte';
 	import Select from './Select.svelte';
+	import PlaylistCover from './PlaylistCover.svelte';
+	import { playlists } from '#lib/stores/playlist.ts';
+	import { goto } from '$app/navigation';
+	import { BEATMAP_STATUS } from '#lib/beatmapStatus.ts';
+
+	const hour = new Date().getHours();
+	const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+	let failedCovers = $state({});
+
+	// Newest downloads first
+	let downloadedSongs = $derived(formatSongData($mapDataStore).reverse());
+
+	function playDownloaded(song) {
+		// Play it within the "Downloaded Songs" playlist (sorted oldest first, like that page)
+		const songs = formatSongData($mapDataStore);
+		setSongQueue(
+			songs.findIndex((s) => s.id === song.id),
+			songs,
+			'playlist',
+			-1
+		);
+	}
 
 	// Colors match the status badges on the beatmap cards
 	const STATUS_OPTIONS = [
 		{ value: 'any', label: 'All', icon: 'icon-[fa6-solid--layer-group]' },
-		{ value: 'ranked', label: 'Ranked', color: 'bg-lime-400' },
-		{ value: 'loved', label: 'Loved', color: 'bg-fuchsia-500' },
-		{ value: 'qualified', label: 'Qualified', color: 'bg-blue-500' },
-		{ value: 'pending', label: 'Pending', color: 'bg-yellow-400' },
-		{ value: 'graveyard', label: 'Graveyard', color: 'bg-gray-600' }
+		...['ranked', 'loved', 'qualified', 'pending', 'graveyard'].map((value) => ({
+			value,
+			label: BEATMAP_STATUS[value].label,
+			color: BEATMAP_STATUS[value].dot
+		}))
 	];
 	const SORT_OPTIONS = [
 		{ value: '', label: 'Relevance', icon: 'icon-[fa6-solid--wand-magic-sparkles]' },
@@ -176,105 +211,178 @@
 	});
 </script>
 
-<div class="text-2xl font-semibold mb-3">
-	Welcome back{$user?.username ? `, ${$user.username}` : ''}
-</div>
-<div class="flex flex-wrap items-center gap-2 mb-4">
-	<div class="relative flex flex-1 min-w-64 items-center">
-		<span
-			class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
-		></span>
-		<Input
-			bind:value={search}
-			on:input={(e) => {
-				debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
-			}}
-			placeholder="Search beatmaps by title, artist or mapper"
-			class="pl-9 pr-9"
-		/>
-		{#if searching}
-			<span
-				class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
-			></span>
-		{:else if search}
-			<button
-				aria-label="Clear search"
-				class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
-				onclick={clearSearch}
-			>
-				<span class="icon-[fa6-solid--xmark] size-4"></span>
-			</button>
-		{/if}
-	</div>
-	<Select
-		label="Status"
-		options={STATUS_OPTIONS}
-		value={filters.status}
-		onchange={(status) => setFilter({ status })}
-	/>
-	<Select
-		label="Sort"
-		icon="icon-[fa6-solid--arrow-down-short-wide]"
-		options={SORT_OPTIONS}
-		value={filters.sort}
-		onchange={(sort) => setFilter({ sort })}
-	/>
-</div>
-{#if searchError && !allMaps?.length}
-	<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">
-		<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
-		<p class="text-xl">Couldn't load beatmaps</p>
-		<p class="text-sm">{searchError}</p>
-		<Button type="primary" on:click={() => runSearch(search)}>Try again</Button>
-	</div>
-{:else if osuMapsSearch && !allMaps?.length}
-	<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
-		<span class="icon-[fa6-solid--music] size-10"></span>
-		<p class="text-xl">No beatmaps found{search ? ` for "${search}"` : ''}</p>
-		<p>
-			{filters.status !== 'any'
-				? 'Try a different search term or status'
-				: 'Try a different search term'}
-		</p>
-	</div>
-{:else if osuMapsSearch}
-	<div
-		class="grid xl:grid-cols-3 md:grid-cols-2 gap-2 grid-cols-1 transition-opacity {searching
-			? 'opacity-50'
-			: ''}"
-	>
-		{#key allMaps}
-			{#each allMaps as map}
-				<ContextMenu>
-					<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
-					<svelte:fragment slot="menu">
-						{#if isMapDownloaded(map.id.toString())}
-							<QueueMenuItems song={map} />
-						{/if}
-						<Button
-							type="ghost"
-							icon="icon-[fa6-solid--plus]"
-							class="w-full py-3 rounded-sm hover:bg-secondary-400"
-							on:click={() => {
-								addPlaylistModal.open = true;
-								addPlaylistModal.map = map;
-							}}
-						>
-							Add to Playlist
-						</Button>
-					</svelte:fragment>
-				</ContextMenu>
+<div class="px-6 pt-6 pb-10">
+	<h1 class="text-3xl font-bold tracking-tight mb-5">
+		{greeting}{$user?.username ? `, ${$user.username}` : ''}
+	</h1>
+
+	{#if $playlists.length}
+		<div class="grid grid-cols-2 xl:grid-cols-3 gap-2 mb-8">
+			{#each $playlists.slice(0, 6) as playlist (playlist.id)}
+				{@const playingThis = $songQueue.playlistId == playlist.id && $currentSong.isPlaying}
+				<button
+					class="group flex items-center gap-3 h-14 pr-3 rounded-md overflow-hidden bg-white/[0.06] hover:bg-white/[0.12] text-start cursor-pointer transition-colors"
+					onclick={() => goto(`/playlist/${playlist.id}`)}
+				>
+					<PlaylistCover {playlist} class="size-14" />
+					<span class="flex-1 min-w-0 font-semibold truncate">{playlist.title}</span>
+					{#if playingThis}
+						<span class="icon-[svg-spinners--bars-scale-middle] size-4 text-primary-500 shrink-0"
+						></span>
+					{/if}
+				</button>
 			{/each}
-		{/key}
-	</div>
+		</div>
+	{/if}
 
-	<div bind:this={endOfContent} class=""></div>
-{/if}
+	{#if downloadedSongs.length}
+		<section class="mb-10">
+			<div class="flex items-baseline justify-between mb-3">
+				<h2 class="text-xl font-bold tracking-tight">Recently downloaded</h2>
+				<a
+					href="/playlist/-1"
+					class="text-sm font-semibold text-secondary-600 hover:text-white hover:underline"
+				>
+					Show all
+				</a>
+			</div>
+			<div class="grid grid-cols-3 xl:grid-cols-6 gap-4">
+				{#each downloadedSongs.slice(0, 6) as song, index (song.id)}
+					{@const playingThis = $currentSong.song?.id == song.id && $currentSong.isPlaying}
+					<div class="group min-w-0 {index >= 3 ? 'hidden xl:block' : ''}">
+						<div
+							class="relative aspect-square rounded-md overflow-hidden mb-2"
+							style="background-color: {colorFromString(song.title)}"
+						>
+							<img
+								src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list@2x.jpg"
+								alt=""
+								loading="lazy"
+								class="size-full object-cover {failedCovers[song.id] ? 'invisible' : ''}"
+								onerror={() => (failedCovers[song.id] = true)}
+							/>
+							<button
+								aria-label="Play {song.title}"
+								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
+									? 'opacity-100'
+									: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
+								onclick={() => (playingThis ? togglePlayback() : playDownloaded(song))}
+							>
+								<span
+									class="{playingThis
+										? 'icon-[mingcute--pause-fill]'
+										: 'icon-[mingcute--play-fill]'} size-5"
+								></span>
+							</button>
+						</div>
+						<p class="font-semibold text-sm truncate {playingThis ? 'text-primary-500' : ''}">
+							{song.title}
+						</p>
+						<p class="text-sm text-secondary-600 truncate">{song.artist}</p>
+					</div>
+				{/each}
+			</div>
+		</section>
+	{/if}
 
-{#if loading && !searchError}
-	<div class="w-full text-center">
-		<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
+	<h2 class="text-xl font-bold tracking-tight mb-3">Discover beatmaps</h2>
+	<div class="flex flex-wrap items-center gap-2 mb-4">
+		<div class="relative flex flex-1 min-w-64 items-center">
+			<span
+				class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
+			></span>
+			<Input
+				bind:value={search}
+				on:input={(e) => {
+					debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
+				}}
+				placeholder="Search beatmaps by title, artist or mapper"
+				class="pl-9 pr-9"
+			/>
+			{#if searching}
+				<span
+					class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
+				></span>
+			{:else if search}
+				<button
+					aria-label="Clear search"
+					class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
+					onclick={clearSearch}
+				>
+					<span class="icon-[fa6-solid--xmark] size-4"></span>
+				</button>
+			{/if}
+		</div>
+		<Select
+			label="Status"
+			options={STATUS_OPTIONS}
+			value={filters.status}
+			onchange={(status) => setFilter({ status })}
+		/>
+		<Select
+			label="Sort"
+			icon="icon-[fa6-solid--arrow-down-short-wide]"
+			options={SORT_OPTIONS}
+			value={filters.sort}
+			onchange={(sort) => setFilter({ sort })}
+		/>
 	</div>
-{/if}
+	{#if searchError && !allMaps?.length}
+		<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">
+			<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
+			<p class="text-xl">Couldn't load beatmaps</p>
+			<p class="text-sm">{searchError}</p>
+			<Button type="primary" on:click={() => runSearch(search)}>Try again</Button>
+		</div>
+	{:else if osuMapsSearch && !allMaps?.length}
+		<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
+			<span class="icon-[fa6-solid--music] size-10"></span>
+			<p class="text-xl">No beatmaps found{search ? ` for "${search}"` : ''}</p>
+			<p>
+				{filters.status !== 'any'
+					? 'Try a different search term or status'
+					: 'Try a different search term'}
+			</p>
+		</div>
+	{:else if osuMapsSearch}
+		<div
+			class="grid xl:grid-cols-3 md:grid-cols-2 gap-4 grid-cols-1 transition-opacity {searching
+				? 'opacity-50'
+				: ''}"
+		>
+			{#key allMaps}
+				{#each allMaps as map}
+					<ContextMenu>
+						<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
+						<svelte:fragment slot="menu">
+							{#if isMapDownloaded(map.id.toString())}
+								<QueueMenuItems song={map} />
+							{/if}
+							<Button
+								type="ghost"
+								icon="icon-[mingcute--add-circle-line]"
+								class="w-full rounded-md text-sm hover:bg-secondary-400"
+								on:click={() => {
+									addPlaylistModal.open = true;
+									addPlaylistModal.map = map;
+								}}
+							>
+								Add to Playlist
+							</Button>
+						</svelte:fragment>
+					</ContextMenu>
+				{/each}
+			{/key}
+		</div>
+
+		<div bind:this={endOfContent} class=""></div>
+	{/if}
+
+	{#if loading && !searchError}
+		<div class="w-full text-center">
+			<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
+		</div>
+	{/if}
+</div>
 
 <SongToPlaylistModal bind:open={addPlaylistModal.open} bind:map={addPlaylistModal.map} />

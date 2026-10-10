@@ -13,7 +13,6 @@
 		upNext,
 		queuePanelOpen
 	} from '#lib/stores/audio.ts';
-	import Button from './Button.svelte';
 	import Range from './Range.svelte';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
 	import { handleImageError } from '#lib/stores/data.ts';
@@ -101,15 +100,7 @@
 
 	// Get appropriate volume icon based on current volume
 	function getVolumeIcon() {
-		if (volume === 0.0) {
-			return 'icon-[fa6-solid--volume-xmark]';
-		} else if (volume < 0.03) {
-			return 'icon-[fa6-solid--volume-off]';
-		} else if (volume < 0.06) {
-			return 'icon-[fa6-solid--volume-low]';
-		} else {
-			return 'icon-[fa6-solid--volume-high]';
-		}
+		return volume === 0 ? 'icon-[mingcute--volume-mute-line]' : 'icon-[mingcute--volume-line]';
 	}
 
 	// Space toggles playback, unless the user is typing
@@ -172,6 +163,9 @@
 	$: repeat = $userSettings.settings?.repeat ?? 'off';
 	$: canSkipForward = hasNext($songQueue, $upNext, repeat);
 
+	const ICON_BUTTON =
+		'size-8 grid place-items-center rounded-full cursor-pointer transition disabled:opacity-30 disabled:cursor-not-allowed';
+
 	const repeatTitles = {
 		off: 'Enable repeat',
 		all: 'Enable repeat one',
@@ -182,27 +176,30 @@
 <svelte:window on:keydown={handleKeydown} />
 
 {#if $currentSong?.song?.id}
-	<div class="grid grid-cols-3 gap-2 py-3 px-4 bg-secondary-50">
-		<div class="gap-3 flex items-center">
+	<footer class="h-20 shrink-0 grid grid-cols-[1fr_minmax(0,40rem)_1fr] items-center gap-4 px-4">
+		<div class="flex items-center gap-3 min-w-0">
 			<img
 				src="https://assets.ppy.sh/beatmaps/{$currentSong.song?.id}/covers/list.jpg"
-				class="size-16 rounded"
+				class="size-14 rounded-md object-cover shrink-0"
 				alt=""
 				on:error={handleImageError}
 			/>
-			<div>
-				<div class="font-medium">{$currentSong.song?.title}</div>
-				<div class="text-sm text-secondary-600">{$currentSong.song?.artist}</div>
+			<div class="min-w-0">
+				<div class="text-sm font-semibold truncate">{$currentSong.song?.title}</div>
+				<div class="text-xs text-secondary-600 truncate">{$currentSong.song?.artist}</div>
 			</div>
 		</div>
-		<div class="w-full flex-col flex">
-			<div class="flex justify-center items-center gap-6 -my-2">
-				<Button
-					type="ghost"
+
+		<div class="flex flex-col items-center gap-1.5">
+			<div class="flex items-center gap-4">
+				<button
 					disabled={$songQueue.type != 'playlist'}
 					title={shuffled ? 'Disable shuffle' : 'Enable shuffle'}
+					aria-label={shuffled ? 'Disable shuffle' : 'Enable shuffle'}
 					aria-pressed={shuffled}
-					class={shuffled ? 'text-primary-200 hover:text-primary-300' : ''}
+					class="relative {ICON_BUTTON} {shuffled
+						? 'text-primary-500'
+						: 'text-white/60 hover:text-white'}"
 					on:click={async () => {
 						shuffled = !shuffled;
 						updateUserSettings({ shuffle: shuffled });
@@ -210,36 +207,45 @@
 					}}
 				>
 					<span class="icon-[mingcute--shuffle-line] size-5"></span>
-				</Button>
-
-				<Button type="ghost" title="Previous" on:click={async () => await skipBackward()}>
-					<span class="icon-[fa6-solid--backward-step] size-5"></span>
-				</Button>
-				<Button
-					type="ghost"
+					{#if shuffled}
+						<span class="absolute -bottom-0.5 size-1 rounded-full bg-primary-500"></span>
+					{/if}
+				</button>
+				<button
+					title="Previous"
+					aria-label="Previous"
+					class="{ICON_BUTTON} text-white/70 hover:text-white"
+					on:click={async () => await skipBackward()}
+				>
+					<span class="icon-[mingcute--skip-previous-fill] size-5"></span>
+				</button>
+				<button
 					title={$currentSong.isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+					aria-label={$currentSong.isPlaying ? 'Pause' : 'Play'}
+					class="size-9 grid place-items-center rounded-full bg-white text-black cursor-pointer transition hover:scale-105"
 					on:click={() => togglePlayback()}
 				>
-					{#if $currentSong.isPlaying}
-						<span class="icon-[fa6-solid--circle-pause] size-8 hover:scale-[1.05] text-white"
-						></span>
-					{:else}
-						<span class="icon-[fa6-solid--circle-play] size-8 hover:scale-[1.05] text-white"></span>
-					{/if}
-				</Button>
-				<Button
-					type="ghost"
+					<span
+						class="{$currentSong.isPlaying
+							? 'icon-[mingcute--pause-fill]'
+							: 'icon-[mingcute--play-fill]'} size-5"
+					></span>
+				</button>
+				<button
 					title="Next"
+					aria-label="Next"
 					disabled={!canSkipForward}
+					class="{ICON_BUTTON} text-white/70 hover:text-white"
 					on:click={async () => await skipForward()}
 				>
-					<span class="icon-[fa6-solid--forward-step] size-5"></span>
-				</Button>
-				<Button
-					type="ghost"
+					<span class="icon-[mingcute--skip-forward-fill] size-5"></span>
+				</button>
+				<button
 					title={repeatTitles[repeat]}
 					aria-label={repeatTitles[repeat]}
-					class="relative {repeat !== 'off' ? 'text-primary-200 hover:text-primary-300' : ''}"
+					class="relative {ICON_BUTTON} {repeat !== 'off'
+						? 'text-primary-500'
+						: 'text-white/60 hover:text-white'}"
 					on:click={cycleRepeatMode}
 				>
 					<span
@@ -248,15 +254,14 @@
 							: 'icon-[mingcute--repeat-line]'} size-5"
 					></span>
 					{#if repeat !== 'off'}
-						<span
-							class="absolute bottom-0 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary-200"
-						></span>
+						<span class="absolute -bottom-0.5 size-1 rounded-full bg-primary-500"></span>
 					{/if}
-				</Button>
+				</button>
 			</div>
-			<div class="flex items-center gap-2 mt-3">
-				<span class="text-sm text-secondary-500">{formatTime(currentTime)}</span>
-				<!-- Clickable progress bar -->
+			<div class="w-full flex items-center gap-2">
+				<span class="w-10 text-end text-xs text-secondary-600 tabular-nums">
+					{formatTime(currentTime)}
+				</span>
 				<Range
 					bind:value={currentTime}
 					min={0}
@@ -264,43 +269,46 @@
 					step={0.1}
 					on:change={handleProgressChange}
 				/>
-				<span class="text-sm text-secondary-500">{formatTime(duration)}</span>
+				<span class="w-10 text-xs text-secondary-600 tabular-nums">{formatTime(duration)}</span>
 			</div>
 		</div>
-		<div class="justify-end flex items-center gap-3">
-			<Button
-				type="ghost"
+
+		<div class="flex items-center justify-end gap-2">
+			<button
 				title="Queue"
 				aria-label="Queue"
 				aria-pressed={$queuePanelOpen}
-				class="relative {$queuePanelOpen ? 'text-primary-200 hover:text-primary-300' : ''}"
+				class="relative {ICON_BUTTON} {$queuePanelOpen
+					? 'text-primary-500'
+					: 'text-white/60 hover:text-white'}"
 				on:click={() => queuePanelOpen.update((open) => !open)}
 			>
 				<span class="icon-[mingcute--playlist-2-line] size-5"></span>
 				{#if $upNext.length}
 					<span
-						class="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-primary-200 text-white text-[10px] leading-4 text-center"
+						class="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-primary-300 text-white text-[10px] font-bold leading-4 text-center"
 					>
 						{$upNext.length}
 					</span>
 				{/if}
-			</Button>
-			<!-- Volume control -->
-			<div class="flex items-center justify-start gap-2 relative">
-				<Button type="ghost" on:click={toggleMute}>
-					<span class="{getVolumeIcon()} size-4"></span>
-				</Button>
-
-				<div class="w-24">
-					<Range
-						bind:value={volume}
-						min={0}
-						max={0.2}
-						step={0.001}
-						on:change={(e) => handleVolumeChange(e.detail)}
-					/>
-				</div>
+			</button>
+			<button
+				title={volume === 0 ? 'Unmute' : 'Mute'}
+				aria-label={volume === 0 ? 'Unmute' : 'Mute'}
+				class="{ICON_BUTTON} text-white/60 hover:text-white"
+				on:click={toggleMute}
+			>
+				<span class="{getVolumeIcon()} size-5"></span>
+			</button>
+			<div class="w-28">
+				<Range
+					bind:value={volume}
+					min={0}
+					max={0.2}
+					step={0.001}
+					on:change={(e) => handleVolumeChange(e.detail)}
+				/>
 			</div>
 		</div>
-	</div>
+	</footer>
 {/if}

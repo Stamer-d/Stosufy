@@ -59,11 +59,11 @@
 
 {#if open}
 	<div
-		class="modal-backdrop fixed inset-0 bg-secondary-100/70 z-40 flex items-center justify-center p-4 overflow-y-auto"
+		class="modal-backdrop fixed inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto"
 		role="presentation"
 	>
 		<div
-			class="modal bg-secondary-200 rounded-lg my-auto z-50 max-h-[90vh] flex flex-col"
+			class="modal bg-secondary-200 rounded-xl my-auto z-50 max-h-[90vh] flex flex-col shadow-2xl shadow-black/60 ring-1 ring-white/5"
 			style="width: {width}; max-width: 95vw;"
 			role="dialog"
 			aria-modal="true"
@@ -72,16 +72,16 @@
 		>
 			<div class="modal-content flex flex-col max-h-[80vh]">
 				{#if title}
-					<div class="modal-header border-b border-secondary-200 p-3 flex-shrink-0">
-						<h2 id="modal-title" class="text-lg font-medium">{title}</h2>
+					<div class="modal-header px-5 pt-5 pb-2 flex-shrink-0">
+						<h2 id="modal-title" class="text-xl font-bold">{title}</h2>
 					</div>
 				{/if}
 
-				<div class="modal-body p-3 overflow-y-auto">
+				<div class="modal-body px-5 py-2 overflow-y-auto text-sm text-white/80">
 					<slot />
 				</div>
 
-				<div class="modal-footer p-4 flex justify-end gap-2 flex-shrink-0">
+				<div class="modal-footer px-5 pb-5 pt-4 flex justify-end gap-2 flex-shrink-0">
 					<slot name="footer">
 						<Button
 							on:click={() => {

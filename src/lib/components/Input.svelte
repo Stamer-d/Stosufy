@@ -16,14 +16,15 @@
 
 	const sizeClasses = {
 		sm: 'text-xs p-1',
-		md: 'p-2',
+		md: 'h-10 px-3 text-sm',
 		lg: 'text-lg p-3 '
 	};
 
 	$: inputClasses = `
-      ${sizeClasses[size]} 
-      rounded ring-1 ring-secondary-300  transition  outline-none w-full bg-secondary-300
-      ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:ring-secondary-400 focus:ring-secondary-600'}
+      ${sizeClasses[size]}
+      w-full rounded-lg bg-secondary-300 outline-none ring-1 ring-transparent transition
+      placeholder:text-secondary-600
+      ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary-400 focus:bg-secondary-300 focus:ring-primary-400'}
     `;
 </script>
 

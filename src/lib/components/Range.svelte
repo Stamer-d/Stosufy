@@ -19,10 +19,10 @@
 	$: percentage = ((value - min) / (max - min)) * 100;
 </script>
 
-<div class="range-container relative flex-1 h-1 bg-secondary-300 rounded group">
+<div class="range-container relative flex-1 h-1 bg-white/15 rounded-full group">
 	<div>
 		<div
-			class="progress group-hover:bg-primary-200 bg-white absolute top-0 left-0 h-1 rounded"
+			class="progress group-hover:bg-primary-400 bg-white absolute top-0 left-0 h-1 rounded-full"
 			style="width: {percentage}%"
 		></div>
 	</div>

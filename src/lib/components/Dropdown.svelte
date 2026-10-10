@@ -36,7 +36,7 @@
 
 	{#if isOpen}
 		<div
-			class="absolute right-0 z-30 w-64 mt-2 origin-top-right bg-secondary-300 rounded-lg p-2 {menuClass}"
+			class="absolute right-0 z-40 w-56 mt-1.5 origin-top-right bg-secondary-300 rounded-lg p-1.5 shadow-xl shadow-black/40 ring-1 ring-white/5 {menuClass}"
 			role="menu"
 			aria-orientation="vertical"
 		>

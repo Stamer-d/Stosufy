@@ -40,59 +40,71 @@
 	});
 </script>
 
-<main class="flex flex-col justify-center items-center h-screen gap-6 relative">
-	{#if sessionKeyValid.status_code === 429}
-		<p class="font-semibold absolute top-1/8 z-50 text-red-300 text-center text-xl p-4">
-			Rate limit exceeded. Please try again later.
+<main class="min-h-full grid place-items-center px-6 py-10">
+	<div class="w-full max-w-sm flex flex-col items-center">
+		<img src="logo.png" alt="" class="size-20 mb-6" />
+		<h1 class="text-3xl font-extrabold tracking-tight text-center">Log in to Stosufy</h1>
+		<p class="mt-2 text-sm text-secondary-600 text-center">
+			Listen to osu! beatmaps and build your own playlists.
 		</p>
-	{:else if sessionKeyValid.status_code === 401}
-		<p class="font-semibold absolute top-1/8 z-50 text-red-300 text-center text-xl p-4">
-			Invalid session key. Please check your session key.
-		</p>
-	{/if}
-	<div class="flex flex-col gap-2 items-center">
-		<img src="logo.png" alt="" class="size-30" />
-		<p class="text-5xl font-semibold">Log in to Stosufy</p>
-	</div>
-	<div class="w-1/4 flex flex-col gap-2">
-		<div class="flex items-center">
-			<p class="font-semibold text-lg">Session Key</p>
-			<Button
-				on:click={() => {
-					showInfo = true;
+
+		{#if sessionKeyValid.status_code === 429 || sessionKeyValid.status_code === 401}
+			<div
+				class="mt-6 w-full flex items-start gap-2 rounded-lg bg-red-500/10 ring-1 ring-red-500/30 px-3 py-2.5 text-sm text-red-300"
+				role="alert"
+			>
+				<span class="icon-[mingcute--warning-line] size-5 shrink-0"></span>
+				{sessionKeyValid.status_code === 429
+					? 'Too many attempts. Please try again later.'
+					: 'This session key is invalid. Please check it and try again.'}
+			</div>
+		{/if}
+
+		<div class="mt-8 w-full">
+			<div class="flex items-center justify-between mb-2">
+				<label for="session-key" class="text-sm font-semibold">osu! session key</label>
+				<button
+					class="text-xs font-semibold text-secondary-600 hover:text-white cursor-pointer"
+					onclick={() => (showInfo = true)}
+				>
+					Where do I find it?
+				</button>
+			</div>
+			<Input
+				id="session-key"
+				bind:value={$keyStore.sessionKey}
+				type="password"
+				on:blur={async () => {
+					if ($keyStore?.sessionKey?.startsWith('ey')) {
+						sessionKeyValid = await checkSessionKey($keyStore?.sessionKey);
+					} else {
+						sessionKeyValid.status = false;
+					}
 				}}
-				class="-mt-3 -ml-1"
-				type="ghost"
-				icon="icon-[fa6-solid--circle-question]"
-			/>
+				placeholder="Paste your session key"
+			></Input>
+			<p class="mt-2 text-xs text-secondary-600">
+				Needed to download beatmaps. It stays on this device.
+			</p>
 		</div>
-		<Input
-			bind:value={$keyStore.sessionKey}
-			type="password"
-			on:blur={async () => {
-				if ($keyStore?.sessionKey?.startsWith('ey')) {
-					sessionKeyValid = await checkSessionKey($keyStore?.sessionKey);
-				} else {
-					sessionKeyValid.status = false;
-				}
+
+		<Button
+			class="mt-6 w-full justify-center h-11"
+			type="primary"
+			disabled={!sessionKeyValid.status}
+			on:click={async () => {
+				await open(authUrl);
 			}}
-			placeholder="Session Key"
-		></Input>
+		>
+			Continue with osu!
+		</Button>
 	</div>
-	<Button
-		class="w-1/4 flex justify-center"
-		type="primary"
-		disabled={!sessionKeyValid.status}
-		on:click={async () => {
-			await open(authUrl);
-		}}>Authorize at Osu!</Button
-	>
 </main>
 
-<Modal bind:open={showInfo} title="Session Key Info">
+<Modal bind:open={showInfo} title="About the session key">
 	<div class="flex flex-col gap-4">
 		<div>
-			<h1 class="text-lg font-bold">🟣 What is a Session Key?</h1>
+			<h3 class="text-base font-bold text-white">What is a session key?</h3>
 			<p class="text-sm leading-relaxed">
 				A <strong>Session Key</strong> is a small piece of data that osu! uses to keep you logged in while
 				browsing their website. It’s stored in your browser as a cookie and identifies your account during
@@ -105,7 +117,7 @@
 			</p>
 		</div>
 		<div>
-			<h1 class="text-lg font-bold">🟡 Why does this app need my Session Key?</h1>
+			<h3 class="text-base font-bold text-white">Why does Stosufy need it?</h3>
 			<p class="text-sm leading-relaxed">
 				Normally, downloading beatmaps (songs) from osu! requires you to be logged in. The osu! API
 				doesn’t allow direct song downloads — it only provides metadata (like song title, artist,
@@ -116,13 +128,13 @@
 				your browser, enabling it to download beatmaps on your behalf.
 			</p>
 			<p class="text-sm leading-relaxed mt-2 text-red-500 font-semibold">
-				⚠️ Security Note: Never share your Session Key with untrusted sources. This app only uses it
+				Security note: Never share your Session Key with untrusted sources. This app only uses it
 				for downloads and stores it locally on your device to keep you logged in to Stosufy after
 				restarts.
 			</p>
 		</div>
 		<div>
-			<h1 class="text-lg font-bold">🟢 How do I get my Session Key?</h1>
+			<h3 class="text-base font-bold text-white">How do I get it?</h3>
 			<p class="text-sm leading-relaxed">
 				Follow these steps to retrieve your <strong>Session Key</strong>:
 			</p>

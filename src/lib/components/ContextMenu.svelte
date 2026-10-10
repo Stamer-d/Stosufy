@@ -79,7 +79,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="context-menu-container inline-block" on:contextmenu={handleContextMenu}>
+<div class="context-menu-container block" on:contextmenu={handleContextMenu}>
 	<slot></slot>
 
 	{#if showMenu}
@@ -89,7 +89,9 @@
 			transition:fly={{ y: 5, duration: 150 }}
 			use:adjustMenuPosition
 		>
-			<div class="bg-secondary-300 shadow-lg rounded-md py-2 min-w-64 p-1.5">
+			<div
+				class="bg-secondary-300 rounded-lg min-w-56 p-1.5 shadow-xl shadow-black/40 ring-1 ring-white/5"
+			>
 				<slot name="menu"></slot>
 			</div>
 		</div>

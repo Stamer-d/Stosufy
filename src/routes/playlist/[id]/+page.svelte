@@ -29,6 +29,10 @@
 	import ContextMenu from '#lib/components/ContextMenu.svelte';
 	import SongToPlaylistModal from '#lib/components/SongToPlaylistModal.svelte';
 	import QueueMenuItems from '#lib/components/QueueMenuItems.svelte';
+	import PlaylistCover from '#lib/components/PlaylistCover.svelte';
+	import { colorFromImage, colorFromString } from '#lib/stores/data.ts';
+	import { shuffleQueue } from '#lib/stores/audio.ts';
+	import { user, updateUserSettings } from '#lib/stores/user.ts';
 	import { userSettings } from '#lib/stores/user.ts';
 
 	const pagePlaylistId = toStore(() => page.params?.id);
@@ -38,6 +42,45 @@
 	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
 	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
 	$: songs = $playlistSongsCache[playlistId]?.songs || [];
+
+	// Background wash of the header, taken from the cover
+	let headerColor = null;
+	$: if (playlistData) updateHeaderColor(playlistData);
+
+	async function updateHeaderColor(playlist) {
+		if (playlist.id == -1) {
+			headerColor = 'oklch(0.42 0.17 300)';
+			return;
+		}
+		headerColor = colorFromString(playlist.title);
+		if (playlist.image_url) {
+			const color = await colorFromImage(playlist.image_url);
+			if (color && playlistData === playlist) headerColor = color;
+		}
+	}
+
+	$: isPlayingThis = $songQueue.playlistId == playlistId && $currentSong?.isPlaying;
+	$: shuffleOn = $userSettings.settings?.shuffle || false;
+	$: isCurrent = (song) => $currentSong?.song?.id == song.id && $songQueue.playlistId == playlistId;
+
+	async function playSong(index, song) {
+		if ($songQueue.type !== 'playlist' || $songQueue.playlistId != playlistId) {
+			await setSongQueue(index, songs, 'playlist', playlistId);
+		} else if ($currentSong?.song?.id == song.id) {
+			togglePlayback();
+		} else if ($userSettings.settings.shuffle) {
+			await setSongQueue(index, songs, 'playlist', playlistId);
+		} else {
+			stopPlayback();
+			await updateSongQueue(index, null, null, null);
+			togglePlayback();
+		}
+	}
+
+	async function toggleShuffle() {
+		updateUserSettings({ shuffle: !shuffleOn });
+		await shuffleQueue();
+	}
 
 	let addPlaylistModal = {
 		open: false,
@@ -199,42 +242,51 @@
 </script>
 
 {#if playlistData}
-	<div class="flex flex-col gap-3">
-		<div class="flex items-center gap-4 mb-2">
-			<div class="relative shrink-0">
-				<img
-					src={isDownloadedPlaylist ? '/NoLetterLogo.png' : getImageUrl(playlistData.image_url)}
-					alt=""
-					class="xl:size-50 size-40 bg-secondary-200 rounded-md object-cover"
-				/>
-				{#if isDownloadedPlaylist}
-					<span
-						class="icon-[fa6-solid--circle-arrow-down] text-white xl:size-25 size-18 absolute xl:top-15 xl:left-12.5 top-13 left-11"
-					></span>
+	<div
+		class="transition-colors duration-500"
+		style="background: linear-gradient(to bottom, {headerColor ??
+			'transparent'} 0, transparent 26rem)"
+	>
+		<header class="flex items-end gap-6 px-6 pt-14 pb-6">
+			<PlaylistCover
+				playlist={playlistData}
+				class="size-44 xl:size-52 rounded-md shadow-2xl shadow-black/50"
+				iconClass="size-16"
+			/>
+			<div class="min-w-0 pb-1">
+				<p class="text-sm font-semibold">
+					{isDownloadedPlaylist
+						? 'On this device'
+						: playlistData.public
+							? 'Public playlist'
+							: 'Private playlist'}
+				</p>
+				<h1
+					class="mt-1 text-4xl xl:text-6xl font-extrabold tracking-tight leading-[1.05] line-clamp-2 break-words"
+				>
+					{playlistData.title}
+				</h1>
+				{#if playlistData.description}
+					<p class="mt-3 text-sm text-white/70 line-clamp-2">{playlistData.description}</p>
 				{/if}
+				<p class="mt-3 text-sm">
+					{#if !isDownloadedPlaylist && $user?.username}
+						<span class="font-bold">{$user.username}</span>
+						<span class="text-white/70"> · </span>
+					{/if}
+					<span class="text-white/70">
+						{playlistData.song_amount}
+						{playlistData.song_amount === 1 ? 'song' : 'songs'}
+					</span>
+				</p>
 			</div>
+		</header>
 
-			<div class="flex xl:gap-2 gap-1 flex-col">
-				<div>{playlistData.public ? 'Public Playlist' : 'Private Playlist'}</div>
-				<div class="xl:text-6xl text-3xl font-bold">{playlistData.title}</div>
-				<div class=" line-clamp-1 w-full text-secondary-600 font-semibold">
-					{playlistData.description}
-				</div>
-				<div>
-					{playlistData.song_amount} Song{playlistData.song_amount === 1 ? '' : 's'}
-				</div>
-			</div>
-		</div>
-		<div class="flex items-center gap-1">
-			<Button
-				type="ghost"
-				class="{!songs.length
-					? 'text-secondary-500'
-					: 'text-primary-200 hover:text-primary-300 active:text-primary-400'} text-6xl"
+		<div class="flex items-center gap-5 px-6 py-4 bg-black/10">
+			<button
+				aria-label={isPlayingThis ? 'Pause' : 'Play'}
 				disabled={!songs.length}
-				icon={$songQueue.playlistId == playlistId && $currentSong?.isPlaying
-					? 'icon-[fa6-solid--circle-pause]'
-					: 'icon-[fa6-solid--circle-play]'}
+				class="size-14 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/30 cursor-pointer transition hover:scale-105 hover:bg-primary-400 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
 				on:click={async () => {
 					if ($songQueue?.playlistId == playlistId) {
 						togglePlayback();
@@ -242,253 +294,247 @@
 						await setSongQueue(0, songs, 'playlist', playlistId);
 					}
 				}}
-			/>
+			>
+				<span
+					class="{isPlayingThis
+						? 'icon-[mingcute--pause-fill]'
+						: 'icon-[mingcute--play-fill]'} size-7"
+				></span>
+			</button>
 
-			{#key getNotDownloadedSongs().length}
-				{#if !isDownloadedPlaylist}
-					{#if downloadingAll.downloading}
-						<div class="relative w-12 h-12">
-							<!-- Gray background circle -->
-							<svg class="w-12 h-12" viewBox="0 0 36 36">
-								<path
-									class="text-secondary-300"
-									stroke="currentColor"
-									stroke-width="3"
-									fill="none"
-									d="M18 2.0845
-                a 15.9155 15.9155 0 0 1 0 31.831
-                a 15.9155 15.9155 0 0 1 0 -31.831"
-								/>
-								<!-- Progress circle -->
-								<path
-									class="text-primary-300 transition-all duration-300 ease-out"
-									stroke="currentColor"
-									stroke-width="3"
-									fill="none"
-									stroke-dasharray="{downloadingAll.progress}, 100"
-									stroke-linecap="round"
-									d="M18 2.0845
-                a 15.9155 15.9155 0 0 1 0 31.831
-                a 15.9155 15.9155 0 0 1 0 -31.831"
-								/>
-							</svg>
-							<button
-								aria-label="Stop downloading"
-								on:click={() => {
-									downloadingAll.abort = true;
-									downloadingAll.downloading = false;
-								}}
-								class="cursor-pointer absolute inset-0 flex text-secondary-500 z-10 hover:text-secondary-600 items-center justify-center text-xs font-semibold rounded-full transition-colors"
-							>
-								<span class="icon-[fa6-solid--stop] size-5"></span>
-							</button>
-						</div>
-					{:else}
-						<Button
-							type="ghost"
-							class="text-3xl"
-							icon="icon-[fa6-solid--circle-arrow-down] {getNotDownloadedSongs().length > 0
-								? ''
-								: 'text-primary-400'} "
-							on:click={async () => {
-								await downloadAllSongs();
-							}}
-						/>
-					{/if}
+			<button
+				title={shuffleOn ? 'Disable shuffle' : 'Enable shuffle'}
+				aria-label={shuffleOn ? 'Disable shuffle' : 'Enable shuffle'}
+				aria-pressed={shuffleOn}
+				class="relative size-10 grid place-items-center rounded-full cursor-pointer transition {shuffleOn
+					? 'text-primary-500'
+					: 'text-white/60 hover:text-white'}"
+				on:click={toggleShuffle}
+			>
+				<span class="icon-[mingcute--shuffle-line] size-7"></span>
+				{#if shuffleOn}
+					<span class="absolute bottom-0 size-1 rounded-full bg-primary-500"></span>
 				{/if}
-			{/key}
+			</button>
+
+			{#if !isDownloadedPlaylist}
+				{#if downloadingAll.downloading}
+					<div class="relative size-10" title="Downloading {Math.round(downloadingAll.progress)}%">
+						<svg class="size-10 -rotate-90" viewBox="0 0 36 36">
+							<circle
+								cx="18"
+								cy="18"
+								r="15.9"
+								fill="none"
+								stroke-width="3"
+								class="stroke-white/15"
+							/>
+							<circle
+								cx="18"
+								cy="18"
+								r="15.9"
+								fill="none"
+								stroke-width="3"
+								stroke-linecap="round"
+								stroke-dasharray="{downloadingAll.progress}, 100"
+								class="stroke-primary-400 transition-all duration-300 ease-out"
+							/>
+						</svg>
+						<button
+							aria-label="Stop downloading"
+							on:click={() => {
+								downloadingAll.abort = true;
+								downloadingAll.downloading = false;
+							}}
+							class="absolute inset-0 grid place-items-center text-white/70 hover:text-white cursor-pointer"
+						>
+							<span class="icon-[mingcute--stop-fill] size-4"></span>
+						</button>
+					</div>
+				{:else}
+					{@const missing = getNotDownloadedSongs().length}
+					<button
+						title={missing
+							? `Download ${missing} missing ${missing === 1 ? 'song' : 'songs'}`
+							: 'All songs downloaded'}
+						aria-label={missing ? 'Download all songs' : 'All songs downloaded'}
+						disabled={!missing}
+						class="size-10 grid place-items-center rounded-full cursor-pointer transition {missing
+							? 'text-white/60 hover:text-white'
+							: 'text-primary-500 cursor-default'}"
+						on:click={downloadAllSongs}
+					>
+						<span
+							class="{missing
+								? 'icon-[mingcute--download-2-line]'
+								: 'icon-[mingcute--check-circle-fill]'} size-7"
+						></span>
+					</button>
+				{/if}
+			{/if}
 		</div>
-		<div class="flex flex-col">
-			{#if songs?.length}
-				{#key playlistId}
-					{#each songs as song, index (song.id)}
-						<!-- REMOVE IF AND CONTENT COMPLETLY AND MAKE ONE BUTTON OUT OF IT-->
-						{#if !isSongDownloaded(song.id)}
-							<button
-								class="cursor-pointer group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-300 rounded p-2 relative"
-								on:click={async () => {
-									if ($downloads[song.id]?.isDownloading) {
-										return;
-									}
+	</div>
+
+	<div class="px-6 pb-10">
+		<div
+			class="grid grid-cols-[2rem_minmax(0,1fr)_9rem_2.5rem] items-center gap-4 px-4 h-9 mb-2 border-b border-white/10 text-sm text-secondary-600"
+		>
+			<span class="text-end">#</span>
+			<span>Title</span>
+			<span>{isDownloadedPlaylist ? 'Downloaded' : 'Date added'}</span>
+			<span></span>
+		</div>
+
+		{#if songs?.length}
+			{#key playlistId}
+				{#each songs as song, index (song.id)}
+					{@const downloaded = isSongDownloaded(song.id)}
+					{@const current = isCurrent(song)}
+					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}
+					{@const download = $downloads[song.id]}
+					<ContextMenu disabled={!downloaded}>
+						<div
+							role="button"
+							tabindex="0"
+							aria-label={downloaded ? `Play ${song.title}` : `Download ${song.title}`}
+							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2.5rem] items-center gap-4 px-4 h-14 rounded-md cursor-pointer transition-colors {current
+								? 'bg-white/[0.08]'
+								: 'hover:bg-white/[0.06]'}"
+							on:click={async () => {
+								if (downloaded) {
+									await playSong(index, song);
+								} else if (!download?.isDownloading) {
 									await startDownload(song, song.beatmaps[0].id);
-								}}
+								}
+							}}
+							on:keydown={(e) => {
+								if (e.key === 'Enter') e.currentTarget.click();
+							}}
+						>
+							<div
+								class="relative h-5 flex items-center justify-end text-secondary-600 tabular-nums"
 							>
-								<div class="relative flex justify-end mr-4">
-									<span
-										class="icon-[fa6-solid--arrow-down] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
-									></span>
-									<div class="group-hover:opacity-0 text-start">
+								{#if !downloaded}
+									<span class="group-hover:opacity-0 {download?.isDownloading ? 'opacity-0' : ''}">
 										{index + 1}
-									</div>
-								</div>
+									</span>
+									<span
+										class="icon-[mingcute--download-2-line] absolute size-5 text-white {download?.isDownloading
+											? 'opacity-0'
+											: 'opacity-0 group-hover:opacity-100'}"
+									></span>
+									{#if download?.isDownloading}
+										<span class="absolute text-xs font-semibold text-primary-500">
+											{Math.round(download.progress || 0)}%
+										</span>
+									{/if}
+								{:else if playingRow}
+									<span
+										class="icon-[svg-spinners--bars-scale-middle] absolute size-4 text-primary-500 group-hover:opacity-0"
+									></span>
+									<span
+										class="icon-[mingcute--pause-fill] absolute size-5 text-white opacity-0 group-hover:opacity-100"
+									></span>
+								{:else}
+									<span class="group-hover:opacity-0 {current ? 'text-primary-500' : ''}">
+										{index + 1}
+									</span>
+									<span
+										class="icon-[mingcute--play-fill] absolute size-5 text-white opacity-0 group-hover:opacity-100"
+									></span>
+								{/if}
+							</div>
+
+							<div class="flex items-center gap-3 min-w-0 {downloaded ? '' : 'opacity-50'}">
 								<img
 									src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
-									alt={song.title}
+									alt=""
 									on:error={handleImageError}
 									loading="lazy"
-									class="size-14 rounded"
+									class="size-10 rounded object-cover shrink-0"
 								/>
-								<div class="flex flex-col text-start ml-4">
-									<h3 class="font-semibold">
+								<div class="min-w-0">
+									<h3 class="font-semibold truncate {current ? 'text-primary-500' : ''}">
 										{song.title}
 									</h3>
-									<p class="text-sm text-secondary-600 w-auto">{song.artist}</p>
+									<p class="text-sm text-secondary-600 truncate">{song.artist}</p>
 								</div>
+							</div>
 
-								<div class="flex text-start">
-									{getDateString(song?.created_at || song?.songInfo?.created_at)}
-								</div>
-								<div>
-									<Button
-										class="group-hover:opacity-100 opacity-0 duration-0"
-										type="ghost"
-										disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
-										icon={isDownloadedPlaylist
-											? 'icon-[fa6-solid--trash-can]'
-											: 'icon-[fa6-solid--xmark]'}
-										on:click={async (e) => {
-											e.stopPropagation();
-											if (isDownloadedPlaylist) {
-												await deleteSong(song.id);
-											} else {
-												removeSong(song.songInfo.id);
-											}
-										}}
-									/>
-								</div>
-								{#if $downloads[song.id]?.isDownloading}
-									<div class="absolute bottom-0 left-0 right-0 h-1 bg-secondary-400 z-20 rounded">
-										<div
-											class="h-full bg-lime-400 transition-all duration-200 ease-out rounded"
-											style="width: {$downloads[song.id]?.progress || 0}%;"
-										></div>
-									</div>
-								{/if}
+							<span class="text-sm text-secondary-600 truncate">
+								{getDateString(song?.created_at || song?.songInfo?.created_at)}
+							</span>
+
+							<button
+								title={isDownloadedPlaylist ? 'Delete download' : 'Remove from playlist'}
+								aria-label={isDownloadedPlaylist
+									? `Delete download of ${song.title}`
+									: `Remove ${song.title} from playlist`}
+								disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
+								class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
+								on:click={async (e) => {
+									e.stopPropagation();
+									if (isDownloadedPlaylist) {
+										await deleteSong(song.id);
+										songs = songs.filter((s) => s.id != song.id);
+									} else {
+										removeSong(song.songInfo.id);
+									}
+								}}
+							>
+								<span
+									class="{isDownloadedPlaylist
+										? 'icon-[mingcute--delete-2-line]'
+										: 'icon-[mingcute--close-line]'} size-[18px]"
+								></span>
 							</button>
-						{:else}
-							<ContextMenu>
-								<button
-									class="cursor-pointer w-full group grid grid-cols-[40px_56px_1fr_200px_auto] items-center hover:bg-secondary-300 rounded p-2"
-									on:click={async () => {
-										if ($songQueue.type !== 'playlist' || $songQueue.playlistId != playlistId) {
-											await setSongQueue(index, songs, 'playlist', playlistId);
-											return;
-										} else if (
-											$songQueue.playlistId == playlistId &&
-											$currentSong?.song?.id != song.id
-										) {
-											if ($userSettings.settings.shuffle) {
-												await setSongQueue(index, songs, 'playlist', playlistId);
-											} else {
-												stopPlayback();
-												await updateSongQueue(index, null, null, null);
-												togglePlayback();
-											}
-											return;
-										}
-										if ($currentSong?.song?.id == song.id) {
-											togglePlayback();
-											return;
-										}
-									}}
-								>
-									<div class="relative flex justify-end mr-4">
-										{#if $currentSong?.song?.id == song.id && $currentSong?.isPlaying && $songQueue.type == 'playlist' && $songQueue.playlistId == playlistId}
-											<span
-												class="icon-[svg-spinners--bars-scale-middle] cursor-pointer absolute size-5 top-0.5 group-hover:opacity-0 {$currentSong
-													?.song?.id == song?.id
-													? 'text-primary-200'
-													: ''}"
-											></span>
-											<span
-												class="icon-[fa6-solid--pause] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
-											></span>
-										{:else}
-											<span
-												class=" icon-[fa6-solid--play] cursor-pointer absolute size-5 top-0.5 opacity-0 group-hover:opacity-100 text-white"
-											></span>
-										{/if}
-										<div
-											class="{$currentSong?.song?.id == song.id && $currentSong?.isPlaying
-												? 'opacity-0'
-												: ''} {$currentSong?.song?.id == song?.id &&
-											$songQueue.playlistId == playlistId
-												? 'text-primary-200'
-												: ''} group-hover:opacity-0 text-start"
-										>
-											{index + 1}
-										</div>
-									</div>
-									<img
-										src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
-										alt={song.title}
-										on:error={handleImageError}
-										loading="lazy"
-										class="size-14 rounded"
-									/>
-									<div class="flex flex-col text-start ml-4">
-										<h3
-											class="font-semibold {$currentSong?.song?.id == song?.id &&
-											$songQueue.playlistId == playlistId
-												? 'text-primary-200'
-												: ''}"
-										>
-											{song.title}
-										</h3>
-										<p class="text-sm text-secondary-600 w-auto">{song.artist}</p>
-									</div>
-									<div class="flex text-start">
-										{getDateString(song?.created_at || song?.songInfo?.created_at)}
-									</div>
-									<div>
-										<Button
-											class="group-hover:opacity-100 opacity-0 duration-0"
-											type="ghost"
-											disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
-											icon={isDownloadedPlaylist
-												? 'icon-[fa6-solid--trash-can]'
-												: 'icon-[fa6-solid--xmark]'}
-											on:click={async (e) => {
-												e.stopPropagation();
-												if (isDownloadedPlaylist) {
-													await deleteSong(song.id);
-													songs = songs.filter((s) => s.id != song.id);
-												} else {
-													removeSong(song.songInfo.id);
-												}
-											}}
-										/>
-									</div>
-								</button>
-								<svelte:fragment slot="menu">
-									<QueueMenuItems {song} />
-									<Button
-										type="ghost"
-										class="w-full py-3 rounded-sm hover:bg-secondary-400"
-										icon="icon-[fa6-solid--plus]"
-										on:click={() => {
-											addPlaylistModal.open = true;
-											addPlaylistModal.map = song;
-										}}
-									>
-										Add to Playlist
-									</Button>
-								</svelte:fragment>
-							</ContextMenu>
-						{/if}
-					{/each}
-				{/key}
-			{/if}
-			{#if !isLoadingSongs && !songs?.length}
-				<div class="text-xl text-center text-secondary-600">No Songs found</div>
-				<div class="text-xl text-center text-secondary-600">Start adding Songs to the playlist</div>
-			{/if}
-			{#if isLoadingSongs && !songs.length}
-				<div class="w-full text-center mt-30">
-					<span class="size-20 icon-[svg-spinners--ring-resize] text-primary-300"></span>
-				</div>
-			{/if}
-		</div>
+
+							{#if download?.isDownloading}
+								<div class="absolute bottom-0 left-4 right-4 h-0.5 rounded-full bg-white/10">
+									<div
+										class="h-full rounded-full bg-primary-400 transition-all duration-200 ease-out"
+										style="width: {download.progress || 0}%;"
+									></div>
+								</div>
+							{/if}
+						</div>
+						<svelte:fragment slot="menu">
+							<QueueMenuItems {song} />
+							<Button
+								type="ghost"
+								class="w-full rounded-md text-sm hover:bg-secondary-400"
+								icon="icon-[mingcute--add-circle-line]"
+								on:click={() => {
+									addPlaylistModal.open = true;
+									addPlaylistModal.map = song;
+								}}
+							>
+								Add to playlist
+							</Button>
+						</svelte:fragment>
+					</ContextMenu>
+				{/each}
+			{/key}
+		{/if}
+
+		{#if !isLoadingSongs && !songs?.length}
+			<div class="flex flex-col items-center gap-2 py-16 text-center">
+				<span class="icon-[mingcute--music-2-line] size-10 text-secondary-600"></span>
+				<p class="text-lg font-semibold">
+					{isDownloadedPlaylist ? 'No downloaded songs yet' : 'This playlist is empty'}
+				</p>
+				<p class="text-sm text-secondary-600">
+					{isDownloadedPlaylist
+						? 'Download beatmaps on the home page to listen to them here.'
+						: 'Right-click a song and choose "Add to playlist".'}
+				</p>
+			</div>
+		{/if}
+		{#if isLoadingSongs && !songs.length}
+			<div class="grid place-items-center py-16">
+				<span class="size-10 icon-[svg-spinners--ring-resize] text-primary-400"></span>
+			</div>
+		{/if}
 	</div>
 {/if}
 

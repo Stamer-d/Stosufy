@@ -54,86 +54,91 @@
 	}
 </script>
 
-<div class="h-16 px-1 bg-secondary-50 grid grid-cols-3" data-tauri-drag-region>
-	<div data-tauri-drag-region class="flex items-center">
+<header class="h-12 shrink-0 flex items-center bg-app" data-tauri-drag-region>
+	<div class="flex items-center gap-1 pl-3" data-tauri-drag-region>
+		<img src="/NoLetterLogo.png" alt="" class="size-6 mr-2 pointer-events-none" />
 		{#if $user?.username}
-			<Button
-				type="ghost"
-				icon="icon-[fa6-solid--house]"
-				size="lg"
-				on:click={() => {
-					goto('/home');
-				}}
-			></Button>
+			<button
+				title="Home"
+				aria-label="Home"
+				class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition"
+				onclick={() => goto('/home')}
+			>
+				<span class="icon-[mingcute--home-4-fill] size-[18px]"></span>
+			</button>
 		{/if}
 	</div>
-	<div data-tauri-drag-region></div>
-	<div class="flex items-center justify-end group" data-tauri-drag-region>
-		<Dropdown>
-			<svelte:fragment slot="trigger">
-				<button class="mr-4 cursor-pointer flex items-center hover:scale-[1.05] rounded-full">
-					<img src={$user?.avatar_url ?? '/logo.png'} class=" size-11 rounded-full" alt="" />
-				</button>
-			</svelte:fragment>
-			<svelte:fragment slot="menu">
-				<Button
-					type="ghost"
-					disabled
-					class="w-full py-3 rounded-sm hover:bg-secondary-300"
-					icon="icon-[fa6-solid--user]"
-				>
-					Profile
-				</Button>
-				<Button
-					type="ghost"
-					class="w-full py-3 rounded-sm hover:bg-secondary-300"
-					icon="icon-[fa6-solid--arrows-rotate]"
-					on:click={() => {
-						updateModal.open();
-					}}
-				>
-					Check for Updates
-				</Button>
-				<Button
-					on:click={() => {
-						refreshAuth();
-					}}
-					type="ghost"
-					class="w-full py-3 rounded-sm hover:bg-secondary-300"
-					icon="icon-[fa6-solid--right-left]"
-				>
-					Refresh Auth
-				</Button>
-			</svelte:fragment>
-		</Dropdown>
-		<Button
-			class="h-full hover:bg-secondary-200 rounded-none px-3"
-			on:click={() => {
-				appWindow.minimize();
-			}}
-			type="ghost"
-			icon="icon-[fa6-solid--minus]"
-		/>
-		<Button
-			class="h-full hover:bg-secondary-200 rounded-none px-3"
-			on:click={() => {
-				appWindow.toggleMaximize();
-			}}
-			type="ghost"
-			icon="icon-[fa6-solid--window-maximize]"
-		/>
-		<Button
-			class="h-full hover:bg-secondary-200 rounded-none px-3"
-			on:click={() => {
-				appWindow.close();
-			}}
-			type="ghost"
-			icon="icon-[fa6-solid--xmark]"
-		/>
-	</div>
-</div>
 
-<Modal bind:open={updateModal.show} title="Stosufy Update">
+	<div class="flex-1 h-full" data-tauri-drag-region></div>
+
+	<div class="flex items-center h-full">
+		{#if $user?.username}
+			<Dropdown>
+				<svelte:fragment slot="trigger">
+					<button
+						class="mr-3 flex items-center gap-2 rounded-full p-0.5 pr-3 bg-secondary-200 hover:bg-secondary-300 cursor-pointer transition"
+						aria-label="Account menu"
+					>
+						<img
+							src={$user?.avatar_url ?? '/logo.png'}
+							class="size-7 rounded-full object-cover"
+							alt=""
+						/>
+						{#if $user?.username}
+							<span class="text-sm font-semibold">{$user.username}</span>
+						{/if}
+					</button>
+				</svelte:fragment>
+				<svelte:fragment slot="menu">
+					<Button
+						type="ghost"
+						class="w-full rounded-md text-sm hover:bg-secondary-400"
+						icon="icon-[mingcute--refresh-2-line]"
+						on:click={() => {
+							updateModal.open();
+						}}
+					>
+						Check for updates
+					</Button>
+					<Button
+						on:click={() => {
+							refreshAuth();
+						}}
+						type="ghost"
+						class="w-full rounded-md text-sm hover:bg-secondary-400"
+						icon="icon-[mingcute--user-3-line]"
+					>
+						Refresh login
+					</Button>
+				</svelte:fragment>
+			</Dropdown>
+		{/if}
+
+		<button
+			aria-label="Minimize"
+			class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-secondary-300 transition"
+			onclick={() => appWindow.minimize()}
+		>
+			<span class="icon-[mingcute--minimize-line] size-4"></span>
+		</button>
+		<button
+			aria-label="Maximize"
+			class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-secondary-300 transition"
+			onclick={() => appWindow.toggleMaximize()}
+		>
+			<span class="icon-[mingcute--square-line] size-3.5"></span>
+		</button>
+		<button
+			aria-label="Close"
+			class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-red-600 transition"
+			onclick={() => appWindow.close()}
+		>
+			<span class="icon-[mingcute--close-line] size-4"></span>
+		</button>
+	</div>
+</header>
+
+<Modal bind:open={updateModal.show} title="Updates">
 	{#if updateModal.hasUpdate === null}
 		<div class="flex flex-col gap-2 items-center justify-center">
 			<p class="text-lg">Checking for updates</p>

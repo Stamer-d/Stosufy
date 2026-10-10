@@ -9,15 +9,15 @@
 	$: leftIcon = iconLeft ?? icon;
 
 	const typeClasses = {
-		normal: 'bg-secondary-300/40 text-white',
-		ghost: 'text-gray-400',
-		primary: 'bg-primary-200 text-white'
+		normal: 'bg-secondary-300 text-white',
+		ghost: 'text-gray-300',
+		primary: 'bg-primary-300 text-white'
 	};
 
 	const hoverClasses = {
-		normal: 'hover:bg-secondary-300/60 active:bg-secondary-300',
-		ghost: 'hover:text-gray-200 active:text-white',
-		primary: 'hover:bg-primary-300 active:bg-primary-400'
+		normal: 'hover:bg-secondary-400 active:bg-secondary-500',
+		ghost: 'hover:text-white active:text-white',
+		primary: 'hover:bg-primary-400 active:bg-primary-200'
 	};
 
 	const sizeClasses = {
@@ -30,8 +30,8 @@
 	  ${!disabled ? hoverClasses[type] : 'text-secondary-500'}
       ${typeClasses[type]} 
       ${sizeClasses[size]} 
-      rounded-lg font-medium transition flex gap-2
-      ${disabled ? 'cursor-not-allowed' : 'cursor-pointer '}
+      rounded-lg font-semibold transition flex items-center gap-2
+      ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}
     `;
 </script>
 

@@ -16,6 +16,7 @@
 	import ContextMenu from './ContextMenu.svelte';
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
+	import PlaylistCover from './PlaylistCover.svelte';
 
 	let fileInput;
 	let uploadedImage = $state(null);
@@ -129,95 +130,87 @@
 	});
 </script>
 
-<div class="h-full flex flex-col text-white bg-secondary-200">
-	<div class="flex items-center justify-between p-4 0">
-		<h2 class="text-xl font-bold">Playlists</h2>
-		<Button
-			type="ghost"
-			icon="icon-[fa6-solid--plus]"
-			class="text-gray-400 hover:text-white"
-			on:click={async () => {
-				await createNewPlaylist();
-			}}
-		/>
+<div class="h-full flex flex-col">
+	<div class="flex items-center justify-between pl-5 pr-3 h-14 shrink-0">
+		<h2 class="font-bold">Your Library</h2>
+		<button
+			title="Create playlist"
+			aria-label="Create playlist"
+			class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition"
+			onclick={createNewPlaylist}
+		>
+			<span class="icon-[mingcute--add-line] size-5"></span>
+		</button>
 	</div>
-	<ul class="overflow-y-auto flex flex-col gap-2 px-2">
-		{#each $playlists as playlist}
+	<ul class="flex-1 overflow-y-auto flex flex-col px-2 pb-2">
+		{#each $playlists as playlist (playlist.id)}
 			{@const isActive = page.params?.id == playlist.id}
-			<ContextMenu disabled={playlist.id == -1}>
-				<button
-					onclick={() => {
-						goto(`/playlist/${playlist?.id}`);
-					}}
-					aria-current={isActive ? 'page' : undefined}
-					class="group flex items-center p-2 rounded-md hover:bg-secondary-300 w-full cursor-pointer transition duration-100 {isActive
-						? 'bg-secondary-300'
-						: ''}"
-				>
-					<div class="w-12 h-12 mr-3 flex items-center">
-						<div class="relative w-12 h-12 aspect-square">
-							<img
-								src={playlist.id !== -1 ? getImageUrl(playlist.image_url) : '/NoLetterLogo.png'}
-								alt={playlist.title}
-								class="w-full h-full object-cover rounded-md aspect-square"
-							/>
-							{#if playlist.id == -1}
-								<span
-									class="icon-[fa6-solid--circle-arrow-down] text-white absolute size-6 top-3.5 left-3"
-								></span>
-							{/if}
-						</div>
-					</div>
-					<div class="overflow-hidden text-start">
-						<h3 class="font-medium truncate {isActive ? 'text-primary-500' : ''}">
-							{playlist.title}
-						</h3>
-						<p class="text-sm text-secondary-600">
-							{playlist.song_amount || 0}
-							{playlist.song_amount === 1 ? 'Song' : 'Songs'}
-						</p>
-					</div>
-					{#if playlist.id !== -1}
-						<Button
-							type="ghost"
-							icon="icon-[fa6-solid--trash]"
-							class="text-gray-400 hover:text-white ml-auto opacity-0 group-hover:opacity-100"
-							on:click={(e) => {
-								e.stopPropagation();
-								playlistToDelete = playlist;
-								deleteModalOpen = true;
-							}}
-						/>
-					{/if}
-				</button>
-				<svelte:fragment slot="menu">
-					{#if playlist.id !== -1}
-						<Button
-							type="ghost"
-							class="w-full py-3 rounded-sm hover:bg-secondary-400"
-							icon="icon-[fa6-solid--pen]"
-							on:click={async (e) => {
-								e.preventDefault();
-								editPlaylistModal.open = true;
-								editPlaylistModal.playlist = playlist;
-								editPlaylistModal.title = playlist.title || '';
-								editPlaylistModal.description = playlist.description || '';
-								editPlaylistModal.isPublic = playlist.public || false;
-								editPlaylistModal.selectedFile = null;
-								uploadedImage = null;
-								editPlaylistModal.imageError = '';
-							}}
+			<li>
+				<ContextMenu disabled={playlist.id == -1}>
+					<div
+						class="group flex items-center gap-3 p-2 rounded-md transition {isActive
+							? 'bg-secondary-300'
+							: 'hover:bg-secondary-200'}"
+					>
+						<button
+							onclick={() => goto(`/playlist/${playlist?.id}`)}
+							aria-current={isActive ? 'page' : undefined}
+							class="flex flex-1 min-w-0 items-center gap-3 text-start cursor-pointer"
 						>
-							Edit Playlist
-						</Button>
-					{/if}
-				</svelte:fragment>
-			</ContextMenu>
+							<PlaylistCover {playlist} />
+							<div class="min-w-0">
+								<h3 class="font-semibold truncate {isActive ? 'text-primary-500' : ''}">
+									{playlist.title}
+								</h3>
+								<p class="text-sm text-secondary-600 truncate">
+									{playlist.id == -1 ? 'On this device' : 'Playlist'} · {playlist.song_amount || 0}
+									{playlist.song_amount === 1 ? 'song' : 'songs'}
+								</p>
+							</div>
+						</button>
+						{#if playlist.id !== -1}
+							<button
+								title="Delete playlist"
+								aria-label="Delete {playlist.title}"
+								class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
+								onclick={() => {
+									playlistToDelete = playlist;
+									deleteModalOpen = true;
+								}}
+							>
+								<span class="icon-[mingcute--delete-2-line] size-[18px]"></span>
+							</button>
+						{/if}
+					</div>
+					<svelte:fragment slot="menu">
+						{#if playlist.id !== -1}
+							<Button
+								type="ghost"
+								class="w-full rounded-md text-sm hover:bg-secondary-400"
+								icon="icon-[mingcute--pencil-line]"
+								on:click={async (e) => {
+									e.preventDefault();
+									editPlaylistModal.open = true;
+									editPlaylistModal.playlist = playlist;
+									editPlaylistModal.title = playlist.title || '';
+									editPlaylistModal.description = playlist.description || '';
+									editPlaylistModal.isPublic = playlist.public || false;
+									editPlaylistModal.selectedFile = null;
+									uploadedImage = null;
+									editPlaylistModal.imageError = '';
+								}}
+							>
+								Edit details
+							</Button>
+						{/if}
+					</svelte:fragment>
+				</ContextMenu>
+			</li>
 		{/each}
 	</ul>
 </div>
 
-<Modal title="Delete Playlist" width="420px" bind:open={deleteModalOpen}>
+<Modal title="Delete playlist" width="420px" bind:open={deleteModalOpen}>
 	<p>
 		Do you really want to delete <strong>{playlistToDelete?.title}</strong>? This cannot be undone.
 	</p>
@@ -242,7 +235,7 @@
 	</svelte:fragment>
 </Modal>
 
-<Modal title="Edit Playlist" bind:open={editPlaylistModal.open}>
+<Modal title="Edit details" bind:open={editPlaylistModal.open}>
 	<div class="flex flex-col md:flex-row gap-4">
 		<div class="flex flex-col items-center">
 			<button

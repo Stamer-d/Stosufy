@@ -36,65 +36,40 @@
 	});
 </script>
 
-<main>
-	{#if showUI}
-		<div class="fixed top-0 left-0 right-0 z-30">
-			<Titlebar />
-		</div>
+{#if showUI}
+	<div class="h-screen flex flex-col bg-app">
+		<Titlebar />
 
-		<main class="flex flex-col h-screen pt-[60px]">
-			<div class="flex flex-1 overflow-hidden">
-				<!-- Playlist on the left -->
-				<div class="w-64 h-full">
-					<Playlist />
-				</div>
+		<div class="flex flex-1 min-h-0 px-2 gap-2">
+			<aside class="w-72 shrink-0 rounded-lg bg-panel overflow-hidden">
+				<Playlist />
+			</aside>
 
-				<!-- MapFinder on the right -->
-				<div class="flex-1 p-4 overflow-y-auto">
-					{@render children()}
-				</div>
+			<main class="flex-1 min-w-0 rounded-lg bg-panel overflow-y-auto" data-scroll-container>
+				{@render children()}
+			</main>
 
-				<!-- The width animates, so the content next to it shrinks smoothly instead of jumping -->
-				<div
-					class="h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out {$queuePanelOpen
-						? 'w-80'
-						: 'w-0'}"
-					inert={!$queuePanelOpen}
-				>
+			<!-- The width animates, so the content next to it shrinks smoothly instead of jumping -->
+			<div
+				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$queuePanelOpen
+					? 'w-80'
+					: 'w-0 -ml-2'}"
+				inert={!$queuePanelOpen}
+			>
+				<div class="w-80 h-full rounded-lg bg-panel overflow-hidden">
 					<QueuePanel />
 				</div>
 			</div>
-
-			<div class="w-full">
-				<Songbar />
-			</div>
-		</main>
-		<Toasts />
-	{:else}
-		<div class="fixed top-0 left-0 right-0 z-30">
-			<Titlebar />
 		</div>
-		{@render children()}
-	{/if}
-</main>
 
-<style lang="postcss">
-	:global(html) {
-		@apply bg-[#141414];
-		color: white;
-		user-select: none;
-	}
-	/* Custom scrollbar styles */
-
-	:global(::-webkit-scrollbar-thumb) {
-		background: #555;
-		border-radius: 4px;
-		transition: background 0.2s ease;
-	}
-
-	/* For Firefox */
-	:global(html) {
-		scrollbar-width: thin;
-		scrollbar-color: #555 #1a1a1a;
-	}
-</style>
+		<Songbar />
+	</div>
+	<Toasts />
+{:else}
+	<div class="h-screen flex flex-col bg-app">
+		<Titlebar />
+		<div class="flex-1 min-h-0 overflow-y-auto">
+			{@render children()}
+		</div>
+	</div>
+{/if}

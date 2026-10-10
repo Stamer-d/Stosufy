@@ -27,7 +27,7 @@
 </script>
 
 {#snippet songRow(song, onclick, removeLabel = null, onremove = null)}
-	<div class="group flex items-center gap-3 rounded-md p-1.5 hover:bg-secondary-300">
+	<div class="group flex items-center gap-3 rounded-md p-1.5 hover:bg-white/[0.06]">
 		<button class="flex flex-1 min-w-0 items-center gap-3 text-start cursor-pointer" {onclick}>
 			<img
 				src="https://assets.ppy.sh/beatmaps/{song.id}/covers/list.jpg"
@@ -48,28 +48,28 @@
 				class="opacity-0 group-hover:opacity-100 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
 				onclick={onremove}
 			>
-				<span class="icon-[fa6-solid--xmark] size-4"></span>
+				<span class="icon-[mingcute--close-line] size-4"></span>
 			</button>
 		{/if}
 	</div>
 {/snippet}
 
-<aside class="h-full w-80 flex flex-col bg-secondary-200 text-white" aria-label="Queue">
-	<div class="flex items-center justify-between p-4">
-		<h2 class="text-xl font-bold">Queue</h2>
+<aside class="h-full w-80 flex flex-col" aria-label="Queue">
+	<div class="flex items-center justify-between pl-5 pr-3 h-14 shrink-0">
+		<h2 class="font-bold">Queue</h2>
 		<button
 			aria-label="Close queue"
-			class="p-1 flex text-gray-400 hover:text-white cursor-pointer"
+			class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition"
 			onclick={() => queuePanelOpen.set(false)}
 		>
-			<span class="icon-[fa6-solid--xmark] size-5"></span>
+			<span class="icon-[mingcute--close-line] size-5"></span>
 		</button>
 	</div>
 
 	<div class="flex-1 overflow-y-auto px-2 pb-4 flex flex-col gap-4">
 		{#if $currentSong.song}
 			<section>
-				<h3 class="px-1.5 mb-1 text-sm font-semibold text-secondary-600">Now playing</h3>
+				<h3 class="px-1.5 mb-1 text-sm font-bold">Now playing</h3>
 				<div class="flex items-center gap-3 p-1.5">
 					<img
 						src="https://assets.ppy.sh/beatmaps/{$currentSong.song.id}/covers/list.jpg"
@@ -90,9 +90,9 @@
 		{#if $upNext.length}
 			<section>
 				<div class="flex items-center justify-between px-1.5 mb-1">
-					<h3 class="text-sm font-semibold text-secondary-600">Next in queue</h3>
+					<h3 class="text-sm font-bold">Next in queue</h3>
 					<button
-						class="text-xs text-secondary-600 hover:text-white cursor-pointer"
+						class="text-xs font-semibold text-secondary-600 hover:text-white cursor-pointer"
 						onclick={clearQueuedSongs}
 					>
 						Clear
@@ -116,7 +116,7 @@
 
 		{#if upcoming.length}
 			<section>
-				<h3 class="px-1.5 mb-1 text-sm font-semibold text-secondary-600 truncate">
+				<h3 class="px-1.5 mb-1 text-sm font-bold truncate">
 					Next from: {sourceName}
 				</h3>
 				{#each upcoming.slice(0, MAX_SHOWN) as { song, index } (index + '-' + song.id)}

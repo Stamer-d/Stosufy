@@ -513,3 +513,48 @@ export function formatSongData(songData: Record<string, StoredMapSet>): MapSet[]
 	songs.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
 	return songs;
 }
+
+/** A stable, muted color for something without an image, derived from its name */
+export function colorFromString(text = '') {
+	let hash = 0;
+	for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+	return `oklch(0.42 0.12 ${Math.abs(hash) % 360})`;
+}
+
+const imageColorCache = new Map<string, Promise<string | null>>();
+
+/**
+ * Average color of an image, toned for use as a background wash. The image is loaded
+ * through the HTTP plugin, so cross-origin images don't taint the canvas.
+ */
+export function colorFromImage(url: string): Promise<string | null> {
+	if (!imageColorCache.has(url)) {
+		imageColorCache.set(
+			url,
+			(async () => {
+				try {
+					const response = await fetch(url);
+					if (!response.ok) return null;
+					const bitmap = await createImageBitmap(await response.blob());
+					const canvas = new OffscreenCanvas(16, 16);
+					const context = canvas.getContext('2d');
+					context.drawImage(bitmap, 0, 0, 16, 16);
+					const pixels = context.getImageData(0, 0, 16, 16).data;
+					let r = 0;
+					let g = 0;
+					let b = 0;
+					for (let i = 0; i < pixels.length; i += 4) {
+						r += pixels[i];
+						g += pixels[i + 1];
+						b += pixels[i + 2];
+					}
+					const count = pixels.length / 4;
+					return `rgb(${Math.round(r / count)} ${Math.round(g / count)} ${Math.round(b / count)})`;
+				} catch {
+					return null;
+				}
+			})()
+		);
+	}
+	return imageColorCache.get(url);
+}

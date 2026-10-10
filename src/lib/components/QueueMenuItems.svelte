@@ -14,15 +14,15 @@
 
 <Button
 	type="ghost"
-	class="w-full py-3 rounded-sm hover:bg-secondary-400"
-	icon="icon-[fa6-solid--arrow-turn-down]"
+	class="w-full rounded-md text-sm hover:bg-secondary-400"
+	icon="icon-[mingcute--corner-down-right-line]"
 	on:click={() => add(true)}
 >
 	Play next
 </Button>
 <Button
 	type="ghost"
-	class="w-full py-3 rounded-sm hover:bg-secondary-400"
+	class="w-full rounded-md text-sm hover:bg-secondary-400"
 	icon="icon-[mingcute--playlist-2-line]"
 	on:click={() => add(false)}
 >
