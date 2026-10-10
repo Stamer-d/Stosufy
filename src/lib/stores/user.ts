@@ -81,6 +81,7 @@ async function initializeStores() {
 initializeStores();
 
 export const DEFAULT_HOME: HomeSettings = {
+	layout: 'desktop',
 	sections: [
 		{ id: 'hero', visible: true },
 		{ id: 'playlists', visible: true },

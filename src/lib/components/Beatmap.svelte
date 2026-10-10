@@ -104,7 +104,7 @@
 
 		<button
 			aria-label={isPlaying ? `Pause preview of ${map.title}` : `Play preview of ${map.title}`}
-			class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white ring-2 ring-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {isPlaying
+			class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {isPlaying
 				? 'opacity-100 translate-y-0'
 				: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
 			on:click={() => {

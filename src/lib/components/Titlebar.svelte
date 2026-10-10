@@ -8,6 +8,7 @@
 	import Modal from './Modal.svelte';
 	import { check } from '@tauri-apps/plugin-updater';
 	import { relaunch } from '@tauri-apps/plugin-process';
+	import { focusMode } from '#lib/stores/audio.ts';
 
 	const appWindow = getCurrentWindow();
 	let updating = $state(false);
@@ -65,6 +66,21 @@
 				onclick={() => goto('/home')}
 			>
 				<span class="icon-[mingcute--home-4-fill] size-[18px]"></span>
+			</button>
+			<button
+				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}
+				aria-label={$focusMode ? 'Exit focus mode' : 'Focus mode'}
+				aria-pressed={$focusMode}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {$focusMode
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={() => focusMode.update((on) => !on)}
+			>
+				<span
+					class="{$focusMode
+						? 'icon-[mingcute--fullscreen-exit-line]'
+						: 'icon-[mingcute--fullscreen-line]'} size-[18px]"
+				></span>
 			</button>
 		{/if}
 	</div>

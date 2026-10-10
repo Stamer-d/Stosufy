@@ -10,6 +10,22 @@ export const currentSong = writable<CurrentSong>({ song: null, isPlaying: false 
 /** Songs the user queued with "Play next" / "Add to queue"; they play before the rest of the queue */
 export const upNext = writable<MapSet[]>([]);
 export const queuePanelOpen = writable(false);
+/** Focus mode: only the wallpaper, the clock and the player */
+export const focusMode = writable(false);
+/** Position of the current song, updated twice a second */
+export const playbackTime = writable({ current: 0, duration: 0 });
+
+if (typeof window !== 'undefined') {
+	setInterval(() => {
+		const audio = get(songQueue).audio;
+		const current = audio?.currentTime ?? 0;
+		const duration = audio?.duration || 0;
+		const previous = get(playbackTime);
+		if (previous.current !== current || previous.duration !== duration) {
+			playbackTime.set({ current, duration });
+		}
+	}, 500);
+}
 
 const repeatMode = (): RepeatMode => get(userSettings).settings.repeat ?? 'off';
 

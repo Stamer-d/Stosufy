@@ -87,6 +87,8 @@ export interface SearchFilters {
 export type HomeSectionId = 'hero' | 'playlists' | 'recent' | 'discover';
 
 export interface HomeSettings {
+	/** "desktop": wallpaper with widgets, "classic": banner and lists */
+	layout: 'desktop' | 'classic';
 	/** Sections of the home page in display order */
 	sections: { id: HomeSectionId; visible: boolean }[];
 	/** Which beatmap background the hero banner shows */

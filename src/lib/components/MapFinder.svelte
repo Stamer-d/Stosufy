@@ -4,7 +4,8 @@
 		setSongQueue,
 		updateSongQueue,
 		togglePlayback,
-		currentSong
+		currentSong,
+		focusMode
 	} from '#lib/stores/audio.ts';
 	import {
 		DEFAULT_SEARCH_FILTERS,
@@ -28,35 +29,19 @@
 	import { BEATMAP_STATUS } from '#lib/beatmapStatus.ts';
 	import BeatmapBackground from './BeatmapBackground.svelte';
 	import Triangles from './Triangles.svelte';
-	import HitCircle from './HitCircle.svelte';
+	import PlayButton from './PlayButton.svelte';
 	import HomeCustomize from './HomeCustomize.svelte';
+	import ClockWidget from './desktop/ClockWidget.svelte';
+	import NowPlayingWidget from './desktop/NowPlayingWidget.svelte';
+	import FetchWidget from './desktop/FetchWidget.svelte';
+	import PlaylistDock from './desktop/PlaylistDock.svelte';
+	import { wallpaper } from '#lib/stores/home.ts';
 	import { DEFAULT_HOME } from '#lib/stores/user.ts';
 
 	let customizeOpen = $state(false);
 	let homeSettings = $derived({ ...DEFAULT_HOME, ...$userSettings.settings?.home });
 
-	// Picked once per visit, so the banner doesn't change while browsing
-	const randomPick = Math.random();
-
-	let hero = $derived.by(() => {
-		const downloaded = formatSongData($mapDataStore);
-		const randomSong = downloaded.length
-			? downloaded[Math.floor(randomPick * downloaded.length)]
-			: null;
-		const isDownloaded = (song) => !!$mapDataStore[song?.id];
-		if (homeSettings.heroBackground === 'pinned') {
-			const pinned = downloaded.find((song) => song.id == homeSettings.pinnedSetId);
-			if (pinned) return { song: pinned, label: 'Pinned', downloaded: true };
-		}
-		if (homeSettings.heroBackground === 'current' && $currentSong.song) {
-			return {
-				song: $currentSong.song,
-				label: $currentSong.isPlaying ? 'Now playing' : 'Paused',
-				downloaded: isDownloaded($currentSong.song)
-			};
-		}
-		return { song: randomSong, label: 'From your downloads', downloaded: true };
-	});
+	let hero = $derived($wallpaper);
 	let heroPlaying = $derived($currentSong.song?.id == hero.song?.id && $currentSong.isPlaying);
 
 	function playHero() {
@@ -267,7 +252,7 @@
 					{hero.song.artist}{hero.song.creator ? ` · mapped by ${hero.song.creator}` : ''}
 				</p>
 				<div class="mt-3 flex items-center gap-4">
-					<HitCircle
+					<PlayButton
 						playing={heroPlaying}
 						label={heroPlaying ? 'Pause' : `Play ${hero.song.title}`}
 						onclick={playHero}
@@ -327,7 +312,7 @@
 							<BeatmapBackground setId={song.id} title={song.title} class="absolute inset-0" />
 							<button
 								aria-label="Play {song.title}"
-								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white ring-2 ring-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
+								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
 									? 'opacity-100'
 									: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
 								onclick={() => (playingThis ? togglePlayback() : playDownloaded(song))}
@@ -453,32 +438,97 @@
 	</section>
 {/snippet}
 
-<div class="px-6 pt-6 pb-10 flex flex-col gap-10">
-	<div class="flex items-center justify-between gap-4 -mb-4">
-		<h1 class="text-3xl font-bold tracking-tight">
-			{greeting}{$user?.username ? `, ${$user.username}` : ''}
-		</h1>
-		<button
-			class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer transition"
-			onclick={() => (customizeOpen = true)}
-		>
-			<span class="icon-[mingcute--palette-line] size-[18px]"></span>
-			Customize
-		</button>
-	</div>
+{#snippet customizeButton(onWallpaper)}
+	<button
+		class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold cursor-pointer transition {onWallpaper
+			? 'bg-black/45 backdrop-blur-md ring-1 ring-white/10 text-white/80 hover:text-white'
+			: 'text-secondary-600 hover:text-white hover:bg-white/10'}"
+		onclick={() => (customizeOpen = true)}
+	>
+		<span class="icon-[mingcute--palette-line] size-[18px]"></span>
+		Customize
+	</button>
+{/snippet}
 
-	{#each homeSettings.sections.filter((section) => section.visible) as section (section.id)}
-		{#if section.id === 'hero'}
-			{@render heroSection()}
-		{:else if section.id === 'playlists'}
-			{@render playlistsSection()}
-		{:else if section.id === 'recent'}
-			{@render recentSection()}
-		{:else if section.id === 'discover'}
-			{@render discoverSection()}
-		{/if}
-	{/each}
-</div>
+{#if homeSettings.layout === 'desktop'}
+	<!-- Desktop: the beatmap background as wallpaper with widgets on it -->
+	<section class="relative h-full min-h-[34rem] overflow-hidden">
+		<BeatmapBackground
+			setId={$wallpaper.song?.id ?? null}
+			title={$wallpaper.song?.title}
+			class="absolute inset-0"
+		/>
+		<div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60"></div>
+		<div class="relative h-full flex flex-col justify-between gap-6 p-8">
+			<div class="flex items-start justify-between gap-6">
+				<ClockWidget />
+				<div class="flex flex-col items-end gap-3">
+					<div class="flex gap-2">
+						<button
+							class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold bg-black/45 backdrop-blur-md ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer transition"
+							onclick={() => focusMode.set(true)}
+						>
+							<span class="icon-[mingcute--fullscreen-line] size-[18px]"></span>
+							Focus
+						</button>
+						{@render customizeButton(true)}
+					</div>
+					<div class="hidden lg:block w-80"><FetchWidget /></div>
+				</div>
+			</div>
+			<div class="flex items-end justify-between gap-6">
+				<NowPlayingWidget class="w-full max-w-sm" />
+				<div class="flex flex-col items-end gap-4">
+					<PlaylistDock />
+					<button
+						class="flex items-center gap-1.5 text-sm font-semibold text-white/70 hover:text-white cursor-pointer drop-shadow"
+						onclick={(e) =>
+							e.currentTarget.closest('[data-scroll-container]')?.scrollTo({
+								top: e.currentTarget.closest('section').offsetHeight,
+								behavior: 'smooth'
+							})}
+					>
+						Browse beatmaps
+						<span class="icon-[mingcute--arrow-down-line] size-4"></span>
+					</button>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<div class="px-6 pt-8 pb-10 flex flex-col gap-10">
+		{#each homeSettings.sections.filter((section) => section.visible && section.id !== 'hero') as section (section.id)}
+			{#if section.id === 'playlists'}
+				{@render playlistsSection()}
+			{:else if section.id === 'recent'}
+				{@render recentSection()}
+			{:else if section.id === 'discover'}
+				{@render discoverSection()}
+			{/if}
+		{/each}
+	</div>
+{:else}
+	<div class="px-6 pt-6 pb-10 flex flex-col gap-10">
+		<div class="flex items-center justify-between gap-4 -mb-4">
+			<h1 class="text-3xl font-bold tracking-tight">
+				{greeting}{$user?.username ? `, ${$user.username}` : ''}
+			</h1>
+			{@render customizeButton(false)}
+		</div>
+
+		{#each homeSettings.sections.filter((section) => section.visible) as section (section.id)}
+			{#if section.id === 'hero'}
+				{@render heroSection()}
+			{:else if section.id === 'playlists'}
+				{@render playlistsSection()}
+			{:else if section.id === 'recent'}
+				{@render recentSection()}
+			{:else if section.id === 'discover'}
+				{@render discoverSection()}
+			{/if}
+		{/each}
+	</div>
+{/if}
 
 <HomeCustomize bind:open={customizeOpen} />
 

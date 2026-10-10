@@ -15,11 +15,27 @@
 	let { open = $bindable(false) } = $props();
 
 	const SECTION_LABELS = {
-		hero: 'Featured banner',
+		hero: 'Featured banner (classic)',
 		playlists: 'Your playlists',
 		recent: 'Recently downloaded',
 		discover: 'Discover beatmaps'
 	};
+	/** @type {{ value: import('#lib/types.ts').HomeSettings['layout'], label: string, description: string, icon: string }[]} */
+	const LAYOUTS = [
+		{
+			value: 'desktop',
+			label: 'Desktop',
+			description: 'Beatmap wallpaper with widgets',
+			icon: 'icon-[mingcute--computer-line]'
+		},
+		{
+			value: 'classic',
+			label: 'Classic',
+			description: 'Banner and lists',
+			icon: 'icon-[mingcute--layout-line]'
+		}
+	];
+
 	/** @type {{ value: import('#lib/types.ts').HomeSettings['heroBackground'], label: string }[]} */
 	const HERO_OPTIONS = [
 		{ value: 'current', label: 'Current song' },
@@ -61,6 +77,33 @@
 
 <Modal title="Customize" width="480px" bind:open>
 	<div class="flex flex-col gap-6 py-2">
+		<section>
+			{@render heading('Home layout')}
+			<div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Home layout">
+				{#each LAYOUTS as option (option.value)}
+					{@const active = home.layout === option.value}
+					<button
+						role="radio"
+						aria-checked={active}
+						class="flex items-start gap-3 p-3 rounded-lg text-start cursor-pointer transition ring-1 {active
+							? 'bg-primary-300/15 ring-primary-400'
+							: 'bg-white/[0.04] ring-transparent hover:bg-white/[0.08]'}"
+						onclick={() => updateHomeSettings({ layout: option.value })}
+					>
+						<span
+							class="{option.icon} size-5 shrink-0 mt-0.5 {active
+								? 'text-primary-500'
+								: 'text-secondary-600'}"
+						></span>
+						<span>
+							<span class="block font-semibold text-white">{option.label}</span>
+							<span class="block text-xs text-secondary-600">{option.description}</span>
+						</span>
+					</button>
+				{/each}
+			</div>
+		</section>
+
 		<section>
 			{@render heading('Home sections')}
 			<ul class="flex flex-col gap-1">
@@ -110,7 +153,7 @@
 		</section>
 
 		<section>
-			{@render heading('Featured banner')}
+			{@render heading(home.layout === 'desktop' ? 'Wallpaper' : 'Featured banner')}
 			<div class="grid grid-cols-3 p-1 rounded-lg bg-white/[0.04]" role="radiogroup">
 				{#each HERO_OPTIONS as option (option.value)}
 					{@const active = home.heroBackground === option.value}

@@ -30,7 +30,7 @@
 	import SongToPlaylistModal from '#lib/components/SongToPlaylistModal.svelte';
 	import QueueMenuItems from '#lib/components/QueueMenuItems.svelte';
 	import PlaylistCover from '#lib/components/PlaylistCover.svelte';
-	import HitCircle from '#lib/components/HitCircle.svelte';
+	import PlayButton from '#lib/components/PlayButton.svelte';
 	import Triangles from '#lib/components/Triangles.svelte';
 	import { colorFromImage, colorFromString } from '#lib/stores/data.ts';
 	import { shuffleQueue } from '#lib/stores/audio.ts';
@@ -286,7 +286,7 @@
 		</header>
 
 		<div class="flex items-center gap-5 px-6 py-4 bg-black/10">
-			<HitCircle
+			<PlayButton
 				playing={isPlayingThis}
 				disabled={!songs.length}
 				onclick={async () => {

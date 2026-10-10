@@ -8,7 +8,8 @@
 	import Titlebar from '#lib/components/Titlebar.svelte';
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
-	import { queuePanelOpen, currentSong } from '#lib/stores/audio.ts';
+	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
+	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
 
@@ -89,6 +90,9 @@
 
 		<Songbar />
 	</div>
+	{#if $focusMode}
+		<FocusView />
+	{/if}
 	<Toasts />
 {:else}
 	<div class="h-screen flex flex-col bg-app">
