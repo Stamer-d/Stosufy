@@ -3,6 +3,7 @@
 
 import JSZip from 'jszip';
 import { parseOsuFile, type OsuFileInfo } from '../osuFile.ts';
+import { extractStoryboard } from '../storyboard/extract.ts';
 
 // Message counter to track request/response pairs
 let messageId = 0;
@@ -61,6 +62,7 @@ self.onmessage = async function (event) {
 					video: result.video,
 					timing: result.timing,
 					maps: result.maps,
+					storyboard: result.storyboard,
 					beatmapId: result.mapId,
 					setId: data.setId
 				},
@@ -190,10 +192,14 @@ async function extractAudioFromBeatmap(
 		self.postMessage({ type: 'progress', progress: 60, setId });
 
 		// Read every difficulty: a set can have a different song and background per difficulty
-		const diffs: (Omit<OsuFileInfo, 'beatmapId'> & { beatmapId: number | string })[] = [];
+		const diffs: (Omit<OsuFileInfo, 'beatmapId'> & {
+			beatmapId: number | string;
+			content: string;
+		})[] = [];
 		for (const osuFile of osuFiles) {
-			const info = parseOsuFile(await fs.readTextFile(osuFile));
-			if (info.audioFile) diffs.push({ ...info, beatmapId: info.beatmapId ?? mapId });
+			const content = await fs.readTextFile(osuFile);
+			const info = parseOsuFile(content);
+			if (info.audioFile) diffs.push({ ...info, beatmapId: info.beatmapId ?? mapId, content });
 		}
 
 		self.postMessage({ type: 'progress', progress: 70, setId });
@@ -270,6 +276,16 @@ async function extractAudioFromBeatmap(
 			}
 		}
 
+		// The storyboard: its scripts and the images it uses
+		const storyboard = await extractStoryboard(zip, setId, diffs, mapSetsDir, {
+			join: (...paths) => fs.path.join(...paths),
+			mkdir: (dir) => fs.mkdir(dir),
+			writeFile: (path, data) => fs.writeFile(path, data)
+		});
+		for (const [beatmapId, osuFile] of Object.entries(storyboard?.osuFiles ?? {})) {
+			if (maps[beatmapId]) maps[beatmapId].osuFile = osuFile;
+		}
+
 		// Clean up
 		await fs.remove(extractDir);
 
@@ -285,6 +301,7 @@ async function extractAudioFromBeatmap(
 				video: savedVideo,
 				timing,
 				maps,
+				storyboard: storyboard && { dir: storyboard.dir, osb: storyboard.osb },
 				mapId: first.beatmapId
 			};
 		}

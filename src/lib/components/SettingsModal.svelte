@@ -299,30 +299,37 @@
 				</section>
 
 				<section>
-					{@render heading('Beatmap videos')}
+					{@render heading('Videos & storyboards')}
 					{@render toggle(
 						'Play beatmap videos',
 						'Maps with a video play it instead of the background',
 						appearance.video,
 						(checked) => updateAppearance({ video: checked })
 					)}
+					{@render toggle(
+						'Play storyboards',
+						'The animations of the beatmap, drawn over the background like in osu!',
+						appearance.storyboard,
+						(checked) => updateAppearance({ storyboard: checked })
+					)}
 					<div class="flex items-center justify-between gap-4 mt-4 p-3 rounded-lg bg-white/[0.04]">
 						<span class="min-w-0">
-							<span class="block font-semibold text-white">Videos for downloaded songs</span>
+							<span class="block font-semibold text-white"
+								>Videos & storyboards for downloaded songs</span
+							>
 							<span class="block text-xs text-secondary-600" aria-live="polite">
 								{#if $videoFetch.state === 'checking'}
-									Checking which songs have a video…
+									Checking which songs have a video or storyboard…
 								{:else if $videoFetch.state === 'downloading'}
-									Adding videos: {$videoFetch.done} of {$videoFetch.total}. You can close this
-									window.
+									Adding them: {$videoFetch.done} of {$videoFetch.total} songs. You can close this window.
 								{:else if $videoFetch.state === 'done'}
 									{$videoFetch.total
-										? `Added ${$videoFetch.done} ${$videoFetch.done === 1 ? 'video' : 'videos'}.`
+										? `Updated ${$videoFetch.done} ${$videoFetch.done === 1 ? 'song' : 'songs'}.`
 										: 'All your songs are up to date.'}
 								{:else if $videoFetch.state === 'error'}
 									<span class="text-red-400">{$videoFetch.message}</span>
 								{:else}
-									Songs downloaded before videos were supported get theirs. Nothing else changes.
+									Songs downloaded before these were supported get theirs. Nothing else changes.
 								{/if}
 							</span>
 						</span>
@@ -333,7 +340,7 @@
 						{:else}
 							<div class="shrink-0 whitespace-nowrap">
 								<Button type="normal" on:click={fetchMissingVideos}>
-									{$videoFetch.state === 'error' ? 'Retry' : 'Get videos'}
+									{$videoFetch.state === 'error' ? 'Retry' : 'Get them'}
 								</Button>
 							</div>
 						{/if}

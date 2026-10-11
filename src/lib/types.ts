@@ -17,6 +17,8 @@ export interface Beatmap {
 	artist?: string;
 	timing?: import('./osuFile').TimingPoint[];
 	kiai?: import('./osuFile').KiaiSection[];
+	/** The .osu file of this difficulty, for its own storyboard */
+	osuFile?: string;
 	/** Integrated loudness of this difficulty's audio in LUFS */
 	loudness?: number;
 	[key: string]: any;
@@ -62,6 +64,10 @@ interface MapSetInfo {
 	videoOffset?: number;
 	/** Whether the set has a video on osu!; unknown for songs downloaded before videos were saved */
 	hasVideo?: boolean;
+	/** Saved storyboard: folder its images are relative to and the .osb file */
+	storyboard?: { dir: string; osb: string | null } | null;
+	/** Whether the set has a storyboard on osu! (for songs saved before storyboards) */
+	hasStoryboard?: boolean;
 	/** Video in a format the webview can't play, converted when the song is played */
 	videoSource?: string | null;
 	/** Uninherited timing points of the first difficulty (for Nightcore beats) */
@@ -150,6 +156,8 @@ export interface AppearanceSettings {
 	video?: boolean;
 	/** The background pulses to the beat and lights up in kiai time, like in osu! */
 	beatEffects?: boolean;
+	/** Play the storyboards of beatmaps that have one */
+	storyboard?: boolean;
 }
 
 export type AccentColor = 'violet' | 'pink' | 'blue' | 'teal' | 'orange';

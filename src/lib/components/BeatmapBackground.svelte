@@ -34,13 +34,14 @@
 <script>
 	import { fade } from 'svelte/transition';
 	import BeatmapVideo from './BeatmapVideo.svelte';
+	import Storyboard from './Storyboard.svelte';
 	import { backgroundUrls, colorFromString, mapDataStore } from '#lib/stores/data.ts';
 	import { currentSong } from '#lib/stores/audio.ts';
 
 	/**
 	 * Shows the background of a beatmap set, cross-fading when it changes. With `video`, the
 	 * beatmap video plays on top of it while the set is the current song.
-	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string, video?: boolean, mapId?: number | string | null, beat?: boolean }}
+	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string, video?: boolean, mapId?: number | string | null, beat?: boolean, storyboard?: boolean }}
 	 */
 	let {
 		setId,
@@ -49,7 +50,9 @@
 		class: className = '',
 		imageClass = '',
 		video = false,
-		beat = false
+		beat = false,
+		// Storyboards with the video, unless turned off (e.g. behind the blurred app background)
+		storyboard = true
 	} = $props();
 
 	// Beat effects only for the song that is playing
@@ -98,6 +101,10 @@
 		{/key}
 		{#if video}
 			<BeatmapVideo {setId} class={imageClass} />
+			{#if storyboard}
+				<!-- Storyboards are drawn over the video, like in osu! -->
+				<Storyboard {setId} {mapId} class={imageClass} />
+			{/if}
 		{/if}
 	</div>
 	{#if pulsing}

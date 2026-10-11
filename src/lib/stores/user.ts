@@ -97,7 +97,8 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
 	background: true,
 	dim: 75,
 	video: true,
-	beatEffects: true
+	beatEffects: true,
+	storyboard: true
 };
 
 export function updateHomeSettings(change: Partial<HomeSettings>) {

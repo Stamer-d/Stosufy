@@ -73,6 +73,7 @@
 				imageClass="blur-2xl scale-110"
 				video
 				beat
+				storyboard={false}
 			/>
 			<!-- A bit brighter in kiai time, like osu! -->
 			<div
