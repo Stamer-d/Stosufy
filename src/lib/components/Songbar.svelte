@@ -25,6 +25,7 @@
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { setVolume } from '#lib/stores/mixer.ts';
 	import ModSelect from './ModSelect.svelte';
+	import SleepTimer from './SleepTimer.svelte';
 
 	let currentTime = 0;
 	let duration = 0;
@@ -286,6 +287,7 @@
 		</div>
 
 		<div class="flex items-center justify-end gap-2">
+			<SleepTimer />
 			<ModSelect />
 			{#if hasVideo}
 				<button

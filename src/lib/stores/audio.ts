@@ -359,6 +359,13 @@ export async function jumpTo(index: number) {
 
 async function handleSongEnded() {
 	const current = get(songQueue);
+	if (get(sleepTimer).endOfSong) {
+		// Sleep timer "end of song": stop here, rewound for the next play
+		sleepTimer.set({ until: null, endOfSong: false });
+		stopPlayback();
+		current.audio.currentTime = 0;
+		return;
+	}
 	if (repeatMode() === 'one') {
 		current.audio.currentTime = 0;
 		current.audio.play();
@@ -477,6 +484,8 @@ if (typeof window !== 'undefined') {
 		const audio = current.audio;
 		const seconds = crossfadeSeconds();
 		if (!seconds || !audio || audio.paused || fadingOut || isSkipping) return;
+		// The sleep timer stops at the end of this song: no next song to fade into
+		if (get(sleepTimer).endOfSong) return;
 		// Previews are only short clips; downloaded songs play in full, also in the search
 		const song = current.queue?.[current.currentIndex];
 		if (current.type === 'preview' && (!song || localMapId(song) == null)) return;
@@ -494,4 +503,50 @@ if (typeof window !== 'undefined') {
 		setId: get(currentSong).song?.id?.toString() ?? null,
 		mapId: get(currentSong).song?.beatmaps?.[0]?.id?.toString() ?? null
 	}));
+}
+
+// --- Sleep timer ------------------------------------------------------------------------
+
+/** Stops playback at `until` (a timestamp) or at the end of the current song */
+export const sleepTimer = writable<{ until: number | null; endOfSong: boolean }>({
+	until: null,
+	endOfSong: false
+});
+
+const SLEEP_FADE_SECONDS = 8;
+
+/** Minutes from now, 'song' for the end of the current song, or null to turn it off */
+export function setSleepTimer(choice: number | 'song' | null) {
+	sleepTimer.set({
+		until: typeof choice === 'number' ? Date.now() + choice * 60_000 : null,
+		endOfSong: choice === 'song'
+	});
+}
+
+if (typeof window !== 'undefined') {
+	let fading = false;
+	setInterval(() => {
+		const { until } = get(sleepTimer);
+		const audio = get(songQueue).audio;
+		if (!until || fading || Date.now() < until) return;
+		sleepTimer.set({ until: null, endOfSong: false });
+		if (!audio || audio.paused) return;
+		// Fade out instead of cutting the song off; follows the song if the next one starts
+		fading = true;
+		const faded = new Set<HTMLAudioElement>();
+		const start = performance.now();
+		const timer = setInterval(() => {
+			const progress = Math.min(1, (performance.now() - start) / (SLEEP_FADE_SECONDS * 1000));
+			const current = get(songQueue).audio;
+			if (current) {
+				faded.add(current);
+				setFade(current, 1 - progress);
+			}
+			if (progress < 1 && current && !current.paused) return;
+			clearInterval(timer);
+			stopPlayback();
+			faded.forEach((element) => setFade(element, 1));
+			fading = false;
+		}, 100);
+	}, 1000);
 }
