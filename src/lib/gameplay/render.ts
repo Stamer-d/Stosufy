@@ -374,6 +374,79 @@ export function createGameplayRenderer(
 		ctx.restore();
 	}
 
+	/**
+	 * An image for adding light (osu!'s additive blending): its black made see-through, so
+	 * that it only brightens what's below on this transparent canvas
+	 */
+	const additives = new Map<SkinImage, SkinImage>();
+	function additive(source: SkinImage | null | undefined) {
+		if (!source) return null;
+		let made = additives.get(source);
+		if (!made) {
+			const { width, height } = source.image;
+			const c = new OffscreenCanvas(width, height).getContext('2d')!;
+			c.drawImage(source.image, 0, 0);
+			const data = c.getImageData(0, 0, width, height);
+			const px = data.data;
+			for (let i = 0; i < px.length; i += 4) {
+				const a = px[i + 3] / 255;
+				const light = Math.max(px[i], px[i + 1], px[i + 2]) * a;
+				if (light <= 0) {
+					px[i + 3] = 0;
+					continue;
+				}
+				px[i] = (px[i] * a * 255) / light;
+				px[i + 1] = (px[i + 1] * a * 255) / light;
+				px[i + 2] = (px[i + 2] * a * 255) / light;
+				px[i + 3] = light;
+			}
+			c.putImageData(data, 0, 0);
+			made = { image: c.canvas.transferToImageBitmap(), scale: source.scale };
+			additives.set(source, made);
+		}
+		return made;
+	}
+
+	/**
+	 * The slider ball like osu!'s LegacySliderBall: a dark sliderb-nd underneath, the ball's
+	 * frames turned the way it rolls, and the sliderb-spec shine on top
+	 */
+	function drawBall(
+		object: HitObject,
+		ball: { x: number; y: number; progress: number; span: number },
+		time: number,
+		colour: Colour
+	) {
+		const frames = skin.frames.sliderb;
+		if (!frames?.length) return false;
+		const slider = object.slider!;
+		const velocity = slider.path.length / (slider.spanDuration || 1);
+		const frameTime = Math.max((0.15 / (velocity || 1)) * (1000 / 60), 1000 / 60);
+		const frame = frames[Math.floor((time - object.time) / frameTime) % frames.length];
+		const angle = slider.path.angleAt(ball.progress) + (ball.span % 2 ? Math.PI : 0);
+		image(element('sliderb-nd'), ball.x, ball.y, circleScale, 1, [5, 5, 5], 'sliderb-nd');
+		const tint = skin.allowSliderBallTint ? colour : skin.sliderBall;
+		const white = !tint || tint.every((c) => c === 255);
+		image(
+			frame,
+			ball.x,
+			ball.y,
+			circleScale,
+			1,
+			white ? undefined : tint,
+			`sliderb${frames.indexOf(frame)}`,
+			angle
+		);
+		const spec = additive(element('sliderb-spec'));
+		if (spec) {
+			ctx.save();
+			ctx.globalCompositeOperation = 'lighter';
+			image(spec, ball.x, ball.y, circleScale, 1);
+			ctx.restore();
+		}
+		return true;
+	}
+
 	function drawSlider(object: HitObject, time: number, state: ObjectState) {
 		const slider = object.slider!;
 		// The body; with Hidden it fades out over the slider's length (eased out)
@@ -450,8 +523,7 @@ export function createGameplayRenderer(
 		drawApproach(object, object.x, object.y, time, state);
 		if (time >= object.time && time <= object.endTime) {
 			const ball = sliderBall(object, time);
-			const sliderb = element('sliderb0') ?? element('sliderb');
-			if (!image(sliderb, ball.x, ball.y, circleScale, 1)) {
+			if (!drawBall(object, ball, time, colour)) {
 				ctx.fillStyle = css(colour);
 				ctx.beginPath();
 				ctx.arc(ball.x, ball.y, radius * 0.85, 0, Math.PI * 2);
@@ -641,7 +713,9 @@ export function createGameplayRenderer(
 
 	function drawFollowPoints(time: number) {
 		const first = Math.max(0, lastAtOrBefore(followTimes, time - FOLLOW_FADE - 100));
-		const picture = element('followpoint');
+		const frames = skin.frames.followpoint ?? [];
+		// The animation starts as each point fades in, over and over (osu!'s frame rate)
+		const frameTime = 1000 / (skin.animationFramerate || frames.length || 1);
 		for (let l = first; l < followLines.length; l++) {
 			const line = followLines[l];
 			if (line.from.endTime - followPreempt > time) break;
@@ -664,7 +738,10 @@ export function createGameplayRenderer(
 				const x = line.start.x + line.dx * at;
 				const y = line.start.y + line.dy * at;
 				const size = circleScale * (1.5 - 0.5 * eased);
-				if (!image(picture, x, y, size, alpha, undefined, '', line.angle)) {
+				const picture = frames.length
+					? frames[Math.floor((time - fadeIn) / frameTime) % frames.length]
+					: null;
+				if (!picture) {
 					ctx.save();
 					ctx.globalAlpha = alpha * 0.8;
 					ctx.translate(x, y);
@@ -672,7 +749,7 @@ export function createGameplayRenderer(
 					ctx.fillStyle = 'white';
 					ctx.fillRect(-8 * size, -2 * size, 16 * size, 4 * size);
 					ctx.restore();
-				}
+				} else image(picture, x, y, size, alpha, undefined, '', line.angle);
 			}
 		}
 	}

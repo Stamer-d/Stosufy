@@ -8,8 +8,8 @@ export const ELEMENTS = [
 	'hitcircle',
 	'hitcircleoverlay',
 	'approachcircle',
-	'sliderb0',
-	'sliderb',
+	'sliderb-nd',
+	'sliderb-spec',
 	'sliderfollowcircle',
 	'reversearrow',
 	'cursor',
@@ -56,9 +56,7 @@ const ANIMATED = new Set<string>([
 	'hit100k',
 	'hit300',
 	'hit300g',
-	'hit300k',
-	'followpoint',
-	'sliderb'
+	'hit300k'
 ]);
 
 /** Characters of the score and combo fonts besides the digits */
@@ -72,8 +70,18 @@ export interface SkinImage {
 	scale: number;
 }
 
+/** Elements that are animations of their own: sliderb0, sliderb1, … and followpoint-0, … */
+export type FramesName = 'sliderb' | 'followpoint';
+
 export interface GameplaySkin {
 	images: Partial<Record<ElementName, SkinImage>>;
+	/** The frames of the slider ball and the follow points (one if they're still images) */
+	frames: Partial<Record<FramesName, SkinImage[]>>;
+	/** skin.ini's AnimationFramerate (0: all frames in one second) */
+	animationFramerate: number;
+	/** skin.ini's SliderBall colour, and whether the ball takes the combo colour instead */
+	sliderBall: [number, number, number] | null;
+	allowSliderBallTint: boolean;
 	/** The combo number images, 0–9 */
 	numbers: (SkinImage | null)[];
 	/** The score font: digits and "x", "%", ".", "," */
@@ -95,6 +103,10 @@ export interface GameplaySkin {
 
 export const EMPTY_SKIN: GameplaySkin = {
 	images: {},
+	frames: {},
+	animationFramerate: 0,
+	sliderBall: null,
+	allowSliderBallTint: false,
 	numbers: [],
 	score: {},
 	scoreOverlap: 0,
@@ -163,6 +175,19 @@ async function load(dir: string): Promise<GameplaySkin> {
 		return null;
 	};
 
+	// Like osu!: the numbered frames if there are any, else the still image
+	const frames = async (name: string, separator: string) => {
+		const list: SkinImage[] = [];
+		for (let i = 0; i < 120; i++) {
+			const frame = await image(dir, byName, `${name}${separator}${i}`);
+			if (!frame) break;
+			list.push(frame);
+		}
+		if (list.length) return list;
+		const still = await image(dir, byName, name);
+		return still ? [still] : [];
+	};
+
 	const element = async (name: string) =>
 		(await image(dir, byName, name)) ??
 		(ANIMATED.has(name) ? await image(dir, byName, `${name}-0`) : null);
@@ -218,6 +243,14 @@ async function load(dir: string): Promise<GameplaySkin> {
 	]);
 	const numbers = Array.from({ length: 10 }, (_, digit) => circleFont[digit] ?? null);
 
+	const [sliderbFrames, followpointFrames] = await Promise.all([
+		frames('sliderb', ''),
+		frames('followpoint', '-')
+	]);
+	const animationFrames: GameplaySkin['frames'] = {};
+	if (sliderbFrames.length) animationFrames.sliderb = sliderbFrames;
+	if (followpointFrames.length) animationFrames.followpoint = followpointFrames;
+
 	const colours = Object.entries(settings)
 		.filter(([key]) => /^Combo\d$/.test(key))
 		.sort(([a], [b]) => Number(a.slice(5)) - Number(b.slice(5)))
@@ -226,6 +259,10 @@ async function load(dir: string): Promise<GameplaySkin> {
 
 	return {
 		images,
+		frames: animationFrames,
+		animationFramerate: Number(settings.AnimationFramerate) || 0,
+		sliderBall: rgb(settings.SliderBall),
+		allowSliderBallTint: settings.AllowSliderBallTint === '1',
 		numbers,
 		colours,
 		sliderBorder: rgb(settings.SliderBorder),
@@ -258,10 +295,29 @@ export function withFallback(skin: GameplaySkin, fallback: GameplaySkin): Gamepl
 	const fallbackImages = new Set(
 		Object.keys(fallback.images).filter((name) => !skin.images[name as ElementName])
 	);
+	const images = fill(skin.images, fallback.images);
+	// The slider ball is taken whole, with its layers: the skin's if it has one, else the
+	// default one (a skin's sliderb without the -nd and -spec layers is meant that way)
+	const ownBall = !!skin.frames.sliderb?.length;
+	for (const layer of ['sliderb-nd', 'sliderb-spec'] as const) {
+		if (ownBall) {
+			if (skin.images[layer]) images[layer] = skin.images[layer];
+			else delete images[layer];
+		} else if (fallback.images[layer]) images[layer] = fallback.images[layer];
+	}
 	return {
 		...skin,
 		fallbackImages,
-		images: fill(skin.images, fallback.images),
+		images,
+		frames: {
+			sliderb: ownBall ? skin.frames.sliderb : fallback.frames.sliderb,
+			followpoint: skin.frames.followpoint?.length
+				? skin.frames.followpoint
+				: fallback.frames.followpoint
+		},
+		animationFramerate: skin.frames.followpoint?.length
+			? skin.animationFramerate
+			: fallback.animationFramerate,
 		numbers: ownNumbers ? skin.numbers : fallback.numbers,
 		numberOverlap: ownNumbers ? skin.numberOverlap : fallback.numberOverlap,
 		score: font(skin.score, fallback.score),

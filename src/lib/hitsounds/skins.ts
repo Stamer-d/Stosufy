@@ -20,7 +20,7 @@ const HITSOUND_FILE =
 /** The play's other sounds: the spinner's, the combo break */
 const PLAY_SOUND_FILE = /^(spinnerspin|spinnerbonus|combobreak)\.(wav|ogg|mp3)$/i;
 /** Marks a downloaded osu! default skin that has everything the gameplay view uses */
-const COMPLETE_MARKER = '.stosufy-gameplay-v2';
+const COMPLETE_MARKER = '.stosufy-gameplay-v3';
 
 export interface SkinOption {
 	/** "stosufy:<name>" or "osu:<name>" */
@@ -235,7 +235,7 @@ async function rename(from: string, to: string) {
 
 /** The images the gameplay view uses (see gameplay/skin.ts) */
 const GAMEPLAY_FILE =
-	/^(hitcircle|hitcircleoverlay|approachcircle|sliderb\d*|sliderfollowcircle|sliderscorepoint|reversearrow|cursor|cursormiddle|cursortrail|spinner-[a-z0-9]+|hit(0|50|100k?|300[gk]?)(-\d+)?|followpoint(-\d+)?|inputoverlay-(key|background)|ranking-(xh|x|sh|s|a|b|c|d)|[a-z0-9_ -]+-(\d|x|percent|dot|comma))(@2x)?\.png$/i;
+	/^(hitcircle|hitcircleoverlay|approachcircle|sliderb(\d*|-nd|-spec)|sliderfollowcircle|sliderscorepoint|reversearrow|cursor|cursormiddle|cursortrail|spinner-[a-z0-9]+|hit(0|50|100k?|300[gk]?)(-\d+)?|followpoint(-\d+)?|inputoverlay-(key|background)|ranking-(xh|x|sh|s|a|b|c|d)|[a-z0-9_ -]+-(\d|x|percent|dot|comma))(@2x)?\.png$/i;
 
 /** Depth of a folder in an archive ("" is the top) */
 const depth = (folder: string) => (folder ? folder.split('/').length : 0);

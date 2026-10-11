@@ -1051,6 +1051,15 @@ class Mixer {
 			}
 		}
 		if (to.grid.length && inPoint !== base) inPoint = Math.max(base, beatRound(to.grid, inPoint));
+		// Where the user put the new song (scrubbed, or played it before) it goes on from there
+		const placed = to.position();
+		if (
+			!to.state.playing &&
+			Math.abs(placed - base) > 1 &&
+			placed > 0 &&
+			placed < to.state.duration - 20
+		)
+			inPoint = to.grid.length ? beatRound(to.grid, placed) : placed;
 		return { type, bars, startAt, inPoint, fit };
 	}
 
