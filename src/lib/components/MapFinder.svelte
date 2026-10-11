@@ -17,8 +17,10 @@
 	import { user, userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import Beatmap from './Beatmap.svelte';
-	import Input from './Input.svelte';
-	import { onDestroy, tick } from 'svelte';
+	import SongCover from './SongCover.svelte';
+	import { get } from 'svelte/store';
+	import { searchQuery, matchesQuery } from '#lib/stores/search.ts';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import Button from './Button.svelte';
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
@@ -134,7 +136,21 @@
 		runSearch(search);
 	}
 
-	let search = $state('');
+	/** @type {{ searchPage?: boolean }} */
+	let { searchPage = false } = $props();
+
+	// On the search page the query comes from the search bar in the title bar
+	let search = $state(untrack(() => searchPage) ? get(searchQuery) : '');
+	$effect(() => {
+		const query = $searchQuery;
+		if (searchPage && query !== search) {
+			search = query;
+			debouncedSearch(query);
+		}
+	});
+	let libraryMatches = $derived(
+		searchPage ? formatSongData($mapDataStore).filter((song) => matchesQuery(song, search)) : []
+	);
 	let searching = $state(false);
 	let searchError = $state(null);
 	let osuMapsSearch = $state(null);
@@ -195,12 +211,6 @@
 	function debouncedSearch(query) {
 		if (searchTimeout) clearTimeout(searchTimeout);
 		searchTimeout = setTimeout(() => runSearch(query), 500);
-	}
-
-	function clearSearch() {
-		if (searchTimeout) clearTimeout(searchTimeout);
-		search = '';
-		runSearch('');
 	}
 
 	function isMapDownloaded(setId) {
@@ -397,34 +407,13 @@
 
 {#snippet discoverSection()}
 	<section>
-		<h2 class="text-xl font-bold tracking-tight mb-3">Discover beatmaps</h2>
 		<div class="flex flex-wrap items-center gap-2 mb-4">
-			<div class="relative flex flex-1 min-w-64 items-center">
-				<span
-					class="icon-[fa6-solid--magnifying-glass] absolute left-3 size-4 text-secondary-600 pointer-events-none"
-				></span>
-				<Input
-					bind:value={search}
-					on:input={(e) => {
-						debouncedSearch(/** @type {HTMLInputElement} */ (e.target).value);
-					}}
-					placeholder="Search beatmaps by title, artist or mapper"
-					class="pl-9 pr-9"
-				/>
-				{#if searching}
-					<span
-						class="icon-[svg-spinners--ring-resize] absolute right-3 size-4 text-primary-400 pointer-events-none"
-					></span>
-				{:else if search}
-					<button
-						aria-label="Clear search"
-						class="absolute right-2 p-1 flex text-secondary-600 hover:text-white cursor-pointer"
-						onclick={clearSearch}
-					>
-						<span class="icon-[fa6-solid--xmark] size-4"></span>
-					</button>
-				{/if}
-			</div>
+			<h2 class="flex-1 text-xl font-bold tracking-tight">
+				{searchPage ? (search ? 'Beatmaps' : 'Popular beatmaps') : 'Discover beatmaps'}
+			</h2>
+			{#if searching}
+				<span class="icon-[svg-spinners--ring-resize] size-4 text-primary-400"></span>
+			{/if}
 			<Select
 				label="Status"
 				options={STATUS_OPTIONS}
@@ -518,7 +507,56 @@
 	</button>
 {/snippet}
 
-{#if homeSettings.layout === 'desktop'}
+{#if searchPage}
+	<div class="px-6 pt-6 pb-10 flex flex-col gap-10">
+		{#if libraryMatches.length}
+			<section>
+				<h2 class="text-xl font-bold tracking-tight mb-3">In your library</h2>
+				<div class="grid md:grid-cols-2 gap-1">
+					{#each libraryMatches.slice(0, 8) as song (songKey(song))}
+						{@const playingThis = sameSong($currentSong.song, song) && $currentSong.isPlaying}
+						<button
+							class="group flex items-center gap-3 p-2 rounded-md text-start cursor-pointer hover:bg-white/[0.06] transition-colors"
+							onclick={() =>
+								sameSong($currentSong.song, song) ? togglePlayback() : playDownloaded(song)}
+						>
+							<div class="relative shrink-0">
+								<SongCover setId={song.id} title={song.title} class="size-12 rounded" />
+								<span
+									class="absolute inset-0 grid place-items-center rounded bg-black/50 transition-opacity {playingThis
+										? 'opacity-100'
+										: 'opacity-0 group-hover:opacity-100'}"
+								>
+									<span
+										class="{playingThis
+											? 'icon-[mingcute--pause-fill]'
+											: 'icon-[mingcute--play-fill]'} size-5 text-white"
+									></span>
+								</span>
+							</div>
+							<span class="min-w-0">
+								<span
+									class="block font-semibold truncate {sameSong($currentSong.song, song)
+										? 'text-primary-500'
+										: 'text-white'}">{song.title}</span
+								>
+								<span class="block text-sm text-secondary-600 truncate">
+									{song.artist}{song.creator ? ` · mapped by ${song.creator}` : ''}
+								</span>
+							</span>
+						</button>
+					{/each}
+				</div>
+				{#if libraryMatches.length > 8}
+					<p class="mt-2 text-sm text-secondary-600">
+						And {libraryMatches.length - 8} more in Downloaded Songs.
+					</p>
+				{/if}
+			</section>
+		{/if}
+		{@render discoverSection()}
+	</div>
+{:else if homeSettings.layout === 'desktop'}
 	<!-- Desktop: the beatmap background as wallpaper with widgets on it -->
 	<ContextMenu class="h-full">
 		<!-- svelte-ignore a11y_no_static_element_interactions -->

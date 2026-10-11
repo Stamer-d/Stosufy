@@ -1,4 +1,5 @@
 <script>
+	import SearchBar from './SearchBar.svelte';
 	import { openSettings } from '#lib/stores/settings.ts';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Button from './Button.svelte';
@@ -86,7 +87,11 @@
 		{/if}
 	</div>
 
-	<div class="flex-1 h-full" data-tauri-drag-region></div>
+	<div class="flex-1 h-full flex items-center justify-center px-6" data-tauri-drag-region>
+		{#if $user?.username}
+			<SearchBar />
+		{/if}
+	</div>
 
 	<div class="flex items-center h-full">
 		{#if $user?.username}
