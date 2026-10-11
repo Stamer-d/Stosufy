@@ -7,6 +7,10 @@ import * as path from '@tauri-apps/api/path';
 export const ELEMENTS = [
 	'hitcircle',
 	'hitcircleoverlay',
+	'sliderstartcircle',
+	'sliderstartcircleoverlay',
+	'sliderendcircle',
+	'sliderendcircleoverlay',
 	'approachcircle',
 	'sliderb-nd',
 	'sliderb-spec',

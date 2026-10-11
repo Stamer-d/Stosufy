@@ -20,6 +20,7 @@ import {
 } from './judge';
 
 type Colour = [number, number, number];
+type CircleKind = 'hitcircle' | 'sliderstartcircle' | 'sliderendcircle';
 
 const DEFAULT_COLOURS: Colour[] = [
 	[255, 192, 0],
@@ -157,6 +158,16 @@ export function createGameplayRenderer(
 		);
 	}
 
+	/**
+	 * The images of a circle: a slider's start and end have their own if the skin (the one
+	 * giving the hit circle) has them (osu!'s LegacyMainCirclePiece), else the hit circle's
+	 */
+	function circleImages(kind: CircleKind): [SkinImage | null, SkinImage | null, string] {
+		const own = kind !== 'hitcircle' && !skin.fallbackImages?.has('hitcircle') && images[kind];
+		if (own) return [own, images[`${kind}overlay`] ?? null, kind];
+		return [images.hitcircle ?? null, images.hitcircleoverlay ?? null, 'hitcircle'];
+	}
+
 	function drawCircle(
 		object: HitObject,
 		x: number,
@@ -164,7 +175,8 @@ export function createGameplayRenderer(
 		time: number,
 		hitTime: number | null,
 		missedAt: number | null,
-		number = true
+		number = true,
+		kind: CircleKind = 'hitcircle'
 	) {
 		let alpha = appearAlpha(object, time);
 		let grow = 1;
@@ -179,14 +191,16 @@ export function createGameplayRenderer(
 		if (alpha <= 0) return;
 		const colour = colourOf(object);
 		const size = circleScale * grow;
-		if (!image(element('hitcircle'), x, y, size, alpha, colour, 'hitcircle')) {
+		const [circle, overlay, name] = circleImages(kind);
+		if (circle) {
+			image(circle, x, y, size, alpha, colour, name);
+			image(overlay, x, y, size, alpha);
+		} else {
 			ctx.globalAlpha = alpha;
 			ctx.fillStyle = css(colour, 0.85);
 			ctx.beginPath();
 			ctx.arc(x, y, radius * grow * 0.92, 0, Math.PI * 2);
 			ctx.fill();
-		}
-		if (!image(element('hitcircleoverlay'), x, y, size, alpha)) {
 			ctx.globalAlpha = alpha;
 			ctx.strokeStyle = 'white';
 			ctx.lineWidth = radius * 0.12 * grow;
@@ -462,7 +476,6 @@ export function createGameplayRenderer(
 		if (alpha > 0) drawSliderBody(object, colour, alpha);
 
 		const span = time < object.time ? 0 : Math.floor((time - object.time) / slider.spanDuration);
-		const end = slider.path.at(1);
 		if (time < object.endTime && shown > 0) {
 			// The ticks still to come in this span
 			for (const point of slider.points) {
@@ -483,43 +496,82 @@ export function createGameplayRenderer(
 					ctx.globalAlpha = 1;
 				}
 			}
-			// The end, and the arrow where it turns around
-			drawCircle(object, end.x, end.y, Math.min(time, object.time), null, null, false);
-			const remainingTurns = slider.slides - 1 - Math.max(0, span);
-			if (remainingTurns > 0) {
-				const atEnd = Math.max(0, span) % 2 === 0;
-				const where = atEnd ? end : slider.path.at(0);
-				const angle = atEnd ? slider.path.angleAt(1) + Math.PI : slider.path.angleAt(0);
-				if (
-					!image(
-						element('reversearrow'),
-						where.x,
-						where.y,
-						circleScale,
-						shown,
-						undefined,
-						'',
-						angle
-					)
-				) {
-					ctx.save();
-					ctx.globalAlpha = shown;
-					ctx.translate(where.x, where.y);
-					ctx.rotate(angle);
-					ctx.fillStyle = 'white';
-					ctx.beginPath();
-					ctx.moveTo(radius * 0.45, 0);
-					ctx.lineTo(-radius * 0.3, -radius * 0.35);
-					ctx.lineTo(-radius * 0.3, radius * 0.35);
-					ctx.fill();
-					ctx.restore();
-				}
-			}
 		}
+
+		// The end (where the last span ends: back at the start after an even number) and
+		// the turns, each popping like a hit circle when the ball gets there
+		const tailIndex = slider.points.findIndex((p) => p.kind === 'tail');
+		const tail = slider.path.at(slider.slides % 2);
+		const pop = (x: number, y: number, at: number, hit: boolean | null) => {
+			if (time < at) return false;
+			const t = (time - at) / (hit ? HIT_FADE : MISS_FADE);
+			if (t >= 1) return true;
+			const [circle, overlay, name] = circleImages('sliderendcircle');
+			const size = circleScale * (hit ? 1 + 0.4 * t : 1);
+			const alpha = (hidden ? 0 : 1) * (1 - t);
+			image(circle, x, y, size, alpha, colourOf(object), name);
+			image(overlay, x, y, size, alpha);
+			return true;
+		};
+		if (!pop(tail.x, tail.y, object.endTime, state.points[tailIndex] !== false) && shown > 0)
+			drawCircle(
+				object,
+				tail.x,
+				tail.y,
+				Math.min(time, object.time),
+				null,
+				null,
+				false,
+				'sliderendcircle'
+			);
+		slider.points.forEach((point, i) => {
+			if (point.kind !== 'repeat') return;
+			const at = slider.path.at(point.progress);
+			if (pop(at.x, at.y, point.time, state.points[i] !== false)) return;
+			// Only the next turn at each end shows
+			const before = slider.points.find((p) => p.kind === 'repeat' && p.time > time);
+			if (before !== point && before?.progress === point.progress) return;
+			if (point.time - time > slider.spanDuration * 2) return;
+			drawCircle(
+				object,
+				at.x,
+				at.y,
+				Math.min(time, object.time),
+				null,
+				null,
+				false,
+				'sliderendcircle'
+			);
+			// The arrow points back along the path
+			const angle =
+				point.progress === 1 ? slider.path.angleAt(1) + Math.PI : slider.path.angleAt(0);
+			if (!image(element('reversearrow'), at.x, at.y, circleScale, shown, undefined, '', angle)) {
+				ctx.save();
+				ctx.globalAlpha = shown;
+				ctx.translate(at.x, at.y);
+				ctx.rotate(angle);
+				ctx.fillStyle = 'white';
+				ctx.beginPath();
+				ctx.moveTo(radius * 0.45, 0);
+				ctx.lineTo(-radius * 0.3, -radius * 0.35);
+				ctx.lineTo(-radius * 0.3, radius * 0.35);
+				ctx.fill();
+				ctx.restore();
+			}
+		});
 
 		// The head, then the ball while it slides
 		const headMissed = state.head === 0 ? state.headAt : null;
-		drawCircle(object, object.x, object.y, time, state.hitTime, headMissed);
+		drawCircle(
+			object,
+			object.x,
+			object.y,
+			time,
+			state.hitTime,
+			headMissed,
+			true,
+			'sliderstartcircle'
+		);
 		drawApproach(object, object.x, object.y, time, state);
 		if (time >= object.time && time <= object.endTime) {
 			const ball = sliderBall(object, time);

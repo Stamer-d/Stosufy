@@ -50,6 +50,33 @@
 		});
 	});
 
+	// While a full-screen view (playing, focus, DJ) covers the page, the page keeps where it
+	// was scrolled to: nothing behind it may move it, and it's put back when the view closes
+	let covered = $derived($playingLive || $focusMode || $djOpen);
+	let keptScroll = null;
+	$effect(() => {
+		const el = scroller;
+		if (!el) return;
+		if (covered) {
+			keptScroll = el.scrollTop;
+			const hold = () => {
+				if (keptScroll !== null && el.scrollTop !== keptScroll) el.scrollTop = keptScroll;
+			};
+			el.addEventListener('scroll', hold);
+			return () => {
+				el.removeEventListener('scroll', hold);
+				const top = keptScroll;
+				// Once the page is laid out again
+				requestAnimationFrame(() =>
+					requestAnimationFrame(() => {
+						if (top !== null) el.scrollTop = top;
+						keptScroll = null;
+					})
+				);
+			};
+		}
+	});
+
 	let showUI = $state(false);
 
 	let appearance = $derived({ ...DEFAULT_APPEARANCE, ...$userSettings.settings?.appearance });
