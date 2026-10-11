@@ -96,11 +96,6 @@
 				{@render toggle('Beatmap hitsounds', beatmapSounds, (checked) =>
 					updateUserSettings({ mapHitsounds: checked })
 				)}
-				{#if beatmapSounds}
-					{@render toggle('Skin click on every circle', settings.skinClick ?? true, (checked) =>
-						updateUserSettings({ skinClick: checked })
-					)}
-				{/if}
 
 				<div class="px-2.5 pt-2 pb-1">
 					<p class="text-xs font-bold uppercase tracking-wider text-secondary-600 mb-1.5">Sounds</p>
@@ -144,6 +139,17 @@
 						on:change={(e) => updateUserSettings({ hitsoundVolume: e.detail })}
 					/>
 				</div>
+				{#if $hitsoundStatus.state === 'ready' && $hitsoundStatus.skinUnreadable}
+					<p class="px-2.5 pb-1 text-xs text-yellow-300" role="alert">
+						Can't read this skin's sounds, so the osu! default ones play. Choose the osu! Skins
+						folder again under “Import skins and more…”.
+						{#if $hitsoundStatus.skinError}
+							<span class="block mt-1 text-secondary-600 break-all"
+								>{$hitsoundStatus.skinError}</span
+							>
+						{/if}
+					</p>
+				{/if}
 				{#if $hitsoundStatus.state === 'ready' && $hitsoundStatus.sources}
 					<!-- Where this song's sounds come from, to see at a glance if the skin is used -->
 					<p class="px-2.5 pb-1 text-xs text-secondary-600" aria-live="polite">

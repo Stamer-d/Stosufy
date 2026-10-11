@@ -28,6 +28,10 @@ export interface HitsoundStatus {
 	message?: string;
 	/** How many of the song's different samples come from where */
 	sources?: Partial<Record<SampleSource, number>>;
+	/** A skin is chosen but none of its sounds could be read (e.g. no access to its folder) */
+	skinUnreadable?: boolean;
+	/** Why, if known */
+	skinError?: string;
 }
 
 export const hitsoundStatus = writable<HitsoundStatus>({ state: 'off' });
@@ -46,9 +50,6 @@ function settings() {
 		// Off by default: many maps mute the hitnormal with their own silent samples, and a
 		// music player should sound like the skin on every circle
 		beatmap: s.mapHitsounds ?? false,
-		// The "click" of every circle (the hitnormal) from the skin, even with the beatmap's
-		// own samples on: maps often have quiet or silent hitnormals of their own
-		skinClick: s.skinClick ?? true,
 		/** Sounds turned off (whistle, finish, clap, slidertick) */
 		muted: (['whistle', 'finish', 'clap', 'slidertick'] as const).filter(
 			(sound) => s.hitsoundParts?.[sound] === false
@@ -68,6 +69,8 @@ export function toggleHitsounds() {
 type Folder = { dir: string; files: Map<string, string> };
 
 const folders = new Map<string, Promise<Folder | null>>();
+/** Why a folder couldn't be read, to show it */
+const folderErrors = new Map<string, string>();
 
 function folder(dir: string | null | undefined): Promise<Folder | null> {
 	if (!dir) return Promise.resolve(null);
@@ -85,7 +88,11 @@ function folder(dir: string | null | undefined): Promise<Folder | null> {
 					}
 					return { dir, files };
 				})
-				.catch(() => null)
+				.catch((error) => {
+					folderErrors.set(dir, String(error));
+					console.warn('Could not read the folder', dir, error);
+					return null;
+				})
 		);
 	}
 	return folders.get(dir)!;
@@ -149,13 +156,14 @@ async function resolve(
 	beatmap: Folder | null,
 	skin: Folder | null,
 	fallback: Folder | null,
-	from: (source: SampleSource) => void = () => {},
-	skinClick = false
+	from: (source: SampleSource) => void = () => {}
 ) {
 	const sound = sample.sound === 'slidertick' ? 'slidertick' : `hit${sample.sound}`;
 	const name = `${sample.set}-${sound}`;
+	// The click of every circle (the hitnormal) always comes from the skin: maps often have
+	// quiet or silent hitnormals of their own
 	const isClick = sample.sound === 'normal' && !sample.file;
-	if (beatmap && (sample.file || sample.index >= 1) && !(isClick && skinClick)) {
+	if (beatmap && (sample.file || sample.index >= 1) && !isClick) {
 		const names = sample.file
 			? [sample.file.replace(AUDIO_FILE, ''), name, sound]
 			: sample.index >= 2
@@ -259,8 +267,8 @@ let loadingKey: string | null = null;
 async function load() {
 	const song = get(currentSong).song;
 	const queue = get(songQueue);
-	const { on, skin, beatmap, skinClick, muted } = settings();
-	const key = song && `${songKey(song)}:${skin}:${beatmap}:${skinClick}:${muted}`;
+	const { on, skin, beatmap, muted } = settings();
+	const key = song && `${songKey(song)}:${skin}:${beatmap}:${muted}`;
 	if (!on || !song) {
 		chart = null;
 		loadingKey = null;
@@ -304,10 +312,7 @@ async function load() {
 		const sound = (sample: HitSample) => {
 			const id = `${sample.set}:${sample.sound}:${sample.index}:${sample.file ?? ''}`;
 			if (!resolved.has(id))
-				resolved.set(
-					id,
-					resolve(sample, beatmapFolder, skinSamples, defaultSamples, count, skinClick)
-				);
+				resolved.set(id, resolve(sample, beatmapFolder, skinSamples, defaultSamples, count));
 			return resolved.get(id)!;
 		};
 		// Without the sounds turned off (a tick alone leaves nothing to play)
@@ -330,7 +335,17 @@ async function load() {
 			sources.skin = (sources.skin ?? 0) + sources.default;
 			delete sources.default;
 		}
-		hitsoundStatus.set({ state: 'ready', sources });
+		// A skin is chosen, but not a single sound came from it
+		const skinUnreadable = !!skin && skin !== BUILTIN && !sources.skin;
+		const skinDir = skin && skin !== BUILTIN ? await skinFolder(skin) : null;
+		const skinError = skinUnreadable
+			? ((skinDir && folderErrors.get(skinDir)) ??
+				(skinSamples
+					? `Found ${skinSamples.files.size} sound files in ${skinSamples.dir}, but none could be played`
+					: `Couldn't open ${skinDir ?? 'the skin folder'}`))
+			: undefined;
+		if (skinUnreadable) console.warn('The skin gave no sounds:', skin, skinError);
+		hitsoundStatus.set({ state: 'ready', sources, skinUnreadable, skinError });
 	} catch (error) {
 		console.error('Could not load the hitsounds:', error);
 		if (loadingKey === key) hitsoundStatus.set({ state: 'error', message: String(error) });
@@ -427,7 +442,7 @@ export function startHitsounds() {
 	let last = '';
 	userSettings.subscribe(() => {
 		const s = settings();
-		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.skinClick}:${s.muted}:${s.skinsFolder}`;
+		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.muted}:${s.skinsFolder}`;
 		if (key === last) return;
 		last = key;
 		if (!s.on) stopScheduled();
@@ -447,6 +462,7 @@ export function startHitsounds() {
 /** Forget the read folders, e.g. after choosing another skins folder */
 export function forgetSkinFolders() {
 	folders.clear();
+	folderErrors.clear();
 	buffers.clear();
 	loadingKey = null;
 	load();

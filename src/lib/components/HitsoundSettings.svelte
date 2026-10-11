@@ -64,6 +64,8 @@
 		const picked = await open({
 			title: 'Select your osu! Skins folder',
 			directory: true,
+			// Access to the skins inside it too, not just the folder itself
+			recursive: true,
 			defaultPath: osuFolder ?? undefined
 		});
 		if (typeof picked !== 'string') return;
@@ -203,20 +205,6 @@
 			'Use the beatmap’s own samples where it has them, like osu! does',
 			beatmapSwitch
 		)}
-		{#if settings.mapHitsounds}
-			{#snippet clickSwitch()}
-				{@render switchControl(
-					settings.skinClick ?? true,
-					(checked) => updateUserSettings({ skinClick: checked }),
-					'Skin click on every circle'
-				)}
-			{/snippet}
-			{@render row(
-				'Skin click on every circle',
-				'The hit sound of your skin on every circle, even where the beatmap has its own',
-				clickSwitch
-			)}
-		{/if}
 
 		<div class="mt-4">
 			<span class="block mb-2 text-sm font-semibold text-white">Sounds</span>

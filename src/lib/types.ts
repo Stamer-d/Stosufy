@@ -189,8 +189,6 @@ export interface Settings {
 	 * before; a new name, so it's off for everyone.
 	 */
 	mapHitsounds?: boolean;
-	/** The skin's hitnormal ("click") on every circle, also with mapHitsounds on (default on) */
-	skinClick?: boolean;
 	/** Hitsound parts turned off (false); all play by default */
 	hitsoundParts?: Partial<Record<'whistle' | 'finish' | 'clap' | 'slidertick', boolean>>;
 	/** Hitsounds later (positive) or earlier, in ms */
