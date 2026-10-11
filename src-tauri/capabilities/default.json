@@ -32,6 +32,12 @@
 				},
 				{
 					"url": "https://lrclib.net/*"
+				},
+				{
+					"url": "https://api.github.com/repos/ppy/osu-resources/*"
+				},
+				{
+					"url": "https://raw.githubusercontent.com/ppy/osu-resources/*"
 				}
 			],
 			"deny": [
