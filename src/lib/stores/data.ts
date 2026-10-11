@@ -1,9 +1,9 @@
 import { get, writable } from 'svelte/store';
-import { keyStore } from './auth';
+import { keyStore, freshToken } from './auth';
 import { fetch } from '@tauri-apps/plugin-http';
 import JSZip from 'jszip';
 import { findVideo, parseOsuFile } from '../osuFile';
-import { splitTracks } from '../tracks';
+import { splitTracks, trackGroups } from '../tracks';
 import {
 	writeTextFile,
 	exists,
@@ -127,18 +127,20 @@ export async function fetchMaps(
 	cursorString = '',
 	filters: SearchFilters = DEFAULT_SEARCH_FILTERS
 ) {
-	const params = new URLSearchParams({
-		q: search,
-		s: filters.status,
-		sort: filters.sort,
-		cursor_string: cursorString ?? ''
-	});
+	const params = new URLSearchParams({ q: search });
+	if (filters.status) params.set('s', filters.status);
+	if (filters.sort) params.set('sort', filters.sort);
+	if (cursorString) params.set('cursor_string', cursorString);
 	try {
-		const response = await fetch(`https://osu.ppy.sh/api/v2/beatmapsets/search?${params}`, {
-			headers: {
-				Authorization: `Bearer ${get(keyStore).access_token}`
-			}
-		});
+		const url = `https://osu.ppy.sh/api/v2/beatmapsets/search?${params}`;
+		let response!: Response;
+		// osu! sometimes answers with a 5xx (and a token can run out): try again a bit later
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const token = await freshToken(attempt > 0 && response?.status === 401);
+			response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+			if (response.ok || (response.status < 500 && response.status !== 401)) break;
+			await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+		}
 		if (!response.ok) {
 			// Include the start of the body to tell an osu! API error from a Cloudflare block
 			const body = (await response.text()).replace(/\s+/g, ' ').slice(0, 120);
@@ -225,13 +227,28 @@ export async function downloadBeatmap(
 			return await bufferToBase64(cachedAudio);
 		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 0 } }));
-		const response = await fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
-			headers: {
-				Cookie: `osu_session=${sessionKey}`,
-				Referer: `https://osu.ppy.sh/beatmapsets/${setId}`
-			},
-			redirect: 'follow'
-		});
+		// osu! renews the session cookie now and then: the newest one is kept, and a refused
+		// download is tried once more with it
+		const request = (key: string | undefined) =>
+			fetch(`https://osu.ppy.sh/beatmapsets/${setId}/download`, {
+				headers: {
+					Cookie: `osu_session=${key}`,
+					Referer: `https://osu.ppy.sh/beatmapsets/${setId}`
+				},
+				redirect: 'follow'
+			});
+		const keepCookie = (answer: Response) => {
+			const renewed = answer.headers.get('set-cookie')?.match(/osu_session=([^;]+)/)?.[1];
+			if (renewed && renewed !== get(keyStore).sessionKey)
+				keyStore.update((keys) => ({ ...keys, sessionKey: renewed }));
+		};
+		let response = await request(get(keyStore).sessionKey || sessionKey);
+		keepCookie(response);
+		if (response.status === 401 || response.status === 403) {
+			await new Promise((resolve) => setTimeout(resolve, 1500));
+			response = await request(get(keyStore).sessionKey || sessionKey);
+			keepCookie(response);
+		}
 
 		if (!response.ok) {
 			throw new Error(
@@ -988,9 +1005,45 @@ export async function backgroundUrls(
 	];
 }
 
-/** The small square cover of a beatmap set: saved in the songs folder or online */
-export async function thumbnailUrl(setId: number | string): Promise<string> {
-	const imagePath = get(mapDataStore)[setId]?.thumbnail;
+const smallImages = new Map<string, Promise<string | null>>();
+
+/** A small (cover sized) copy of an image in the songs folder, made once */
+function smallImageUrl(imagePath: string) {
+	if (!smallImages.has(imagePath)) {
+		smallImages.set(
+			imagePath,
+			readFile(imagePath, { baseDir: BaseDirectory.Home })
+				.then(async (data) => {
+					const bitmap = await createImageBitmap(new Blob([data]));
+					const size = 160;
+					const scale = size / Math.min(bitmap.width, bitmap.height);
+					const canvas = new OffscreenCanvas(size, size);
+					const w = bitmap.width * scale;
+					const h = bitmap.height * scale;
+					canvas.getContext('2d')!.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
+					bitmap.close();
+					return URL.createObjectURL(await canvas.convertToBlob({ type: 'image/jpeg' }));
+				})
+				.catch(() => null)
+		);
+	}
+	return smallImages.get(imagePath)!;
+}
+
+/**
+ * The small square cover of a beatmap set: saved in the songs folder or online. The songs
+ * of a set with several (track > 0) show their own background when they have one.
+ */
+export async function thumbnailUrl(setId: number | string, track = 0): Promise<string> {
+	const set = get(mapDataStore)[setId];
+	if (track > 0 && set) {
+		const own = trackGroups(set)[track]?.find((map) => map.background)?.background;
+		if (own && own !== set.background) {
+			const url = await smallImageUrl(own);
+			if (url) return url;
+		}
+	}
+	const imagePath = set?.thumbnail;
 	return (
 		(imagePath && (await localImageUrl(imagePath))) ||
 		`https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`

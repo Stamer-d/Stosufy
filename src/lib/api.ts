@@ -1,4 +1,6 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { get } from 'svelte/store';
+import { keyStore, freshToken } from './stores/auth';
 import type { Playlist, PlaylistSongInfo, User } from './types';
 
 // Trailing slash: nginx redirects /v2 to /v2/, which turns the POST into a GET
@@ -33,7 +35,14 @@ export async function graphql<T>(
 		body = JSON.stringify({ query, variables });
 	}
 
-	const response = await fetch(API_URL, { method: 'POST', headers, body });
+	// The user's own token: renewed if it ran out, and once more if the API turns it down
+	const own = token && token === get(keyStore).access_token;
+	if (own) headers.Authorization = `Bearer ${await freshToken()}`;
+	let response = await fetch(API_URL, { method: 'POST', headers, body });
+	if (own && response.status === 401 && typeof body === 'string') {
+		headers.Authorization = `Bearer ${await freshToken(true)}`;
+		response = await fetch(API_URL, { method: 'POST', headers, body });
+	}
 	const result = await response.json().catch(() => null);
 	if (!result || result.errors?.length) {
 		throw new Error(result?.errors?.[0]?.message ?? `HTTP error! status: ${response.status}`);

@@ -113,6 +113,7 @@
 		<div class="flex items-center gap-3 min-w-0">
 			<SongCover
 				setId={$currentSong.song.id}
+				track={$currentSong.song.track}
 				title={$currentSong.song.title}
 				class="size-14 rounded-md"
 			/>

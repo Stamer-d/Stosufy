@@ -18,6 +18,9 @@
 		PLAY_MODS
 	} from '#lib/gameplay/play.ts';
 
+	/** @type {{ up?: boolean }} up: the panel opens above the button (at the bottom of a view) */
+	let { up = false } = $props();
+
 	let open = $state(false);
 	let root = $state(null);
 	let song = $derived($currentSong.song);
@@ -183,8 +186,10 @@
 
 	{#if open}
 		<div
-			class="absolute right-0 top-11 z-40 w-[24rem] max-h-[75vh] flex flex-col rounded-2xl bg-secondary-200/95 backdrop-blur-2xl ring-1 ring-white/10 shadow-2xl text-white overflow-hidden"
-			transition:fly={{ y: -6, duration: 150 }}
+			class="absolute right-0 {up
+				? 'bottom-12'
+				: 'top-11'} z-40 w-[24rem] max-h-[75vh] flex flex-col rounded-2xl bg-secondary-200/95 backdrop-blur-2xl ring-1 ring-white/10 shadow-2xl text-white overflow-hidden"
+			transition:fly={{ y: up ? 6 : -6, duration: 150 }}
 		>
 			<div class="p-3 pb-2 flex flex-col gap-3 border-b border-white/5">
 				{#if diffs.length > 1}

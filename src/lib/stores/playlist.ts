@@ -2,7 +2,7 @@ import { sameSong, trackOf } from '../tracks';
 import { showToast } from './toast';
 import { fetch } from '@tauri-apps/plugin-http';
 import { get, writable } from 'svelte/store';
-import { keyStore } from './auth';
+import { keyStore, freshToken } from './auth';
 import { formatSongData, mapDataStore } from './data';
 import * as api from '../api';
 import type { MapSet, Playlist, PlaylistId } from '../types';
@@ -266,11 +266,12 @@ export async function getPlaylistSongs(
 			mapIdChunks.push(mapIds.slice(i, i + chunkSize));
 		}
 
+		const osuToken = await freshToken();
 		const beatmapRequests = mapIdChunks.map((chunk) =>
 			fetch(`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${chunk.join('&ids[]=')}`, {
 				method: 'GET',
 				headers: {
-					Authorization: `Bearer ${get(keyStore).access_token}`,
+					Authorization: `Bearer ${osuToken}`,
 					'Content-Type': 'application/json'
 				}
 			})
@@ -311,20 +312,40 @@ export async function getPlaylistSongs(
 		const beatmapsetGroups: Record<string, MapSet> = {};
 
 		const downloaded = get(mapDataStore);
+		// Sets that are in the playlist with several of their difficulties (sets with several
+		// songs): not downloaded, each is its own song, named with its difficulty
+		const mapsOfSet = new Map<string, Set<string>>();
+		for (const song of enhancedSongs) {
+			const setId = String(song.beatmap?.beatmapset?.id ?? '');
+			if (!setId || downloaded[setId]) continue;
+			mapsOfSet.set(setId, (mapsOfSet.get(setId) ?? new Set()).add(String(song.beatmap.id)));
+		}
 		enhancedSongs.forEach((song) => {
 			if (!song.beatmap || !song.beatmap.beatmapset) return;
 
 			const beatmapsetId = song.beatmap.beatmapset.id;
 			// Sets with several songs: each song of the set is its own entry
 			const stored = downloaded[beatmapsetId];
-			const track = trackOf(stored, song.beatmap.id);
+			const several = [...(mapsOfSet.get(String(beatmapsetId)) ?? [])];
+			const guessed = several.length > 1 ? several.indexOf(String(song.beatmap.id)) : -1;
+			const track = stored ? trackOf(stored, song.beatmap.id) : Math.max(0, guessed);
 			const key = `${beatmapsetId}:${track}`;
 			const local = stored?.beatmaps?.[song.beatmap.id];
+			const named = stored
+				? track
+					? { title: local?.title, artist: local?.artist, track }
+					: {}
+				: guessed >= 0
+					? {
+							title: `${song.beatmap.beatmapset.title} (${song.beatmap.version})`,
+							track
+						}
+					: {};
 
 			if (!beatmapsetGroups[key]) {
 				beatmapsetGroups[key] = {
 					...song.beatmap.beatmapset,
-					...(track ? { title: local?.title, artist: local?.artist, track } : {}),
+					...named,
 					songInfo: { ...song },
 					beatmaps: [],
 					// Store the position for sorting
@@ -390,6 +411,20 @@ export async function loadOtherPlaylist(id: PlaylistId) {
 	const playlist = await api.getPlaylist(token(), Number(id));
 	otherPlaylists.update((all) => ({ ...all, [id]: playlist }));
 	return playlist;
+}
+
+/**
+ * Loads a public playlist of someone else again (its details and songs), so changes its
+ * owner made show up right away
+ */
+export async function refreshOtherPlaylist(id: PlaylistId) {
+	const [playlist] = await Promise.all([
+		api.getPlaylist(token(), Number(id)).catch(() => null),
+		getPlaylistSongs(id, true)
+	]);
+	if (!playlist) return;
+	otherPlaylists.update((all) => ({ ...all, [id]: playlist }));
+	savedPlaylists.update((list) => list.map((p) => (p.id == id ? { ...p, ...playlist } : p)));
 }
 
 /** Saves a public playlist of someone else to the library, or removes it */

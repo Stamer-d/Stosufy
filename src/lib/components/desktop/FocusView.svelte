@@ -11,6 +11,7 @@
 	import Gameplay from '../Gameplay.svelte';
 	import ModSelect from '../ModSelect.svelte';
 	import HitsoundMenu from '../HitsoundMenu.svelte';
+	import GameplayControls from '../GameplayControls.svelte';
 
 	let gameplayOn = $derived($userSettings.settings?.gameplay ?? false);
 	let showLyrics = $derived($userSettings.settings?.appearance?.focusLyrics ?? true);
@@ -60,6 +61,10 @@
 					<ModSelect />
 					<HitsoundMenu />
 				</div>
+				{#if gameplayOn && $currentSong.song}
+					<!-- Difficulty, autoplay, playing it yourself and the replays -->
+					<GameplayControls up />
+				{/if}
 				<button
 					class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 cursor-pointer transition {gameplayOn
 						? 'text-white'

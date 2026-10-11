@@ -110,7 +110,12 @@
 				class="absolute inset-2 rounded-full overflow-hidden pointer-events-none"
 			>
 				{#if ds.song}
-					<SongCover setId={ds.song.id} title={ds.song.title} class="size-full" />
+					<SongCover
+						setId={ds.song.id}
+						track={ds.song.track}
+						title={ds.song.title}
+						class="size-full"
+					/>
 				{:else}
 					<div class="size-full grid place-items-center text-white/30 text-xs text-center px-6">
 						Drop a song here

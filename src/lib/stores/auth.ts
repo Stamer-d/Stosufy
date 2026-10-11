@@ -108,6 +108,24 @@ export async function refreshToken(refreshToken: string) {
 	}
 }
 
+let refreshing: Promise<unknown> | null = null;
+
+/**
+ * The osu! access token, renewed first if it ran out or is about to (timers don't run while
+ * the computer sleeps, so the scheduled refresh can be late)
+ */
+export async function freshToken(force = false): Promise<string> {
+	const keys = get(keyStore);
+	if (!keys.refresh_token) return keys.access_token;
+	if (force || keys.expiry_time - Date.now() < 60 * 1000) {
+		refreshing ??= refreshToken(keys.refresh_token)
+			.catch(() => null)
+			.finally(() => (refreshing = null));
+		await refreshing;
+	}
+	return get(keyStore).access_token;
+}
+
 export async function verifyAccessToken(
 	token: string
 ): Promise<{ status: boolean; userData: User | null }> {

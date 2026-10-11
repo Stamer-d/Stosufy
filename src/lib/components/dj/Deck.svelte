@@ -171,7 +171,12 @@
 					class="absolute inset-2 rounded-full overflow-hidden ring-1 ring-white/10 pointer-events-none"
 				>
 					{#if ds.song}
-						<SongCover setId={ds.song.id} title={ds.song.title} class="size-full opacity-80" />
+						<SongCover
+							setId={ds.song.id}
+							track={ds.song.track}
+							title={ds.song.title}
+							class="size-full opacity-80"
+						/>
 					{/if}
 					<div
 						class="absolute left-1/2 top-1 -translate-x-1/2 w-1 h-6 rounded-full bg-white/90"

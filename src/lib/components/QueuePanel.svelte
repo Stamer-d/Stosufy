@@ -49,7 +49,13 @@
 {#snippet songRow(song, onclick, removeLabel = null, onremove = null)}
 	<div class="group flex items-center gap-3 rounded-md p-1.5 hover:bg-white/[0.06]">
 		<button class="flex flex-1 min-w-0 items-center gap-3 text-start cursor-pointer" {onclick}>
-			<SongCover setId={song.id} title={song.title} class="size-10 rounded" lazy />
+			<SongCover
+				setId={song.id}
+				track={song.track}
+				title={song.title}
+				class="size-10 rounded"
+				lazy
+			/>
 			<div class="min-w-0">
 				<div class="truncate text-sm font-medium">{song.title}</div>
 				<div class="truncate text-xs text-secondary-600">{song.artist}</div>
@@ -87,6 +93,7 @@
 				<div class="flex items-center gap-3 p-1.5">
 					<SongCover
 						setId={$currentSong.song.id}
+						track={$currentSong.song.track}
 						title={$currentSong.song.title}
 						class="size-10 rounded"
 					/>

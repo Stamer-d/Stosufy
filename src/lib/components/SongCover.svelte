@@ -3,9 +3,10 @@
 
 	/**
 	 * The small square cover of a beatmap set: the copy saved with the download, or online.
-	 * @type {{ setId: number | string, title?: string, class?: string, lazy?: boolean }}
+	 * The songs of a set with several (track) show their own background.
+	 * @type {{ setId: number | string, track?: number, title?: string, class?: string, lazy?: boolean }}
 	 */
-	let { setId, title = '', class: className = '', lazy = false } = $props();
+	let { setId, track = 0, title = '', class: className = '', lazy = false } = $props();
 
 	let url = $state(null);
 	// Lazy covers load once they come near the screen: reading hundreds of files at once
@@ -32,8 +33,9 @@
 	$effect(() => {
 		if (!visible) return;
 		const id = setId;
-		thumbnailUrl(id).then((result) => {
-			if (setId === id) url = result;
+		const which = track ?? 0;
+		thumbnailUrl(id, which).then((result) => {
+			if (setId === id && (track ?? 0) === which) url = result;
 		});
 	});
 </script>

@@ -12,6 +12,7 @@
 	} from '#lib/stores/data.ts';
 	import {
 		getPlaylistSongs,
+		refreshOtherPlaylist,
 		playlistLoadingStatus,
 		playlists,
 		playlistSongsCache,
@@ -186,6 +187,24 @@
 	$: if (playlistId && playlistData) {
 		loadSongs();
 	}
+
+	// Someone else's playlist: loaded fresh when opened, and again every minute while open
+	let refreshedOther = null;
+	let otherTimer = null;
+	$: if (isOther && playlistId !== refreshedOther) {
+		refreshedOther = playlistId;
+		refreshOtherPlaylist(playlistId).catch(() => {});
+		clearInterval(otherTimer);
+		const id = playlistId;
+		otherTimer = setInterval(() => {
+			if (id === playlistId) refreshOtherPlaylist(id).catch(() => {});
+		}, 60_000);
+	}
+	$: if (!isOther) {
+		clearInterval(otherTimer);
+		refreshedOther = null;
+	}
+	onDestroy(() => clearInterval(otherTimer));
 
 	async function loadSongs(forceRefresh = false) {
 		await getPlaylistSongs(playlistId, forceRefresh);
@@ -603,7 +622,13 @@
 							</div>
 
 							<div class="flex items-center gap-3 min-w-0 {downloaded ? '' : 'opacity-50'}">
-								<SongCover setId={song.id} title={song.title} class="size-10 rounded" lazy />
+								<SongCover
+									setId={song.id}
+									track={song.track}
+									title={song.title}
+									class="size-10 rounded"
+									lazy
+								/>
 								<div class="min-w-0">
 									<h3 class="font-semibold truncate {current ? 'text-primary-500' : ''}">
 										{song.title}

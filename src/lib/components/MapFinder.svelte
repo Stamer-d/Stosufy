@@ -532,7 +532,12 @@
 								sameSong($currentSong.song, song) ? togglePlayback() : playDownloaded(song)}
 						>
 							<div class="relative shrink-0">
-								<SongCover setId={song.id} title={song.title} class="size-12 rounded" />
+								<SongCover
+									setId={song.id}
+									track={song.track}
+									title={song.title}
+									class="size-12 rounded"
+								/>
 								<span
 									class="absolute inset-0 grid place-items-center rounded bg-black/50 transition-opacity {playingThis
 										? 'opacity-100'

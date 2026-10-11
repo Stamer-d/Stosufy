@@ -196,6 +196,7 @@
 			>
 				<SongCover
 					setId={song.id}
+					track={song.track}
 					title={song.title}
 					class="size-8 rounded pointer-events-none"
 					lazy
