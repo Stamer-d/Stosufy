@@ -76,10 +76,14 @@
 </script>
 
 {#if info}
-	<canvas
-		bind:this={canvas}
-		class="absolute inset-0 size-full pointer-events-none transition-opacity duration-500 {visible
-			? 'opacity-100'
-			: 'opacity-0'} {className}"
-	></canvas>
+	<!-- A new canvas for each storyboard: a renderer gives up its WebGL context when it's done,
+	     and that canvas would only hand out the lost context again -->
+	{#key dir}
+		<canvas
+			bind:this={canvas}
+			class="absolute inset-0 size-full pointer-events-none transition-opacity duration-500 {visible
+				? 'opacity-100'
+				: 'opacity-0'} {className}"
+		></canvas>
+	{/key}
 {/if}
