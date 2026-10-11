@@ -1,5 +1,5 @@
-// Friend activity: shares what you listen to with your osu! friends, and shows what they
-// listen to. Clicking a friend listens along: joins their listening session if they're in
+// Friend activity: shows your osu! friends whether you're online and what you listen to,
+// and shows the same of them. Clicking a friend listens along: joins their listening session if they're in
 // one, otherwise plays their song from where they are.
 
 import { get, writable } from 'svelte/store';
@@ -25,10 +25,8 @@ export interface FriendsState {
 export const friendActivity = writable<FriendsState>({ status: 'idle', friends: [], offset: 0 });
 export const friendsPanelOpen = writable(false);
 
-/** A friend counts as listening right now if they sent something this recently */
-export const LIVE_FOR = 3 * 60 * 1000;
 const POLL = 30 * 1000;
-/** Sent this often while playing, so friends see the right position */
+/** Checked in this often, so friends see you online and at the right position */
 const HEARTBEAT = 60 * 1000;
 
 export function sharing() {
@@ -38,32 +36,22 @@ export function sharing() {
 export function setSharing(share: boolean) {
 	updateUserSettings({ shareActivity: share });
 	lastSent = null;
-	if (!share) send(null);
-	else shareNow();
+	const token = get(keyStore).access_token;
+	if (!share && token) api.hidePresence(token).catch(() => {});
+	else checkIn(true);
 }
 
-// --- What the user plays ------------------------------------------------------------
+// --- The user's own status ----------------------------------------------------------
 
 let lastSent: string | null = null;
 
-async function send(playback: api.ListenPlaybackInput | null, roomCode: string | null = null) {
-	const token = get(keyStore).access_token;
-	if (!token || !get(user)?.id) return;
-	try {
-		await api.setNowPlaying(token, playback, roomCode);
-	} catch (error) {
-		console.warn('Could not share the playback:', error);
-	}
-}
-
-/** Sends the current playback if it changed (or `force`) */
-function shareNow(force = false) {
-	if (!sharing()) return;
+/** What the user plays now, or null */
+function nowPlaying(): api.ListenPlaybackInput | null {
 	const song = get(currentSong).song;
 	const audio = get(songQueue).audio;
 	const setId = Number(song?.id);
-	if (!song || !audio || !(setId > 0)) return;
-	const playback: api.ListenPlaybackInput = {
+	if (!song || !audio || !(setId > 0)) return null;
+	return {
 		setId,
 		mapId: Number(song.beatmaps?.[0]?.id ?? 0),
 		title: song.title ?? '',
@@ -72,12 +60,34 @@ function shareNow(force = false) {
 		playing: !audio.paused,
 		mod: currentMod()
 	};
+}
+
+/** Checks in as online with the current song, if it changed (or `force`) */
+async function checkIn(force = false) {
+	const token = get(keyStore).access_token;
+	if (!sharing() || !token || !get(user)?.id) return;
+	const playback = nowPlaying();
 	const room = get(listen);
 	const roomCode = room.status === 'live' ? room.code : null;
 	const key = JSON.stringify({ ...playback, position: 0, roomCode });
 	if (!force && key === lastSent) return;
 	lastSent = key;
-	send(playback, roomCode);
+	try {
+		await api.setPresence(token, true, playback, roomCode);
+	} catch (error) {
+		console.warn('Could not check in:', error);
+	}
+}
+
+/** Shows the user as offline; when the app closes */
+export async function goOffline() {
+	const token = get(keyStore).access_token;
+	if (!sharing() || !token || !get(user)?.id) return;
+	// Don't hold up closing the app for long
+	await Promise.race([
+		api.setPresence(token, false).catch(() => {}),
+		new Promise((resolve) => setTimeout(resolve, 1500))
+	]);
 }
 
 // --- What the friends play ----------------------------------------------------------
@@ -109,6 +119,7 @@ export async function loadFriendActivity() {
 /** Where a friend is in their song now, in seconds */
 export function friendPosition(friend: api.FriendActivity) {
 	const { playback } = friend;
+	if (!playback) return 0;
 	if (!playback.playing) return playback.position;
 	const serverNow = Date.now() - get(friendActivity).offset;
 	const rate = MODS[playback.mod as PlaybackMod]?.rate ?? 1;
@@ -118,19 +129,21 @@ export function friendPosition(friend: api.FriendActivity) {
 /** Listens along with a friend */
 export async function listenAlong(friend: api.FriendActivity) {
 	const room = get(listen);
+	if (!friend.playback) return;
 	if (friend.roomCode) {
 		if (room.code !== friend.roomCode) await joinSession(friend.roomCode);
 		return;
 	}
-	const playback = { ...friend.playback, mod: friend.playback.mod as PlaybackMod };
+	const playback = { ...friend.playback!, mod: friend.playback.mod as PlaybackMod };
 	const song = await songFor(playback);
 	listen.update((s) => ({ ...s, activity: null }));
 	if (!song) {
-		showToast(`Couldn't play ${friend.playback.title}`, 'icon-[mingcute--warning-line]');
+		showToast(`Couldn't play ${playback.title}`, 'icon-[mingcute--warning-line]');
 		return;
 	}
 	if (currentMod() !== playback.mod) setPlaybackMod(playback.mod);
-	await setSongQueue(0, [song], 'playlist', null, true, friendPosition(friend));
+	// An offline friend's last song plays from the start
+	await setSongQueue(0, [song], 'playlist', null, true, friend.online ? friendPosition(friend) : 0);
 }
 
 /** Asks osu! again, now with access to the friend list */
@@ -156,9 +169,9 @@ export async function connectFriends() {
 }
 
 if (typeof window !== 'undefined') {
-	// Share on every change of song, pause or seek, and now and then while playing
+	// Check in on every change of song, pause or seek, and every minute to stay online
 	let watched: HTMLAudioElement | null = null;
-	const onChange = () => setTimeout(() => shareNow(true), 500);
+	const onChange = () => setTimeout(() => checkIn(true), 500);
 	songQueue.subscribe(({ audio }) => {
 		if (audio === watched) return;
 		for (const type of ['play', 'pause', 'seeked', 'ratechange']) {
@@ -168,10 +181,9 @@ if (typeof window !== 'undefined') {
 		watched = audio ?? null;
 		onChange();
 	});
-	listen.subscribe(() => shareNow());
-	setInterval(() => {
-		if (!get(songQueue).audio?.paused) shareNow(true);
-	}, HEARTBEAT);
+	listen.subscribe(() => checkIn());
+	user.subscribe((current) => current?.id && checkIn(true));
+	setInterval(() => checkIn(true), HEARTBEAT);
 
 	// One panel at a time on the right
 	friendsPanelOpen.subscribe((isOpen) => isOpen && queuePanelOpen.set(false));

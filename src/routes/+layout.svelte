@@ -14,7 +14,8 @@
 	import SettingsModal from '#lib/components/SettingsModal.svelte';
 	import OsuProfileImport from '#lib/components/OsuProfileImport.svelte';
 	import FriendsPanel from '#lib/components/FriendsPanel.svelte';
-	import { friendsPanelOpen } from '#lib/stores/friends.ts';
+	import { friendsPanelOpen, goOffline } from '#lib/stores/friends.ts';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
@@ -51,6 +52,10 @@
 		onOpenUrl(joinFromLink).catch(() => {});
 		getCurrent()
 			.then(joinFromLink)
+			.catch(() => {});
+		// Friends see you go offline right away instead of after a few minutes
+		getCurrentWindow()
+			.onCloseRequested(() => goOffline())
 			.catch(() => {});
 		await startTokenRefresh();
 		updateShowUI();

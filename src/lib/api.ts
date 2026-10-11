@@ -221,26 +221,36 @@ export interface FriendActivity {
 	osuId: number;
 	username: string;
 	avatarUrl: string | null;
-	playback: ListenPlaybackInput & { updatedAt: number };
+	/** Stosufy is open */
+	online: boolean;
+	/** Server time (ms) of the last check-in */
+	lastSeen: number;
+	/** The song now; the last one while offline */
+	playback: (ListenPlaybackInput & { updatedAt: number }) | null;
 	/** The listening session the friend is in, to join it */
 	roomCode: string | null;
-	updatedAt: number;
 }
 
-/** Shares what the user listens to with their osu! friends; null stops sharing */
-export async function setNowPlaying(
+/** Checks in for the friend activity: online (with the song now, if any) or going offline */
+export async function setPresence(
 	token: string,
-	playback: ListenPlaybackInput | null,
-	roomCode: string | null
+	online: boolean,
+	playback: ListenPlaybackInput | null = null,
+	roomCode: string | null = null
 ) {
 	await graphql(
 		token,
-		'mutation ($playback: ListenPlaybackInput, $roomCode: String) { setNowPlaying(playback: $playback, roomCode: $roomCode) }',
-		{ playback, roomCode }
+		'mutation ($online: Boolean!, $playback: ListenPlaybackInput, $roomCode: String) { setPresence(online: $online, playback: $playback, roomCode: $roomCode) }',
+		{ online, playback, roomCode }
 	);
 }
 
-/** What the user's osu! friends listen to in Stosufy */
+/** Stops showing the user to their friends */
+export async function hidePresence(token: string) {
+	await graphql(token, 'mutation { hidePresence }');
+}
+
+/** The user's osu! friends who use Stosufy */
 export async function getFriendActivity(
 	token: string
 ): Promise<{ friends: FriendActivity[]; serverTime: number }> {
@@ -254,8 +264,9 @@ export async function getFriendActivity(
 						osuId
 						username
 						avatarUrl
+						online
+						lastSeen
 						roomCode
-						updatedAt
 						playback {
 							setId
 							mapId
