@@ -8,6 +8,7 @@ import type { GameplaySkin, SkinImage, ElementName } from './skin';
 import {
 	cursorAt,
 	keyCounts,
+	lastAtOrBefore,
 	snapshotAt,
 	spinAt,
 	trackingAt,
@@ -45,6 +46,8 @@ export interface PlayView {
 	results: boolean;
 	/** The song is over: show the results now */
 	finished?: boolean;
+	/** Where the cursor is (else from the play's inputs) */
+	cursor?: ((time: number) => { x: number; y: number }) | null;
 }
 
 export interface GameplayRenderer {
@@ -373,102 +376,146 @@ export function createGameplayRenderer(
 
 	// --- Spinners -------------------------------------------------------------------------
 
+	/**
+	 * A spinner like osu!'s legacy ones (LegacyNewStyleSpinner / LegacyOldStyleSpinner):
+	 * the old style (spinner-background, spinner-circle, metre) if the skin has a background,
+	 * else the new style (spinner-bottom, -top, -middle, -middle2, -glow)
+	 */
 	function drawSpinner(object: HitObject, time: number, state: ObjectState, judge: Judge) {
-		const appear = object.time - fadeIn;
-		let alpha = clamp01((time - appear) / fadeIn);
+		const duration = object.endTime - object.time || 1;
+		let alpha = clamp01((time - (object.time - fadeIn)) / fadeIn);
 		if (time > object.endTime) alpha = 1 - (time - object.endTime) / HIT_FADE;
 		if (alpha <= 0) return;
-		const progress = clamp01((time - object.time) / (object.endTime - object.time || 1));
 		const { total, rpm } = spinAt(state, time);
 		const spun = total / (Math.PI * 2);
-		const required = object.spinner!.required || 1;
-		const cleared = spun >= required;
+		const required = object.spinner!.required;
+		const progress = required ? clamp01(spun / required) : 1;
 		const px = PLAYFIELD_PIXEL;
+		const cx = 256;
+		const cy = 192;
+		const oldStyle = !!element('spinner-background');
 
-		if (element('spinner-top')) {
-			// The newer style: a bottom and top turning, a glow as it's spun
-			image(
-				element('spinner-glow'),
-				256,
-				192,
-				px,
-				alpha * clamp01(spun / required),
-				[3, 151, 255],
-				'glow'
-			);
-			image(element('spinner-bottom'), 256, 192, px, alpha, undefined, '', total * 0.2);
-			image(element('spinner-top'), 256, 192, px, alpha, undefined, '', total * 0.5);
-			const middleColour: Colour = [
-				255,
-				Math.round(255 * (1 - progress)),
-				Math.round(255 * (1 - progress))
-			];
-			image(element('spinner-middle2'), 256, 192, px, alpha, undefined, '', 0);
-			image(element('spinner-middle'), 256, 192, px, alpha, middleColour, 'middle');
-		} else {
-			image(element('spinner-background'), 256, 192, px, alpha * 0.8);
-			if (!image(element('spinner-circle'), 256, 192, px, alpha, undefined, '', total)) {
+		if (oldStyle) {
+			image(element('spinner-background'), cx, cy, px, alpha);
+			// The metre fills up from below in ten bars
+			const metre = element('spinner-metre');
+			if (metre) {
+				const w = metre.image.width * metre.scale * px;
+				const h = metre.image.height * metre.scale * px;
+				const bars = Math.floor(progress * 10) / 10;
 				ctx.save();
 				ctx.globalAlpha = alpha;
-				ctx.translate(256, 192);
-				ctx.rotate(total);
-				ctx.strokeStyle = 'white';
-				ctx.lineWidth = 6;
 				ctx.beginPath();
-				ctx.arc(0, 0, 150, 0, Math.PI * 1.6);
-				ctx.stroke();
+				ctx.rect(cx - w / 2, cy - h / 2 + h * (1 - bars), w, h * bars);
+				ctx.clip();
+				ctx.drawImage(metre.image, cx - w / 2, cy - h / 2, w, h);
 				ctx.restore();
 			}
+			if (!image(element('spinner-circle'), cx, cy, px, alpha, undefined, '', total)) {
+				drawPlainSpinner(total, alpha);
+			}
+		} else if (element('spinner-top')) {
+			const scale = px * (0.8 + (1 - (1 - progress) ** 2) * 0.2);
+			const hasMiddle2 = !!element('spinner-middle2');
+			const top = total * (hasMiddle2 ? 0.5 : 1);
+			ctx.save();
+			ctx.globalCompositeOperation = 'lighter';
+			image(element('spinner-glow'), cx, cy, scale, alpha * progress, [3, 151, 255], 'glow');
+			ctx.restore();
+			image(element('spinner-bottom'), cx, cy, scale, alpha, undefined, '', top / 3);
+			image(element('spinner-top'), cx, cy, scale, alpha, undefined, '', top);
+			image(element('spinner-middle2'), cx, cy, scale, alpha, undefined, '', total);
+			// White, turning red over the spinner's time
+			const red = clamp01((time - object.time) / duration);
+			const tint: Colour = [255, Math.round(255 * (1 - red)), Math.round(255 * (1 - red))];
+			image(element('spinner-middle'), cx, cy, scale, alpha, tint, `middle${Math.round(red * 20)}`);
+		} else {
+			drawPlainSpinner(total, alpha);
 		}
-		if (!image(element('spinner-approachcircle'), 256, 192, px * 1.9 * (1 - progress), alpha)) {
-			ctx.globalAlpha = alpha;
-			ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-			ctx.lineWidth = 3;
-			ctx.beginPath();
-			ctx.arc(256, 192, Math.max(4, 190 * (1 - progress)), 0, Math.PI * 2);
-			ctx.stroke();
-			ctx.globalAlpha = 1;
+
+		// The approach circle: not with the default skin's new-style spinner (like osu!)
+		const showApproach = oldStyle || !skin.fallbackImages?.has('spinner-top');
+		if (showApproach && time >= object.time) {
+			const shrink = clamp01((time - object.time) / duration);
+			const size = px * 1.86 * (1 - shrink * 0.95);
+			if (!image(element('spinner-approachcircle'), cx, cy, size, alpha)) {
+				ctx.globalAlpha = alpha;
+				ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+				ctx.lineWidth = 3;
+				ctx.beginPath();
+				ctx.arc(cx, cy, Math.max(4, 190 * (1 - shrink)), 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.globalAlpha = 1;
+			}
 		}
-		// "Spin!" at the start, "Clear!" once spun enough
-		if (time < object.time + 600 && time >= object.time - 200 && !cleared) {
-			image(element('spinner-spin'), 256, 192 + 110, px, alpha);
+
+		// "Spin!" below while it spins, "Clear" above once spun enough
+		const spinIn = clamp01((time - (object.time - fadeIn / 2)) / (fadeIn / 2));
+		const spinOutStart = object.endTime - Math.min(400, duration);
+		const spinAlpha = spinIn * (1 - clamp01((time - spinOutStart) / Math.min(400, duration)));
+		// …and gone after the first full spin
+		const firstSpin = state.spins.find((s) => s.total >= Math.PI * 2)?.time;
+		const afterSpin = firstSpin === undefined ? 1 : 1 - clamp01((time - firstSpin) / 300);
+		image(element('spinner-spin'), cx, cy + 116, px, alpha * spinAlpha * afterSpin);
+		const clearedAt = state.spins.find((s) => s.total / (Math.PI * 2) >= required)?.time;
+		if (required && clearedAt !== undefined && time >= clearedAt) {
+			const t = time - clearedAt;
+			const pop =
+				t < 240 ? 2 - 1.2 * (1 - (1 - t / 240) ** 2) : t < 400 ? 0.8 + 0.2 * ((t - 240) / 160) : 1;
+			const clearOut = 1 - clamp01((time - (object.endTime - 50)) / 50);
+			image(element('spinner-clear'), cx, cy - 104, px * pop, alpha * clamp01(t / 400) * clearOut);
 		}
-		if (cleared && time <= object.endTime) {
-			image(element('spinner-clear'), 256, 192 - 100, px, alpha);
-		}
-		// The bonus so far
+
+		// The bonus: pops up with each bonus spin
 		const bonuses = judge.sounds.filter(
-			(s) =>
-				s.kind === 'spinnerbonus' && s.at >= object.time && s.at <= Math.min(time, object.endTime)
-		).length;
-		if (bonuses && time <= object.endTime + HIT_FADE) {
-			drawText(
-				String(bonuses * 1000),
-				skin.score,
-				skin.scoreOverlap,
-				256,
-				192 + 80,
-				px * 1.3,
-				alpha,
-				'center',
-				28
-			);
+			(s) => s.kind === 'spinnerbonus' && s.at >= object.time && s.at <= time
+		);
+		if (bonuses.length) {
+			const t = time - bonuses[bonuses.length - 1].at;
+			const bonusAlpha = 1 - clamp01(t / 800);
+			const scale = px * (2 - 0.72 * (1 - (1 - clamp01(t / 800)) ** 2));
+			if (bonusAlpha > 0)
+				drawText(
+					String(bonuses.length * 1000),
+					skin.score,
+					skin.scoreOverlap,
+					cx,
+					cy + 80,
+					scale,
+					alpha * bonusAlpha,
+					'center',
+					28
+				);
 		}
-		// The RPM
-		if (time >= object.time && time <= object.endTime) {
-			image(element('spinner-rpm'), 256, 384 + 6, px, alpha);
+
+		// The spins per minute, at the bottom
+		if (time >= object.time - fadeIn && time <= object.endTime + HIT_FADE) {
+			image(element('spinner-rpm'), cx - 87 * px * 0.9, 384 + 8, px, alpha);
 			drawText(
 				`${Math.round(Math.max(0, rpm))}`,
 				skin.score,
 				skin.scoreOverlap,
-				256 + 40,
-				384 + 8,
-				px * 0.6,
+				cx + 80 * px,
+				384 + 10,
+				px * 0.9 * 0.6,
 				alpha,
 				'right',
 				14
 			);
 		}
+	}
+
+	function drawPlainSpinner(total: number, alpha: number) {
+		ctx.save();
+		ctx.globalAlpha = alpha;
+		ctx.translate(256, 192);
+		ctx.rotate(total);
+		ctx.strokeStyle = 'white';
+		ctx.lineWidth = 6;
+		ctx.beginPath();
+		ctx.arc(0, 0, 150, 0, Math.PI * 1.6);
+		ctx.stroke();
+		ctx.restore();
 	}
 
 	// --- Follow points --------------------------------------------------------------------
@@ -486,8 +533,14 @@ export function createGameplayRenderer(
 		return [{ from, to, start, dx, dy, length, angle: Math.atan2(dy, dx) }];
 	});
 
+	// By the time the line ends (its next object), for finding the visible ones
+	const followTimes = followLines.map((line) => ({ time: line.to.time }));
+	const longest = objects.reduce((max, o) => Math.max(max, o.endTime - o.time), 0);
+
 	function drawFollowPoints(time: number) {
-		for (const line of followLines) {
+		const first = Math.max(0, lastAtOrBefore(followTimes, time - 1000));
+		for (let l = first; l < followLines.length; l++) {
+			const line = followLines[l];
 			if (line.from.endTime - preempt > time) break;
 			if (line.to.time < time) continue;
 			for (
@@ -569,14 +622,19 @@ export function createGameplayRenderer(
 
 	// --- Cursor ---------------------------------------------------------------------------
 
-	function drawCursor(time: number, judge: Judge) {
-		const frames = judge.frames;
+	function drawCursor(time: number, view: PlayView) {
+		const frames = view.judge.frames;
 		if (!frames.length) return;
-		const at = cursorAt(frames, time);
+		const where = (t: number) => {
+			const input = cursorAt(frames, t);
+			if (!input || !view.cursor) return input;
+			return { ...input, ...view.cursor(t) };
+		};
+		const at = where(time);
 		if (!at || at.y < -100) return;
 		// The trail: where it was a moment ago
 		for (let i = 8; i >= 1; i--) {
-			const p = cursorAt(frames, time - i * 12);
+			const p = where(time - i * 12);
 			if (!p) continue;
 			const alpha = (1 - i / 9) * 0.6;
 			if (!image(element('cursortrail'), p.x, p.y, PLAYFIELD_PIXEL, alpha)) {
@@ -785,7 +843,13 @@ export function createGameplayRenderer(
 		const { states } = view.judge;
 		// Visible objects; earlier ones are drawn on top, so from the last one back
 		const visible: HitObject[] = [];
-		for (const object of objects) {
+		// Objects that started long before (more than the longest object ago) are gone
+		for (
+			let i = Math.max(0, lastAtOrBefore(objects, time - longest - 3000));
+			i < objects.length;
+			i++
+		) {
+			const object = objects[i];
 			if (object.time - preempt > time) break;
 			const state = states[object.index];
 			const gone = Math.max(
@@ -811,7 +875,7 @@ export function createGameplayRenderer(
 			if (judgements[i].time < time - JUDGEMENT_TIME - 2000) break;
 			drawJudgement(judgements[i], time);
 		}
-		drawCursor(time, view.judge);
+		drawCursor(time, view);
 
 		ctx.setTransform(1, 0, 0, 1, 0, 0);
 		drawHud(time, view, width, height);

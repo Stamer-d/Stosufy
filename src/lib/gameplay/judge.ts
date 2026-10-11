@@ -4,7 +4,7 @@
 // (osu!'s classic ScoreV1) and the accuracy. The same for all three, so they look and sound
 // the same: hitsounds only play for what's hit, a combo break plays its sound.
 
-import { MOD, sliderBall, type GameplayBeatmap, type HitObject } from './beatmap';
+import { MOD, parseGameplay, sliderBall, type GameplayBeatmap, type HitObject } from './beatmap';
 import type { Frame } from './replay';
 
 export type Result = 300 | 100 | 50 | 0;
@@ -538,15 +538,17 @@ export function autoplayFrames(beatmap: GameplayBeatmap): Frame[] {
 		holds.push({ start: object.time, end, key: alternate ? KEY.K2 | KEY.M2 : KEY.K1 | KEY.M1 });
 		alternate = !alternate;
 	});
+	// Inputs only when something happens: the cursor in between is autoplayCursor's, so the
+	// view draws it from that (much less to judge than an input every frame)
 	const times = new Set<number>();
-	const first = objects[0].time - 1500;
-	const lastEnd = objects[objects.length - 1].endTime + 500;
-	for (let t = first; t <= lastEnd; t += 16) times.add(Math.round(t));
+	times.add(objects[0].time - 1500);
 	for (const object of objects) {
 		times.add(object.time);
 		if (object.kind === 'spinner')
-			for (let t = object.time; t <= object.endTime; t += 8) times.add(Math.round(t));
+			for (let t = object.time; t <= object.endTime; t += 16) times.add(Math.round(t));
 		for (const point of object.slider?.points ?? []) {
+			// Just before too: points are judged by the last input before them
+			times.add(point.judgeTime - 1);
 			times.add(point.judgeTime);
 			times.add(point.time);
 		}
@@ -565,6 +567,22 @@ export function autoplayFrames(beatmap: GameplayBeatmap): Frame[] {
 		const at = autoplayCursor(objects, time);
 		return { time, x: at.x, y: at.y, keys };
 	});
+}
+
+const autoplays = new Map<string, { beatmap: GameplayBeatmap; judge: Judge } | null>();
+
+/**
+ * Autoplay's play of a beatmap (.osu content), worked out once and shared by the gameplay
+ * view and the hitsounds. Null for maps that aren't osu!standard.
+ */
+export function autoplayFor(content: string) {
+	if (!autoplays.has(content)) {
+		const beatmap = parseGameplay(content);
+		const play = beatmap ? { beatmap, judge: judgeFrames(beatmap, autoplayFrames(beatmap)) } : null;
+		if (autoplays.size >= 3) autoplays.delete(autoplays.keys().next().value!);
+		autoplays.set(content, play);
+	}
+	return autoplays.get(content)!;
 }
 
 /** Judges a whole list of inputs (a replay or autoplay) */

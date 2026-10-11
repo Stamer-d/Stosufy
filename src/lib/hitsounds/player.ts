@@ -27,10 +27,9 @@ import {
 	BUILTIN
 } from './skins';
 import { builtinExtra, type ExtraSound } from './builtin';
-import { parseGameplay, type GameplayBeatmap } from '../gameplay/beatmap';
+import type { GameplayBeatmap } from '../gameplay/beatmap';
 import {
-	autoplayFrames,
-	judgeFrames,
+	autoplayFor,
 	lastAtOrBefore,
 	spinAt,
 	trackingAt,
@@ -257,6 +256,7 @@ interface Chart {
 	events: ChartEvent[];
 	/** The osu!standard objects, for autoplay's play when the gameplay view doesn't show one */
 	beatmap: GameplayBeatmap | null;
+	content: string;
 	/** Sounds of the play besides the hitsounds: spinner, slider slide, combo break */
 	extras: Partial<Record<ExtraSound, AudioBuffer | null>>;
 	/** The slider slide's sample set at each slider (by the time of its head) */
@@ -402,7 +402,8 @@ async function load() {
 			)
 		).filter((event) => event.buffers.length);
 		// The play's other sounds, from the skin, the osu! default ones, else built in
-		const gameplay = parseGameplay(files.content);
+		const auto = autoplayFor(files.content);
+		const gameplay = auto?.beatmap ?? null;
 		const extraNames: ExtraSound[] = [
 			'spinnerspin',
 			'spinnerbonus',
@@ -430,6 +431,7 @@ async function load() {
 			playKey: songKey(song)!,
 			events: ready,
 			beatmap: gameplay,
+			content: files.content,
 			extras,
 			slideSets,
 			spinnerModulate: true,
@@ -487,7 +489,8 @@ function currentPlay(): { judge: Judge; live: boolean } | null {
 	if (shown && shown.key === chart.playKey)
 		return { judge: shown.judge, live: shown.kind === 'live' };
 	if (!chart.beatmap) return null;
-	autoplay ??= judgeFrames(chart.beatmap, autoplayFrames(chart.beatmap));
+	autoplay ??= autoplayFor(chart.content)?.judge ?? null;
+	if (!autoplay) return null;
 	return { judge: autoplay, live: false };
 }
 

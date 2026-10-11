@@ -84,6 +84,8 @@ export interface GameplaySkin {
 	comboOverlap: number;
 	/** Whether the spinner's sound rises in pitch */
 	spinnerFrequencyModulate: boolean;
+	/** The images taken from the osu! default skin (the skin doesn't have them) */
+	fallbackImages?: Set<string>;
 	colours: [number, number, number][];
 	sliderBorder: [number, number, number] | null;
 	sliderTrack: [number, number, number] | null;
@@ -242,7 +244,8 @@ async function load(dir: string): Promise<GameplaySkin> {
  * Only images: the colours stay the skin's own.
  */
 export function withFallback(skin: GameplaySkin, fallback: GameplaySkin): GameplaySkin {
-	if (skin === fallback) return skin;
+	// The osu! default skin itself: all its images are the default ones
+	if (skin === fallback) return { ...skin, fallbackImages: new Set(Object.keys(skin.images)) };
 	const fill = <T>(own: Record<string, T | null>, other: Record<string, T | null>) => {
 		const result = { ...own };
 		for (const [key, value] of Object.entries(other)) result[key] ??= value;
@@ -252,8 +255,12 @@ export function withFallback(skin: GameplaySkin, fallback: GameplaySkin): Gamepl
 	const font = (own: Record<string, SkinImage | null>, other: Record<string, SkinImage | null>) =>
 		Array.from({ length: 10 }).every((_, d) => own[d]) ? own : other;
 	const ownNumbers = skin.numbers.length === 10 && skin.numbers.every(Boolean);
+	const fallbackImages = new Set(
+		Object.keys(fallback.images).filter((name) => !skin.images[name as ElementName])
+	);
 	return {
 		...skin,
+		fallbackImages,
 		images: fill(skin.images, fallback.images),
 		numbers: ownNumbers ? skin.numbers : fallback.numbers,
 		numberOverlap: ownNumbers ? skin.numberOverlap : fallback.numberOverlap,

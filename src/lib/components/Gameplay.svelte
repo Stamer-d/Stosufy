@@ -13,7 +13,13 @@
 	import { parseGameplay } from '#lib/gameplay/beatmap.ts';
 	import { loadGameplaySkin, forgetGameplaySkins, withFallback } from '#lib/gameplay/skin.ts';
 	import { createGameplayRenderer } from '#lib/gameplay/render.ts';
-	import { autoplayFrames, judgeFrames, createJudge, KEY } from '#lib/gameplay/judge.ts';
+	import {
+		autoplayFor,
+		autoplayCursor,
+		judgeFrames,
+		createJudge,
+		KEY
+	} from '#lib/gameplay/judge.ts';
 	import {
 		gameplayMode,
 		activePlay,
@@ -56,6 +62,8 @@
 		renderer = null;
 		view = null;
 		message = '';
+		// Nothing of the last song stays (also when this one has no gameplay)
+		target?.getContext('2d')?.clearRect(0, 0, target.width, target.height);
 		if (!current || !target) return;
 		// Only the song, difficulty, skin and mode rebuild the play (not every queue update)
 		const preview = untrack(
@@ -70,8 +78,12 @@
 		(async () => {
 			const content = await beatmapContent(current, difficulty).catch(() => null);
 			if (cancelled) return;
+			// Let the song start first: the work below can take a moment on long maps
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			if (cancelled) return;
+			const auto = shown.kind === 'auto' && content ? autoplayFor(content) : null;
 			const mods = shown.kind === 'replay' ? shown.replay.mods : 0;
-			const beatmap = content ? parseGameplay(content, mods) : null;
+			const beatmap = auto ? auto.beatmap : content ? parseGameplay(content, mods) : null;
 			if (!beatmap) {
 				message = content ? 'Gameplay is only for osu!standard maps' : "Couldn't load the beatmap";
 				return;
@@ -94,11 +106,18 @@
 				judge.onSound = (sound) => playSoundNow(sound, judge);
 				label = `Playing · ${keyNames()} to click · Esc to stop`;
 			} else {
-				judge = judgeFrames(beatmap, autoplayFrames(beatmap));
+				judge = auto.judge;
 				label = 'Autoplay';
 			}
 			renderer = createGameplayRenderer(target, beatmap, withFallback(own, fallback));
-			view = { judge, label, results: shown.kind !== 'auto', finished: false };
+			view = {
+				judge,
+				label,
+				results: shown.kind !== 'auto',
+				finished: false,
+				// Autoplay's cursor between its inputs
+				cursor: shown.kind === 'auto' ? (time) => autoplayCursor(beatmap.objects, time) : null
+			};
 			activePlay.set({ key: playing, judge, kind: shown.kind });
 		})();
 		return () => {
