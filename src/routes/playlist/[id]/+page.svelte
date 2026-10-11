@@ -14,13 +14,13 @@
 		playlistLoadingStatus,
 		playlists,
 		playlistSongsCache,
-		removeSongFromPlaylist
+		removeSongFromPlaylist,
+		moveSongInPlaylist
 	} from '#lib/stores/playlist.ts';
 	import {
 		currentSong,
 		setSongQueue,
 		songQueue,
-		stopPlayback,
 		togglePlayback,
 		updateSongQueue
 	} from '#lib/stores/audio.ts';
@@ -37,6 +37,9 @@
 	import { shuffleQueue } from '#lib/stores/audio.ts';
 	import { user, updateUserSettings } from '#lib/stores/user.ts';
 	import { userSettings } from '#lib/stores/user.ts';
+	import Select from '#lib/components/Select.svelte';
+	import { matchesQuery } from '#lib/stores/search.ts';
+	import { sortOptions, sortSongs } from '#lib/songSort.ts';
 
 	const pagePlaylistId = toStore(() => page.params?.id);
 	$: playlistId = $pagePlaylistId;
@@ -45,6 +48,45 @@
 	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
 	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
 	$: songs = $playlistSongsCache[playlistId]?.songs || [];
+
+	// Sorting (remembered per playlist) and filtering; playing follows what's shown
+	let filterText = '';
+	$: sort = $userSettings.settings?.playlistSort?.[playlistId] ?? 'custom';
+	$: visibleSongs = sortSongs(
+		filterText.trim() ? songs.filter((song) => matchesQuery(song, filterText)) : songs,
+		sort
+	);
+	// Dragging songs reorders the playlist; only in its own order, unfiltered, if it's yours
+	$: canReorder =
+		!isDownloadedPlaylist &&
+		sort === 'custom' &&
+		!filterText.trim() &&
+		playlistData?.created_by != null &&
+		playlistData.created_by == $user?.stosufy_id;
+	let dragFrom = null;
+	let dropAt = null;
+
+	function dragOver(event, index) {
+		if (dragFrom === null) return;
+		event.preventDefault();
+		const rect = event.currentTarget.getBoundingClientRect();
+		dropAt = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
+	}
+
+	function drop(event) {
+		event.preventDefault();
+		if (dragFrom !== null && dropAt !== null) {
+			const to = dropAt > dragFrom ? dropAt - 1 : dropAt;
+			if (to !== dragFrom) moveSongInPlaylist(playlistId, dragFrom, to);
+		}
+		dragFrom = dropAt = null;
+	}
+
+	function setSort(value) {
+		updateUserSettings({
+			playlistSort: { ...$userSettings.settings?.playlistSort, [playlistId]: value }
+		});
+	}
 
 	// Background wash of the header, taken from the cover
 	let headerColor = null;
@@ -68,16 +110,15 @@
 		sameSong($currentSong?.song, song) && $songQueue.playlistId == playlistId;
 
 	async function playSong(index, song) {
-		if ($songQueue.type !== 'playlist' || $songQueue.playlistId != playlistId) {
-			await setSongQueue(index, songs, 'playlist', playlistId);
-		} else if (sameSong($currentSong?.song, song)) {
+		if (
+			$songQueue.type === 'playlist' &&
+			$songQueue.playlistId == playlistId &&
+			sameSong($currentSong?.song, song)
+		) {
 			togglePlayback();
-		} else if ($userSettings.settings.shuffle) {
-			await setSongQueue(index, songs, 'playlist', playlistId);
 		} else {
-			stopPlayback();
-			await updateSongQueue(index, null, null, null);
-			togglePlayback();
+			// The queue is the list as shown: sorted and filtered
+			await setSongQueue(index, visibleSongs, 'playlist', playlistId);
 		}
 	}
 
@@ -279,12 +320,12 @@
 		<div class="flex items-center gap-5 px-6 py-4 bg-black/10">
 			<PlayButton
 				playing={isPlayingThis}
-				disabled={!songs.length}
+				disabled={!visibleSongs.length}
 				onclick={async () => {
 					if ($songQueue?.playlistId == playlistId) {
 						togglePlayback();
-					} else if (songs.length > 0) {
-						await setSongQueue(0, songs, 'playlist', playlistId);
+					} else if (visibleSongs.length > 0) {
+						await setSongQueue(0, visibleSongs, 'playlist', playlistId);
 					}
 				}}
 			/>
@@ -359,6 +400,28 @@
 					</button>
 				{/if}
 			{/if}
+
+			<div class="ml-auto flex items-center gap-2">
+				<div class="relative flex items-center">
+					<span
+						class="icon-[mingcute--search-line] absolute left-3 size-4 text-secondary-600 pointer-events-none"
+					></span>
+					<input
+						type="search"
+						bind:value={filterText}
+						placeholder="Filter"
+						aria-label="Filter songs in this playlist"
+						class="w-48 h-9 pl-9 pr-3 rounded-full bg-white/[0.06] hover:bg-white/10 focus:bg-white/10 text-sm text-white placeholder:text-secondary-600 outline-none ring-1 ring-transparent focus:ring-white/20 transition [&::-webkit-search-cancel-button]:hidden"
+					/>
+				</div>
+				<Select
+					label="Sort"
+					icon="icon-[mingcute--sort-descending-line]"
+					options={sortOptions(isDownloadedPlaylist)}
+					value={sort}
+					onchange={setSort}
+				/>
+			</div>
 		</div>
 	</div>
 
@@ -374,7 +437,7 @@
 
 		{#if songs?.length}
 			{#key playlistId}
-				{#each songs as song, index (songKey(song))}
+				{#each visibleSongs as song, index (songKey(song))}
 					{@const downloaded = isSongDownloaded(song.id)}
 					{@const current = isCurrent(song)}
 					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}
@@ -384,9 +447,19 @@
 							role="button"
 							tabindex="0"
 							aria-label={downloaded ? `Play ${song.title}` : `Download ${song.title}`}
+							draggable={canReorder}
+							title={canReorder ? 'Drag to change the order' : undefined}
+							on:dragstart={(e) => {
+								dragFrom = index;
+								e.dataTransfer.effectAllowed = 'move';
+								e.dataTransfer.setData('text/plain', String(index));
+							}}
+							on:dragover={(e) => dragOver(e, index)}
+							on:drop={drop}
+							on:dragend={() => (dragFrom = dropAt = null)}
 							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2.5rem] items-center gap-4 px-4 h-14 rounded-md cursor-pointer transition-colors {current
 								? 'bg-white/[0.08]'
-								: 'hover:bg-white/[0.06]'}"
+								: 'hover:bg-white/[0.06]'} {dragFrom === index ? 'opacity-40' : ''}"
 							on:click={async () => {
 								if (downloaded) {
 									await playSong(index, song);
@@ -398,6 +471,20 @@
 								if (e.key === 'Enter') e.currentTarget.click();
 							}}
 						>
+							{#if dragFrom !== null && (dropAt === index || (dropAt === index + 1 && index === visibleSongs.length - 1))}
+								<!-- Where the dragged song will land -->
+								<div
+									class="absolute left-2 right-2 h-0.5 rounded-full bg-primary-400 pointer-events-none {dropAt ===
+									index
+										? '-top-px'
+										: '-bottom-px'}"
+								></div>
+							{/if}
+							{#if canReorder}
+								<span
+									class="icon-[mingcute--menu-line] absolute left-1 size-3.5 text-secondary-600 opacity-0 group-hover:opacity-100 pointer-events-none"
+								></span>
+							{/if}
 							<div
 								class="relative h-5 flex items-center justify-end text-secondary-600 tabular-nums"
 							>
@@ -496,6 +583,10 @@
 					</ContextMenu>
 				{/each}
 			{/key}
+		{/if}
+
+		{#if songs?.length && !visibleSongs.length}
+			<p class="mt-10 text-center text-secondary-600">No songs match "{filterText}".</p>
 		{/if}
 
 		{#if !isLoadingSongs && !songs?.length}

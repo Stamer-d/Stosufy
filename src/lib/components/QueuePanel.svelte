@@ -24,6 +24,24 @@
 			? 'Search results'
 			: ($playlists.find((playlist) => playlist.id == $songQueue.playlistId)?.title ?? 'Queue')
 	);
+
+	let dragFrom = $state(null);
+	let dropAt = $state(null);
+
+	function moveQueued() {
+		if (dragFrom !== null && dropAt !== null) {
+			const from = dragFrom;
+			const to = dropAt > from ? dropAt - 1 : dropAt;
+			if (to !== from) {
+				upNext.update((songs) => {
+					const reordered = [...songs];
+					reordered.splice(to, 0, ...reordered.splice(from, 1));
+					return reordered;
+				});
+			}
+		}
+		dragFrom = dropAt = null;
+	}
 </script>
 
 {#snippet songRow(song, onclick, removeLabel = null, onremove = null)}
@@ -92,17 +110,48 @@
 					</button>
 				</div>
 				{#each $upNext as song, index (index + '-' + song.id)}
-					{@render songRow(
-						song,
-						() => {
-							// Play it now: move it to the front of the queue and skip to it
-							removeQueuedSong(index);
-							upNext.update((songs) => [song, ...songs]);
-							skipForward();
-						},
-						'Remove from queue',
-						() => removeQueuedSong(index)
-					)}
+					<!-- Queued songs can be dragged into a different order -->
+					<div
+						role="listitem"
+						draggable="true"
+						class="relative cursor-grab {dragFrom === index ? 'opacity-40' : ''}"
+						ondragstart={(e) => {
+							dragFrom = index;
+							e.dataTransfer.effectAllowed = 'move';
+							e.dataTransfer.setData('text/plain', String(index));
+						}}
+						ondragover={(e) => {
+							if (dragFrom === null) return;
+							e.preventDefault();
+							const rect = e.currentTarget.getBoundingClientRect();
+							dropAt = e.clientY < rect.top + rect.height / 2 ? index : index + 1;
+						}}
+						ondrop={(e) => {
+							e.preventDefault();
+							moveQueued();
+						}}
+						ondragend={() => (dragFrom = dropAt = null)}
+					>
+						{#if dragFrom !== null && (dropAt === index || (dropAt === index + 1 && index === $upNext.length - 1))}
+							<div
+								class="absolute left-1.5 right-1.5 h-0.5 rounded-full bg-primary-400 pointer-events-none {dropAt ===
+								index
+									? '-top-px'
+									: '-bottom-px'}"
+							></div>
+						{/if}
+						{@render songRow(
+							song,
+							() => {
+								// Play it now: move it to the front of the queue and skip to it
+								removeQueuedSong(index);
+								upNext.update((songs) => [song, ...songs]);
+								skipForward();
+							},
+							'Remove from queue',
+							() => removeQueuedSong(index)
+						)}
+					</div>
 				{/each}
 			</section>
 		{/if}

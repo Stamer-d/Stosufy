@@ -151,6 +151,20 @@ export async function addSongToPlaylist(
 	return toSong(data.addSongToStosufyPlaylist);
 }
 
+/** Moves a song of a playlist to a position (1 is the first song) */
+export async function moveSongInPlaylist(
+	token: string,
+	playlistId: number,
+	songId: number,
+	position: number
+) {
+	await graphql(
+		token,
+		'mutation ($playlistId: Int!, $songId: Int!, $position: Int!) { moveSongInStosufyPlaylist(playlistId: $playlistId, songId: $songId, position: $position) }',
+		{ playlistId, songId, position }
+	);
+}
+
 export async function removeSongFromPlaylist(token: string, playlistId: number, songId: number) {
 	await graphql(
 		token,

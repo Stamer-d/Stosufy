@@ -167,6 +167,8 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Chosen sort order per playlist id */
+	playlistSort?: Record<string, import('./songSort').SongSort>;
 }
 
 /** No mod, Half Time, Daycore, Double Time or Nightcore */

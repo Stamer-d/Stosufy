@@ -1,4 +1,5 @@
 import { sameSong, trackOf } from '../tracks';
+import { showToast } from './toast';
 import { fetch } from '@tauri-apps/plugin-http';
 import { get, writable } from 'svelte/store';
 import { keyStore } from './auth';
@@ -119,6 +120,34 @@ export async function removeSongFromPlaylist(playlistId: PlaylistId, songId: num
 	await api.removeSongFromPlaylist(token(), Number(playlistId), songId);
 }
 
+/** Moves the song at index `from` of a playlist to index `to` (drag and drop) */
+export async function moveSongInPlaylist(playlistId: PlaylistId, from: number, to: number) {
+	const songs = get(playlistSongsCache)[playlistId]?.songs;
+	if (!songs || from === to || !songs[from] || !songs[to]) return;
+	const moved = songs[from];
+	const target = songs[to].songInfo.position;
+	// Show the new order right away; the songs keep the positions of their new places
+	const positions = songs.map((song) => song.songInfo.position);
+	const reordered = [...songs];
+	reordered.splice(to, 0, ...reordered.splice(from, 1));
+	playlistSongsCache.update((cache) => ({
+		...cache,
+		[playlistId]: {
+			songs: reordered.map((song, i) => ({
+				...song,
+				songInfo: { ...song.songInfo, position: positions[i] }
+			}))
+		}
+	}));
+	try {
+		await api.moveSongInPlaylist(token(), Number(playlistId), moved.songInfo.id, target);
+	} catch (error) {
+		console.error('Could not move the song:', error);
+		showToast("Couldn't save the new order", 'icon-[mingcute--warning-line]');
+		await getPlaylistSongs(playlistId, true);
+	}
+}
+
 export async function getPlaylistSongs(
 	playlistId: PlaylistId,
 	forceRefresh = false
@@ -234,10 +263,8 @@ export async function getPlaylistSongs(
 
 		const structuredSongs = Object.values(beatmapsetGroups);
 
-		structuredSongs.sort(
-			(a, b) =>
-				new Date(a.songInfo.created_at).getTime() - new Date(b.songInfo.created_at).getTime()
-		);
+		// The playlist's own order (positions can be changed by dragging songs)
+		structuredSongs.sort((a, b) => (a.songInfo.position ?? 0) - (b.songInfo.position ?? 0));
 
 		playlistSongsCache.update((cache) => ({
 			...cache,
