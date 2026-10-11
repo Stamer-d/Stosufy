@@ -30,6 +30,8 @@
 		}
 
 		await onOpenUrl(async (urls) => {
+			// Only the osu! login callback; other links (e.g. listening sessions) aren't for here
+			if (!urls[0]?.includes('code=')) return;
 			const code = urls[0].split('code=')[1];
 			const tokenData = await exchangeCode(code);
 			$keyStore.access_token = tokenData.access_token;

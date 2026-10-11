@@ -2,7 +2,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import type { Playlist, PlaylistSongInfo, User } from './types';
 
 // Trailing slash: nginx redirects /v2 to /v2/, which turns the POST into a GET
-const API_URL = 'https://api.stamer-d.de/v2/';
+export const API_URL = 'https://api.stamer-d.de/v2/';
 
 /**
  * Sends a GraphQL request to the Stamer API, authenticated with the osu! access token.
@@ -185,5 +185,34 @@ export async function addSong(token: string, setId: number, mapId: number) {
 			}
 		`,
 		{ setId, mapId }
+	);
+}
+
+/** Starts a listening session; returns its code */
+export async function createListenRoom(token: string): Promise<string> {
+	const data = await graphql<any>(token, 'mutation { createListenRoom { code } }');
+	return data.createListenRoom.code;
+}
+
+export interface ListenPlaybackInput {
+	setId: number;
+	mapId: number;
+	title: string;
+	artist: string;
+	position: number;
+	playing: boolean;
+	mod: string;
+}
+
+/** Sends the host's playback to a listening session */
+export async function updateListenPlayback(
+	token: string,
+	code: string,
+	playback: ListenPlaybackInput
+) {
+	await graphql(
+		token,
+		'mutation ($code: String!, $playback: ListenPlaybackInput!) { updateListenPlayback(code: $code, playback: $playback) }',
+		{ code, playback }
 	);
 }

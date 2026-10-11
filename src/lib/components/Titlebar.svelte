@@ -1,4 +1,5 @@
 <script>
+	import ListenTogether from './ListenTogether.svelte';
 	import SearchBar from './SearchBar.svelte';
 	import { openSettings } from '#lib/stores/settings.ts';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -143,6 +144,7 @@
 
 	<div class="flex items-center h-full">
 		{#if $user?.username}
+			<ListenTogether />
 			<button
 				title="Settings"
 				aria-label="Settings"

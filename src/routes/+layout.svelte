@@ -4,6 +4,8 @@
 	import Playlist from '#lib/components/Playlist.svelte';
 	import { onMount } from 'svelte';
 	import { startBeatEffects } from '#lib/stores/beat.ts';
+	import { joinSession } from '#lib/stores/listen.ts';
+	import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 	import { page } from '$app/state';
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
@@ -38,6 +40,15 @@
 
 	onMount(async () => {
 		startBeatEffects();
+		// Invites to listening sessions: stosufynew://listen/CODE
+		const joinFromLink = (urls) => {
+			const link = urls?.find((url) => url.includes('listen/'));
+			if (link) joinSession(link.split('listen/')[1]);
+		};
+		onOpenUrl(joinFromLink).catch(() => {});
+		getCurrent()
+			.then(joinFromLink)
+			.catch(() => {});
 		await startTokenRefresh();
 		updateShowUI();
 	});
