@@ -108,6 +108,21 @@ function localMapId(song: MapSet) {
 	return own ?? Object.values(stored.beatmaps ?? {}).find((map) => map.audioFile)?.id ?? null;
 }
 
+/**
+ * Each load of a song gets a number; one that finishes after a newer one started is
+ * dropped. Without this, clicking songs quickly (or during a crossfade) could leave a song
+ * playing that the app no longer knows about, and so can't stop.
+ */
+let loadGeneration = 0;
+
+/** Throws away a song's audio that won't be played */
+function discard(audio: HTMLAudioElement | null | undefined) {
+	if (!audio) return;
+	audio.pause();
+	untrack(audio);
+	if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src);
+}
+
 async function getAudio(index: number, queue: MapSet[], type: QueueType, currentSeconds = 0) {
 	let audio: HTMLAudioElement = null;
 	const song = queue[index];
@@ -151,11 +166,14 @@ export async function setSongQueue(
 	currentSeconds = 0
 ) {
 	stopPlayback();
+	const generation = ++loadGeneration;
 	let audio: HTMLAudioElement;
 	if (index !== null) {
 		try {
 			audio = await getAudio(index, queue, type, currentSeconds);
+			if (generation !== loadGeneration) return discard(audio);
 		} catch (error) {
+			if (generation !== loadGeneration) return;
 			console.error('Could not play', queue[index]?.title, error);
 			showToast(
 				`Couldn't play ${queue[index]?.title ?? 'this song'}`,
@@ -199,9 +217,12 @@ export async function updateSongQueue(
 	) {
 		console.log('Updating song queue');
 	} else if (index !== null && targetIndex < targetQueue.length) {
+		const generation = ++loadGeneration;
 		try {
 			audio = await getAudio(targetIndex, targetQueue, type || current.type);
+			if (generation !== loadGeneration) return discard(audio);
 		} catch {
+			if (generation !== loadGeneration) return;
 			let newIndex;
 			if (get(songQueue).currentIndex < index) {
 				if (index < targetQueue.length - 1) {
@@ -243,8 +264,9 @@ export async function updateSongQueue(
 export function stopPlayback(onlyPause = false) {
 	songQueue.update((current) => {
 		if (!current || !current.audio) return current;
-		// The song fading out of a crossfade keeps playing until the fade is done
-		if (current.audio !== fadingOut) {
+		// The song fading out of a crossfade keeps playing until the fade is done; stopping
+		// (or starting another song) ends the crossfade
+		if (current.audio !== fadingOut || !onlyPause) {
 			finishCrossfade();
 			current.audio.pause();
 		}
@@ -275,16 +297,20 @@ export function togglePlayback() {
 }
 /** Loads and plays the song at `index` of `queue`, skipping songs that can't be loaded */
 async function playAt(index: number, queue: MapSet[], direction: 1 | -1 = 1) {
-	const current = get(songQueue);
 	stopPlayback(true);
+	const generation = ++loadGeneration;
 	let audio: HTMLAudioElement;
 	try {
-		audio = await getAudio(index, queue, current.type);
+		audio = await getAudio(index, queue, get(songQueue).type);
+		if (generation !== loadGeneration) return discard(audio);
 	} catch {
+		if (generation !== loadGeneration) return;
 		const next = index + direction;
 		if (next >= 0 && next < queue.length) await playAt(next, queue, direction);
 		return;
 	}
+	// The queue as it is now (it may have changed while the song loaded)
+	const current = get(songQueue);
 	songQueue.set({ ...current, currentIndex: index, audio, queue });
 	currentSong.set({ song: queue[index], isPlaying: false });
 	updateCurrentQueue({
@@ -500,6 +526,19 @@ if (typeof window !== 'undefined') {
 		const fade = Math.min(seconds, length / 2);
 		if (remaining <= fade) startCrossfade(audio, fade);
 	}, 100);
+
+	// Only the current song (and the one fading out of a crossfade) may play: anything else
+	// the app once played is stopped as soon as another song takes over
+	const known = new Set<HTMLAudioElement>();
+	songQueue.subscribe(({ audio }) => {
+		if (audio) known.add(audio);
+		for (const other of known) {
+			if (other === audio || other === fadingOut) continue;
+			other.pause();
+			untrack(other);
+			known.delete(other);
+		}
+	});
 
 	startBeats(() => ({
 		audio: get(songQueue).audio ?? null,
