@@ -277,6 +277,12 @@
 						appearance.background,
 						(checked) => updateAppearance({ background: checked })
 					)}
+					{@render toggle(
+						'Beat effects',
+						'The background pulses to the beat and lights up in kiai time, like in osu!',
+						appearance.beatEffects,
+						(checked) => updateAppearance({ beatEffects: checked })
+					)}
 					<div class="mt-4 {appearance.background ? '' : 'opacity-40 pointer-events-none'}">
 						<div class="flex justify-between text-sm mb-2">
 							<span class="font-semibold text-white">Background dim</span>

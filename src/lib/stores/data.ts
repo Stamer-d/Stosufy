@@ -345,6 +345,7 @@ async function processWithWorker(
 							if (info?.title) element.title = info.title;
 							if (info?.artist) element.artist = info.artist;
 							if (info?.timing) element.timing = info.timing;
+							if (info?.kiai) element.kiai = info.kiai;
 						});
 
 						await updateMapsetData(mapSetData);
@@ -743,6 +744,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 				title: beatmap.title || existing?.title,
 				artist: beatmap.artist || existing?.artist,
 				timing: beatmap.timing || existing?.timing,
+				kiai: beatmap.kiai || existing?.kiai,
 				loudness: existing?.loudness
 			};
 		});

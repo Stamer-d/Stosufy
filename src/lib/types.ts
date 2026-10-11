@@ -16,6 +16,7 @@ export interface Beatmap {
 	title?: string;
 	artist?: string;
 	timing?: import('./osuFile').TimingPoint[];
+	kiai?: import('./osuFile').KiaiSection[];
 	/** Integrated loudness of this difficulty's audio in LUFS */
 	loudness?: number;
 	[key: string]: any;
@@ -147,6 +148,8 @@ export interface AppearanceSettings {
 	dim: number;
 	/** Play the videos of beatmaps that have one instead of the background */
 	video?: boolean;
+	/** The background pulses to the beat and lights up in kiai time, like in osu! */
+	beatEffects?: boolean;
 }
 
 export type AccentColor = 'violet' | 'pink' | 'blue' | 'teal' | 'orange';

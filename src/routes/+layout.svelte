@@ -3,6 +3,7 @@
 	import Songbar from '#lib/components/Songbar.svelte';
 	import Playlist from '#lib/components/Playlist.svelte';
 	import { onMount } from 'svelte';
+	import { startBeatEffects } from '#lib/stores/beat.ts';
 	import { page } from '$app/state';
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
@@ -36,6 +37,7 @@
 	}
 
 	onMount(async () => {
+		startBeatEffects();
 		await startTokenRefresh();
 		updateShowUI();
 	});
@@ -59,8 +61,13 @@
 				class="absolute inset-0"
 				imageClass="blur-2xl scale-110"
 				video
+				beat
 			/>
-			<div class="absolute inset-0 bg-app" style="opacity: {appearance.dim / 100}"></div>
+			<!-- A bit brighter in kiai time, like osu! -->
+			<div
+				class="absolute inset-0 bg-app"
+				style="opacity: calc({appearance.dim / 100} - var(--kiai, 0) * 0.15)"
+			></div>
 		</div>
 	{/if}
 	<div class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'}">

@@ -533,6 +533,7 @@
 				title={$wallpaper.song?.title}
 				class="absolute inset-0"
 				video
+				beat
 			/>
 			<div
 				class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60"

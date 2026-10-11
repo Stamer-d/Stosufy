@@ -41,6 +41,7 @@ export interface OsuFileInfo {
 	background: string | null;
 	video: { file: string; offset: number } | null;
 	timingPoints: TimingPoint[];
+	kiai: KiaiSection[];
 }
 
 const MODES = ['osu', 'taiko', 'fruits', 'mania'];
@@ -65,7 +66,8 @@ export function parseOsuFile(content: string): OsuFileInfo {
 		mode: MODES[parseInt(value('Mode'), 10)] ?? 'osu',
 		background: findBackground(content),
 		video: findVideo(content),
-		timingPoints: parseTimingPoints(content)
+		timingPoints: parseTimingPoints(content),
+		kiai: parseKiai(content)
 	};
 }
 
@@ -98,4 +100,33 @@ export function mainBpm(points: TimingPoint[], length: number) {
 		}
 	});
 	return best ? Math.round((60000 / best.beatLength) * 100) / 100 : 0;
+}
+
+/** A kiai section ("kiai time", where osu! flashes on every beat), in ms */
+export interface KiaiSection {
+	start: number;
+	end: number;
+}
+
+/** Kiai sections from the effects of all timing points (red and green lines) */
+export function parseKiai(content: string): KiaiSection[] {
+	const section = content.split(/^\[TimingPoints\]\s*$/m)[1]?.split(/^\[/m)[0] ?? '';
+	const changes = section
+		.split(/\r?\n/)
+		.map((line) => line.split(','))
+		.filter((fields) => fields.length > 7 && Number.isFinite(Number(fields[0])))
+		.map((fields) => ({ time: Number(fields[0]), kiai: (Number(fields[7]) & 1) === 1 }))
+		.sort((a, b) => a.time - b.time);
+	const sections: KiaiSection[] = [];
+	let start: number | null = null;
+	for (const { time, kiai } of changes) {
+		if (kiai && start === null) start = time;
+		if (!kiai && start !== null) {
+			sections.push({ start, end: time });
+			start = null;
+		}
+	}
+	// Kiai until the end of the song
+	if (start !== null) sections.push({ start, end: Number.MAX_SAFE_INTEGER });
+	return sections;
 }

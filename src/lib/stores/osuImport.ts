@@ -99,7 +99,8 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 			title: diff.title,
 			artist: diff.artist,
 			background: await existing(diff.background),
-			timing: diff.timingPoints
+			timing: diff.timingPoints,
+			kiai: diff.kiai
 		};
 	}
 	if (!Object.keys(beatmaps).length) return null;

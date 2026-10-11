@@ -6,7 +6,7 @@ import { get } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
 import { mapDataStore, saveMapData } from './data';
 import { userSettings } from './user';
-import { parseTimingPoints, type TimingPoint } from '../osuFile';
+import { parseKiai, parseTimingPoints, type TimingPoint } from '../osuFile';
 import type { PlaybackMod } from '../types';
 
 export const MODS: Record<
@@ -146,8 +146,11 @@ function playBeat(index: number, point: TimingPoint, when: number) {
 
 const loadingTiming = new Set<string>();
 
-/** Songs downloaded before timing points were saved: get them from the .osu file online */
-async function loadTiming(setId: string, mapId: string | null) {
+/**
+ * Songs downloaded before timing points (and kiai sections) were saved: get them from the
+ * .osu file online, once per difficulty
+ */
+export async function loadTiming(setId: string, mapId: string | null) {
 	const set = get(mapDataStore)[setId];
 	const beatmapId =
 		mapId && /^\d+$/.test(mapId)
@@ -158,14 +161,16 @@ async function loadTiming(setId: string, mapId: string | null) {
 	try {
 		const response = await fetch(`https://osu.ppy.sh/osu/${beatmapId}`);
 		if (!response.ok) return;
-		const timing = parseTimingPoints(await response.text());
+		const content = await response.text();
+		const timing = parseTimingPoints(content);
+		const kiai = parseKiai(content);
 		mapDataStore.update((data) => {
 			const stored = data[setId];
 			if (!stored) return data;
 			const map = stored.beatmaps?.[beatmapId];
 			// Per difficulty: the songs of a set can have different timing
 			const beatmaps = map
-				? { ...stored.beatmaps, [beatmapId]: { ...map, timing } }
+				? { ...stored.beatmaps, [beatmapId]: { ...map, timing, kiai } }
 				: stored.beatmaps;
 			return { ...data, [setId]: { ...stored, beatmaps, timing: stored.timing ?? timing } };
 		});

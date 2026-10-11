@@ -97,3 +97,17 @@
 		animation: none !important;
 	}
 }
+
+/* Beat effects, driven by --beat and --kiai (see stores/beat.ts). Only transform and
+   opacity change, which the GPU handles without repainting the images. */
+.beat-bump {
+	transform: scale(calc(1 + var(--beat, 0) * (0.006 + var(--kiai, 0) * 0.018)));
+}
+
+.kiai-glow {
+	opacity: calc(var(--kiai, 0) * (0.1 + var(--beat, 0) * 0.3));
+}
+
+.beat-logo {
+	transform: scale(calc(1 + var(--beat, 0) * (0.08 + var(--kiai, 0) * 0.12)));
+}

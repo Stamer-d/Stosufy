@@ -35,11 +35,12 @@
 	import { fade } from 'svelte/transition';
 	import BeatmapVideo from './BeatmapVideo.svelte';
 	import { backgroundUrls, colorFromString, mapDataStore } from '#lib/stores/data.ts';
+	import { currentSong } from '#lib/stores/audio.ts';
 
 	/**
 	 * Shows the background of a beatmap set, cross-fading when it changes. With `video`, the
 	 * beatmap video plays on top of it while the set is the current song.
-	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string, video?: boolean, mapId?: number | string | null }}
+	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string, video?: boolean, mapId?: number | string | null, beat?: boolean }}
 	 */
 	let {
 		setId,
@@ -47,8 +48,12 @@
 		title = '',
 		class: className = '',
 		imageClass = '',
-		video = false
+		video = false,
+		beat = false
 	} = $props();
+
+	// Beat effects only for the song that is playing
+	let pulsing = $derived(beat && setId != null && $currentSong.song?.id == setId);
 
 	let url = $state(null);
 	// Only this set's saved background, so other changes to the song data don't reload it
@@ -80,17 +85,25 @@
 	class="overflow-hidden {className || 'relative'}"
 	style="background-color: {colorFromString(title || String(setId ?? ''))}"
 >
-	{#key url}
-		{#if url}
-			<img
-				src={url}
-				alt=""
-				class="absolute inset-0 size-full object-cover {imageClass}"
-				transition:fade={{ duration: 400 }}
-			/>
+	<div class="absolute inset-0 {pulsing ? 'beat-bump' : ''}">
+		{#key url}
+			{#if url}
+				<img
+					src={url}
+					alt=""
+					class="absolute inset-0 size-full object-cover {imageClass}"
+					transition:fade={{ duration: 400 }}
+				/>
+			{/if}
+		{/key}
+		{#if video}
+			<BeatmapVideo {setId} class={imageClass} />
 		{/if}
-	{/key}
-	{#if video}
-		<BeatmapVideo {setId} class={imageClass} />
+	</div>
+	{#if pulsing}
+		<!-- Lights up on the beat in kiai time -->
+		<div
+			class="kiai-glow absolute inset-0 pointer-events-none mix-blend-soft-light bg-[radial-gradient(circle_at_center,white,transparent_75%)]"
+		></div>
 	{/if}
 </div>

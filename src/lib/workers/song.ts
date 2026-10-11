@@ -245,7 +245,8 @@ async function extractAudioFromBeatmap(
 				backgroundPath: backgroundPaths.get(diff.background?.toLowerCase()) ?? null,
 				title: diff.title,
 				artist: diff.artist,
-				timing: diff.timingPoints
+				timing: diff.timingPoints,
+				kiai: diff.kiai
 			};
 		}
 		const first = diffs[0];
