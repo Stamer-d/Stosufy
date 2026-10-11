@@ -10,7 +10,6 @@ import { keyStore } from './auth';
 import { mapDataStore, saveMapData, backfillImages } from './data';
 import { getPlaylistSongs } from './playlist';
 import { parseOsuFile, mainBpm } from '../osuFile';
-import { hasStoryboard } from '../storyboard/parse';
 import type { Beatmap, StoredMapSet } from '../types';
 
 export interface OsuImportState {
@@ -69,7 +68,7 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 		try {
 			const filePath = await path.join(folder, file.name);
 			const content = await readTextFile(filePath);
-			diffs.push({ ...parseOsuFile(content), filePath, storyboard: hasStoryboard(content) });
+			diffs.push({ ...parseOsuFile(content), filePath });
 		} catch (error) {
 			console.warn('Could not read', file.name, error);
 		}
@@ -102,8 +101,6 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 			title: diff.title,
 			artist: diff.artist,
 			background: await existing(diff.background),
-			// Difficulties with their own storyboard read it from their .osu file
-			osuFile: diff.storyboard ? diff.filePath : undefined,
 			chartFile: diff.filePath,
 			timing: diff.timingPoints,
 			kiai: diff.kiai
@@ -115,11 +112,6 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 	const videoInfo = diffs.find((diff) => diff.video)?.video ?? null;
 	const video = await existing(videoInfo?.file ?? null);
 	const timing = first.timingPoints;
-	// The storyboard stays in the osu! folder, its images are relative to it
-	const osbFile = files.find((file) => file.isFile && file.name.toLowerCase().endsWith('.osb'));
-	const osb = osbFile ? await path.join(folder, osbFile.name) : null;
-	const osbHasStoryboard = osb ? hasStoryboard(await readTextFile(osb).catch(() => '')) : false;
-	const withStoryboard = osbHasStoryboard || diffs.some((diff) => diff.storyboard);
 	let createdAt = Date.now();
 	try {
 		createdAt = (await stat(folder)).mtime?.getTime() ?? createdAt;
@@ -141,9 +133,7 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 		videoSource: video,
 		videoOffset: videoInfo?.offset ?? 0,
 		hasVideo: !!video,
-		storyboard: withStoryboard ? { dir: folder, osb: osbHasStoryboard ? osb : null } : null,
 		hitsounds: { dir: folder },
-		hasStoryboard: withStoryboard,
 		timing,
 		source: 'osu',
 		beatmaps,

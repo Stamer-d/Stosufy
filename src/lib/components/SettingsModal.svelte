@@ -304,27 +304,19 @@
 				</section>
 
 				<section>
-					{@render heading('Videos & storyboards')}
+					{@render heading('Videos')}
 					{@render toggle(
 						'Play beatmap videos',
 						'Maps with a video play it instead of the background',
 						appearance.video,
 						(checked) => updateAppearance({ video: checked })
 					)}
-					{@render toggle(
-						'Play storyboards',
-						'The animations of the beatmap, like in osu!. They play in focus mode (the button next to Home).',
-						appearance.storyboard,
-						(checked) => updateAppearance({ storyboard: checked })
-					)}
 					<div class="flex items-center justify-between gap-4 mt-4 p-3 rounded-lg bg-white/[0.04]">
 						<span class="min-w-0">
-							<span class="block font-semibold text-white"
-								>Videos & storyboards for downloaded songs</span
-							>
+							<span class="block font-semibold text-white">Videos for downloaded songs</span>
 							<span class="block text-xs text-secondary-600" aria-live="polite">
 								{#if $videoFetch.state === 'checking'}
-									Checking which songs have a video or storyboard…
+									Checking which songs have a video…
 								{:else if $videoFetch.state === 'downloading'}
 									Adding them: {$videoFetch.done} of {$videoFetch.total} songs. You can close this window.
 								{:else if $videoFetch.state === 'done'}

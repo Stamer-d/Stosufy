@@ -3,7 +3,6 @@ import { keyStore } from './auth';
 import { fetch } from '@tauri-apps/plugin-http';
 import JSZip from 'jszip';
 import { findVideo, parseOsuFile } from '../osuFile';
-import { extractStoryboard } from '../storyboard/extract';
 import { splitTracks } from '../tracks';
 import {
 	writeTextFile,
@@ -58,12 +57,43 @@ export const downloads = writable<Record<string, DownloadState>>({});
 		} else {
 			const mapData = JSON.parse(await readTextFile(mapDataFile, { baseDir: BaseDirectory.Home }));
 			mapDataStore.set(mapData);
+			removeStoryboards();
 		}
 		setTimeout(backfillImages, BACKFILL_START_DELAY);
 	} catch (error) {
 		console.error('Error initializing data store:', error);
 	}
 })();
+
+/** Storyboards were removed: frees the space of the ones saved before, once */
+async function removeStoryboards() {
+	const data = get(mapDataStore);
+	const withStoryboard = Object.values(data).filter(
+		(set) => 'storyboard' in set || 'hasStoryboard' in set || 'storyboardChecked' in set
+	);
+	if (!withStoryboard.length) return;
+	for (const set of withStoryboard) {
+		const dir = set.storyboard?.dir;
+		if (dir?.startsWith(mapSetsDir)) {
+			await remove(dir, { baseDir: BaseDirectory.Home, recursive: true }).catch(() => {});
+		}
+	}
+	mapDataStore.update((current) => {
+		const next = { ...current };
+		for (const { id } of withStoryboard) {
+			if (!next[id]) continue;
+			const {
+				storyboard: _storyboard,
+				hasStoryboard: _has,
+				storyboardChecked: _checked,
+				...rest
+			} = next[id];
+			next[id] = rest as StoredMapSet;
+		}
+		return next;
+	});
+	await saveMapData();
+}
 
 export function handleImageError(event: Event) {
 	const image = event.target as HTMLImageElement;
@@ -138,10 +168,7 @@ export async function deleteSong(setId: number | string) {
 	if (beatmapIds.length === 0) return null;
 	const firstBeatmapId = beatmapIds[0];
 	const audioFilePath = mapData[setId].beatmaps[firstBeatmapId].audioFile;
-	const { background, thumbnail, video, storyboard } = mapData[setId];
-	if (storyboard?.dir?.startsWith(mapSetsDir)) {
-		await remove(storyboard.dir, { baseDir: BaseDirectory.Home, recursive: true }).catch(() => {});
-	}
+	const { background, thumbnail, video } = mapData[setId];
 	// The hitsounds (also the .osu files fetched for songs downloaded before they were saved)
 	await remove(`${mapSetsDir}/${setId}-hitsounds`, {
 		baseDir: BaseDirectory.Home,
@@ -344,8 +371,6 @@ async function processWithWorker(
 							...mapSetData,
 							hasVideo: !!video,
 							timing: event.data.timing ?? [],
-							storyboard: event.data.storyboard ?? null,
-							hasStoryboard: !!event.data.storyboard,
 							hitsounds: event.data.hitsounds ?? null
 						};
 						if (video && isPlayableVideo(video.path)) {
@@ -499,15 +524,10 @@ export async function fetchMissingVideos() {
 	try {
 		videoFetch.set({ state: 'checking', done: 0, total: 0 });
 
-		// 1. Which sets have a video or storyboard; remembered, so this only runs once per set
-		// Sets saved as without a storyboard are asked again once: storyboards whose file
-		// starts with a byte order mark weren't recognized before
+		// 1. Which sets have a video; remembered, so this only runs once per set
 		const unchecked = Object.values(get(mapDataStore)).filter(
 			(set) =>
-				(set.hasVideo === undefined ||
-					set.hasStoryboard === undefined ||
-					(!set.hasStoryboard && !set.storyboardChecked)) &&
-				Object.keys(set.beatmaps ?? {}).some((id) => /^\d+$/.test(id))
+				set.hasVideo === undefined && Object.keys(set.beatmaps ?? {}).some((id) => /^\d+$/.test(id))
 		);
 		for (let i = 0; i < unchecked.length; i += VIDEO_CHECK_BATCH) {
 			const batch = unchecked.slice(i, i + VIDEO_CHECK_BATCH);
@@ -523,24 +543,18 @@ export async function fetchMissingVideos() {
 					beatmaps.filter((map) => map.beatmapset?.[flag]).map((map) => String(map.beatmapset_id))
 				);
 			const withVideo = setsWith('video');
-			const withStoryboard = setsWith('storyboard');
 			for (const set of batch) {
 				const id = set.id.toString();
-				setStoredFields(id, {
-					hasVideo: set.hasVideo ?? withVideo.has(id),
-					hasStoryboard: set.hasStoryboard || withStoryboard.has(id),
-					storyboardChecked: true
-				});
+				setStoredFields(id, { hasVideo: set.hasVideo ?? withVideo.has(id) });
 			}
 			await saveMapData();
 			await wait(VIDEO_CHECK_DELAY);
 		}
 
-		// 2. Download the sets missing their video or storyboard again, one at a time
+		// 2. Download the sets missing their video again, one at a time
 		const needsVideo = (set: StoredMapSet) => set.hasVideo && !set.video && !set.videoSource;
-		const needsStoryboard = (set: StoredMapSet) => set.hasStoryboard && !set.storyboard;
 		const missing = Object.values(get(mapDataStore)).filter(
-			(set) => set.source !== 'osu' && (needsVideo(set) || needsStoryboard(set))
+			(set) => set.source !== 'osu' && needsVideo(set)
 		);
 		videoFetch.set({ state: 'downloading', done: 0, total: missing.length });
 		for (const [index, set] of missing.entries()) {
@@ -563,8 +577,7 @@ export async function fetchMissingVideos() {
 				);
 			}
 			const zip = await JSZip.loadAsync(buffer);
-			if (needsVideo(set)) await saveVideoFromSet(setId, zip);
-			if (needsStoryboard(set)) await saveStoryboardFromSet(setId, zip);
+			await saveVideoFromSet(setId, zip);
 			videoFetch.update((s) => ({ ...s, done: s.done + 1 }));
 			if (index < missing.length - 1) await wait(VIDEO_DOWNLOAD_DELAY);
 		}
@@ -573,34 +586,6 @@ export async function fetchMissingVideos() {
 		console.error('Could not fetch videos:', error);
 		fail(error instanceof Error ? error.message : String(error));
 	}
-}
-
-/** Saves only the video of a downloaded beatmap set (.osz) */
-/** Saves only the storyboard of a downloaded beatmap set (.osz) */
-async function saveStoryboardFromSet(setId: string, zip: JSZip) {
-	const diffs = [];
-	for (const entry of Object.values(zip.files)) {
-		if (entry.dir || !entry.name.endsWith('.osu')) continue;
-		const content = await entry.async('string');
-		const beatmapId = parseOsuFile(content).beatmapId;
-		if (beatmapId) diffs.push({ beatmapId, content });
-	}
-	const saved = await extractStoryboard(zip, setId, diffs, mapSetsDir, {
-		join: (...paths) => path.join(...paths),
-		mkdir: (dir) => mkdir(dir, { recursive: true }),
-		writeFile: (file, data) => writeFile(file, data, { baseDir: BaseDirectory.Home })
-	});
-	mapDataStore.update((data) => {
-		const set = data[setId];
-		if (!set) return data;
-		const beatmaps = { ...set.beatmaps };
-		for (const [id, osuFile] of Object.entries(saved?.osuFiles ?? {})) {
-			if (beatmaps[id]) beatmaps[id] = { ...beatmaps[id], osuFile };
-		}
-		const storyboard = saved && { dir: saved.dir, osb: saved.osb };
-		return { ...data, [setId]: { ...set, beatmaps, storyboard, hasStoryboard: !!saved } };
-	});
-	await saveMapData();
 }
 
 /** Saves only the video of a downloaded beatmap set (.osz) */
@@ -768,8 +753,6 @@ async function updateMapsetData(mapsetData: MapSet) {
 			videoOffset: mapsetData.videoOffset || 0,
 			hasVideo: mapsetData.hasVideo,
 			timing: mapsetData.timing,
-			storyboard: mapsetData.storyboard,
-			hasStoryboard: mapsetData.hasStoryboard,
 			hitsounds: mapsetData.hitsounds ?? null,
 			beatmaps: {},
 			created_at: mapsetData.createdAt || Date.now()
@@ -787,8 +770,6 @@ async function updateMapsetData(mapsetData: MapSet) {
 			video: mapsetData.video || updatedMapData[setId].video || null,
 			videoOffset: mapsetData.videoOffset ?? updatedMapData[setId].videoOffset ?? 0,
 			hasVideo: mapsetData.hasVideo ?? updatedMapData[setId].hasVideo,
-			storyboard: mapsetData.storyboard ?? updatedMapData[setId].storyboard,
-			hasStoryboard: mapsetData.hasStoryboard ?? updatedMapData[setId].hasStoryboard,
 			hitsounds: mapsetData.hitsounds ?? updatedMapData[setId].hitsounds,
 			timing: mapsetData.timing ?? updatedMapData[setId].timing
 		});

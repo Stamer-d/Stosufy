@@ -3,7 +3,6 @@
 
 import JSZip from 'jszip';
 import { parseOsuFile, type OsuFileInfo } from '../osuFile.ts';
-import { extractStoryboard } from '../storyboard/extract.ts';
 
 // Message counter to track request/response pairs
 let messageId = 0;
@@ -62,7 +61,6 @@ self.onmessage = async function (event) {
 					video: result.video,
 					timing: result.timing,
 					maps: result.maps,
-					storyboard: result.storyboard,
 					hitsounds: result.hitsounds,
 					beatmapId: result.mapId,
 					setId: data.setId
@@ -277,16 +275,6 @@ async function extractAudioFromBeatmap(
 			}
 		}
 
-		// The storyboard: its scripts and the images it uses
-		const storyboard = await extractStoryboard(zip, setId, diffs, mapSetsDir, {
-			join: (...paths) => fs.path.join(...paths),
-			mkdir: (dir) => fs.mkdir(dir),
-			writeFile: (path, data) => fs.writeFile(path, data)
-		});
-		for (const [beatmapId, osuFile] of Object.entries(storyboard?.osuFiles ?? {})) {
-			if (maps[beatmapId]) maps[beatmapId].osuFile = osuFile;
-		}
-
 		// The hitsounds: each difficulty's .osu file and the beatmap's own samples (small audio
 		// files next to the .osu files that aren't a song)
 		const hitsoundDir = await fs.path.join(mapSetsDir, `${setId}-hitsounds`);
@@ -321,7 +309,6 @@ async function extractAudioFromBeatmap(
 				video: savedVideo,
 				timing,
 				maps,
-				storyboard: storyboard && { dir: storyboard.dir, osb: storyboard.osb },
 				hitsounds: { dir: hitsoundDir },
 				mapId: first.beatmapId
 			};

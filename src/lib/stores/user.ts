@@ -148,7 +148,6 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
 	dim: 75,
 	video: true,
 	beatEffects: true,
-	storyboard: true,
 	focusLyrics: true
 };
 
