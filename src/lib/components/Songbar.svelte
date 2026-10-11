@@ -15,7 +15,7 @@
 		queuePanelOpen
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
-	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
+	import { handleKeybind } from '#lib/stores/keybinds.ts';
 	import {
 		updateUserSettings,
 		userSettings,
@@ -117,61 +117,25 @@
 		return volume === 0 ? 'icon-[mingcute--volume-mute-line]' : 'icon-[mingcute--volume-line]';
 	}
 
-	// Space toggles playback, unless the user is typing
-	function handleKeydown(event) {
-		if (event.code !== 'Space' || event.repeat || !$songQueue?.audio) return;
-		const target = event.target;
-		if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable]')) {
-			return;
-		}
-		event.preventDefault();
-		togglePlayback();
-	}
-
 	// Track changes to currentlyPlaying and set up time tracking
 	$: if ($songQueue?.audio) {
 		setupTimeTracking();
 	}
 
-	onMount(async () => {
-		await register('MEDIAPLAYPAUSE', (e) => {
-			if (e.state == 'Pressed') {
-				togglePlayback();
-			}
-		});
-		await register('MEDIATRACKNEXT', async (e) => {
-			if (e.state == 'Pressed') await skipForward();
-		});
-		await register('MEDIATRACKPREV', async (e) => {
-			if (e.state == 'Pressed') await skipBackward();
-		});
-		await register('F14', (e) => {
-			if (e.state == 'Released') return;
-			if (volume + 0.01 >= 0.2) {
-				handleVolumeChange(0.2);
-				return;
-			}
-			handleVolumeChange(volume + 0.01);
-		});
-		await register('F13', (e) => {
-			if (e.state == 'Released') return;
-			if (volume - 0.01 <= 0) {
-				handleVolumeChange(0.001);
-				return;
-			}
-			handleVolumeChange(volume - 0.01);
-		});
-	});
+	// The song bar owns the volume, so it does the volume shortcuts (see keybinds.ts)
+	const VOLUME_STEP = 0.01;
+	const MAX_VOLUME = 0.2;
+	const stopHandling = [
+		handleKeybind('volumeUp', () => handleVolumeChange(Math.min(MAX_VOLUME, volume + VOLUME_STEP))),
+		handleKeybind('volumeDown', () => handleVolumeChange(Math.max(0.001, volume - VOLUME_STEP))),
+		handleKeybind('mute', toggleMute)
+	];
 	onDestroy(async () => {
 		clearInterval(updateInterval);
 		if ($currentSong.isPlaying) {
 			stopPlayback();
 		}
-		await unregister('MEDIAPLAYPAUSE');
-		await unregister('MEDIATRACKNEXT');
-		await unregister('MEDIATRACKPREV');
-		await unregister('F14');
-		await unregister('F13');
+		stopHandling.forEach((stop) => stop());
 	});
 	$: shuffled = $userSettings.settings?.shuffle || false;
 	$: repeat = $userSettings.settings?.repeat ?? 'off';
@@ -186,8 +150,6 @@
 		one: 'Disable repeat'
 	};
 </script>
-
-<svelte:window on:keydown={handleKeydown} />
 
 {#if $currentSong?.song?.id}
 	<footer class="h-20 shrink-0 grid grid-cols-[1fr_minmax(0,40rem)_1fr] items-center gap-4 px-4">

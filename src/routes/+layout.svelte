@@ -16,6 +16,7 @@
 	import FriendsPanel from '#lib/components/FriendsPanel.svelte';
 	import { friendsPanelOpen, goOffline } from '#lib/stores/friends.ts';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { startKeybinds } from '#lib/stores/keybinds.ts';
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
@@ -44,6 +45,7 @@
 
 	onMount(async () => {
 		startBeatEffects();
+		startKeybinds();
 		// Invites to listening sessions: stosufynew://listen/CODE
 		const joinFromLink = (urls) => {
 			const link = urls?.find((url) => url.includes('listen/'));

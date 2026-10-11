@@ -23,6 +23,7 @@
 	} from '#lib/stores/osuImport.ts';
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
 	import VisibilityPicker from './VisibilityPicker.svelte';
+	import KeybindSettings from './KeybindSettings.svelte';
 
 	let osuFolder = $state(null);
 	defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
@@ -44,7 +45,8 @@
 		{ id: 'home', label: 'Home', icon: 'icon-[mingcute--home-4-line]' },
 		{ id: 'appearance', label: 'Appearance', icon: 'icon-[mingcute--palette-line]' },
 		{ id: 'playback', label: 'Playback', icon: 'icon-[mingcute--play-circle-line]' },
-		{ id: 'library', label: 'Library', icon: 'icon-[mingcute--folder-open-line]' }
+		{ id: 'library', label: 'Library', icon: 'icon-[mingcute--folder-open-line]' },
+		{ id: 'shortcuts', label: 'Shortcuts', icon: 'icon-[mingcute--keyboard-line]' }
 	];
 
 	const SECTION_LABELS = {
@@ -481,6 +483,8 @@
 						<VisibilityPicker />
 					</div>
 				</section>
+			{:else if $settingsTab === 'shortcuts'}
+				<KeybindSettings />
 			{/if}
 		</div>
 	</div>

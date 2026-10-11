@@ -2,6 +2,7 @@
 	import { goto, afterNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { searchQuery } from '#lib/stores/search.ts';
+	import { currentKeybinds, keybindLabel } from '#lib/stores/keybinds.ts';
 
 	let input = $state(null);
 	let onSearchPage = $derived(page.url.pathname === '/search');
@@ -47,17 +48,9 @@
 		}
 	});
 
-	// Ctrl+K or Ctrl+F jumps into the search from anywhere
-	function handleShortcut(event) {
-		if ((event.ctrlKey || event.metaKey) && ['k', 'f'].includes(event.key.toLowerCase())) {
-			event.preventDefault();
-			input?.focus();
-			input?.select();
-		}
-	}
+	// The search shortcut (Ctrl+K by default) is in keybinds.ts
+	let shortcut = $derived(keybindLabel($currentKeybinds.app.search));
 </script>
-
-<svelte:window onkeydown={handleShortcut} />
 
 <div class="relative w-full max-w-md flex items-center">
 	<span
@@ -66,6 +59,7 @@
 	<input
 		bind:this={input}
 		type="search"
+		data-search-input
 		value={$searchQuery}
 		placeholder="What do you want to listen to?"
 		aria-label="Search beatmaps and your songs"
@@ -86,10 +80,10 @@
 		>
 			<span class="icon-[mingcute--close-line] size-4"></span>
 		</button>
-	{:else}
+	{:else if shortcut.length}
 		<kbd
 			class="absolute right-3 px-1.5 rounded text-[10px] font-semibold text-secondary-600 ring-1 ring-white/10 pointer-events-none"
-			>Ctrl K</kbd
+			>{shortcut.join(' ')}</kbd
 		>
 	{/if}
 </div>

@@ -175,6 +175,8 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Changed keyboard shortcuts, by scope and action (null: none); see keybinds.ts */
+	keybinds?: Partial<Record<'app' | 'global', Record<string, string | null>>>;
 	/** What osu! friends see: online status and song, only the status, or nothing */
 	activityVisibility?: 'all' | 'online' | 'hidden';
 	/** Before activityVisibility: false hid the user */
