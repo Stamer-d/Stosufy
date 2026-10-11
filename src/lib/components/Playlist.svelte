@@ -23,6 +23,7 @@
 	import PlaylistCover from './PlaylistCover.svelte';
 	import DownloadQueue from './DownloadQueue.svelte';
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
+	import { showToast } from '#lib/stores/toast.ts';
 
 	let addMenuOpen = $state(false);
 
@@ -99,18 +100,33 @@
 
 		const virtual = $playlists.filter(isVirtual);
 		$playlists = [...virtual, dummyPlaylist, ...$playlists.filter((p) => !isVirtual(p))];
-		const newPlaylist = await createPlaylist(`My Playlist Nr.${amount}`);
-		$playlists = $playlists.map((playlist) => (playlist.id === tempId ? newPlaylist : playlist));
+		try {
+			const newPlaylist = await createPlaylist(`My Playlist Nr.${amount}`);
+			$playlists = $playlists.map((playlist) => (playlist.id === tempId ? newPlaylist : playlist));
+		} catch (error) {
+			console.error('Could not create the playlist:', error);
+			$playlists = $playlists.filter((playlist) => playlist.id !== tempId);
+			showToast("Couldn't create the playlist, try again", 'icon-[mingcute--warning-line]');
+		}
 	}
 
 	let playlistToDelete = $state(null);
 	let deleteModalOpen = $state(false);
 
 	async function deleteClickedPlaylist(playlistId) {
+		const before = $playlists;
 		$playlists = $playlists.filter((playlist) => playlist.id !== playlistId);
 		if (page.params?.id == playlistId) goto('/home');
-		await deletePlaylist(playlistId);
+		try {
+			await deletePlaylist(playlistId);
+		} catch (error) {
+			console.error('Could not delete the playlist:', error);
+			$playlists = before;
+			showToast("Couldn't delete the playlist, try again", 'icon-[mingcute--warning-line]');
+		}
 	}
+
+	let saving = $state(false);
 
 	async function handleImageSelect(event) {
 		const file = event.target.files[0];
@@ -136,20 +152,26 @@
 
 	async function handleSavePlaylistChanges() {
 		const { playlist, title, description, isPublic, selectedFile } = editPlaylistModal;
-
-		const updatedPlaylist = await editPlaylist(
-			playlist.id,
-			title,
-			description,
-			isPublic,
-			selectedFile
-		);
-
-		$playlists = $playlists.map((p) =>
-			p.id === playlist.id ? { ...updatedPlaylist, song_amount: p.song_amount } : p
-		);
-
-		editPlaylistModal.open = false;
+		if (saving) return;
+		saving = true;
+		try {
+			const updatedPlaylist = await editPlaylist(
+				playlist.id,
+				title,
+				description,
+				isPublic,
+				selectedFile
+			);
+			$playlists = $playlists.map((p) =>
+				p.id === playlist.id ? { ...updatedPlaylist, song_amount: p.song_amount } : p
+			);
+			editPlaylistModal.open = false;
+		} catch (error) {
+			console.error('Could not save the playlist:', error);
+			editPlaylistModal.imageError = `Couldn't save: ${error instanceof Error ? error.message : error}`;
+		} finally {
+			saving = false;
+		}
 	}
 
 	let lastUserId = null;
@@ -447,7 +469,11 @@
 		>
 			Cancel
 		</Button>
-		<Button type="primary" on:click={handleSavePlaylistChanges} disabled={!editPlaylistModal.title}>
+		<Button
+			type="primary"
+			on:click={handleSavePlaylistChanges}
+			disabled={!editPlaylistModal.title || saving}
+		>
 			Save Changes
 		</Button>
 	</svelte:fragment>

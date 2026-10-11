@@ -591,7 +591,7 @@
 				<!-- The song's gameplay, like osu!'s autoplay, over a dimmed background -->
 				<div class="absolute inset-0 bg-black/45"></div>
 				<!-- (playing it yourself, it fills the window instead: PlayOverlay) -->
-				{#if !$playingLive}
+				{#if !$playingLive && !$focusMode}
 					<Gameplay class="absolute inset-0" />
 				{/if}
 			{/if}

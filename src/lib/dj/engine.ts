@@ -34,8 +34,13 @@ const KILL_DB = -60;
 export const HOT_CUES = 8;
 export const TEMPO_RANGES = [0.08, 0.16, 0.5];
 
-export type TransitionType = 'crossfade' | 'bassswap' | 'filter' | 'echo' | 'cut';
+export type TransitionType = 'smart' | 'crossfade' | 'bassswap' | 'filter' | 'echo' | 'cut';
 export const TRANSITIONS: { id: TransitionType; name: string; description: string }[] = [
+	{
+		id: 'smart',
+		name: 'Smart',
+		description: 'Picks the mix that fits the two songs, and lands the new one on its drop'
+	},
 	{
 		id: 'bassswap',
 		name: 'Bass swap',
@@ -169,8 +174,11 @@ export class Deck {
 	/** Temporary tempo push (nudge, jog) */
 	private bend = 0;
 	private loadId = 0;
+	/** Loaded by the user (not Auto DJ): Auto DJ plays it next instead of its own pick */
+	pickedByUser = false;
 	private onChange: () => void;
 	onPlay: () => void = () => {};
+	beforePlay: (deck: Deck) => void = () => {};
 
 	constructor(
 		id: DeckId,
@@ -300,6 +308,12 @@ export class Deck {
 		}
 	}
 
+	/** A song the user chose (Auto DJ plays it next) */
+	userLoad(song: MapSet) {
+		this.pickedByUser = true;
+		return this.load(song);
+	}
+
 	eject() {
 		this.loadId++;
 		this.stopSource();
@@ -319,7 +333,7 @@ export class Deck {
 	}
 
 	private get playbackRate() {
-		return this.rate * (1 + this.bend);
+		return this.rate * (1 + this.bend + this.autoBend);
 	}
 
 	/** Where the song is (s); while a loop runs, inside the loop */
@@ -384,6 +398,8 @@ export class Deck {
 		if (!this.buffer || this.state.playing) return;
 		audioContext();
 		if (this.pausedAt >= this.state.duration - 0.05) this.pausedAt = this.state.cue;
+		// Started by hand while synced: on the other deck's beat
+		if (when === undefined) this.beforePlay(this);
 		this.startSource(this.pausedAt, when);
 		this.state = { ...this.state, playing: true };
 		this.onPlay();
@@ -439,6 +455,8 @@ export class Deck {
 
 	/** Pushes the tempo for a moment (nudge or jog), to line up beats by ear */
 	setBend(bend: number) {
+		// Pushing it by hand: the user leads now, not the sync lock
+		if (bend !== 0 && this.state.synced) this.unsync();
 		this.rebase();
 		this.bend = bend;
 		if (this.source) this.source.playbackRate.value = this.playbackRate;
@@ -569,27 +587,73 @@ export class Deck {
 		if (!match) return false;
 		this.setTempo(match.rate - 1, true);
 		this.state = { ...this.state, synced: true };
+		// The other deck leads
+		if (master.state.synced) master.state = { ...master.state, synced: false };
 		if (this.state.playing && master.state.playing) this.alignTo(master, match.factor === 1);
+		else if (master.state.playing) this.alignPaused(master);
 		this.emit();
 		return true;
 	}
 
-	/** Moves the song so its beats (and bars) fall on the other deck's */
-	alignTo(master: Deck, bars = true) {
+	unsync() {
+		this.setAutoBend(0);
+		this.state = { ...this.state, synced: false };
+		this.emit();
+	}
+
+	/**
+	 * How many of its own beats this deck is off the other one's grid (positive: it's behind).
+	 * With the same tempo, bars line up too; at double or half tempo, beats do.
+	 */
+	phaseOffset(master: Deck, factor = 1, bars = true, at = this.position()) {
 		const m = phaseAt(master.grid, master.position());
-		const s = phaseAt(this.grid, this.position());
-		if (!m || !s) return;
+		const s = phaseAt(this.grid, at);
+		if (!m || !s) return 0;
 		let shift: number;
-		if (bars && m.point.meter === s.point.meter) {
+		if (bars && factor === 1 && m.point.meter === s.point.meter) {
 			const meter = s.point.meter;
 			shift = m.barBeats - s.barBeats;
 			if (shift > meter / 2) shift -= meter;
 			if (shift < -meter / 2) shift += meter;
 		} else {
-			shift = m.beatPhase - s.beatPhase;
+			const masterPhase = (((m.beats * factor) % 1) + 1) % 1;
+			shift = masterPhase - s.beatPhase;
 			if (shift > 0.5) shift -= 1;
 			if (shift < -0.5) shift += 1;
 		}
+		return shift;
+	}
+
+	/** Puts the paused song where it starts on the other deck's beat and bar */
+	alignPaused(master: Deck) {
+		const match = this.matchRate(master);
+		if (!match || this.state.playing) return;
+		const shift = this.phaseOffset(master, match.factor, match.factor === 1, this.pausedAt);
+		const beat = sectionAt(this.grid, this.pausedAt)?.beat ?? 0.5;
+		this.pausedAt += shift * beat;
+		this.emit();
+	}
+
+	/** Small tempo pushes by the sync lock to stay on the beat */
+	private autoBend = 0;
+
+	setAutoBend(bend: number) {
+		if (bend === this.autoBend) return;
+		this.rebase();
+		this.autoBend = bend;
+		if (this.source) this.source.playbackRate.value = this.playbackRate;
+	}
+
+	get userBending() {
+		return this.bend !== 0;
+	}
+
+	/** Moves the song so its beats (and bars) fall on the other deck's */
+	alignTo(master: Deck, bars = true) {
+		const match = this.matchRate(master);
+		const s = phaseAt(this.grid, this.position());
+		if (!s) return;
+		const shift = this.phaseOffset(master, match?.factor ?? 1, bars);
 		if (Math.abs(shift) < 0.002) return;
 		this.seek(this.position() + shift * s.point.beat);
 	}
@@ -625,12 +689,93 @@ export class Deck {
 		const amount = Math.abs(s.filter);
 		smooth(this.lowpass.frequency, s.filter < 0 ? 22000 * Math.pow(60 / 22000, amount) : 22000);
 		smooth(this.highpass.frequency, s.filter > 0 ? 10 * Math.pow(8000 / 10, amount) : 10);
-		smooth(this.echoWet.gain, s.echo * 0.9);
-		smooth(this.echoFeedback.gain, s.echo > 0 ? 0.35 + s.echo * 0.3 : 0);
+		// Echo: turned down, it rings out instead of stopping
+		this.echoWet.gain.setTargetAtTime(s.echo * 0.9, now, s.echo > 0 ? 0.012 : 0.9);
+		this.echoFeedback.gain.setTargetAtTime(
+			s.echo > 0 ? 0.35 + s.echo * 0.3 : 0.45,
+			now,
+			s.echo > 0 ? 0.012 : 0.9
+		);
 		smooth(this.reverbWet.gain, s.reverb * 0.8);
 		// The fader feels like a real one: quiet at the bottom
 		smooth(this.fader.gain, s.volume * s.volume);
 		this.applyEcho();
+	}
+
+	// --- Effects to hold (like performance pads) -----------------------------------------
+
+	private holds: Partial<
+		Record<
+			'filter' | 'echo' | 'roll',
+			{ value: number; timer?: ReturnType<typeof setInterval>; slip?: { pos: number; ctx: number } }
+		>
+	> = {};
+
+	/** Held: the filter sweeps up over two beats; let go: back */
+	filterHold(on: boolean) {
+		const hold = this.holds.filter;
+		clearInterval(hold?.timer);
+		if (!on) {
+			if (hold) this.set({ filter: hold.value });
+			delete this.holds.filter;
+			return;
+		}
+		const value = hold?.value ?? this.state.filter;
+		const started = this.ctx.currentTime;
+		const beat = (sectionAt(this.grid, this.position())?.beat ?? 0.5) / this.rate;
+		const timer = setInterval(() => {
+			const p = Math.min(1, (this.ctx.currentTime - started) / (beat * 2));
+			this.set({ filter: 0.15 + 0.6 * p });
+		}, 30);
+		this.holds.filter = { value, timer };
+	}
+
+	/** Held: an echo on the beat; let go: it rings out */
+	echoHold(on: boolean) {
+		if (on) {
+			this.holds.echo ??= { value: this.state.echo };
+			this.set({ echo: 0.75 });
+		} else {
+			this.set({ echo: this.holds.echo?.value ?? 0 });
+			delete this.holds.echo;
+		}
+	}
+
+	/** Held: a loop roll of some beats; let go: the song goes on where it would have been */
+	roll(beats: number, on: boolean) {
+		if (!this.buffer || !this.state.playing) return;
+		if (on) {
+			this.holds.roll = {
+				value: beats,
+				slip: { pos: this.position(), ctx: this.ctx.currentTime }
+			};
+			if (this.state.loop) this.exitLoop();
+			const pos = this.position();
+			const beat = sectionAt(this.grid, pos)?.beat ?? 0.5;
+			const start = beatFloor(this.grid, pos);
+			this.setLoopRange(start, start + beats * beat, beats);
+		} else {
+			const slip = this.holds.roll?.slip;
+			delete this.holds.roll;
+			this.exitLoop();
+			if (slip) this.seek(slip.pos + (this.ctx.currentTime - slip.ctx) * this.rate);
+		}
+	}
+
+	/** A record stopping: slows down to a halt */
+	brake() {
+		if (!this.state.playing) return;
+		const started = this.ctx.currentTime;
+		const timer = setInterval(() => {
+			const p = (this.ctx.currentTime - started) / 1.1;
+			if (p >= 1) {
+				clearInterval(timer);
+				this.pause();
+				this.setBend(0);
+				return;
+			}
+			this.setBend(-p * 0.98);
+		}, 20);
 	}
 
 	/** For echo out: the song itself off, its echo on */
@@ -658,6 +803,8 @@ export interface TransitionState {
 	/** Audio clock times */
 	start: number;
 	end: number;
+	/** One beat (s, real time) */
+	beat: number;
 }
 
 export interface AutoDjState {
@@ -680,6 +827,8 @@ export interface DjState {
 	auto: AutoDjState;
 	recording: boolean;
 	recordedSeconds: number;
+	hype: boolean;
+	glide: boolean;
 }
 
 export const dj = writable<DjState | null>(null);
@@ -688,6 +837,7 @@ class Mixer {
 	ctx: AudioContext;
 	decks: Record<DeckId, Deck>;
 	private master: GainNode;
+	private bus!: GainNode;
 	private recordGain!: GainNode;
 	readonly analyser: AnalyserNode;
 	private stream: MediaStreamAudioDestinationNode;
@@ -697,7 +847,7 @@ class Mixer {
 	crossfader = 0.5;
 	masterLevel = 0.85;
 	transition: TransitionState | null = null;
-	transitionType: TransitionType = 'bassswap';
+	transitionType: TransitionType = 'smart';
 	transitionBars = 16;
 	auto: AutoDjState = { on: false, queue: [], index: -1, source: '' };
 	private timer: ReturnType<typeof setInterval>;
@@ -708,6 +858,7 @@ class Mixer {
 		const ctx = audioContext();
 		this.ctx = ctx;
 		const bus = ctx.createGain();
+		this.bus = bus;
 		this.master = ctx.createGain();
 		const limiter = ctx.createDynamicsCompressor();
 		limiter.threshold.value = -1.5;
@@ -740,6 +891,10 @@ class Mixer {
 		for (const deck of Object.values(this.decks)) {
 			// The music player and the DJ mode don't play at the same time
 			deck.onPlay = () => get(songQueue).audio?.pause();
+			deck.beforePlay = (d) => {
+				const master = this.other(d.id);
+				if (d.state.synced && master.state.playing) d.alignPaused(master);
+			};
 		}
 		this.applyCrossfader();
 		this.applyMaster();
@@ -762,6 +917,8 @@ class Mixer {
 				transitionType: this.transitionType,
 				transitionBars: this.transitionBars,
 				auto: this.auto,
+				hype: this.hype,
+				glide: this.glide,
 				recording: !!this.recorder,
 				recordedSeconds: this.recorder ? this.ctx.currentTime - this.recordStart : 0
 			});
@@ -819,6 +976,16 @@ class Mixer {
 		this.emit();
 	}
 
+	/** Riser and reverb in mixes */
+	hype = true;
+	/** After a mix, the new song glides back to its own tempo */
+	glide = true;
+
+	setOptions(options: { hype?: boolean; glide?: boolean }) {
+		Object.assign(this, options);
+		this.emit();
+	}
+
 	/** The deck that's heard: the playing one (the louder side if both play) */
 	leading(): Deck | null {
 		const { A, B } = this.decks;
@@ -828,66 +995,158 @@ class Mixer {
 		return null;
 	}
 
+	/** How well a song fits after another: the tempo change it needs */
+	compat(from: Deck, to: Deck) {
+		const match = to.matchRate(from);
+		if (!match) return { rating: 'clash' as const, change: null, factor: 1 };
+		const change = match.rate - 1;
+		const size = Math.abs(change);
+		const rating = size <= 0.03 ? 'perfect' : size <= 0.07 ? 'good' : 'tricky';
+		return { rating: rating as 'perfect' | 'good' | 'tricky', change, factor: match.factor };
+	}
+
 	/**
-	 * Mixes from the playing deck to the other one: matches its tempo, starts it on the next
-	 * bar of the playing one (from its cue) and blends them over some bars
+	 * How a mix goes: its kind and length (Smart picks them from how well the songs fit),
+	 * when it starts in the playing song (on its next bar, or phrase if that's close) and
+	 * where the new song starts, so that its drop (kiai) comes when the mix is done
 	 */
+	plan(from: Deck, to: Deck, type = this.transitionType, bars = this.transitionBars) {
+		const fit = this.compat(from, to);
+		if (type === 'smart') {
+			const size = Math.abs(fit.change ?? 1);
+			[type, bars] =
+				fit.rating === 'clash' ? ['echo', 4] : size <= 0.06 ? ['bassswap', 16] : ['filter', 8];
+		}
+		if (
+			fit.rating === 'clash' &&
+			(type === 'bassswap' || type === 'crossfade' || type === 'filter')
+		) {
+			type = 'echo';
+			bars = Math.min(bars, 4);
+		}
+		if (type === 'cut') bars = 1;
+		const pos = from.position();
+		const section = sectionAt(from.grid, pos);
+		const meter = section?.meter ?? 4;
+		const bar = (section?.beat ?? 0.5) * meter;
+		// On a phrase (8 bars) if one comes within 4 bars, else on the next bar
+		let startAt = nextDownbeat(from.grid, pos, 0.15);
+		if (section && type !== 'cut' && type !== 'echo') {
+			const phrase = bar * 8;
+			const nextPhrase = section.time + Math.ceil((pos + 0.15 - section.time) / phrase) * phrase;
+			if (nextPhrase - pos <= bar * 4 + 0.01) startAt = nextPhrase;
+		}
+		// The new song: from its cue, or so its first drop lands when the mix is done
+		const toSection = sectionAt(to.grid, to.state.cue);
+		const toBar = (toSection?.beat ?? 0.5) * (toSection?.meter ?? 4);
+		const base = to.state.hotCues[0] ?? to.state.cue;
+		let inPoint = base;
+		const drop = to.state.kiai.find((k) => k.start > base + toBar)?.start;
+		if (drop !== undefined) {
+			if (type === 'cut' || type === 'echo') inPoint = drop - toBar;
+			else {
+				const lead = drop - bars * toBar;
+				// Not skipping more than a little intro
+				if (lead >= base && lead - base <= 24 * toBar) inPoint = lead;
+			}
+		}
+		if (to.grid.length && inPoint !== base) inPoint = Math.max(base, beatRound(to.grid, inPoint));
+		return { type, bars, startAt, inPoint, fit };
+	}
+
+	/** Mixes from the playing deck to the other one (see plan) */
 	mix(type = this.transitionType, bars = this.transitionBars) {
 		const from = this.leading();
 		if (!from || this.transition) return false;
 		const to = this.other(from.id);
 		if (!to.buffer) return false;
+		const plan = this.plan(from, to, type, bars);
 		const match = to.matchRate(from);
-		// Too different to beat-match: a quick echo out or cut works best
-		if (!match && (type === 'bassswap' || type === 'crossfade' || type === 'filter')) type = 'echo';
-		if (match) to.setTempo(match.rate - 1, true);
+		if (match && plan.fit.rating !== 'clash') {
+			to.setTempo(match.rate - 1, true);
+			to.state = { ...to.state, synced: true };
+			from.state = { ...from.state, synced: false };
+		}
 		const section = sectionAt(from.grid, from.position());
 		const beatSeconds = (section?.beat ?? 0.5) / from.rate;
 		const meter = section?.meter ?? 4;
-		let start = this.ctx.currentTime + 0.05;
+		const pos = from.position();
+		const start = this.ctx.currentTime + Math.max(0.05, (plan.startAt - pos) / from.rate);
 		if (!to.state.playing) {
-			if (match && section) {
-				// On the next bar of the playing song
-				const pos = from.position();
-				const downbeat = nextDownbeat(from.grid, pos, 0.15);
-				start = this.ctx.currentTime + (downbeat - pos) / from.rate;
-			}
-			to.seek(to.state.hotCues[0] ?? to.state.cue);
+			to.seek(plan.inPoint);
 			to.play(start);
 		} else if (match) {
 			to.alignTo(from, match.factor === 1);
 		}
-		const length = type === 'cut' ? beatSeconds : bars * meter * beatSeconds;
+		const length = plan.type === 'cut' ? beatSeconds : plan.bars * meter * beatSeconds;
 		this.before[from.id] = {
 			eq: from.state.eq,
 			kill: from.state.kill,
 			filter: from.state.filter,
 			echo: from.state.echo,
+			reverb: from.state.reverb,
 			volume: from.state.volume
 		};
-		this.before[to.id] = {
-			eq: to.state.eq,
-			kill: to.state.kill,
-			filter: to.state.filter,
-			echo: to.state.echo
-		};
-		to.set({ volume: Math.max(to.state.volume, 0.9) });
+		this.before[to.id] = { eq: to.state.eq, filter: to.state.filter };
+		to.set({
+			volume: Math.max(to.state.volume, 0.9),
+			kill: { low: false, mid: false, high: false }
+		});
 		this.transition = {
 			from: from.id,
 			to: to.id,
-			type,
-			bars,
+			type: plan.type,
+			bars: plan.bars,
 			start,
-			end: start + length
+			end: start + length,
+			beat: beatSeconds
 		};
+		if (this.hype && plan.bars >= 4 && plan.type !== 'cut') {
+			// Up to the swap (the middle) of a bass swap, else most of the mix
+			const until = plan.type === 'bassswap' ? 0.5 : plan.type === 'echo' ? 0.3 : 0.65;
+			this.riser(start, start + length * until);
+		}
 		this.emit();
 		return true;
 	}
+
+	/** A noise sweep rising into a moment (when the new song takes over) */
+	private riser(from: number, to: number) {
+		const ctx = this.ctx;
+		const length = Math.max(0.5, to - from);
+		const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * (length + 0.3)), ctx.sampleRate);
+		const data = buffer.getChannelData(0);
+		for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+		const source = ctx.createBufferSource();
+		source.buffer = buffer;
+		const band = ctx.createBiquadFilter();
+		band.type = 'bandpass';
+		band.Q.value = 1.4;
+		band.frequency.setValueAtTime(300, from);
+		band.frequency.exponentialRampToValueAtTime(9000, to);
+		const gain = ctx.createGain();
+		gain.gain.setValueAtTime(0.0001, from);
+		gain.gain.exponentialRampToValueAtTime(0.16, to);
+		gain.gain.exponentialRampToValueAtTime(0.0001, to + 0.25);
+		source.connect(band).connect(gain).connect(this.bus);
+		source.start(from);
+		source.stop(to + 0.3);
+		this.risers.push(source);
+	}
+	private risers: AudioBufferSourceNode[] = [];
 
 	/** Stops a mix where it is */
 	cancelMix() {
 		if (!this.transition) return;
 		this.decks[this.transition.from].setDry(1);
+		for (const source of this.risers) {
+			try {
+				source.stop();
+			} catch {
+				// Over already
+			}
+		}
+		this.risers = [];
 		this.transition = null;
 		this.emit();
 	}
@@ -898,34 +1157,63 @@ class Mixer {
 		const from = this.decks[t.from];
 		const to = this.decks[t.to];
 		const now = this.ctx.currentTime;
-		const p = Math.max(0, Math.min(1, (now - t.start) / (t.end - t.start || 1)));
 		if (now < t.start) return;
+		const p = Math.max(0, Math.min(1, (now - t.start) / (t.end - t.start || 1)));
 		const fromSide = t.from === 'A' ? 0 : 1;
 		const toSide = 1 - fromSide;
-		const lerp = (a: number, b: number, x: number) => a + (b - a) * Math.max(0, Math.min(1, x));
+		const clamp = (x: number) => Math.max(0, Math.min(1, x));
+		const lerp = (a: number, b: number, x: number) => a + (b - a) * clamp(x);
 		const was = this.before;
+		const fromEq = { ...(was[t.from]?.eq ?? { low: 0, mid: 0, high: 0 }) };
+		const toEq = { ...(was[t.to]?.eq ?? { low: 0, mid: 0, high: 0 }) };
+		/** One beat as a part of the mix */
+		const beat = t.beat / (t.end - t.start || 1);
 		switch (t.type) {
-			case 'crossfade':
-				this.setCrossfader(lerp(fromSide, toSide, p));
-				break;
 			case 'bassswap': {
-				// In the middle both play; the basslines swap on the middle bar
-				this.setCrossfader(p < 0.5 ? lerp(fromSide, 0.5, p * 2) : lerp(0.5, toSide, (p - 0.5) * 2));
-				const swapped = p >= 0.5;
-				if (to.state.kill.low === swapped || from.state.kill.low !== swapped) {
-					to.set({ kill: { ...to.state.kill, low: !swapped } });
-					from.set({ kill: { ...from.state.kill, low: swapped } });
-				}
+				// The new one comes in without its bass and highs open up; on the middle bar
+				// the basslines swap; then the old one's mids and highs fade and it's gone
+				const swap = clamp((p - 0.5) / beat);
+				to.set({
+					eq: {
+						low: lerp(EQ_MIN, toEq.low, swap),
+						mid: lerp(-8, toEq.mid, p / 0.5),
+						high: lerp(-14, toEq.high, p / 0.4)
+					}
+				});
+				from.set({
+					eq: {
+						low: lerp(fromEq.low, EQ_MIN, swap),
+						mid: lerp(fromEq.mid, -10, (p - 0.55) / 0.4),
+						high: lerp(fromEq.high, -16, (p - 0.6) / 0.35)
+					},
+					reverb: this.hype ? lerp(0, 0.35, (p - 0.75) / 0.25) : from.state.reverb
+				});
+				this.setCrossfader(
+					p < 0.85 ? lerp(fromSide, 0.5, p / 0.2) : lerp(0.5, toSide, (p - 0.85) / 0.15)
+				);
 				break;
 			}
-			case 'filter':
-				from.set({ filter: lerp(was[t.from]?.filter ?? 0, 0.85, p) });
-				to.set({ filter: lerp(-0.8, 0, p / 0.7) });
-				this.setCrossfader(lerp(fromSide, toSide, (p - 0.3) / 0.7));
+			case 'crossfade': {
+				// Without two basslines at once: the new one's bass comes as the old one's goes
+				to.set({ eq: { ...toEq, low: lerp(EQ_MIN, toEq.low, (p - 0.4) / 0.2) } });
+				from.set({ eq: { ...fromEq, low: lerp(fromEq.low, EQ_MIN, (p - 0.4) / 0.2) } });
+				this.setCrossfader(lerp(fromSide, toSide, p));
 				break;
+			}
+			case 'filter': {
+				// The old one thins out (high-pass), the new one opens up (low-pass)
+				const sweep = clamp(p / 0.9);
+				from.set({
+					filter: lerp(was[t.from]?.filter ?? 0, 0.8, sweep * sweep),
+					reverb: this.hype ? lerp(0, 0.4, (p - 0.6) / 0.4) : from.state.reverb
+				});
+				to.set({ filter: lerp(-0.75, 0, p / 0.65) });
+				this.setCrossfader(lerp(fromSide, toSide, (p - 0.2) / 0.75));
+				break;
+			}
 			case 'echo':
 				// The old one echoes for a moment, then stops: only its echo rings out
-				from.set({ echo: lerp(0, 0.85, p / 0.3) });
+				from.set({ echo: lerp(0, 0.85, p / 0.3), reverb: this.hype ? lerp(0, 0.4, p / 0.3) : 0 });
 				this.setCrossfader(lerp(fromSide, 0.5, p / 0.3));
 				if (p >= 0.3 && from.state.playing) from.pause();
 				break;
@@ -936,12 +1224,16 @@ class Mixer {
 		if (p >= 1) this.finishMix();
 	}
 
+	/** After a mix, the new song's tempo goes back to its own over a few bars */
+	private glideState: { deck: Deck; from: number; start: number; end: number } | null = null;
+
 	private finishMix() {
 		const t = this.transition!;
 		const from = this.decks[t.from];
 		const to = this.decks[t.to];
 		const echo = t.type === 'echo';
 		this.transition = null;
+		this.risers = [];
 		// The old deck stops and gets its sound back; after an echo out, once it rang out
 		const done = () => {
 			this.setCrossfader(t.to === 'A' ? 0 : 1);
@@ -950,14 +1242,40 @@ class Mixer {
 			from.set({
 				...this.before[t.from],
 				echo: 0,
+				reverb: this.before[t.from]?.reverb ?? 0,
 				kill: { low: false, mid: false, high: false },
 				filter: 0
 			});
 		};
 		if (echo) setTimeout(done, 3000);
 		else done();
-		to.set({ kill: { ...to.state.kill, low: false }, filter: 0 });
+		to.set({ eq: this.before[t.to]?.eq ?? { low: 0, mid: 0, high: 0 }, filter: 0 });
+		// The new song leads now
+		to.unsync();
+		const tempo = to.state.tempo;
+		if (this.glide && Math.abs(tempo) > 0.004 && Math.abs(tempo) <= 0.15) {
+			this.glideState = {
+				deck: to,
+				from: tempo,
+				start: this.ctx.currentTime + t.beat * 4,
+				end: this.ctx.currentTime + t.beat * 36
+			};
+		}
 		this.emit();
+	}
+
+	private stepGlide() {
+		const g = this.glideState!;
+		const now = this.ctx.currentTime;
+		if (now < g.start) return;
+		// A mix (or the user) moved the tempo: it's theirs now
+		if (this.transition) {
+			this.glideState = null;
+			return;
+		}
+		const p = Math.min(1, (now - g.start) / (g.end - g.start));
+		g.deck.setTempo(g.from * (1 - p * p * (3 - 2 * p)), true);
+		if (p >= 1) this.glideState = null;
 	}
 
 	// --- Auto DJ -------------------------------------------------------------------------------
@@ -968,6 +1286,7 @@ class Mixer {
 		if (!playing) {
 			this.auto.index = 0;
 			const deck = this.decks.A;
+			deck.pickedByUser = false;
 			deck.load(queue[0]).then(() => {
 				if (this.auto.on && this.auto.index === 0) deck.play();
 			});
@@ -982,14 +1301,20 @@ class Mixer {
 		this.emit();
 	}
 
-	/** When the playing song should start mixing out: the bars before its end */
-	private mixOutPoint(deck: Deck) {
+	/**
+	 * When the playing song should start mixing out: after its last drop (kiai) if there's
+	 * room for the mix after it, else the bars before its end; on a bar
+	 */
+	private mixOutPoint(deck: Deck, other: Deck) {
 		const duration = deck.state.duration;
 		const section = sectionAt(deck.grid, duration);
 		const bar = (section?.beat ?? 0.5) * (section?.meter ?? 4);
-		const bars = this.transitionType === 'cut' ? 1 : this.transitionBars;
-		// Mixed before the last bar or two, on a bar
-		const at = duration - bar * (bars + 2);
+		const { type, bars } = this.plan(deck, other);
+		const length = (type === 'cut' ? 1 : bars) * bar;
+		let at = duration - length - bar * 2;
+		const lastDrop = deck.state.kiai.at(-1);
+		if (lastDrop && lastDrop.end + length < duration - bar && lastDrop.end > duration * 0.5)
+			at = lastDrop.end - bar;
 		const start = section ? section.time + Math.floor((at - section.time) / bar) * bar : at;
 		return Math.max(deck.state.cue + bar * 4, start);
 	}
@@ -1000,15 +1325,16 @@ class Mixer {
 		if (!this.auto.on || this.autoBusy || this.transition) return;
 		const playing = this.leading();
 		const queue = this.auto.queue;
-		if (!queue.length) return;
-		if (!playing) return;
+		if (!queue.length || !playing) return;
 		const next = this.other(playing.id);
 		const nextIndex = (this.auto.index + 1) % queue.length;
-		// The next song waits on the other deck
-		if (next.state.song?.id !== queue[nextIndex]?.id || next.state.error) {
-			if (next.state.loading) return;
+		// What the user put on the other deck plays next; else the list's next song
+		const userPick = next.pickedByUser && next.state.song && !next.state.error;
+		if (!userPick && (next.state.song?.id !== queue[nextIndex]?.id || next.state.error)) {
+			if (next.state.loading || next.state.playing) return;
 			this.autoBusy = true;
 			try {
+				next.pickedByUser = false;
 				await next.load(queue[nextIndex]);
 			} finally {
 				this.autoBusy = false;
@@ -1016,16 +1342,59 @@ class Mixer {
 			return;
 		}
 		if (next.state.loading || !next.buffer || next.state.playing) return;
-		if (playing.position() >= this.mixOutPoint(playing)) {
+		if (playing.position() >= this.mixOutPoint(playing, next)) {
 			if (this.mix()) {
-				this.auto = { ...this.auto, index: nextIndex };
+				if (!userPick) this.auto = { ...this.auto, index: nextIndex };
+				next.pickedByUser = false;
 				this.emit();
 			}
 		}
 	}
 
+	private lastPhaseCheck = 0;
+
+	/**
+	 * The sync lock: a synced deck keeps the other one's tempo (also when it changes, or
+	 * the song's own tempo does) and stays on its beat, corrected with small tempo pushes
+	 */
+	private keepSync() {
+		const now = this.ctx.currentTime;
+		const checkPhase = now - this.lastPhaseCheck >= 0.2;
+		if (checkPhase) this.lastPhaseCheck = now;
+		for (const deck of Object.values(this.decks)) {
+			if (!deck.state.synced || !deck.buffer) continue;
+			const master = this.other(deck.id);
+			if (!master.buffer || !master.state.playing) {
+				deck.setAutoBend(0);
+				continue;
+			}
+			const match = deck.matchRate(master);
+			if (!match) continue;
+			if (Math.abs(deck.rate - match.rate) > 0.0001) deck.setTempo(match.rate - 1, true);
+			if (!deck.state.playing || deck.userBending || !checkPhase) continue;
+			const beat = (sectionAt(deck.grid, deck.position())?.beat ?? 0.5) / deck.rate;
+			const error = deck.phaseOffset(master, match.factor, match.factor === 1) * beat;
+			if (Math.abs(error) > 0.15) {
+				deck.setAutoBend(0);
+				deck.alignTo(master, match.factor === 1);
+			} else if (Math.abs(error) > 0.004) {
+				// Caught up within about half a second, too little to hear
+				deck.setAutoBend(Math.max(-0.03, Math.min(0.03, error * 2)));
+			} else deck.setAutoBend(0);
+		}
+	}
+
+	/** SYNC on a deck: it follows the other one (again to stop) */
+	syncDeck(id: DeckId) {
+		const deck = this.decks[id];
+		if (deck.state.synced) deck.unsync();
+		else deck.sync(this.other(id));
+	}
+
 	private tick() {
+		this.keepSync();
 		if (this.transition) this.stepTransition();
+		if (this.glideState) this.stepGlide();
 		this.autoStep();
 		if (this.recorder) this.emit();
 	}

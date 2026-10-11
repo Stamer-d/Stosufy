@@ -85,7 +85,8 @@ export class SliderPath {
 
 	constructor(type: string, controls: Point[], length: number) {
 		let points: Point[];
-		if (type === 'P' && controls.length === 3) points = perfectCircle(controls) ?? bezier(controls);
+		// Three points in a line: osu! makes that a straight line
+		if (type === 'P' && controls.length === 3) points = perfectCircle(controls) ?? controls;
 		else if (type === 'C') points = catmull(controls);
 		else if (type === 'L') points = controls;
 		else {
@@ -95,7 +96,8 @@ export class SliderPath {
 			for (let i = 1; i < controls.length; i++) {
 				const p = controls[i];
 				const prev = controls[i - 1];
-				if (p.x === prev.x && p.y === prev.y) {
+				// A repeated point starts a new part, except at the very end (osu!'s rule)
+				if (p.x === prev.x && p.y === prev.y && i < controls.length - 1) {
 					if (segment.length > 1) points.push(...bezier(segment));
 					segment = [p];
 				} else segment.push(p);
@@ -125,7 +127,12 @@ export class SliderPath {
 			cut.push(points[i]);
 			lengths.push(total);
 		}
-		if (length > 0 && total < length && cut.length > 1) {
+		// Shorter than it should be: made longer along its last direction, except (like osu!)
+		// when it ends on a repeated point
+		const last = points[points.length - 1];
+		const beforeLast = points[points.length - 2];
+		const endsTwice = !!beforeLast && last.x === beforeLast.x && last.y === beforeLast.y;
+		if (length > 0 && total < length && cut.length > 1 && !endsTwice) {
 			const a = cut[cut.length - 2];
 			const b = cut[cut.length - 1];
 			const d = dist(a, b) || 1;

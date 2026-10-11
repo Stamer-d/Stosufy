@@ -14,6 +14,75 @@ export const playlistLoadingStatus = writable<Record<string, boolean>>({});
 
 const token = () => get(keyStore).access_token;
 
+// --- Changes to a playlist: one after another, tried again, and checked with the server ----
+
+const queues = new Map<string, Promise<unknown>>();
+const pending = new Map<string, number>();
+const RETRIES = 3;
+
+/** Errors trying again won't fix */
+const final = (error: unknown) =>
+	/not found|already in playlist|not owned/i.test(error instanceof Error ? error.message : '');
+
+/**
+ * Runs a change of a playlist after the ones before it (quick clicks stay in order), tries
+ * it again if the connection hiccups, and once the playlist's changes are done, takes its
+ * songs and count from the server, so what's shown is what's saved
+ */
+function change<T>(playlistId: PlaylistId, run: () => Promise<T>, what: string): Promise<T | null> {
+	const key = String(playlistId);
+	pending.set(key, (pending.get(key) ?? 0) + 1);
+	const job = (queues.get(key) ?? Promise.resolve()).then(async () => {
+		for (let attempt = 0; ; attempt++) {
+			try {
+				return await run();
+			} catch (error) {
+				if (final(error) || attempt >= RETRIES - 1) {
+					console.error(`Could not ${what}:`, error);
+					showToast(
+						`Couldn't ${what}. The playlist shows what's saved.`,
+						'icon-[mingcute--warning-line]'
+					);
+					failed.add(key);
+					return null;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+			}
+		}
+	});
+	queues.set(
+		key,
+		job.catch(() => null)
+	);
+	job.finally(() => {
+		const left = (pending.get(key) ?? 1) - 1;
+		pending.set(key, left);
+		if (left === 0) {
+			queues.delete(key);
+			refreshFromServer(playlistId);
+		}
+	});
+	return job;
+}
+
+const failed = new Set<string>();
+
+/** After changes: the playlist's count (and after a failure its songs) from the server */
+async function refreshFromServer(playlistId: PlaylistId) {
+	const key = String(playlistId);
+	try {
+		const saved = (await api.getPlaylists(token())).find((p) => p.id == playlistId);
+		if (saved) {
+			playlists.update((list) =>
+				list.map((p) => (p.id == playlistId ? { ...p, song_amount: saved.song_amount } : p))
+			);
+		}
+		if (failed.delete(key)) await getPlaylistSongs(playlistId, true);
+	} catch (error) {
+		console.warn('Could not check the playlist with the server:', error);
+	}
+}
+
 export async function getPlaylists(accessToken: string): Promise<Playlist[]> {
 	return api.getPlaylists(accessToken);
 }
@@ -65,12 +134,12 @@ export async function addSongToPlaylist(playlistId: PlaylistId, mapSetData: MapS
 		};
 	});
 
-	const songInfo = await api.addSongToPlaylist(
-		token(),
-		Number(playlistId),
-		Number(setId),
-		Number(mapId)
+	const songInfo = await change(
+		playlistId,
+		() => api.addSongToPlaylist(token(), Number(playlistId), Number(setId), Number(mapId)),
+		`add "${mapSetData.title}" to the playlist`
 	);
+	if (!songInfo) return null;
 
 	playlistSongsCache.update((cache) => {
 		if (!cache[playlistId] || !cache[playlistId].songs) {
@@ -117,7 +186,11 @@ export async function removeSongFromPlaylist(playlistId: PlaylistId, songId: num
 			[playlistId]: { songs: updatedSongs }
 		};
 	});
-	await api.removeSongFromPlaylist(token(), Number(playlistId), songId);
+	await change(
+		playlistId,
+		() => api.removeSongFromPlaylist(token(), Number(playlistId), songId),
+		'remove the song'
+	);
 }
 
 /** Moves the song at index `from` of a playlist to index `to` (drag and drop) */
@@ -139,13 +212,11 @@ export async function moveSongInPlaylist(playlistId: PlaylistId, from: number, t
 			}))
 		}
 	}));
-	try {
-		await api.moveSongInPlaylist(token(), Number(playlistId), moved.songInfo.id, target);
-	} catch (error) {
-		console.error('Could not move the song:', error);
-		showToast("Couldn't save the new order", 'icon-[mingcute--warning-line]');
-		await getPlaylistSongs(playlistId, true);
-	}
+	await change(
+		playlistId,
+		() => api.moveSongInPlaylist(token(), Number(playlistId), moved.songInfo.id, target),
+		'save the new order'
+	);
 }
 
 export async function getPlaylistSongs(

@@ -9,12 +9,21 @@
 	import Mixer from './Mixer.svelte';
 	import Waveform from './Waveform.svelte';
 	import Browser from './Browser.svelte';
+	import EasyDeck from './EasyDeck.svelte';
+	import EasyMix from './EasyMix.svelte';
+	import { userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { dj, djMixer, djOpen } from '#lib/dj/engine.ts';
 	import { keybindsPaused } from '#lib/stores/keybinds.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 
 	const COLORS = { A: '#38bdf8', B: '#fb923c' };
 	const mixer = djMixer();
+	/** Easy (big decks, one mix button, effect pads) or Pro (all the controls) */
+	const MODES = [
+		{ value: false, label: 'Easy' },
+		{ value: true, label: 'Pro' }
+	];
+	let pro = $derived($userSettings.settings?.djPro ?? false);
 	mixer.emit();
 
 	onMount(() => keybindsPaused.set(true));
@@ -102,6 +111,25 @@
 					Q/P play, A/L cue, 1–4/7–0 hot cues, Z/M sync, Space mix, ←→ crossfader
 				</span>
 				<div class="ml-auto flex items-center gap-2">
+					<div
+						class="flex p-1 rounded-full bg-white/[0.06] ring-1 ring-white/10"
+						role="group"
+						aria-label="Controls"
+					>
+						{#each MODES as { value, label } (label)}
+							<button
+								aria-pressed={pro === value}
+								title={value
+									? 'All the controls: EQ, loops, hot cues, tempo'
+									: 'Big decks, one mix button and effect pads'}
+								class="h-6 px-3 rounded-full text-xs font-bold cursor-pointer transition {pro ===
+								value
+									? 'bg-white text-black'
+									: 'text-white/60 hover:text-white'}"
+								onclick={() => updateUserSettings({ djPro: value })}>{label}</button
+							>
+						{/each}
+					</div>
 					<button
 						title={$dj.recording ? 'Stop recording and save the mix' : 'Record the mix'}
 						aria-pressed={$dj.recording}
@@ -133,23 +161,43 @@
 				<Waveform deck={mixer.decks.B} color={COLORS.B} height={96} />
 			</div>
 
-			<div class="flex gap-2 items-stretch">
-				<Deck
-					deck={mixer.decks.A}
-					other={mixer.decks.B}
-					state={$dj.A}
-					color={COLORS.A}
-					side="left"
-				/>
-				<Mixer {mixer} state={$dj} colors={COLORS} />
-				<Deck
-					deck={mixer.decks.B}
-					other={mixer.decks.A}
-					state={$dj.B}
-					color={COLORS.B}
-					side="right"
-				/>
-			</div>
+			{#if pro}
+				<div class="flex gap-2 items-stretch">
+					<Deck
+						deck={mixer.decks.A}
+						other={mixer.decks.B}
+						state={$dj.A}
+						color={COLORS.A}
+						side="left"
+					/>
+					<Mixer {mixer} state={$dj} colors={COLORS} />
+					<Deck
+						deck={mixer.decks.B}
+						other={mixer.decks.A}
+						state={$dj.B}
+						color={COLORS.B}
+						side="right"
+					/>
+				</div>
+			{:else}
+				<div class="flex gap-2 items-stretch">
+					<EasyDeck
+						deck={mixer.decks.A}
+						other={mixer.decks.B}
+						state={$dj.A}
+						color={COLORS.A}
+						side="left"
+					/>
+					<EasyMix {mixer} state={$dj} colors={COLORS} />
+					<EasyDeck
+						deck={mixer.decks.B}
+						other={mixer.decks.A}
+						state={$dj.B}
+						color={COLORS.B}
+						side="right"
+					/>
+				</div>
+			{/if}
 
 			<Browser {mixer} state={$dj} colors={COLORS} />
 		</div>

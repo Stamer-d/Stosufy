@@ -7,6 +7,7 @@
 	import { joinSession } from '#lib/stores/listen.ts';
 	import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 	import { page } from '$app/state';
+	import { beforeNavigate, afterNavigate } from '$app/navigation';
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
@@ -29,6 +30,24 @@
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
 
 	let { children } = $props();
+
+	// The pages scroll in one container: each page keeps where it was scrolled to (back and
+	// forward come back there), a new page starts at the top. Without this, a page opened
+	// after the lyrics (which scroll along) showed up somewhere in the middle.
+	let scroller = $state();
+	const scrolled = new Map();
+	beforeNavigate(({ from }) => {
+		if (from && scroller) scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
+	});
+	afterNavigate(({ from, to, type }) => {
+		if (!scroller || !to) return;
+		const restore = type === 'popstate' ? scrolled.get(to.url.pathname + to.url.search) : 0;
+		// Only a new page, not a change of the same page's address (like a search)
+		if (type !== 'popstate' && from?.url.pathname === to.url.pathname) return;
+		requestAnimationFrame(() => {
+			if (scroller) scroller.scrollTop = restore ?? 0;
+		});
+	});
 
 	let showUI = $state(false);
 
@@ -112,6 +131,7 @@
 			</aside>
 
 			<main
+				bind:this={scroller}
 				class="flex-1 min-w-0 rounded-lg {panel} overflow-y-auto transition-colors"
 				data-scroll-container
 			>

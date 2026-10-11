@@ -4,6 +4,7 @@
 	// (playing); scroll to zoom.
 	import { onMount } from 'svelte';
 	import { beatsIn } from '#lib/dj/grid.ts';
+	import { songDrop } from '#lib/dj/library.ts';
 
 	let { deck, color = '#38bdf8', height = 110 } = $props();
 
@@ -153,7 +154,8 @@
 
 <canvas
 	bind:this={canvas}
-	class="w-full block cursor-grab active:cursor-grabbing touch-none"
+	use:songDrop={(song) => deck.userLoad(song)}
+	class="w-full block cursor-grab active:cursor-grabbing touch-none data-[dropping=true]:brightness-150"
 	style="height: {height}px"
 	onpointerdown={down}
 	onpointermove={move}

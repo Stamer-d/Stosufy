@@ -272,6 +272,108 @@ export function createGameplayRenderer(
 
 	// --- Sliders --------------------------------------------------------------------------
 
+	// The body like osu!'s legacy sliders (LegacySliderBody): a thin shadow at the edge, the
+	// border, then the track, the combo colour going lighter towards the middle, at 70%. Drawn
+	// once per slider into a picture of its own (again when the playfield's size changes).
+	const bodies = new Map<
+		HitObject,
+		{ picture: HTMLCanvasElement; x: number; y: number; scale: number }
+	>();
+	let layer: HTMLCanvasElement | null = null;
+	const BODY_STEPS = 24;
+
+	function bodyPicture(object: HitObject, colour: Colour) {
+		const scale = transform.scale;
+		const cached = bodies.get(object);
+		if (cached && cached.scale === scale) return cached;
+		// Old ones (of sliders long gone) aren't needed any more
+		if (bodies.size > 40) bodies.delete(bodies.keys().next().value!);
+		const points = object.slider!.path.points;
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		for (const p of points) {
+			minX = Math.min(minX, p.x);
+			minY = Math.min(minY, p.y);
+			maxX = Math.max(maxX, p.x);
+			maxY = Math.max(maxY, p.y);
+		}
+		const pad = radius + 2;
+		const x = minX - pad;
+		const y = minY - pad;
+		const width = Math.min(4096, Math.ceil((maxX - minX + pad * 2) * scale));
+		const height = Math.min(4096, Math.ceil((maxY - minY + pad * 2) * scale));
+		const picture = cached?.picture ?? document.createElement('canvas');
+		picture.width = Math.max(1, width);
+		picture.height = Math.max(1, height);
+		layer ??= document.createElement('canvas');
+		layer.width = picture.width;
+		layer.height = picture.height;
+
+		const trace = (c: CanvasRenderingContext2D, lineWidth: number, style: string) => {
+			c.lineWidth = lineWidth;
+			c.strokeStyle = style;
+			c.beginPath();
+			c.moveTo(points[0].x, points[0].y);
+			for (const p of points) c.lineTo(p.x, p.y);
+			// A slider that's just a point still shows as a circle
+			if (points.length < 2) c.lineTo(points[0].x + 0.01, points[0].y);
+			c.stroke();
+		};
+		const setup = (c: CanvasRenderingContext2D) => {
+			c.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
+			c.lineCap = 'round';
+			c.lineJoin = 'round';
+		};
+
+		const SHADOW = 5 / 64;
+		const BORDER = 0.1875;
+		const c = picture.getContext('2d')!;
+		c.setTransform(1, 0, 0, 1, 0, 0);
+		c.clearRect(0, 0, picture.width, picture.height);
+		setup(c);
+		trace(c, radius * 2 * (1 - SHADOW), css(skin.sliderBorder ?? [255, 255, 255]));
+		// The shadow just outside the border, fading out towards the edge
+		c.globalCompositeOperation = 'destination-over';
+		trace(c, radius * 2 * (1 - SHADOW / 2), 'rgba(0, 0, 0, 0.16)');
+		trace(c, radius * 2, 'rgba(0, 0, 0, 0.1)');
+		c.globalCompositeOperation = 'destination-out';
+		trace(c, radius * 2 * (1 - BORDER), 'black');
+		c.globalCompositeOperation = 'source-over';
+
+		// The track, solid on its own layer, then put in at 70%
+		const accent = skin.sliderTrack ?? colour;
+		const outer = accent.map((v) => v / 1.1);
+		const inner = accent.map((v) => Math.min(255, v * 1.125 + 0.25 * 255));
+		const l = layer.getContext('2d')!;
+		l.setTransform(1, 0, 0, 1, 0, 0);
+		l.clearRect(0, 0, layer.width, layer.height);
+		setup(l);
+		for (let step = 0; step < BODY_STEPS; step++) {
+			const t = step / BODY_STEPS;
+			const position = BORDER + (1 - BORDER) * t;
+			const mix = outer.map((v, i) => Math.round(v + (inner[i] - v) * t)) as Colour;
+			trace(l, Math.max(0.5, radius * 2 * (1 - position)), css(mix));
+		}
+		c.setTransform(1, 0, 0, 1, 0, 0);
+		c.globalAlpha = 0.7;
+		c.drawImage(layer, 0, 0);
+		c.globalAlpha = 1;
+
+		const made = { picture, x, y, scale };
+		bodies.set(object, made);
+		return made;
+	}
+
+	function drawSliderBody(object: HitObject, colour: Colour, alpha: number) {
+		const { picture, x, y, scale } = bodyPicture(object, colour);
+		ctx.save();
+		ctx.globalAlpha = Math.min(1, alpha);
+		ctx.drawImage(picture, x, y, picture.width / scale, picture.height / scale);
+		ctx.restore();
+	}
+
 	function drawSlider(object: HitObject, time: number, state: ObjectState) {
 		const slider = object.slider!;
 		// The body; with Hidden it fades out over the slider's length (eased out)
@@ -284,24 +386,7 @@ export function createGameplayRenderer(
 			alpha *= (1 - t) ** 2;
 		}
 		const colour = colourOf(object);
-		if (alpha > 0) {
-			const points = slider.path.points;
-			ctx.save();
-			ctx.globalAlpha = alpha * 0.9;
-			ctx.lineCap = 'round';
-			ctx.lineJoin = 'round';
-			ctx.beginPath();
-			ctx.moveTo(points[0].x, points[0].y);
-			for (const p of points) ctx.lineTo(p.x, p.y);
-			ctx.strokeStyle = css(skin.sliderBorder ?? [255, 255, 255]);
-			ctx.lineWidth = radius * 2 * 0.95;
-			ctx.stroke();
-			const track = skin.sliderTrack ?? (colour.map((c) => Math.round(c * 0.4)) as Colour);
-			ctx.strokeStyle = css(track);
-			ctx.lineWidth = radius * 2 * 0.8;
-			ctx.stroke();
-			ctx.restore();
-		}
+		if (alpha > 0) drawSliderBody(object, colour, alpha);
 
 		const span = time < object.time ? 0 : Math.floor((time - object.time) / slider.spanDuration);
 		const end = slider.path.at(1);
@@ -532,6 +617,10 @@ export function createGameplayRenderer(
 
 	// --- Follow points --------------------------------------------------------------------
 
+	// Like osu!'s FollowPointConnection: every 32 px from 48 px on, each point fading in
+	// (growing in from 1.5× and sliding into place) 800 ms before the cursor should pass it
+	const followPreempt = 800 * Math.min(1, preempt / 450);
+	const FOLLOW_FADE = 400;
 	const followLines = objects.slice(1).flatMap((to, i) => {
 		const from = objects[i];
 		if (to.combo === 1 || from.kind === 'spinner' || to.kind === 'spinner') return [];
@@ -540,43 +629,48 @@ export function createGameplayRenderer(
 			: { x: from.x, y: from.y };
 		const dx = to.x - start.x;
 		const dy = to.y - start.y;
-		const length = Math.hypot(dx, dy);
-		if (length < FOLLOW_POINT_SPACING * 2.5) return [];
+		const length = Math.trunc(Math.hypot(dx, dy));
+		if (length - FOLLOW_POINT_SPACING <= FOLLOW_POINT_SPACING * 1.5) return [];
 		return [{ from, to, start, dx, dy, length, angle: Math.atan2(dy, dx) }];
 	});
 
-	// By the time the line ends (its next object), for finding the visible ones
+	// By the time the line is gone (its next object), for finding the visible ones
 	const followTimes = followLines.map((line) => ({ time: line.to.time }));
 	const longest = objects.reduce((max, o) => Math.max(max, o.endTime - o.time), 0);
+	const easeOut = (t: number) => 1 - (1 - t) ** 2;
 
 	function drawFollowPoints(time: number) {
-		const first = Math.max(0, lastAtOrBefore(followTimes, time - 1000));
+		const first = Math.max(0, lastAtOrBefore(followTimes, time - FOLLOW_FADE - 100));
+		const picture = element('followpoint');
 		for (let l = first; l < followLines.length; l++) {
 			const line = followLines[l];
-			if (line.from.endTime - preempt > time) break;
-			if (line.to.time < time) continue;
+			if (line.from.endTime - followPreempt > time) break;
+			if (line.to.time + FOLLOW_FADE < time) continue;
+			const duration = line.to.time - line.from.endTime;
 			for (
 				let d = FOLLOW_POINT_SPACING * 1.5;
 				d < line.length - FOLLOW_POINT_SPACING;
 				d += FOLLOW_POINT_SPACING
 			) {
 				const fraction = d / line.length;
-				const at = line.from.endTime + fraction * (line.to.time - line.from.endTime);
-				const fadeInAt = at - preempt;
-				if (time < fadeInAt) continue;
-				const alpha = clamp01((time - fadeInAt) / 400) * (1 - clamp01((time - at) / 400));
+				const fadeOut = line.from.endTime + fraction * duration;
+				const fadeIn = fadeOut - followPreempt;
+				if (time < fadeIn || time > fadeOut + FOLLOW_FADE) continue;
+				const progress = clamp01((time - fadeIn) / FOLLOW_FADE);
+				const eased = easeOut(progress);
+				const alpha = progress * (1 - clamp01((time - fadeOut) / FOLLOW_FADE));
 				if (alpha <= 0) continue;
-				const x = line.start.x + line.dx * fraction;
-				const y = line.start.y + line.dy * fraction;
-				if (
-					!image(element('followpoint'), x, y, PLAYFIELD_PIXEL, alpha, undefined, '', line.angle)
-				) {
+				const at = fraction - 0.1 * (1 - eased);
+				const x = line.start.x + line.dx * at;
+				const y = line.start.y + line.dy * at;
+				const size = circleScale * (1.5 - 0.5 * eased);
+				if (!image(picture, x, y, size, alpha, undefined, '', line.angle)) {
 					ctx.save();
 					ctx.globalAlpha = alpha * 0.8;
 					ctx.translate(x, y);
 					ctx.rotate(line.angle);
 					ctx.fillStyle = 'white';
-					ctx.fillRect(-6, -1.5, 12, 3);
+					ctx.fillRect(-8 * size, -2 * size, 16 * size, 4 * size);
 					ctx.restore();
 				}
 			}

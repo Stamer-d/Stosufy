@@ -110,8 +110,9 @@ export function parseGameplay(content: string, mods = 0): GameplayBeatmap | null
 		const found = Number(value(parsed.Difficulty, key));
 		return isFinite(found) && value(parsed.Difficulty, key) !== undefined ? found : fallback;
 	};
+	// osu! keeps these as floats: the same rounding decides stacking at the edges
 	const adjust = (v: number, hardRock: number) =>
-		mods & MOD.HardRock ? Math.min(10, v * hardRock) : mods & MOD.Easy ? v / 2 : v;
+		Math.fround(mods & MOD.HardRock ? Math.min(10, v * hardRock) : mods & MOD.Easy ? v / 2 : v);
 	const rawOd = number('OverallDifficulty', 5);
 	const od = adjust(rawOd, 1.4);
 	const ar = adjust(number('ApproachRate', rawOd), 1.4);
@@ -119,9 +120,11 @@ export function parseGameplay(content: string, mods = 0): GameplayBeatmap | null
 	const multiplier = number('SliderMultiplier', 1.4) || 1.4;
 	const tickRate = number('SliderTickRate', 1) || 1;
 	// osu!'s formulas
-	const preempt = range(ar, 1800, 1200, 450);
-	const fadeIn = range(ar, 1200, 800, 300);
-	const radius = 54.4 - 4.48 * cs;
+	// Whole milliseconds, like osu!'s DifficultyRangeInt; the fade-in is osu!'s too
+	const preempt = Math.trunc(range(ar, 1800, 1200, 450));
+	const fadeIn = 400 * Math.min(1, preempt / 450);
+	// With osu!'s little "fudge" factor
+	const radius = 64 * (((1 - (0.7 * (cs - 5)) / 5) / 2) * 1.00041);
 	const windows = {
 		300: Math.floor(range(od, 80, 50, 20)) - 0.5,
 		100: Math.floor(range(od, 140, 100, 60)) - 0.5,

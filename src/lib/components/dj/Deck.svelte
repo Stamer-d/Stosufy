@@ -7,6 +7,7 @@
 	import Fader from './Fader.svelte';
 	import Overview from './Overview.svelte';
 	import { TEMPO_RANGES, HOT_CUES } from '#lib/dj/engine.ts';
+	import { songDrop } from '#lib/dj/library.ts';
 
 	let { deck, other, state: ds, color, side = 'left' } = $props();
 
@@ -113,7 +114,8 @@
 {/snippet}
 
 <section
-	class="flex-1 min-w-0 flex flex-col gap-3 p-3 rounded-xl bg-white/[0.035] ring-1 ring-white/[0.06]"
+	use:songDrop={(song) => deck.userLoad(song)}
+	class="flex-1 min-w-0 flex flex-col gap-3 p-3 rounded-xl bg-white/[0.035] ring-1 ring-white/[0.06] transition data-[dropping=true]:ring-2 data-[dropping=true]:ring-white/60 data-[dropping=true]:bg-white/[0.08]"
 	style="--deck: {color}"
 >
 	<!-- The song -->
@@ -158,6 +160,7 @@
 				aria-label="Jog wheel"
 				aria-valuenow={0}
 				tabindex="-1"
+				ondragstart={(e) => e.preventDefault()}
 				onpointerdown={jogDown}
 				onpointermove={jogMove}
 				onpointerup={jogUp}
@@ -165,7 +168,7 @@
 			>
 				<div
 					bind:this={platter}
-					class="absolute inset-2 rounded-full overflow-hidden ring-1 ring-white/10"
+					class="absolute inset-2 rounded-full overflow-hidden ring-1 ring-white/10 pointer-events-none"
 				>
 					{#if ds.song}
 						<SongCover setId={ds.song.id} title={ds.song.title} class="size-full opacity-80" />
@@ -210,7 +213,7 @@
 					class="size-12 rounded-full text-xs font-black ring-2 cursor-pointer transition bg-black/40 disabled:opacity-40 {ds.synced
 						? 'ring-sky-300 text-sky-200 bg-sky-400/15'
 						: 'ring-white/30 text-white/80 hover:bg-white/10'}"
-					onclick={() => deck.sync(other)}>SYNC</button
+					onclick={() => (ds.synced ? deck.unsync() : deck.sync(other))}>SYNC</button
 				>
 			</div>
 		</div>
