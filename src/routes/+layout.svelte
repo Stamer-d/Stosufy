@@ -13,6 +13,8 @@
 	import Toasts from '#lib/components/Toasts.svelte';
 	import SettingsModal from '#lib/components/SettingsModal.svelte';
 	import OsuProfileImport from '#lib/components/OsuProfileImport.svelte';
+	import FriendsPanel from '#lib/components/FriendsPanel.svelte';
+	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
@@ -107,6 +109,16 @@
 			>
 				<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
 					<QueuePanel />
+				</div>
+			</div>
+			<div
+				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$friendsPanelOpen
+					? 'w-80'
+					: 'w-0 -ml-2'}"
+				inert={!$friendsPanelOpen}
+			>
+				<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
+					<FriendsPanel />
 				</div>
 			</div>
 		</div>

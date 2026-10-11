@@ -175,6 +175,8 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Show osu! friends what you listen to (default on) */
+	shareActivity?: boolean;
 	/** Download the songs of the playlists made from the osu! profile */
 	profileDownload?: boolean;
 	/** Playlists made from the osu! profile, by list */

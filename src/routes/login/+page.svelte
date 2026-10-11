@@ -8,16 +8,12 @@
 		checkSessionKey,
 		exchangeCode,
 		keyStore,
+		osuAuthUrl,
 		type SessionKeyCheck
 	} from '#lib/stores/auth.ts';
 	import { open } from '@tauri-apps/plugin-shell';
 	import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 	import { goto } from '$app/navigation';
-
-	const clientId = '40234';
-	const redirectUrl = 'stosufynew://callback';
-	const scope = 'public';
-	const authUrl = `https://osu.ppy.sh/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=code&scope=${scope}`;
 
 	let sessionKeyValid: Pick<SessionKeyCheck, 'status' | 'status_code'> = {
 		status: false
@@ -95,7 +91,7 @@
 			type="primary"
 			disabled={!sessionKeyValid.status}
 			on:click={async () => {
-				await open(authUrl);
+				await open(osuAuthUrl);
 			}}
 		>
 			Continue with osu!

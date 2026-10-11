@@ -216,3 +216,60 @@ export async function updateListenPlayback(
 		{ code, playback }
 	);
 }
+
+export interface FriendActivity {
+	osuId: number;
+	username: string;
+	avatarUrl: string | null;
+	playback: ListenPlaybackInput & { updatedAt: number };
+	/** The listening session the friend is in, to join it */
+	roomCode: string | null;
+	updatedAt: number;
+}
+
+/** Shares what the user listens to with their osu! friends; null stops sharing */
+export async function setNowPlaying(
+	token: string,
+	playback: ListenPlaybackInput | null,
+	roomCode: string | null
+) {
+	await graphql(
+		token,
+		'mutation ($playback: ListenPlaybackInput, $roomCode: String) { setNowPlaying(playback: $playback, roomCode: $roomCode) }',
+		{ playback, roomCode }
+	);
+}
+
+/** What the user's osu! friends listen to in Stosufy */
+export async function getFriendActivity(
+	token: string
+): Promise<{ friends: FriendActivity[]; serverTime: number }> {
+	const data = await graphql<any>(
+		token,
+		`
+			{
+				getFriendActivity {
+					serverTime
+					friends {
+						osuId
+						username
+						avatarUrl
+						roomCode
+						updatedAt
+						playback {
+							setId
+							mapId
+							title
+							artist
+							position
+							playing
+							mod
+							updatedAt
+						}
+					}
+				}
+			}
+		`
+	);
+	return data.getFriendActivity;
+}

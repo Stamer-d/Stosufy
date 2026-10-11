@@ -12,6 +12,7 @@
 	import { check } from '@tauri-apps/plugin-updater';
 	import { relaunch } from '@tauri-apps/plugin-process';
 	import { focusMode } from '#lib/stores/audio.ts';
+	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 
 	const appWindow = getCurrentWindow();
 	let updating = $state(false);
@@ -145,6 +146,17 @@
 	<div class="flex items-center h-full">
 		{#if $user?.username}
 			<ListenTogether />
+			<button
+				title="Friend activity"
+				aria-label="Friend activity"
+				aria-pressed={$friendsPanelOpen}
+				class="ml-1 size-8 grid place-items-center rounded-full cursor-pointer transition {$friendsPanelOpen
+					? 'text-primary-500 bg-primary-300/20'
+					: 'text-secondary-600 hover:text-white hover:bg-secondary-300'}"
+				onclick={() => friendsPanelOpen.update((open) => !open)}
+			>
+				<span class="icon-[mingcute--user-heart-line] size-[18px]"></span>
+			</button>
 			<button
 				title="Settings"
 				aria-label="Settings"

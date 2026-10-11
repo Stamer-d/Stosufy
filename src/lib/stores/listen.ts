@@ -252,7 +252,7 @@ function hostPosition(playback: ListenPlayback) {
 }
 
 /** The library song for the host's song, downloading it first if needed */
-async function songFor(playback: ListenPlayback): Promise<MapSet | null> {
+export async function songFor(playback: ListenPlayback): Promise<MapSet | null> {
 	const wanted = { id: playback.setId, beatmaps: [{ id: playback.mapId }] } as MapSet;
 	const local = librarySong(wanted);
 	if (local) return local;

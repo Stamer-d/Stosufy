@@ -16,6 +16,9 @@ export const keyStore = writable<Keys>({
 const clientId = '40234';
 const clientSecret = import.meta.env.VITE_CLIENT_SECRET;
 const redirectUrl = 'stosufynew://callback';
+/** friends.read: to show what the user's osu! friends listen to */
+const scope = 'public friends.read';
+export const osuAuthUrl = `https://osu.ppy.sh/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=code&scope=${encodeURIComponent(scope)}`;
 
 async function initializeStores() {
 	await load('keyStore.json')
