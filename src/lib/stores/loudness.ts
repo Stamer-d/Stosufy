@@ -20,6 +20,16 @@ export function gainFor(loudness: number) {
 export async function measureLoudness(file: Uint8Array): Promise<number | null> {
 	try {
 		const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(file.slice().buffer);
+		return await loudnessOf(decoded);
+	} catch (error) {
+		console.warn('Could not measure the loudness', error);
+		return null;
+	}
+}
+
+/** Integrated loudness of decoded audio in LUFS (null: silent) */
+export async function loudnessOf(decoded: AudioBuffer): Promise<number | null> {
+	{
 		// K-weighting: a high shelf for the head's acoustic effect and a high-pass
 		const context = new OfflineAudioContext(
 			decoded.numberOfChannels,
@@ -65,8 +75,5 @@ export async function measureLoudness(file: Uint8Array): Promise<number | null> 
 		const threshold = loudness(mean(audible)) + RELATIVE_GATE;
 		const gated = audible.filter((energy) => loudness(energy) > threshold);
 		return Math.round(loudness(mean(gated)) * 10) / 10;
-	} catch (error) {
-		console.warn('Could not measure the loudness', error);
-		return null;
 	}
 }

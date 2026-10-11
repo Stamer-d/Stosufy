@@ -9,7 +9,7 @@ import { readFile } from '@tauri-apps/plugin-fs';
 import { mapDataStore } from '../stores/data';
 import { songQueue } from '../stores/audio';
 import { userSettings } from '../stores/user';
-import { gainFor } from '../stores/loudness';
+import { gainFor, loudnessOf } from '../stores/loudness';
 import { beatmapContent } from '../hitsounds/player';
 import { parseKiai, parseTimingPoints } from '../osuFile';
 import {
@@ -141,6 +141,9 @@ function impulse(ctx: AudioContext, seconds = 2.4) {
 	return buffer;
 }
 
+/** Loudness (LUFS) of songs measured here, by their audio file */
+const measured = new Map<string, number>();
+
 export class Deck {
 	readonly id: DeckId;
 	state: DeckState = freshState();
@@ -270,7 +273,15 @@ export class Deck {
 			if (id !== this.loadId) return;
 			this.buffer = buffer;
 			this.grid = gridFrom(timing);
-			this.normalize = map.loudness != null ? gainFor(map.loudness) : 1;
+			// Every song about as loud as the others (like auto gain), measured now if it
+			// wasn't yet (a fraction of a second)
+			let lufs = map.loudness ?? measured.get(map.audioFile) ?? null;
+			if (lufs == null) {
+				lufs = await loudnessOf(buffer).catch(() => null);
+				if (lufs != null) measured.set(map.audioFile, lufs);
+				if (id !== this.loadId) return;
+			}
+			this.normalize = lufs != null ? gainFor(lufs) : 1;
 			const main = mainSection(this.grid, buffer.duration);
 			// The cue starts on the first beat (most songs start with a little silence)
 			const first = this.grid[0];
