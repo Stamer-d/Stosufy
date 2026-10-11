@@ -41,7 +41,7 @@
 		onclick={() => (open = !open)}
 	>
 		{#if mod === 'NM'}
-			<span class="icon-[mingcute--speed-line] size-5"></span>
+			<span class="icon-[mingcute--dashboard-3-line] size-5"></span>
 		{:else}
 			<span
 				class="px-1.5 rounded-md text-xs font-black tracking-wide text-black"

@@ -295,11 +295,7 @@
 					class="{ICON_BUTTON} {videoOn ? 'text-primary-500' : 'text-white/60 hover:text-white'}"
 					on:click={() => updateAppearance({ video: !videoOn })}
 				>
-					<span
-						class="{videoOn
-							? 'icon-[mingcute--video-line]'
-							: 'icon-[mingcute--video-off-line]'} size-5"
-					></span>
+					<span class="icon-[mingcute--video-line] size-5"></span>
 				</button>
 			{/if}
 			<button
