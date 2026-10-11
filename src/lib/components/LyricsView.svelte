@@ -7,8 +7,16 @@
 		lyricsOffset,
 		nudgeLyrics,
 		lineAt,
-		loadLyrics
+		loadLyrics,
+		shownLyrics,
+		setLyricsRomaji
 	} from '#lib/stores/lyrics.ts';
+	import { userSettings } from '#lib/stores/user.ts';
+
+	let romajiOn = $derived($userSettings.settings?.lyricsRomaji ?? false);
+	/** A line's text as shown (romaji when turned on) */
+	let shownLine = (index, text) =>
+		($shownLyrics.key === $lyrics.key && $shownLyrics.lines?.[index]) || text;
 
 	let current = $state(-1);
 	let container = $state();
@@ -61,32 +69,51 @@
 			<h1 class="font-bold truncate">{$currentSong.song?.title ?? 'Lyrics'}</h1>
 			<p class="text-sm text-secondary-600 truncate">{$currentSong.song?.artist ?? ''}</p>
 		</div>
-		{#if lines}
-			<div
-				class="flex items-center gap-1 shrink-0"
-				title="Move the lyrics if they're early or late"
-			>
+		<div class="flex items-center gap-3 shrink-0">
+			{#if $shownLyrics.japanese}
 				<button
-					aria-label="Lyrics earlier"
-					class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer"
-					onclick={() => nudgeLyrics(-0.5)}
+					class="h-8 px-3 flex items-center gap-1.5 rounded-full text-xs font-semibold ring-1 cursor-pointer transition {romajiOn
+						? 'ring-primary-500 text-primary-500 bg-primary-500/10'
+						: 'ring-white/15 text-secondary-600 hover:text-white'}"
+					title={romajiOn ? 'Show the original Japanese' : 'Show the Japanese in Latin letters'}
+					aria-pressed={romajiOn}
+					onclick={() => setLyricsRomaji(!romajiOn)}
 				>
-					<span class="icon-[mingcute--minimize-line] size-4"></span>
+					{#if $shownLyrics.converting}
+						<span class="icon-[mingcute--loading-line] size-3.5 animate-spin"></span>
+					{:else}
+						<span lang="ja">あ</span>
+					{/if}
+					Romaji
 				</button>
-				<span class="w-16 text-center text-xs tabular-nums text-secondary-600">
-					{$lyricsOffset
-						? `${$lyricsOffset > 0 ? '−' : '+'}${Math.abs($lyricsOffset)} s`
-						: 'In sync'}
-				</span>
-				<button
-					aria-label="Lyrics later"
-					class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer"
-					onclick={() => nudgeLyrics(0.5)}
+			{/if}
+			{#if lines}
+				<div
+					class="flex items-center gap-1 shrink-0"
+					title="Move the lyrics if they're early or late"
 				>
-					<span class="icon-[mingcute--add-line] size-4"></span>
-				</button>
-			</div>
-		{/if}
+					<button
+						aria-label="Lyrics earlier"
+						class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer"
+						onclick={() => nudgeLyrics(-0.5)}
+					>
+						<span class="icon-[mingcute--minimize-line] size-4"></span>
+					</button>
+					<span class="w-16 text-center text-xs tabular-nums text-secondary-600">
+						{$lyricsOffset
+							? `${$lyricsOffset > 0 ? '−' : '+'}${Math.abs($lyricsOffset)} s`
+							: 'In sync'}
+					</span>
+					<button
+						aria-label="Lyrics later"
+						class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer"
+						onclick={() => nudgeLyrics(0.5)}
+					>
+						<span class="icon-[mingcute--add-line] size-4"></span>
+					</button>
+				</div>
+			{/if}
+		</div>
 	</header>
 
 	{#if !$currentSong.song}
@@ -103,6 +130,15 @@
 			$lyrics.lyrics?.instrumental ? 'This song is instrumental.' : 'No lyrics found for this song.'
 		)}
 	{:else}
+		{#if $shownLyrics.error && romajiOn}
+			<p class="mt-2 text-xs text-red-400">
+				Couldn't load the dictionary for romaji. Check your internet connection.
+			</p>
+		{:else if $shownLyrics.converting}
+			<p class="mt-2 text-xs text-secondary-600">
+				Loading the Japanese dictionary (once, about 18 MB)…
+			</p>
+		{/if}
 		{#if $lyrics.lyrics.otherVersion}
 			<p class="mt-2 text-xs text-secondary-600">
 				Synced to another version of the song. If the lines are off, move them with − and +.
@@ -124,14 +160,14 @@
 									: 'text-white/25 hover:text-white/80'}"
 							onclick={() => seek(line)}
 						>
-							{line.text || '♪'}
+							{shownLine(index, line.text) || '♪'}
 						</button>
 					</li>
 				{/each}
 			</ol>
 		{:else}
 			<p class="mt-8 whitespace-pre-line text-2xl font-bold leading-relaxed text-white/85">
-				{$lyrics.lyrics.plain}
+				{($shownLyrics.key === $lyrics.key && $shownLyrics.plain) || $lyrics.lyrics.plain}
 			</p>
 		{/if}
 		<p class="mt-12 text-xs text-secondary-600">

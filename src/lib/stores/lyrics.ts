@@ -8,6 +8,7 @@ import { keyStore } from './auth';
 import { currentSong, songQueue } from './audio';
 import { userSettings, updateUserSettings } from './user';
 import type { MapSet } from '../types';
+import { hasJapanese, romanize } from '../romaji';
 
 const API = 'https://lrclib.net/api';
 const HEADERS = { 'Lrclib-Client': 'Stosufy (https://github.com/Stamer-d/Stosufy)' };
@@ -187,6 +188,78 @@ export async function loadLyrics() {
 	} finally {
 		loadingKey = null;
 	}
+}
+
+// --- Romaji -------------------------------------------------------------------------
+
+export interface ShownLyrics {
+	key: string | null;
+	/** The synced lines' texts as shown (romaji if turned on), by index */
+	lines: string[] | null;
+	plain: string | null;
+	/** The lyrics have Japanese in them */
+	japanese: boolean;
+	/** Loading the dictionary or converting */
+	converting: boolean;
+	error: boolean;
+}
+
+/** The lyrics' text as shown: in romaji when that's turned on and they have Japanese */
+export const shownLyrics = writable<ShownLyrics>({
+	key: null,
+	lines: null,
+	plain: null,
+	japanese: false,
+	converting: false,
+	error: false
+});
+
+export function setLyricsRomaji(on: boolean) {
+	updateUserSettings({ lyricsRomaji: on });
+}
+
+let converting = '';
+
+async function updateShown() {
+	const state = get(lyrics);
+	const found = state.status === 'found' ? state.lyrics : null;
+	const original = {
+		key: state.key,
+		lines: found?.lines?.map((line) => line.text) ?? null,
+		plain: found?.plain ?? null
+	};
+	const japanese = hasJapanese(original.lines?.join('\n') ?? original.plain);
+	const romaji = japanese && (get(userSettings).settings?.lyricsRomaji ?? false);
+	const job = `${state.key}:${state.status}:${romaji}`;
+	if (job === converting) return;
+	converting = job;
+	if (!romaji) {
+		shownLyrics.set({ ...original, japanese, converting: false, error: false });
+		return;
+	}
+	shownLyrics.set({ ...original, japanese, converting: true, error: false });
+	try {
+		const [lines, plain] = await Promise.all([
+			original.lines ? romanize(original.lines) : null,
+			original.plain ? romanize(original.plain.split('\n')).then((l) => l.join('\n')) : null
+		]);
+		if (converting === job)
+			shownLyrics.set({ key: state.key, lines, plain, japanese, converting: false, error: false });
+	} catch (error) {
+		console.error('Could not convert the lyrics to romaji:', error);
+		if (converting === job)
+			shownLyrics.set({ ...original, japanese, converting: false, error: true });
+	}
+}
+
+if (typeof window !== 'undefined') {
+	lyrics.subscribe(updateShown);
+	let lastRomaji: boolean | undefined;
+	userSettings.subscribe(({ settings }) => {
+		if (settings?.lyricsRomaji === lastRomaji) return;
+		lastRomaji = settings?.lyricsRomaji;
+		updateShown();
+	});
 }
 
 // --- Timing -------------------------------------------------------------------------

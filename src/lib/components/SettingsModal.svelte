@@ -416,6 +416,15 @@
 						/>
 					</div>
 				</section>
+				<section>
+					{@render heading('Lyrics')}
+					{@render toggle(
+						'Japanese in romaji',
+						'Shows Japanese lyrics in Latin letters. The dictionary for it (about 18 MB) downloads once.',
+						$userSettings.settings?.lyricsRomaji ?? false,
+						(checked) => updateUserSettings({ lyricsRomaji: checked })
+					)}
+				</section>
 			{:else if $settingsTab === 'library'}
 				<section>
 					{@render heading('osu!')}

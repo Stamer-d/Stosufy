@@ -2,10 +2,13 @@
 	// The line being sung and the next one, big, for the focus view
 	import { onMount } from 'svelte';
 	import { songQueue } from '#lib/stores/audio.ts';
-	import { lyrics, lyricsWanted, lyricsOffset, lineAt } from '#lib/stores/lyrics.ts';
+	import { lyrics, lyricsWanted, lyricsOffset, lineAt, shownLyrics } from '#lib/stores/lyrics.ts';
 
 	let current = $state(-1);
 	let lines = $derived($lyrics.status === 'found' ? $lyrics.lyrics?.lines : null);
+	/** A line's text as shown (romaji when turned on) */
+	let text = (index) =>
+		($shownLyrics.key === $lyrics.key && $shownLyrics.lines?.[index]) || lines?.[index]?.text;
 
 	onMount(() => {
 		lyricsWanted.update((n) => n + 1);
@@ -29,10 +32,10 @@
 			<p
 				class="text-5xl font-extrabold leading-tight tracking-tight text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.6)] animate-[lyric-in_300ms_ease-out]"
 			>
-				{current >= 0 ? lines[current].text || '♪' : ' '}
+				{current >= 0 ? text(current) || '♪' : ' '}
 			</p>
 			<p class="mt-3 text-2xl font-bold text-white/50 drop-shadow-[0_2px_12px_rgba(0,0,0,0.6)]">
-				{lines[current + 1]?.text || ' '}
+				{text(current + 1) || ' '}
 			</p>
 		{/key}
 	</div>

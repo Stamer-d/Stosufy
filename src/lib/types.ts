@@ -179,6 +179,8 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Show Japanese lyrics in romaji (Latin letters) */
+	lyricsRomaji?: boolean;
 	/** Lyrics moved earlier or later (seconds), by song; see lyrics.ts */
 	lyricsOffsets?: Record<string, number>;
 	/** Changed keyboard shortcuts, by scope and action (null: none); see keybinds.ts */
