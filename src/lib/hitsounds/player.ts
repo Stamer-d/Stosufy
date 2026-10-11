@@ -39,7 +39,9 @@ function settings() {
 		on: s.hitsounds ?? false,
 		volume: s.hitsoundVolume ?? DEFAULT_VOLUME,
 		skin: s.hitsoundSkin ?? null,
-		beatmap: s.beatmapHitsounds ?? true,
+		// Off by default: many maps mute the hitnormal with their own silent samples, and a
+		// music player should sound like the skin on every circle
+		beatmap: s.beatmapHitsounds ?? false,
 		offset: s.hitsoundOffset ?? 0,
 		skinsFolder: s.skinsFolder ?? null
 	};
@@ -124,9 +126,12 @@ async function fromFolder(dir: Folder | null, name: string) {
 }
 
 /**
- * The sound of a sample, like osu! picks it: the beatmap's own (custom index 1+ or a file),
- * else the skin's, else the osu! default one (skins only bring the samples they change),
- * else the built-in one. null plays nothing.
+ * The sound of a sample, picked like osu! does it (ppy/osu: LegacySkin, LegacyBeatmapSkin):
+ * - the beatmap's own samples only for custom sample index 1+ (or a file): index 1 is
+ *   "soft-hitnormal", index 2+ only "soft-hitnormal2" (no plain fallback within the map)
+ * - else the skin's "soft-hitnormal", else its bank-less "hitnormal"
+ * - else the same from the osu! default sounds, else the built-in one.
+ * null plays nothing.
  */
 async function resolve(
 	sample: HitSample,
@@ -134,21 +139,24 @@ async function resolve(
 	skin: Folder | null,
 	fallback: Folder | null
 ) {
-	const name =
-		sample.sound === 'slidertick' ? `${sample.set}-slidertick` : `${sample.set}-hit${sample.sound}`;
-	if (beatmap) {
-		if (sample.file) {
-			const own = await fromFolder(beatmap, sample.file.replace(AUDIO_FILE, ''));
-			if (own !== undefined) return own;
-		}
-		if (sample.index >= 1) {
-			const own = await fromFolder(beatmap, sample.index > 1 ? name + sample.index : name);
+	const sound = sample.sound === 'slidertick' ? 'slidertick' : `hit${sample.sound}`;
+	const name = `${sample.set}-${sound}`;
+	if (beatmap && (sample.file || sample.index >= 1)) {
+		const names = sample.file
+			? [sample.file.replace(AUDIO_FILE, ''), name, sound]
+			: sample.index >= 2
+				? [name + sample.index]
+				: [name, sound];
+		for (const candidate of names) {
+			const own = await fromFolder(beatmap, candidate);
 			if (own !== undefined) return own;
 		}
 	}
 	for (const folder of [skin, fallback]) {
-		const skinned = await fromFolder(folder, name);
-		if (skinned !== undefined) return skinned;
+		for (const candidate of [name, sound]) {
+			const skinned = await fromFolder(folder, candidate);
+			if (skinned !== undefined) return skinned;
+		}
 	}
 	return builtinSample(audioContext(), sample.set, sample.sound);
 }

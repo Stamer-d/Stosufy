@@ -26,6 +26,7 @@ interface TimingPoint {
 	time: number;
 	beatLength: number;
 	sampleSet: number;
+	hasSet: boolean;
 	sampleIndex: number;
 	volume: number;
 	uninherited: boolean;
@@ -62,6 +63,7 @@ function parseTimingPoints(lines: string[] = []): TimingPoint[] {
 				time: Number(p[0]),
 				beatLength,
 				sampleSet: Number(p[3] ?? 0),
+				hasSet: p[3] !== undefined,
 				sampleIndex: Number(p[4] ?? 0),
 				volume: Number(p[5] ?? 100),
 				uninherited: p[6] === undefined ? beatLength > 0 : p[6] === '1'
@@ -71,11 +73,11 @@ function parseTimingPoints(lines: string[] = []): TimingPoint[] {
 		.sort((a, b) => a.time - b.time);
 }
 
-/** The last point at or before a time (osu! counts a point a few ms early as active) */
+/** The last point at or before a time; osu! looks 5 ms ahead (CONTROL_POINT_LENIENCY) */
 function pointAt<T extends { time: number }>(points: T[], time: number): T | undefined {
 	let found: T | undefined;
 	for (const point of points) {
-		if (point.time <= time + 2) found = point;
+		if (point.time <= time + 5) found = point;
 		else break;
 	}
 	return found ?? points[0];
@@ -106,7 +108,16 @@ export function parseHitsounds(content: string): HitsoundEvent[] {
 		file = ''
 	) => {
 		const point = pointAt(points, time);
-		const normal = SETS[normalSet] ?? SETS[point?.sampleSet ?? 0] ?? generalSet;
+		// A timing point's sample set 0 counts as normal (ppy/osu LegacyBeatmapDecoder); the
+		// [General] one only when the timing point has none at all
+		const pointSet = point
+			? point.sampleSet
+				? SETS[point.sampleSet]
+				: point.hasSet
+					? 'normal'
+					: generalSet
+			: generalSet;
+		const normal = SETS[normalSet] ?? pointSet ?? 'normal';
 		const addition = SETS[additionSet] ?? normal;
 		const sampleIndex = index || point?.sampleIndex || 0;
 		const samples: HitSample[] = file
@@ -155,16 +166,22 @@ export function parseHitsounds(content: string): HitsoundEvent[] {
 			// its ends, with the slider's normal sample set (like osu!)
 			if (standard && span > 0) {
 				const every = beat / tickRate;
-				const [normalSet] = sample(p[10]);
+				// The ticks take the bank, index and volume of the slider's own sample at its start
+				const [normalSet, , tickIndex, tickVolume] = sample(p[10]);
+				const start = pointAt(points, time + 1);
+				const startSet = start?.sampleSet
+					? SETS[start.sampleSet]
+					: start?.hasSet
+						? 'normal'
+						: generalSet;
+				const set = SETS[normalSet] ?? startSet ?? 'normal';
 				for (let slide = 0; slide < slides && every > 0; slide++) {
 					for (let at = every; at < span - 10; at += every) {
 						const tickTime = time + slide * span + (slide % 2 ? span - at : at);
-						const point = pointAt(points, tickTime);
-						const set = SETS[normalSet] ?? SETS[point?.sampleSet ?? 0] ?? generalSet;
 						events.push({
 							time: Math.round(tickTime),
-							volume: point?.volume || 100,
-							samples: [{ set, sound: 'slidertick', index: point?.sampleIndex ?? 0 }]
+							volume: tickVolume || start?.volume || 100,
+							samples: [{ set, sound: 'slidertick', index: tickIndex || start?.sampleIndex || 0 }]
 						});
 					}
 				}

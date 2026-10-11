@@ -16,7 +16,7 @@
 	let root = $state(null);
 	let settings = $derived($userSettings.settings ?? {});
 	let on = $derived(settings.hitsounds ?? false);
-	let beatmapSounds = $derived(settings.beatmapHitsounds ?? true);
+	let beatmapSounds = $derived(settings.beatmapHitsounds ?? false);
 	let skins = $state([]);
 
 	$effect(() => {

@@ -15,8 +15,9 @@ export const BUILTIN = 'builtin';
 /** The osu! default sounds, saved as a skin under this name */
 export const DEFAULT_SKIN = 'osu! default';
 /** The samples a skin needs for the hitsounds */
+/** The samples a skin's hitsounds use (osu! doesn't use numbered ones from skins) */
 const HITSOUND_FILE =
-	/^(normal|soft|drum)-(hit(normal|whistle|finish|clap)|slider(slide|tick|whistle))\.(wav|ogg|mp3)$/i;
+	/^((normal|soft|drum)-)?(hit(normal|whistle|finish|clap)|slider(slide|tick|whistle))\.(wav|ogg|mp3)$/i;
 
 export interface SkinOption {
 	/** "stosufy:<name>" or "osu:<name>" */
