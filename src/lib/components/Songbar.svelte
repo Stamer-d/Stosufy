@@ -28,6 +28,7 @@
 	import { setVolume, toggleMute, DEFAULT_VOLUME, MAX_VOLUME } from '#lib/stores/mixer.ts';
 	import ModSelect from './ModSelect.svelte';
 	import SleepTimer from './SleepTimer.svelte';
+	import { isFavourite, toggleFavourite } from '#lib/stores/favourites.ts';
 
 	let currentTime = 0;
 	let duration = 0;
@@ -119,6 +120,24 @@
 				<div class="text-sm font-semibold truncate">{$currentSong.song?.title}</div>
 				<div class="text-xs text-secondary-600 truncate">{$currentSong.song?.artist}</div>
 			</div>
+			{#if Number($currentSong.song.beatmaps?.[0]?.id) > 0}
+				{@const liked = $isFavourite($currentSong.song)}
+				<button
+					title={liked ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+					aria-label={liked ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+					aria-pressed={liked}
+					class="size-8 shrink-0 grid place-items-center rounded-full cursor-pointer transition {liked
+						? 'text-primary-500 hover:text-primary-400'
+						: 'text-secondary-600 hover:text-white'}"
+					on:click={() => toggleFavourite($currentSong.song)}
+				>
+					<span
+						class="{liked
+							? 'icon-[mingcute--heart-fill]'
+							: 'icon-[mingcute--heart-line]'} size-[18px]"
+					></span>
+				</button>
+			{/if}
 		</div>
 
 		<div class="flex flex-col items-center gap-1.5">

@@ -9,8 +9,12 @@
 		createPlaylist,
 		deletePlaylist,
 		editPlaylist,
-		loadAllPlaylistSongs
+		loadAllPlaylistSongs,
+		savedPlaylists,
+		loadSavedPlaylists,
+		toggleSavedPlaylist
 	} from '#lib/stores/playlist.ts';
+	import { favourites, likedPlaylist, loadFavourites, LIKED_ID } from '#lib/stores/favourites.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import ContextMenu from './ContextMenu.svelte';
@@ -57,9 +61,25 @@
 			public: false
 		};
 
-		$playlists = [downloadedSongsPlaylist, ...playlist_list];
+		// Liked Songs come right after the downloads (their count once they're loaded)
+		$playlists = [downloadedSongsPlaylist, likedPlaylist($favourites.length), ...playlist_list];
 		loadAllPlaylistSongs();
+		loadFavourites().catch((error) => console.error('Could not load the liked songs:', error));
+		loadSavedPlaylists().catch((error) =>
+			console.error('Could not load the saved playlists:', error)
+		);
 	}
+
+	// The number of liked songs
+	$effect(() => {
+		const count = $favourites.length;
+		if ($playlists.some((p) => p.id == LIKED_ID && p.song_amount !== count)) {
+			$playlists = $playlists.map((p) => (p.id == LIKED_ID ? { ...p, song_amount: count } : p));
+		}
+	});
+
+	/** Downloaded Songs and Liked Songs: not real playlists */
+	const isVirtual = (playlist) => playlist.id == -1 || playlist.id == LIKED_ID;
 
 	async function createNewPlaylist() {
 		let amount = 1;
@@ -77,7 +97,8 @@
 			created_by: $user?.stosufy_id
 		};
 
-		$playlists = [$playlists[0], dummyPlaylist, ...$playlists.slice(1)];
+		const virtual = $playlists.filter(isVirtual);
+		$playlists = [...virtual, dummyPlaylist, ...$playlists.filter((p) => !isVirtual(p))];
 		const newPlaylist = await createPlaylist(`My Playlist Nr.${amount}`);
 		$playlists = $playlists.map((playlist) => (playlist.id === tempId ? newPlaylist : playlist));
 	}
@@ -145,7 +166,18 @@
 <div class="h-full flex flex-col">
 	<div class="flex items-center justify-between pl-5 pr-3 h-14 shrink-0">
 		<h2 class="font-bold">Your Library</h2>
-		<div class="relative">
+		<div class="relative flex items-center gap-1">
+			<button
+				title="Community playlists"
+				aria-label="Community playlists"
+				class="size-8 grid place-items-center rounded-full cursor-pointer transition {page.url
+					?.pathname === '/community'
+					? 'text-white bg-secondary-300'
+					: 'text-secondary-600 hover:text-white hover:bg-secondary-300'}"
+				onclick={() => goto('/community')}
+			>
+				<span class="icon-[mingcute--earth-2-line] size-5"></span>
+			</button>
 			<button
 				title="Create playlist"
 				aria-label="Create playlist"
@@ -198,7 +230,7 @@
 		{#each $playlists as playlist (playlist.id)}
 			{@const isActive = page.params?.id == playlist.id}
 			<li>
-				<ContextMenu disabled={playlist.id == -1}>
+				<ContextMenu disabled={isVirtual(playlist)}>
 					<div
 						class="group flex items-center gap-3 p-2 rounded-md transition {isActive
 							? 'bg-secondary-300'
@@ -215,12 +247,18 @@
 									{playlist.title}
 								</h3>
 								<p class="text-sm text-secondary-600 truncate">
-									{playlist.id == -1 ? 'On this device' : 'Playlist'} · {playlist.song_amount || 0}
+									{playlist.id == -1
+										? 'On this device'
+										: playlist.id == LIKED_ID
+											? 'Liked'
+											: playlist.public
+												? 'Public playlist'
+												: 'Playlist'} · {playlist.song_amount || 0}
 									{playlist.song_amount === 1 ? 'song' : 'songs'}
 								</p>
 							</div>
 						</button>
-						{#if playlist.id !== -1}
+						{#if !isVirtual(playlist)}
 							<button
 								title="Delete playlist"
 								aria-label="Delete {playlist.title}"
@@ -235,7 +273,7 @@
 						{/if}
 					</div>
 					<svelte:fragment slot="menu">
-						{#if playlist.id !== -1}
+						{#if !isVirtual(playlist)}
 							<Button
 								type="ghost"
 								class="w-full rounded-md text-sm hover:bg-secondary-400"
@@ -259,6 +297,46 @@
 				</ContextMenu>
 			</li>
 		{/each}
+		{#if $savedPlaylists.length}
+			<li class="px-2 pt-4 pb-1 text-xs font-bold uppercase tracking-wide text-secondary-600">
+				Saved
+			</li>
+			{#each $savedPlaylists as playlist (playlist.id)}
+				{@const isActive = page.params?.id == playlist.id}
+				<li>
+					<div
+						class="group flex items-center gap-3 p-2 rounded-md transition {isActive
+							? 'bg-secondary-300'
+							: 'hover:bg-secondary-200'}"
+					>
+						<button
+							onclick={() => goto(`/playlist/${playlist.id}`)}
+							aria-current={isActive ? 'page' : undefined}
+							class="flex flex-1 min-w-0 items-center gap-3 text-start cursor-pointer"
+						>
+							<PlaylistCover {playlist} />
+							<div class="min-w-0">
+								<h3 class="font-semibold truncate {isActive ? 'text-primary-500' : ''}">
+									{playlist.title}
+								</h3>
+								<p class="text-sm text-secondary-600 truncate">
+									by {playlist.creator?.username ?? 'someone'} · {playlist.song_amount || 0}
+									{playlist.song_amount === 1 ? 'song' : 'songs'}
+								</p>
+							</div>
+						</button>
+						<button
+							title="Remove from your library"
+							aria-label="Remove {playlist.title} from your library"
+							class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
+							onclick={() => toggleSavedPlaylist(playlist)}
+						>
+							<span class="icon-[mingcute--bookmark-remove-line] size-[18px]"></span>
+						</button>
+					</div>
+				</li>
+			{/each}
+		{/if}
 	</ul>
 	<DownloadQueue />
 </div>
@@ -345,6 +423,20 @@
 					placeholder="Playlist Description"
 				/>
 			</div>
+			<label
+				class="flex items-center justify-between gap-4 p-3 rounded-md bg-secondary-300/60 cursor-pointer"
+			>
+				<span>
+					<span class="block font-semibold">Public</span>
+					<span class="block text-sm text-secondary-600">
+						Anyone can find it in Community playlists and save it to their library.
+					</span>
+				</span>
+				<input type="checkbox" class="peer sr-only" bind:checked={editPlaylistModal.isPublic} />
+				<span
+					class="relative w-9 h-5 shrink-0 rounded-full bg-secondary-500 transition peer-checked:bg-primary-300 peer-focus-visible:ring-2 peer-focus-visible:ring-primary-400 after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4"
+				></span>
+			</label>
 		</div>
 	</div>
 	<svelte:fragment slot="footer">

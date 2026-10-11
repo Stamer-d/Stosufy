@@ -11,6 +11,12 @@
 	<div class="{className} shrink-0 grid place-items-center bg-primary-300">
 		<span class="icon-[mingcute--download-2-fill] {iconClass} text-white"></span>
 	</div>
+{:else if playlist.id == -2}
+	<div
+		class="{className} shrink-0 grid place-items-center bg-gradient-to-br from-indigo-500 to-fuchsia-400"
+	>
+		<span class="icon-[mingcute--heart-fill] {iconClass} text-white"></span>
+	</div>
 {:else if playlist.image_url && !failed}
 	<img
 		src={getImageUrl(playlist.image_url)}

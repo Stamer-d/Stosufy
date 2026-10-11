@@ -99,6 +99,11 @@ export interface Playlist {
 	created_by?: number;
 	created_at?: string | null;
 	updated_at?: string | null;
+	/** Who made it (for public playlists of others) */
+	creator?: { osuId: number; username: string | null; avatarUrl: string | null } | null;
+	/** How many saved it to their library, and whether the user did */
+	saves?: number;
+	saved?: boolean;
 }
 
 export interface SongQueue {

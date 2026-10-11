@@ -3,6 +3,7 @@
 	import { queueSong, startRadio } from '#lib/stores/audio.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 	import { updateHomeSettings } from '#lib/stores/user.ts';
+	import { isFavourite, toggleFavourite } from '#lib/stores/favourites.ts';
 
 	/** @type {{ song: import('#lib/types.ts').MapSet }} */
 	let { song } = $props();
@@ -29,6 +30,16 @@
 >
 	Add to queue
 </Button>
+{#if Number(song?.beatmaps?.[0]?.id) > 0}
+	<Button
+		type="ghost"
+		class="w-full rounded-md text-sm hover:bg-secondary-400"
+		icon={$isFavourite(song) ? 'icon-[mingcute--heart-fill]' : 'icon-[mingcute--heart-line]'}
+		on:click={() => toggleFavourite(song)}
+	>
+		{$isFavourite(song) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+	</Button>
+{/if}
 <Button
 	type="ghost"
 	class="w-full rounded-md text-sm hover:bg-secondary-400"

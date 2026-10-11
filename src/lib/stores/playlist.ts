@@ -172,7 +172,11 @@ export async function getPlaylistSongs(
 			return { songs };
 		}
 
-		const playlistSongs = await api.getPlaylistSongs(token(), Number(playlistId));
+		// Liked Songs (-2): the favourites, newest first
+		const playlistSongs =
+			playlistId == -2
+				? (await api.getFavourites(token())).map((song, index) => ({ ...song, position: index }))
+				: await api.getPlaylistSongs(token(), Number(playlistId));
 
 		if (playlistSongs.length === 0) {
 			playlistSongsCache.update((cache) => ({
@@ -294,4 +298,52 @@ export async function loadAllPlaylistSongs() {
 	}
 
 	return true;
+}
+
+// --- Public playlists of others -------------------------------------------------------------
+
+/** Public playlists of others the user saved to their library */
+export const savedPlaylists = writable<Playlist[]>([]);
+
+export async function loadSavedPlaylists() {
+	savedPlaylists.set(await api.getSavedPlaylists(token()));
+}
+
+/** Playlists of others opened (not in the library), by id */
+export const otherPlaylists = writable<Record<string, Playlist>>({});
+
+/** A playlist that's not the user's own: from the saved ones, else from the API */
+export async function loadOtherPlaylist(id: PlaylistId) {
+	const known = get(savedPlaylists).find((p) => p.id == id) ?? get(otherPlaylists)[id];
+	if (known) return known;
+	const playlist = await api.getPlaylist(token(), Number(id));
+	otherPlaylists.update((all) => ({ ...all, [id]: playlist }));
+	return playlist;
+}
+
+/** Saves a public playlist of someone else to the library, or removes it */
+export async function toggleSavedPlaylist(playlist: Playlist) {
+	const saved = !get(savedPlaylists).some((p) => p.id == playlist.id);
+	const updated = {
+		...playlist,
+		saved,
+		saves: Math.max(0, (playlist.saves ?? 0) + (saved ? 1 : -1))
+	};
+	const before = get(savedPlaylists);
+	savedPlaylists.set(saved ? [updated, ...before] : before.filter((p) => p.id != playlist.id));
+	otherPlaylists.update((all) => ({ ...all, [playlist.id]: updated }));
+	showToast(
+		saved
+			? `Saved "${playlist.title}" to your library`
+			: `Removed "${playlist.title}" from your library`,
+		saved ? 'icon-[mingcute--bookmark-fill]' : 'icon-[mingcute--bookmark-line]'
+	);
+	try {
+		await api.savePlaylist(token(), Number(playlist.id), saved);
+	} catch (error) {
+		console.error('Could not save the playlist:', error);
+		savedPlaylists.set(before);
+		otherPlaylists.update((all) => ({ ...all, [playlist.id]: playlist }));
+		showToast("Couldn't save that, try again", 'icon-[mingcute--warning-line]');
+	}
 }

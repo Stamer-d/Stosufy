@@ -16,8 +16,13 @@
 		playlists,
 		playlistSongsCache,
 		removeSongFromPlaylist,
-		moveSongInPlaylist
+		moveSongInPlaylist,
+		savedPlaylists,
+		otherPlaylists,
+		loadOtherPlaylist,
+		toggleSavedPlaylist
 	} from '#lib/stores/playlist.ts';
+	import { isFavourite, toggleFavourite, LIKED_ID } from '#lib/stores/favourites.ts';
 	import {
 		currentSong,
 		setSongQueue,
@@ -46,7 +51,29 @@
 	$: playlistId = $pagePlaylistId;
 	// The "Downloaded Songs" playlist has the id -1
 	$: isDownloadedPlaylist = playlistId === '-1';
-	$: playlistData = $playlists.find((playlist) => playlist.id == playlistId);
+	$: isLiked = playlistId == String(LIKED_ID);
+	// The user's own, a saved one of someone else, or one opened from Community playlists
+	$: playlistData =
+		$playlists.find((playlist) => playlist.id == playlistId) ??
+		$savedPlaylists.find((playlist) => playlist.id == playlistId) ??
+		$otherPlaylists[playlistId];
+	$: isOwn = playlistData?.created_by != null && playlistData.created_by == $user?.stosufy_id;
+	/** A public playlist of someone else: only to listen to and save */
+	$: isOther =
+		!!playlistData && !isDownloadedPlaylist && !isLiked && !isOwn && Number(playlistId) > 0;
+	$: isSaved = $savedPlaylists.some((playlist) => playlist.id == playlistId);
+	let missing = '';
+	$: if (playlistId && !playlistData && Number(playlistId) > 0 && $keyStore.access_token) {
+		openOther(playlistId);
+	}
+	async function openOther(id) {
+		missing = '';
+		try {
+			await loadOtherPlaylist(id);
+		} catch (error) {
+			if (id === playlistId) missing = "This playlist is private or doesn't exist anymore.";
+		}
+	}
 	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
 	$: songs = $playlistSongsCache[playlistId]?.songs || [];
 
@@ -109,6 +136,10 @@
 	async function updateHeaderColor(playlist) {
 		if (playlist.id == -1) {
 			headerColor = 'oklch(0.42 0.17 300)';
+			return;
+		}
+		if (playlist.id == LIKED_ID) {
+			headerColor = 'oklch(0.45 0.17 290)';
 			return;
 		}
 		headerColor = colorFromString(playlist.title);
@@ -306,9 +337,11 @@
 				<p class="text-sm font-semibold">
 					{isDownloadedPlaylist
 						? 'On this device'
-						: playlistData.public
-							? 'Public playlist'
-							: 'Private playlist'}
+						: isLiked
+							? 'Playlist'
+							: playlistData.public
+								? 'Public playlist'
+								: 'Private playlist'}
 				</p>
 				<h1
 					class="mt-1 text-4xl xl:text-6xl font-extrabold tracking-tight leading-[1.05] line-clamp-2 break-words"
@@ -319,9 +352,25 @@
 					<p class="mt-3 text-sm text-white/70 line-clamp-2">{playlistData.description}</p>
 				{/if}
 				<p class="mt-3 text-sm">
-					{#if !isDownloadedPlaylist && $user?.username}
+					{#if isOther}
+						{#if playlistData.creator?.avatarUrl}
+							<img
+								src={playlistData.creator.avatarUrl}
+								alt=""
+								class="inline size-5 rounded-full align-[-4px] mr-1"
+							/>
+						{/if}
+						<span class="font-bold">{playlistData.creator?.username ?? 'Someone'}</span>
+						<span class="text-white/70"> · </span>
+					{:else if !isDownloadedPlaylist && $user?.username}
 						<span class="font-bold">{$user.username}</span>
 						<span class="text-white/70"> · </span>
+					{/if}
+					{#if playlistData.public && playlistData.saves}
+						<span class="text-white/70">
+							{playlistData.saves}
+							{playlistData.saves === 1 ? 'save' : 'saves'} ·
+						</span>
 					{/if}
 					<span class="text-white/70">
 						{playlistData.song_amount}
@@ -358,6 +407,24 @@
 					<span class="absolute bottom-0 size-1 rounded-full bg-primary-500"></span>
 				{/if}
 			</button>
+
+			{#if isOther}
+				<button
+					title={isSaved ? 'Remove from your library' : 'Save to your library'}
+					aria-label={isSaved ? 'Remove from your library' : 'Save to your library'}
+					aria-pressed={isSaved}
+					class="size-10 grid place-items-center rounded-full cursor-pointer transition {isSaved
+						? 'text-primary-500'
+						: 'text-white/60 hover:text-white'}"
+					on:click={() => toggleSavedPlaylist(playlistData)}
+				>
+					<span
+						class="{isSaved
+							? 'icon-[mingcute--bookmark-fill]'
+							: 'icon-[mingcute--bookmark-line]'} size-7"
+					></span>
+				</button>
+			{/if}
 
 			{#if !isDownloadedPlaylist}
 				{#if downloadingAll.downloading}
@@ -441,11 +508,12 @@
 
 	<div class="px-6 pb-10">
 		<div
-			class="grid grid-cols-[2rem_minmax(0,1fr)_9rem_2.5rem] items-center gap-4 px-4 h-9 mb-2 border-b border-white/10 text-sm text-secondary-600"
+			class="grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] items-center gap-4 px-4 h-9 mb-2 border-b border-white/10 text-sm text-secondary-600"
 		>
 			<span class="text-end">#</span>
 			<span>Title</span>
-			<span>{isDownloadedPlaylist ? 'Downloaded' : 'Date added'}</span>
+			<span>{isDownloadedPlaylist ? 'Downloaded' : isLiked ? 'Date liked' : 'Date added'}</span>
+			<span></span>
 			<span></span>
 		</div>
 
@@ -456,6 +524,7 @@
 					{@const current = isCurrent(song)}
 					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}
 					{@const download = $downloads[song.id]}
+					{@const liked = $isFavourite(song)}
 					<ContextMenu disabled={!downloaded}>
 						<div
 							role="button"
@@ -471,7 +540,7 @@
 							on:dragover={(e) => dragOver(e, index)}
 							on:drop={drop}
 							on:dragend={() => (dragFrom = dropAt = null)}
-							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2.5rem] items-center gap-4 px-4 h-14 rounded-md cursor-pointer transition-colors {current
+							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] items-center gap-4 px-4 h-14 rounded-md cursor-pointer transition-colors {current
 								? 'bg-white/[0.08]'
 								: 'hover:bg-white/[0.06]'} {dragFrom === index ? 'opacity-40' : ''}"
 							on:click={async () => {
@@ -548,28 +617,53 @@
 							</span>
 
 							<button
-								title={isDownloadedPlaylist ? 'Delete download' : 'Remove from playlist'}
-								aria-label={isDownloadedPlaylist
-									? `Delete download of ${song.title}`
-									: `Remove ${song.title} from playlist`}
-								disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
-								class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
-								on:click={async (e) => {
+								title={liked ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+								aria-label={liked
+									? `Remove ${song.title} from Liked Songs`
+									: `Add ${song.title} to Liked Songs`}
+								aria-pressed={liked}
+								class="size-8 grid place-items-center rounded-full cursor-pointer transition {liked
+									? 'text-primary-500'
+									: 'text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}"
+								on:click={(e) => {
 									e.stopPropagation();
-									if (isDownloadedPlaylist) {
-										await deleteSong(song.id);
-										songs = songs.filter((s) => s.id != song.id);
-									} else {
-										removeSong(song.songInfo.id);
-									}
+									toggleFavourite(song);
 								}}
 							>
 								<span
-									class="{isDownloadedPlaylist
-										? 'icon-[mingcute--delete-2-line]'
-										: 'icon-[mingcute--close-line]'} size-[18px]"
+									class="{liked
+										? 'icon-[mingcute--heart-fill]'
+										: 'icon-[mingcute--heart-line]'} size-[18px]"
 								></span>
 							</button>
+
+							{#if isOther || isLiked}
+								<span></span>
+							{:else}
+								<button
+									title={isDownloadedPlaylist ? 'Delete download' : 'Remove from playlist'}
+									aria-label={isDownloadedPlaylist
+										? `Delete download of ${song.title}`
+										: `Remove ${song.title} from playlist`}
+									disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
+									class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
+									on:click={async (e) => {
+										e.stopPropagation();
+										if (isDownloadedPlaylist) {
+											await deleteSong(song.id);
+											songs = songs.filter((s) => s.id != song.id);
+										} else {
+											removeSong(song.songInfo.id);
+										}
+									}}
+								>
+									<span
+										class="{isDownloadedPlaylist
+											? 'icon-[mingcute--delete-2-line]'
+											: 'icon-[mingcute--close-line]'} size-[18px]"
+									></span>
+								</button>
+							{/if}
 
 							{#if download?.isDownloading}
 								<div class="absolute bottom-0 left-4 right-4 h-0.5 rounded-full bg-white/10">
@@ -607,12 +701,20 @@
 			<div class="flex flex-col items-center gap-2 py-16 text-center">
 				<span class="icon-[mingcute--music-2-line] size-10 text-secondary-600"></span>
 				<p class="text-lg font-semibold">
-					{isDownloadedPlaylist ? 'No downloaded songs yet' : 'This playlist is empty'}
+					{isDownloadedPlaylist
+						? 'No downloaded songs yet'
+						: isLiked
+							? 'Songs you like show up here'
+							: 'This playlist is empty'}
 				</p>
 				<p class="text-sm text-secondary-600">
 					{isDownloadedPlaylist
 						? 'Download beatmaps on the home page to listen to them here.'
-						: 'Right-click a song and choose "Add to playlist".'}
+						: isLiked
+							? 'Click the heart next to a song to like it.'
+							: isOther
+								? 'Nothing in here yet.'
+								: 'Right-click a song and choose "Add to playlist".'}
 				</p>
 			</div>
 		{/if}
@@ -621,6 +723,13 @@
 				<span class="size-10 icon-[svg-spinners--ring-resize] text-primary-400"></span>
 			</div>
 		{/if}
+	</div>
+{/if}
+
+{#if !playlistData && missing}
+	<div class="flex flex-col items-center gap-2 py-24 text-center">
+		<span class="icon-[mingcute--lock-line] size-10 text-secondary-600"></span>
+		<p class="text-lg font-semibold">{missing}</p>
 	</div>
 {/if}
 

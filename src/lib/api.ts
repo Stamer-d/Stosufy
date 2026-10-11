@@ -42,7 +42,7 @@ export async function graphql<T>(
 }
 
 const PLAYLIST_FIELDS =
-	'id title description imageUrl createdBy public songAmount createdAt updatedAt';
+	'id title description imageUrl createdBy public songAmount createdAt updatedAt saves saved creator { osuId username avatarUrl }';
 const SONG_FIELDS = 'id setId mapId createdAt';
 
 function toPlaylist(playlist: any): Playlist {
@@ -55,7 +55,10 @@ function toPlaylist(playlist: any): Playlist {
 		public: playlist.public,
 		song_amount: playlist.songAmount,
 		created_at: playlist.createdAt,
-		updated_at: playlist.updatedAt
+		updated_at: playlist.updatedAt,
+		creator: playlist.creator ?? null,
+		saves: playlist.saves ?? 0,
+		saved: playlist.saved ?? false
 	};
 }
 
@@ -301,4 +304,75 @@ export async function saveSettings(token: string, settings: Record<string, unkno
 		{ settings }
 	);
 	return data.saveStosufySettings as number;
+}
+
+// --- Public playlists and favourites -----------------------------------------------------
+
+/** Public playlists of everyone: most saved ("popular") or newest first, with a search */
+export async function getPublicPlaylists(
+	token: string,
+	options: { search?: string; sort?: 'popular' | 'new'; limit?: number; offset?: number } = {}
+): Promise<Playlist[]> {
+	const data = await graphql<any>(
+		token,
+		`query ($search: String, $sort: String, $limit: Int, $offset: Int) {
+			getPublicStosufyPlaylists(search: $search, sort: $sort, limit: $limit, offset: $offset) {
+				${PLAYLIST_FIELDS}
+			}
+		}`,
+		{
+			search: options.search || null,
+			sort: options.sort ?? 'popular',
+			limit: options.limit ?? 30,
+			offset: options.offset ?? 0
+		}
+	);
+	return data.getPublicStosufyPlaylists.map(toPlaylist);
+}
+
+/** A playlist of the user or a public one of someone else */
+export async function getPlaylist(token: string, id: number): Promise<Playlist> {
+	const data = await graphql<any>(
+		token,
+		`query ($id: Int!) { getStosufyPlaylist(id: $id) { ${PLAYLIST_FIELDS} } }`,
+		{ id }
+	);
+	return toPlaylist(data.getStosufyPlaylist);
+}
+
+/** Public playlists of others the user saved to their library */
+export async function getSavedPlaylists(token: string): Promise<Playlist[]> {
+	const data = await graphql<any>(token, `{ getSavedStosufyPlaylists { ${PLAYLIST_FIELDS} } }`);
+	return data.getSavedStosufyPlaylists.map(toPlaylist);
+}
+
+export async function savePlaylist(token: string, id: number, saved: boolean) {
+	await graphql(
+		token,
+		'mutation ($id: Int!, $saved: Boolean!) { saveStosufyPlaylist(id: $id, saved: $saved) }',
+		{ id, saved }
+	);
+}
+
+/** The user's favourite songs, newest first */
+export async function getFavourites(token: string): Promise<PlaylistSongInfo[]> {
+	const data = await graphql<any>(token, `{ getStosufyFavourites { ${SONG_FIELDS} } }`);
+	return data.getStosufyFavourites.map(toSong);
+}
+
+export async function setFavourite(
+	token: string,
+	setId: number,
+	mapId: number,
+	favourite: boolean
+) {
+	await graphql(
+		token,
+		`
+			mutation ($setId: Int!, $mapId: Int!, $favourite: Boolean!) {
+				setStosufyFavourite(setId: $setId, mapId: $mapId, favourite: $favourite)
+			}
+		`,
+		{ setId, mapId, favourite }
+	);
 }

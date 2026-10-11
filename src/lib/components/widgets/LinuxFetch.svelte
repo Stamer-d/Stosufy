@@ -17,7 +17,7 @@
 
 	let rows = $derived([
 		['songs', `${songs.length} downloaded`],
-		['playlists', `${$playlists.filter((p) => p.id != -1).length}`],
+		['playlists', `${$playlists.filter((p) => p.id != -1 && p.id != -2).length}`],
 		['top artist', mostCommon(songs.map((song) => song.artist))],
 		['top mapper', mostCommon(songs.map((song) => song.creator))],
 		['playing', $currentSong.song?.title ?? '-'],

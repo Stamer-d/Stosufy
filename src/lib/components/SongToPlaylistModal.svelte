@@ -24,7 +24,7 @@
 					{@const isSongInPlaylist = $playlistSongsCache[playlist.id]?.songs.some((song) =>
 						sameSong(song, map)
 					)}
-					{#if playlist.id !== -1}
+					{#if playlist.id != -1 && playlist.id != -2}
 						<button
 							class="p-2 rounded flex items-center gap-2 hover:bg-secondary-300 {isSongInPlaylist
 								? 'cursor-not-allowed opacity-50'
