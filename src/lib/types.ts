@@ -154,6 +154,8 @@ export interface AppearanceSettings {
 	dim: number;
 	/** Play the videos of beatmaps that have one instead of the background */
 	video?: boolean;
+	/** Show the synced lyrics in focus mode */
+	focusLyrics?: boolean;
 	/** The background pulses to the beat and lights up in kiai time, like in osu! */
 	beatEffects?: boolean;
 	/** Play the storyboards of beatmaps that have one */
@@ -175,6 +177,8 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Lyrics moved earlier or later (seconds), by song; see lyrics.ts */
+	lyricsOffsets?: Record<string, number>;
 	/** Changed keyboard shortcuts, by scope and action (null: none); see keybinds.ts */
 	keybinds?: Partial<Record<'app' | 'global', Record<string, string | null>>>;
 	/** What osu! friends see: online status and song, only the status, or nothing */

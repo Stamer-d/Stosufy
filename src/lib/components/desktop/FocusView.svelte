@@ -6,6 +6,10 @@
 	import Titlebar from '../Titlebar.svelte';
 	import { focusMode, currentSong } from '#lib/stores/audio.ts';
 	import { wallpaper } from '#lib/stores/home.ts';
+	import FocusLyrics from '../FocusLyrics.svelte';
+	import { userSettings, updateAppearance } from '#lib/stores/user.ts';
+
+	let showLyrics = $derived($userSettings.settings?.appearance?.focusLyrics ?? true);
 
 	// Prefer the song that is playing, so the wallpaper follows the music
 	let song = $derived($currentSong.song ?? $wallpaper.song);
@@ -34,16 +38,33 @@
 
 	<div class="relative flex-1 flex flex-col justify-between p-12">
 		<ClockWidget size="lg" />
+		{#if showLyrics && $currentSong.song}
+			<div class="flex-1 grid place-items-center px-8">
+				<FocusLyrics />
+			</div>
+		{/if}
 		<div class="flex items-end justify-between gap-6">
 			<NowPlayingWidget />
-			<button
-				class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer transition"
-				onclick={() => focusMode.set(false)}
-			>
-				<span class="icon-[mingcute--fullscreen-exit-line] size-[18px]"></span>
-				Exit focus
-				<kbd class="ml-1 px-1.5 rounded bg-white/10 text-xs font-sans">Esc</kbd>
-			</button>
+			<div class="flex items-center gap-2">
+				<button
+					class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 cursor-pointer transition {showLyrics
+						? 'text-white'
+						: 'text-white/60 hover:text-white'}"
+					aria-pressed={showLyrics}
+					onclick={() => updateAppearance({ focusLyrics: !showLyrics })}
+				>
+					<span class="icon-[mingcute--mic-line] size-[18px]"></span>
+					Lyrics
+				</button>
+				<button
+					class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer transition"
+					onclick={() => focusMode.set(false)}
+				>
+					<span class="icon-[mingcute--fullscreen-exit-line] size-[18px]"></span>
+					Exit focus
+					<kbd class="ml-1 px-1.5 rounded bg-white/10 text-xs font-sans">Esc</kbd>
+				</button>
+			</div>
 		</div>
 	</div>
 </div>

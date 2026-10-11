@@ -5,6 +5,7 @@ import { derived, get, writable } from 'svelte/store';
 import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
 import { userSettings, updateUserSettings } from './user';
 import { setVolume } from './mixer';
+import { goto } from '$app/navigation';
 import {
 	togglePlayback,
 	skipForward,
@@ -29,7 +30,8 @@ export type KeybindAction =
 	| 'repeat'
 	| 'search'
 	| 'queue'
-	| 'focusMode';
+	| 'focusMode'
+	| 'lyrics';
 
 export type KeybindScope = 'app' | 'global';
 
@@ -49,6 +51,7 @@ export const KEYBIND_ACTIONS: { id: KeybindAction; label: string; group: string 
 	{ id: 'mute', label: 'Mute', group: 'Volume' },
 	{ id: 'search', label: 'Search', group: 'App' },
 	{ id: 'queue', label: 'Show queue', group: 'App' },
+	{ id: 'lyrics', label: 'Lyrics', group: 'App' },
 	{ id: 'focusMode', label: 'Focus mode', group: 'App' }
 ];
 
@@ -66,7 +69,8 @@ export const DEFAULT_KEYBINDS: Record<KeybindScope, Record<KeybindAction, Keybin
 		repeat: 'Ctrl+KeyR',
 		search: 'Ctrl+KeyK',
 		queue: 'KeyQ',
-		focusMode: 'KeyF'
+		focusMode: 'KeyF',
+		lyrics: 'KeyL'
 	},
 	global: {
 		playPause: 'MediaPlayPause',
@@ -81,7 +85,8 @@ export const DEFAULT_KEYBINDS: Record<KeybindScope, Record<KeybindAction, Keybin
 		repeat: null,
 		search: null,
 		queue: null,
-		focusMode: null
+		focusMode: null,
+		lyrics: null
 	}
 };
 
@@ -219,10 +224,17 @@ const ACTIONS: Record<KeybindAction, Handler> = {
 		input?.select();
 	},
 	queue: () => queuePanelOpen.update((open) => !open),
+	lyrics: () => toggleLyrics(),
 	focusMode: () => {
 		if (get(songQueue).audio) focusMode.update((on) => !on);
 	}
 };
+
+/** Opens the lyrics page, or goes back from it */
+export function toggleLyrics() {
+	if (location.pathname === '/lyrics') history.back();
+	else goto('/lyrics');
+}
 
 export function runKeybind(action: KeybindAction) {
 	return (overrides[action] ?? ACTIONS[action])();

@@ -15,7 +15,8 @@
 		queuePanelOpen
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
-	import { handleKeybind } from '#lib/stores/keybinds.ts';
+	import { handleKeybind, toggleLyrics } from '#lib/stores/keybinds.ts';
+	import { page } from '$app/state';
 	import {
 		updateUserSettings,
 		userSettings,
@@ -262,6 +263,17 @@
 					<span class="icon-[mingcute--video-line] size-5"></span>
 				</button>
 			{/if}
+			<button
+				title="Lyrics"
+				aria-label="Lyrics"
+				aria-pressed={page.url.pathname === '/lyrics'}
+				class="{ICON_BUTTON} {page.url.pathname === '/lyrics'
+					? 'text-primary-500'
+					: 'text-white/60 hover:text-white'}"
+				on:click={toggleLyrics}
+			>
+				<span class="icon-[mingcute--mic-line] size-5"></span>
+			</button>
 			<button
 				title="Queue"
 				aria-label="Queue"
