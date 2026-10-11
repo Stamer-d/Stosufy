@@ -12,7 +12,10 @@
 		leaderboard,
 		downloadReplay,
 		setGameplayMode,
-		playKey
+		playKey,
+		startPlaying,
+		togglePlayMod,
+		PLAY_MODS
 	} from '#lib/gameplay/play.ts';
 
 	let open = $state(false);
@@ -58,8 +61,11 @@
 		audio.play().catch(() => {});
 	}
 
+	/** @type {import('#lib/gameplay/play.ts').PlayModName[]} */
+	let playMods = $derived($userSettings.settings?.gameplayMods ?? []);
+
 	function playYourself() {
-		setGameplayMode(song, { kind: 'live' });
+		startPlaying(song, playMods);
 		open = false;
 		restartSong();
 	}
@@ -80,6 +86,16 @@
 			loadingScore = null;
 		}
 	}
+
+	const MOD_TITLES = {
+		EZ: 'Easy: bigger circles, slower approach, more lenient',
+		HD: 'Hidden: no approach circles, circles fade out',
+		HR: 'Hard Rock: smaller circles, faster, flipped',
+		HT: 'Half Time: 0.75× speed',
+		DT: 'Double Time: 1.5× speed',
+		NC: 'Nightcore: 1.5× speed and pitch',
+		RX: 'Relax: no clicking, just aim'
+	};
 
 	let gameKeys = $derived($userSettings.settings?.gameplayKeys ?? ['KeyZ', 'KeyX']);
 	const keyLabel = (code) => code.replace(/^Key|^Digit/, '');
@@ -186,6 +202,21 @@
 					</span>
 				</span>
 			</button>
+			<div class="flex flex-wrap items-center gap-1.5 px-2.5 pb-2">
+				{#each PLAY_MODS as mod (mod)}
+					{@const on = playMods.includes(mod)}
+					<button
+						aria-pressed={on}
+						title={MOD_TITLES[mod]}
+						class="h-7 px-2.5 rounded-md text-xs font-bold ring-1 cursor-pointer transition {on
+							? 'ring-primary-300 bg-primary-500/30 text-white'
+							: 'ring-white/15 text-white/60 hover:text-white'}"
+						onclick={() => updateUserSettings({ gameplayMods: togglePlayMod(playMods, mod) })}
+					>
+						{mod}
+					</button>
+				{/each}
+			</div>
 			<div class="flex items-center gap-2 px-2.5 pb-2 text-xs text-white/60">
 				Keys
 				{#each [0, 1] as index (index)}

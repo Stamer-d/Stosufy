@@ -203,6 +203,8 @@ export interface Settings {
 	gameplay?: boolean;
 	/** The difficulty the gameplay and hitsounds use, by beatmap set (when not the song's own) */
 	gameplayDifficulty?: Record<string, string>;
+	/** Mods to play with yourself (EZ, HD, HR, HT, DT, NC, RX) */
+	gameplayMods?: ('EZ' | 'HD' | 'HR' | 'HT' | 'DT' | 'NC' | 'RX')[];
 	/** Keys to play with: two keys (KeyboardEvent.code) */
 	gameplayKeys?: [string, string];
 	/** Show Japanese lyrics in romaji (Latin letters) */

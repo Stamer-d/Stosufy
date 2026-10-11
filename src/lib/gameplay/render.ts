@@ -141,14 +141,20 @@ export function createGameplayRenderer(
 	// --- Hit circles ------------------------------------------------------------------------
 
 	/** How visible an object is before it's hit: fading in, and out with Hidden */
+	/** Hidden (osu!'s OsuModHidden): circles fade in faster, then out */
+	const hiddenFadeIn = preempt * 0.4;
+	const hiddenFadeOut = preempt * 0.3;
+	/** With Hidden, the first object still shows its approach circle */
+	const firstObject = objects.find((o) => o.kind !== 'spinner')?.index ?? -1;
+
+	/** How visible a circle (or a slider's head, end or repeat) is before it's hit */
 	function appearAlpha(object: HitObject, time: number) {
 		const appear = object.time - preempt;
-		let alpha = clamp01((time - appear) / fadeIn);
-		if (hidden) {
-			const fadeOutStart = appear + fadeIn;
-			alpha *= 1 - clamp01((time - fadeOutStart) / (preempt * 0.3));
-		}
-		return alpha;
+		if (!hidden) return clamp01((time - appear) / fadeIn);
+		const fadeOutStart = appear + hiddenFadeIn;
+		return (
+			clamp01((time - appear) / hiddenFadeIn) * (1 - clamp01((time - fadeOutStart) / hiddenFadeOut))
+		);
 	}
 
 	function drawCircle(
@@ -245,7 +251,7 @@ export function createGameplayRenderer(
 	}
 
 	function drawApproach(object: HitObject, x: number, y: number, time: number, state: ObjectState) {
-		if (time > object.time || hidden) return;
+		if (time > object.time || (hidden && object.index !== firstObject)) return;
 		if (state.headAt !== null && state.headAt <= time) return;
 		const appear = object.time - preempt;
 		const progress = (time - appear) / preempt;
@@ -267,15 +273,15 @@ export function createGameplayRenderer(
 
 	function drawSlider(object: HitObject, time: number, state: ObjectState) {
 		const slider = object.slider!;
-		let alpha = appearAlpha(object, time);
+		// The body; with Hidden it fades out over the slider's length (eased out)
+		let shown = clamp01((time - (object.time - preempt)) / fadeIn);
+		if (time > object.endTime) shown = 1 - (time - object.endTime) / HIT_FADE;
+		let alpha = shown;
 		if (hidden) {
-			// The body fades over the slider's length
 			const fadeOutStart = object.time - preempt + fadeIn;
-			alpha =
-				clamp01((time - (object.time - preempt)) / fadeIn) *
-				(1 - clamp01((time - fadeOutStart) / (object.endTime - fadeOutStart || 1)));
+			const t = clamp01((time - fadeOutStart) / (object.endTime - fadeOutStart || 1));
+			alpha *= (1 - t) ** 2;
 		}
-		if (time > object.endTime) alpha = 1 - (time - object.endTime) / HIT_FADE;
 		const colour = colourOf(object);
 		if (alpha > 0) {
 			const points = slider.path.points;
@@ -298,14 +304,19 @@ export function createGameplayRenderer(
 
 		const span = time < object.time ? 0 : Math.floor((time - object.time) / slider.spanDuration);
 		const end = slider.path.at(1);
-		if (time < object.endTime && alpha > 0) {
+		if (time < object.endTime && shown > 0) {
 			// The ticks still to come in this span
 			for (const point of slider.points) {
 				if (point.kind !== 'tick' || point.time <= time) continue;
 				if (Math.floor((point.time - object.time) / slider.spanDuration) !== span) continue;
 				const at = slider.path.at(point.progress);
-				if (!image(element('sliderscorepoint'), at.x, at.y, circleScale, alpha)) {
-					ctx.globalAlpha = alpha;
+				let tickAlpha = shown;
+				if (hidden) {
+					const fade = Math.min(preempt - 150, 1000);
+					tickAlpha *= 1 - clamp01((time - (point.time - fade)) / fade);
+				}
+				if (!image(element('sliderscorepoint'), at.x, at.y, circleScale, tickAlpha)) {
+					ctx.globalAlpha = tickAlpha;
 					ctx.fillStyle = 'white';
 					ctx.beginPath();
 					ctx.arc(at.x, at.y, radius * 0.12, 0, Math.PI * 2);
@@ -326,14 +337,14 @@ export function createGameplayRenderer(
 						where.x,
 						where.y,
 						circleScale,
-						alpha,
+						shown,
 						undefined,
 						'',
 						angle
 					)
 				) {
 					ctx.save();
-					ctx.globalAlpha = alpha;
+					ctx.globalAlpha = shown;
 					ctx.translate(where.x, where.y);
 					ctx.rotate(angle);
 					ctx.fillStyle = 'white';

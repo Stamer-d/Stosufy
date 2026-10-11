@@ -10,7 +10,7 @@
 	import { keybindsPaused } from '#lib/stores/keybinds.ts';
 	import { beatmapContent, playSoundNow } from '#lib/hitsounds/player.ts';
 	import { skinFolder, skinsChanged, completeDefaultSkin, BUILTIN } from '#lib/hitsounds/skins.ts';
-	import { parseGameplay } from '#lib/gameplay/beatmap.ts';
+	import { parseGameplay, MOD } from '#lib/gameplay/beatmap.ts';
 	import { loadGameplaySkin, forgetGameplaySkins, withFallback } from '#lib/gameplay/skin.ts';
 	import { createGameplayRenderer } from '#lib/gameplay/render.ts';
 	import {
@@ -82,7 +82,8 @@
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			if (cancelled) return;
 			const auto = shown.kind === 'auto' && content ? autoplayFor(content) : null;
-			const mods = shown.kind === 'replay' ? shown.replay.mods : 0;
+			const mods =
+				shown.kind === 'replay' ? shown.replay.mods : shown.kind === 'live' ? shown.mods : 0;
 			const beatmap = auto ? auto.beatmap : content ? parseGameplay(content, mods) : null;
 			if (!beatmap) {
 				message = content ? 'Gameplay is only for osu!standard maps' : "Couldn't load the beatmap";
@@ -102,9 +103,11 @@
 				const names = modNames(shown.replay.mods);
 				label = `${shown.replay.player}${names.length ? ' +' + names.join('') : ''} · #${shown.score.position}`;
 			} else if (shown.kind === 'live') {
-				judge = createJudge(beatmap, 0);
+				judge = createJudge(beatmap, mods);
 				judge.onSound = (sound) => playSoundNow(sound, judge);
-				label = `Playing · ${keyNames()} to click · Esc to stop`;
+				const names = modNames(mods);
+				const relax = !!(mods & MOD.Relax);
+				label = `Playing${names.length ? ' +' + names.join('') : ''} · ${relax ? 'just aim' : keyNames() + ' to click'} · Esc to stop`;
 			} else {
 				judge = auto.judge;
 				label = 'Autoplay';
@@ -230,7 +233,8 @@
 				if (live) {
 					// Jumped (seeked): start over from here
 					if (time < lastTime - 300 || time > lastTime + 1500) view.judge.reset(time);
-					if (!view.judge.frames.length) feed();
+					// Relax hits by aiming alone: an input every frame
+					if (!view.judge.frames.length || view.judge.mods & MOD.Relax) feed();
 					if (!audio.paused) view.judge.update(time);
 				}
 				lastTime = time;

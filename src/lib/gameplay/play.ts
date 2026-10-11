@@ -8,7 +8,10 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { keyStore } from '../stores/auth';
 import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
-import { currentSong } from '../stores/audio';
+import { currentSong, setPlaybackMod } from '../stores/audio';
+import { currentMod } from '../stores/mods';
+import { MOD } from './beatmap';
+import type { PlaybackMod } from '../types';
 import { parseReplay, type Replay } from './replay';
 import type { Judge } from './judge';
 import type { MapSet, StoredMapSet } from '../types';
@@ -105,7 +108,9 @@ export interface LeaderboardScore {
 }
 
 export type GameplayMode =
-	{ kind: 'auto' } | { kind: 'replay'; score: LeaderboardScore; replay: Replay } | { kind: 'live' };
+	| { kind: 'auto' }
+	| { kind: 'replay'; score: LeaderboardScore; replay: Replay }
+	| { kind: 'live'; mods: number };
 
 /** What the gameplay view shows, for which song and difficulty */
 export const gameplayMode = writable<{ key: string | null; mode: GameplayMode }>({
@@ -236,3 +241,65 @@ export const playingLive = derived(
 	[gameplayMode, currentSong, userSettings],
 	([$mode, $song]) => $mode.mode.kind === 'live' && $mode.key === playKey($song.song)
 );
+
+// --- Playing it yourself with mods --------------------------------------------------------
+
+/** The mods to play with, as osu! names them */
+export const PLAY_MODS = ['EZ', 'HD', 'HR', 'HT', 'DT', 'NC', 'RX'] as const;
+export type PlayModName = (typeof PLAY_MODS)[number];
+
+const MOD_BITS: Record<PlayModName, number> = {
+	EZ: MOD.Easy,
+	HD: MOD.Hidden,
+	HR: MOD.HardRock,
+	HT: MOD.HalfTime,
+	DT: MOD.DoubleTime,
+	NC: MOD.Nightcore | MOD.DoubleTime,
+	RX: MOD.Relax
+};
+
+/** Mods that can't go together: choosing one turns the others off */
+const EXCLUSIVE: Record<PlayModName, PlayModName[]> = {
+	EZ: ['HR'],
+	HR: ['EZ'],
+	HT: ['DT', 'NC'],
+	DT: ['HT', 'NC'],
+	NC: ['HT', 'DT'],
+	HD: [],
+	RX: []
+};
+
+export function togglePlayMod(selected: PlayModName[], mod: PlayModName): PlayModName[] {
+	if (selected.includes(mod)) return selected.filter((m) => m !== mod);
+	return [...selected.filter((m) => !EXCLUSIVE[mod].includes(m)), mod];
+}
+
+export function playModBits(selected: PlayModName[]) {
+	return selected.reduce((bits, mod) => bits | MOD_BITS[mod], 0);
+}
+
+/** The speed mod of the music before playing, to go back to afterwards */
+let speedBefore: PlaybackMod | null = null;
+
+/** Starts playing the song yourself with mods: the speed ones change the music's speed */
+export function startPlaying(song: MapSet, selected: PlayModName[]) {
+	speedBefore ??= currentMod();
+	const speed: PlaybackMod = selected.includes('NC')
+		? 'NC'
+		: selected.includes('DT')
+			? 'DT'
+			: selected.includes('HT')
+				? 'HT'
+				: 'NM';
+	setPlaybackMod(speed);
+	setGameplayMode(song, { kind: 'live', mods: playModBits(selected) });
+}
+
+if (typeof window !== 'undefined') {
+	// Done playing: the music gets its speed back
+	playingLive.subscribe((live) => {
+		if (live || speedBefore === null) return;
+		setPlaybackMod(speedBefore);
+		speedBefore = null;
+	});
+}
