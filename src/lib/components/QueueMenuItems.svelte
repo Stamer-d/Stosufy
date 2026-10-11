@@ -1,6 +1,6 @@
 <script>
 	import Button from './Button.svelte';
-	import { queueSong } from '#lib/stores/audio.ts';
+	import { queueSong, startRadio } from '#lib/stores/audio.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 	import { updateHomeSettings } from '#lib/stores/user.ts';
 
@@ -28,6 +28,14 @@
 	on:click={() => add(false)}
 >
 	Add to queue
+</Button>
+<Button
+	type="ghost"
+	class="w-full rounded-md text-sm hover:bg-secondary-400"
+	icon="icon-[mingcute--radio-line]"
+	on:click={() => startRadio(song)}
+>
+	Start radio
 </Button>
 <Button
 	type="ghost"

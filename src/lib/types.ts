@@ -1,6 +1,6 @@
 export type PlaylistId = number | string;
 
-export type QueueType = 'playlist' | 'preview';
+export type QueueType = 'playlist' | 'preview' | 'radio';
 
 export interface Beatmap {
 	id: number | string;
@@ -167,6 +167,8 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Keep playing similar songs when a queue ends (default on) */
+	autoplay?: boolean;
 	/** Chosen sort order per playlist id */
 	playlistSort?: Record<string, import('./songSort').SongSort>;
 }

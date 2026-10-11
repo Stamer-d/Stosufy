@@ -22,7 +22,9 @@
 	let sourceName = $derived(
 		$songQueue.type === 'preview'
 			? 'Search results'
-			: ($playlists.find((playlist) => playlist.id == $songQueue.playlistId)?.title ?? 'Queue')
+			: $songQueue.type === 'radio'
+				? `Radio · songs like ${$songQueue.queue?.[0]?.title ?? ''}`
+				: ($playlists.find((playlist) => playlist.id == $songQueue.playlistId)?.title ?? 'Queue')
 	);
 
 	let dragFrom = $state(null);

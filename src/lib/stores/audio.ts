@@ -6,6 +6,7 @@ import { track, untrack, setFade, setGain, rampGain } from './mixer';
 import { measureLoudness, gainFor } from './loudness';
 import { sameSong } from '../tracks';
 import { showToast } from './toast';
+import { librarySong, similarSongs } from './radio';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
 import type {
@@ -373,6 +374,8 @@ async function handleSongEnded() {
 	}
 	if (hasNext(current, get(upNext), repeatMode())) {
 		await skipForward();
+	} else if (await autoplay(current)) {
+		// Autoplay continues with similar songs
 	} else {
 		// End of the queue: stop and rewind, so pressing play starts the song again
 		stopPlayback();
@@ -549,4 +552,24 @@ if (typeof window !== 'undefined') {
 			fading = false;
 		}, 100);
 	}, 1000);
+}
+
+// --- Radio ------------------------------------------------------------------------------
+
+/** Plays a song followed by similar songs from the library */
+export async function startRadio(song: MapSet) {
+	const seed = librarySong(song) ?? song;
+	await setSongQueue(0, [seed, ...similarSongs(seed)], 'radio');
+}
+
+/** At the end of a queue: keep playing songs similar to the last one, unless turned off */
+async function autoplay(current: SongQueue) {
+	const last = current.queue?.[current.currentIndex];
+	if (get(userSettings).settings?.autoplay === false || !last || !librarySong(last)) return false;
+	// Don't repeat what was just played
+	const next = similarSongs(last, current.queue ?? []);
+	if (!next.length) return false;
+	await setSongQueue(0, next, 'radio');
+	showToast(`Autoplay: songs like "${last.title}"`, 'icon-[mingcute--radio-line]');
+	return true;
 }

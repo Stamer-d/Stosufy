@@ -375,6 +375,12 @@
 				<section>
 					{@render heading('Volume')}
 					{@render toggle(
+						'Autoplay',
+						'When a queue ends, keep playing similar songs from your library',
+						$userSettings.settings?.autoplay ?? true,
+						(checked) => updateUserSettings({ autoplay: checked })
+					)}
+					{@render toggle(
 						'Normalize volume',
 						'Plays every song at the same loudness',
 						$userSettings.settings?.normalize ?? true,
