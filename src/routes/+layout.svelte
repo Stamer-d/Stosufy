@@ -12,6 +12,7 @@
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
 	import SettingsModal from '#lib/components/SettingsModal.svelte';
+	import OsuProfileImport from '#lib/components/OsuProfileImport.svelte';
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
@@ -117,6 +118,7 @@
 	{/if}
 	<Toasts />
 	<SettingsModal />
+	<OsuProfileImport />
 {:else}
 	<div class="h-screen flex flex-col bg-app">
 		<Titlebar />

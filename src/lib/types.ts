@@ -175,6 +175,10 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Download the songs of the playlists made from the osu! profile */
+	profileDownload?: boolean;
+	/** Playlists made from the osu! profile, by list */
+	profilePlaylists?: Partial<Record<'favourite' | 'most_played' | 'best', number | string>>;
 	/** Keep playing similar songs when a queue ends (default on) */
 	autoplay?: boolean;
 	/** Chosen sort order per playlist id */

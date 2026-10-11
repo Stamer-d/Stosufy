@@ -181,7 +181,8 @@ export async function downloadBeatmap(
 	mapSetData: MapSet,
 	mapId: number | string,
 	sessionKey?: string,
-	accessToken?: string
+	accessToken?: string,
+	{ quiet = false }: { quiet?: boolean } = {}
 ): Promise<string> {
 	const setId = mapSetData.id.toString();
 	if (downloadWorkers[setId]) return;
@@ -230,11 +231,13 @@ export async function downloadBeatmap(
 		return audio;
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
-		showToast(
-			`Download failed: ${error instanceof Error ? error.message : error}`,
-			'icon-[mingcute--warning-line]',
-			7000
-		);
+		// The download queue shows its own errors
+		if (!quiet)
+			showToast(
+				`Download failed: ${error instanceof Error ? error.message : error}`,
+				'icon-[mingcute--warning-line]',
+				7000
+			);
 		delete downloadWorkers[setId];
 		downloads.update((state) => {
 			const newState = { ...state };

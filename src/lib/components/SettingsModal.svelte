@@ -21,6 +21,7 @@
 		pickOsuSongsFolder,
 		defaultOsuSongsFolder
 	} from '#lib/stores/osuImport.ts';
+	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
 
 	let osuFolder = $state(null);
 	defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
@@ -453,6 +454,23 @@
 								{/if}
 							</div>
 						{/if}
+					</div>
+					<div class="mt-2 flex items-center justify-between gap-4 p-3 rounded-lg bg-white/[0.04]">
+						<span class="min-w-0">
+							<span class="block font-semibold text-white">Playlists from your profile</span>
+							<span class="block text-xs text-secondary-600">
+								Turn your favourites, most played or top plays into a playlist.
+							</span>
+						</span>
+						<Button
+							type="normal"
+							on:click={() => {
+								settingsTab.set(null);
+								profileImportOpen.set(true);
+							}}
+						>
+							Open
+						</Button>
 					</div>
 				</section>
 			{/if}

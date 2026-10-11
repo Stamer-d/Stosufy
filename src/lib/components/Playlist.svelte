@@ -17,6 +17,10 @@
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
 	import PlaylistCover from './PlaylistCover.svelte';
+	import DownloadQueue from './DownloadQueue.svelte';
+	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
+
+	let addMenuOpen = $state(false);
 
 	let fileInput;
 	let uploadedImage = $state(null);
@@ -141,14 +145,54 @@
 <div class="h-full flex flex-col">
 	<div class="flex items-center justify-between pl-5 pr-3 h-14 shrink-0">
 		<h2 class="font-bold">Your Library</h2>
-		<button
-			title="Create playlist"
-			aria-label="Create playlist"
-			class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition"
-			onclick={createNewPlaylist}
-		>
-			<span class="icon-[mingcute--add-line] size-5"></span>
-		</button>
+		<div class="relative">
+			<button
+				title="Create playlist"
+				aria-label="Create playlist"
+				aria-haspopup="menu"
+				aria-expanded={addMenuOpen}
+				class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition"
+				onclick={() => (addMenuOpen = !addMenuOpen)}
+			>
+				<span class="icon-[mingcute--add-line] size-5"></span>
+			</button>
+			{#if addMenuOpen}
+				<!-- Closes the menu on a click anywhere else -->
+				<button
+					class="fixed inset-0 z-40 cursor-default"
+					aria-label="Close menu"
+					tabindex="-1"
+					onclick={() => (addMenuOpen = false)}
+				></button>
+				<div
+					role="menu"
+					class="absolute right-0 top-9 z-50 w-56 p-1 rounded-md bg-secondary-200 shadow-xl border border-white/5"
+				>
+					<button
+						role="menuitem"
+						class="w-full flex items-center gap-3 px-3 py-2 rounded text-sm text-start hover:bg-secondary-400 cursor-pointer"
+						onclick={() => {
+							addMenuOpen = false;
+							createNewPlaylist();
+						}}
+					>
+						<span class="icon-[mingcute--playlist-line] size-[18px] text-secondary-600"></span>
+						New playlist
+					</button>
+					<button
+						role="menuitem"
+						class="w-full flex items-center gap-3 px-3 py-2 rounded text-sm text-start hover:bg-secondary-400 cursor-pointer"
+						onclick={() => {
+							addMenuOpen = false;
+							$profileImportOpen = true;
+						}}
+					>
+						<span class="icon-[mingcute--user-heart-line] size-[18px] text-secondary-600"></span>
+						From your osu! profile
+					</button>
+				</div>
+			{/if}
+		</div>
 	</div>
 	<ul class="flex-1 overflow-y-auto flex flex-col px-2 pb-2">
 		{#each $playlists as playlist (playlist.id)}
@@ -216,6 +260,7 @@
 			</li>
 		{/each}
 	</ul>
+	<DownloadQueue />
 </div>
 
 <Modal title="Delete playlist" width="420px" bind:open={deleteModalOpen}>
