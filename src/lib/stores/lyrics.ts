@@ -69,11 +69,34 @@ export function cleanTitle(title: string) {
 		.trim();
 }
 
+const TIMEOUT = 10_000;
+const ATTEMPTS = 3;
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A request to LRCLIB; it's often slow or briefly down, so it's tried a few times */
 async function lrclib(path: string) {
-	const response = await fetch(`${API}/${path}`, { headers: HEADERS });
-	if (response.status === 404) return null;
-	if (!response.ok) throw new Error(`LRCLIB answered with HTTP ${response.status}`);
-	return response.json();
+	let lastError: unknown;
+	for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+		if (attempt) await wait(attempt * 1000);
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), TIMEOUT);
+		try {
+			const response = await fetch(`${API}/${path}`, {
+				headers: HEADERS,
+				signal: controller.signal
+			});
+			if (response.status === 404) return null;
+			if (response.ok) return await response.json();
+			lastError = new Error(`LRCLIB answered with HTTP ${response.status}`);
+			// Only busy or broken servers are worth asking again
+			if (response.status !== 429 && response.status < 500) break;
+		} catch (error) {
+			lastError = error;
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	throw lastError;
 }
 
 /** Title and artist in the original language, from osu! */
@@ -117,15 +140,19 @@ function best(records: Record[], duration: number): Record | null {
 async function search(song: MapSet, duration: number): Promise<Lyrics | null> {
 	const names = [{ title: cleanTitle(song.title ?? ''), artist: song.artist ?? '' }];
 	const records: Record[] = [];
+	// A failed lookup only counts when none found anything
+	let failure: unknown = null;
+	const lookup = async (path: string) => {
+		try {
+			records.push(...((await lrclib(path)) ?? []));
+		} catch (error) {
+			failure ??= error;
+		}
+	};
 	const find = async ({ title, artist }: { title: string; artist: string }) => {
 		if (!title) return;
-		const params = new URLSearchParams({ track_name: title, artist_name: artist });
-		records.push(...((await lrclib(`search?${params}`)) ?? []));
-		if (!records.length) {
-			records.push(
-				...((await lrclib(`search?${new URLSearchParams({ q: `${artist} ${title}` })}`)) ?? [])
-			);
-		}
+		await lookup(`search?${new URLSearchParams({ track_name: title, artist_name: artist })}`);
+		if (!records.length) await lookup(`search?${new URLSearchParams({ q: `${artist} ${title}` })}`);
 	};
 	await find(names[0]);
 	// Romanized titles often aren't found: try the original ones
@@ -136,7 +163,10 @@ async function search(song: MapSet, duration: number): Promise<Lyrics | null> {
 		}
 	}
 	const found = best(records, duration);
-	if (!found) return null;
+	if (!found) {
+		if (failure) throw failure;
+		return null;
+	}
 	const lines = found.syncedLyrics ? parseLrc(found.syncedLyrics) : null;
 	return {
 		lines: lines?.length ? lines : null,
@@ -183,12 +213,23 @@ export async function loadLyrics() {
 		}
 	} catch (error) {
 		console.error('Could not load the lyrics:', error);
-		if (lyricsKey(get(currentSong).song) === key)
+		if (lyricsKey(get(currentSong).song) === key) {
 			lyrics.set({ key, status: 'error', lyrics: null });
+			// Try once more by itself a bit later, while the song still plays
+			if (!retried.has(key)) {
+				retried.add(key);
+				setTimeout(() => {
+					if (lyricsKey(get(currentSong).song) === key && get(lyrics).status === 'error')
+						loadLyrics();
+				}, 8000);
+			}
+		}
 	} finally {
 		loadingKey = null;
 	}
 }
+
+const retried = new Set<string>();
 
 // --- Romaji -------------------------------------------------------------------------
 
