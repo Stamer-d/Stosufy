@@ -70,6 +70,8 @@ interface MapSetInfo {
 	storyboard?: { dir: string; osb: string | null } | null;
 	/** Whether the set has a storyboard on osu! (for songs saved before storyboards) */
 	hasStoryboard?: boolean;
+	/** hasStoryboard was asked from osu! (it was wrong for storyboards with a byte order mark) */
+	storyboardChecked?: boolean;
 	/** Video in a format the webview can't play, converted when the song is played */
 	videoSource?: string | null;
 	/** Uninherited timing points of the first difficulty (for Nightcore beats) */

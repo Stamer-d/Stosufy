@@ -54,6 +54,9 @@ const VALUE_COUNT: Record<string, number> = { F: 1, S: 1, R: 1, MX: 1, MY: 1, M:
 const MAX_COMMANDS_PER_SPRITE = 50_000;
 
 function section(content: string, name: string) {
+	// Many .osb files (e.g. from storybrew) start with a byte order mark, which would hide a
+	// [Events] header on the first line
+	content = content.replace(/^\uFEFF/, '');
 	const match = content.split(new RegExp(`^\\[${name}\\]\\s*$`, 'm'))[1];
 	return match ? match.split(/^\[[A-Za-z]+\]\s*$/m)[0] : '';
 }

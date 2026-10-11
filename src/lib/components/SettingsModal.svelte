@@ -313,7 +313,7 @@
 					)}
 					{@render toggle(
 						'Play storyboards',
-						'The animations of the beatmap, drawn over the background like in osu!',
+						'The animations of the beatmap, like in osu!. They play in focus mode (the button next to Home).',
 						appearance.storyboard,
 						(checked) => updateAppearance({ storyboard: checked })
 					)}

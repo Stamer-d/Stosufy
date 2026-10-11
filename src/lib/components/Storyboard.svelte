@@ -20,6 +20,9 @@
 	);
 	let isCurrent = $derived(setId != null && $currentSong.song?.id == setId);
 	let info = $derived(isCurrent && enabled ? ($mapDataStore[setId]?.storyboard ?? null) : null);
+	// Plain values, so saving other data of the song (e.g. its loudness) doesn't restart it
+	let dir = $derived(info?.dir ?? null);
+	let osb = $derived(info?.osb ?? null);
 	let osuFile = $derived(
 		info && mapId != null ? ($mapDataStore[setId]?.beatmaps?.[mapId]?.osuFile ?? null) : null
 	);
@@ -33,7 +36,7 @@
 		file ? readTextFile(file, { baseDir: BaseDirectory.Home }).catch(() => '') : '';
 
 	$effect(() => {
-		const storyboardInfo = info;
+		const storyboardInfo = dir ? { dir, osb } : null;
 		const diffFile = osuFile;
 		const target = canvas;
 		visible = false;

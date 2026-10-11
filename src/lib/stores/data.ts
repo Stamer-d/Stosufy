@@ -500,9 +500,13 @@ export async function fetchMissingVideos() {
 		videoFetch.set({ state: 'checking', done: 0, total: 0 });
 
 		// 1. Which sets have a video or storyboard; remembered, so this only runs once per set
+		// Sets saved as without a storyboard are asked again once: storyboards whose file
+		// starts with a byte order mark weren't recognized before
 		const unchecked = Object.values(get(mapDataStore)).filter(
 			(set) =>
-				(set.hasVideo === undefined || set.hasStoryboard === undefined) &&
+				(set.hasVideo === undefined ||
+					set.hasStoryboard === undefined ||
+					(!set.hasStoryboard && !set.storyboardChecked)) &&
 				Object.keys(set.beatmaps ?? {}).some((id) => /^\d+$/.test(id))
 		);
 		for (let i = 0; i < unchecked.length; i += VIDEO_CHECK_BATCH) {
@@ -524,7 +528,8 @@ export async function fetchMissingVideos() {
 				const id = set.id.toString();
 				setStoredFields(id, {
 					hasVideo: set.hasVideo ?? withVideo.has(id),
-					hasStoryboard: set.hasStoryboard ?? withStoryboard.has(id)
+					hasStoryboard: set.hasStoryboard || withStoryboard.has(id),
+					storyboardChecked: true
 				});
 			}
 			await saveMapData();
