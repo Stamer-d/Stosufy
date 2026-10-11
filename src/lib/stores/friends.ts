@@ -29,15 +29,30 @@ const POLL = 30 * 1000;
 /** Checked in this often, so friends see you online and at the right position */
 const HEARTBEAT = 60 * 1000;
 
-export function sharing() {
-	return get(userSettings).settings?.shareActivity ?? true;
+export type Visibility = 'all' | 'online' | 'hidden';
+
+export const VISIBILITY: Record<Visibility, { label: string; description: string }> = {
+	all: {
+		label: 'Everything',
+		description: "Friends see that you're online and what you listen to."
+	},
+	online: {
+		label: 'Only online',
+		description: "Friends see that you're online, not what you listen to."
+	},
+	hidden: { label: 'Invisible', description: "Friends don't see you at all." }
+};
+
+export function visibility(): Visibility {
+	const settings = get(userSettings).settings;
+	return settings?.activityVisibility ?? (settings?.shareActivity === false ? 'hidden' : 'all');
 }
 
-export function setSharing(share: boolean) {
-	updateUserSettings({ shareActivity: share });
+export function setVisibility(value: Visibility) {
+	updateUserSettings({ activityVisibility: value });
 	lastSent = null;
 	const token = get(keyStore).access_token;
-	if (!share && token) api.hidePresence(token).catch(() => {});
+	if (value === 'hidden' && token) api.hidePresence(token).catch(() => {});
 	else checkIn(true);
 }
 
@@ -65,10 +80,12 @@ function nowPlaying(): api.ListenPlaybackInput | null {
 /** Checks in as online with the current song, if it changed (or `force`) */
 async function checkIn(force = false) {
 	const token = get(keyStore).access_token;
-	if (!sharing() || !token || !get(user)?.id) return;
-	const playback = nowPlaying();
+	const shown = visibility();
+	if (shown === 'hidden' || !token || !get(user)?.id) return;
+	// "Only online": no song and no listening session
+	const playback = shown === 'all' ? nowPlaying() : null;
 	const room = get(listen);
-	const roomCode = room.status === 'live' ? room.code : null;
+	const roomCode = shown === 'all' && room.status === 'live' ? room.code : null;
 	const key = JSON.stringify({ ...playback, position: 0, roomCode });
 	if (!force && key === lastSent) return;
 	lastSent = key;
@@ -82,7 +99,7 @@ async function checkIn(force = false) {
 /** Shows the user as offline; when the app closes */
 export async function goOffline() {
 	const token = get(keyStore).access_token;
-	if (!sharing() || !token || !get(user)?.id) return;
+	if (visibility() === 'hidden' || !token || !get(user)?.id) return;
 	// Don't hold up closing the app for long
 	await Promise.race([
 		api.setPresence(token, false).catch(() => {}),

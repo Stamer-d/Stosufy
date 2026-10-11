@@ -22,6 +22,7 @@
 		defaultOsuSongsFolder
 	} from '#lib/stores/osuImport.ts';
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
+	import VisibilityPicker from './VisibilityPicker.svelte';
 
 	let osuFolder = $state(null);
 	defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
@@ -471,6 +472,13 @@
 						>
 							Open
 						</Button>
+					</div>
+				</section>
+				<section>
+					{@render heading('Friends')}
+					<div class="p-3 rounded-lg bg-white/[0.04]">
+						<span class="block mb-2 font-semibold text-white">What your friends see</span>
+						<VisibilityPicker />
 					</div>
 				</section>
 			{/if}

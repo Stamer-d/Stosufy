@@ -1,13 +1,12 @@
 <script>
 	import Button from './Button.svelte';
-	import { userSettings } from '#lib/stores/user.ts';
+	import VisibilityPicker from './VisibilityPicker.svelte';
 	import { listen } from '#lib/stores/listen.ts';
 	import {
 		friendActivity,
 		friendsPanelOpen,
 		listenAlong,
-		connectFriends,
-		setSharing
+		connectFriends
 	} from '#lib/stores/friends.ts';
 
 	// Re-render the "x min ago" texts
@@ -17,7 +16,6 @@
 		return () => clearInterval(timer);
 	});
 
-	let sharing = $derived($userSettings.settings?.shareActivity ?? true);
 	let online = $derived($friendActivity.friends.filter((friend) => friend.online));
 	let offline = $derived($friendActivity.friends.filter((friend) => !friend.online));
 	let joining = $state(null);
@@ -192,20 +190,8 @@
 		{/if}
 	</div>
 
-	<label
-		class="m-2 p-3 flex items-center gap-3 rounded-lg bg-white/[0.04] text-sm cursor-pointer select-none"
-	>
-		<input
-			type="checkbox"
-			class="size-4 accent-primary-500 cursor-pointer"
-			checked={sharing}
-			onchange={(e) => setSharing(e.currentTarget.checked)}
-		/>
-		<span>
-			<span class="text-white">Show me to my friends</span>
-			<span class="block text-xs text-secondary-600">
-				Whether you're online and what you listen to.
-			</span>
-		</span>
-	</label>
+	<div class="m-2 p-3 rounded-lg bg-white/[0.04]">
+		<h3 class="mb-2 text-sm font-semibold">What your friends see</h3>
+		<VisibilityPicker />
+	</div>
 </aside>
