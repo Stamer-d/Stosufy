@@ -1,4 +1,5 @@
 <script>
+	import { onDestroy } from 'svelte';
 	import { sameSong, songKey } from '#lib/tracks.ts';
 	import SongCover from '#lib/components/SongCover.svelte';
 	import Button from '#lib/components/Button.svelte';
@@ -56,6 +57,19 @@
 		filterText.trim() ? songs.filter((song) => matchesQuery(song, filterText)) : songs,
 		sort
 	);
+	// Big playlists render the first rows at once and the rest frame by frame, so opening
+	// them doesn't freeze the app
+	const FIRST_ROWS = 60;
+	const ROWS_PER_FRAME = 30;
+	let shownRows = FIRST_ROWS;
+	let rowsFrame = null;
+	$: (playlistId, (shownRows = FIRST_ROWS));
+	$: if (shownRows < visibleSongs.length && typeof window !== 'undefined') {
+		cancelAnimationFrame(rowsFrame);
+		rowsFrame = requestAnimationFrame(() => (shownRows += ROWS_PER_FRAME));
+	}
+	onDestroy(() => cancelAnimationFrame(rowsFrame));
+
 	// Dragging songs reorders the playlist; only in its own order, unfiltered, if it's yours
 	$: canReorder =
 		!isDownloadedPlaylist &&
@@ -437,7 +451,7 @@
 
 		{#if songs?.length}
 			{#key playlistId}
-				{#each visibleSongs as song, index (songKey(song))}
+				{#each visibleSongs.slice(0, shownRows) as song, index (songKey(song))}
 					{@const downloaded = isSongDownloaded(song.id)}
 					{@const current = isCurrent(song)}
 					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}

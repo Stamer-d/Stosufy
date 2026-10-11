@@ -28,6 +28,7 @@
 		"windows": [
 			{
 				"decorations": false,
+				"dragDropEnabled": false,
 				"title": "Stosufy",
 				"width": 800,
 				"height": 600,
