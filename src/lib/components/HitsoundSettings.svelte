@@ -202,6 +202,20 @@
 			'Use the beatmap’s own samples where it has them, like osu! does',
 			beatmapSwitch
 		)}
+		{#if settings.mapHitsounds}
+			{#snippet clickSwitch()}
+				{@render switchControl(
+					settings.skinClick ?? true,
+					(checked) => updateUserSettings({ skinClick: checked }),
+					'Skin click on every circle'
+				)}
+			{/snippet}
+			{@render row(
+				'Skin click on every circle',
+				'The hit sound of your skin on every circle, even where the beatmap has its own',
+				clickSwitch
+			)}
+		{/if}
 
 		<div class="mt-4">
 			<div class="flex justify-between text-sm mb-2">

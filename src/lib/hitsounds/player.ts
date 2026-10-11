@@ -46,6 +46,9 @@ function settings() {
 		// Off by default: many maps mute the hitnormal with their own silent samples, and a
 		// music player should sound like the skin on every circle
 		beatmap: s.mapHitsounds ?? false,
+		// The "click" of every circle (the hitnormal) from the skin, even with the beatmap's
+		// own samples on: maps often have quiet or silent hitnormals of their own
+		skinClick: s.skinClick ?? true,
 		offset: s.hitsoundOffset ?? 0,
 		skinsFolder: s.skinsFolder ?? null
 	};
@@ -142,11 +145,13 @@ async function resolve(
 	beatmap: Folder | null,
 	skin: Folder | null,
 	fallback: Folder | null,
-	from: (source: SampleSource) => void = () => {}
+	from: (source: SampleSource) => void = () => {},
+	skinClick = false
 ) {
 	const sound = sample.sound === 'slidertick' ? 'slidertick' : `hit${sample.sound}`;
 	const name = `${sample.set}-${sound}`;
-	if (beatmap && (sample.file || sample.index >= 1)) {
+	const isClick = sample.sound === 'normal' && !sample.file;
+	if (beatmap && (sample.file || sample.index >= 1) && !(isClick && skinClick)) {
 		const names = sample.file
 			? [sample.file.replace(AUDIO_FILE, ''), name, sound]
 			: sample.index >= 2
@@ -250,8 +255,8 @@ let loadingKey: string | null = null;
 async function load() {
 	const song = get(currentSong).song;
 	const queue = get(songQueue);
-	const { on, skin, beatmap } = settings();
-	const key = song && `${songKey(song)}:${skin}:${beatmap}`;
+	const { on, skin, beatmap, skinClick } = settings();
+	const key = song && `${songKey(song)}:${skin}:${beatmap}:${skinClick}`;
 	if (!on || !song) {
 		chart = null;
 		loadingKey = null;
@@ -295,7 +300,10 @@ async function load() {
 		const sound = (sample: HitSample) => {
 			const id = `${sample.set}:${sample.sound}:${sample.index}:${sample.file ?? ''}`;
 			if (!resolved.has(id))
-				resolved.set(id, resolve(sample, beatmapFolder, skinSamples, defaultSamples, count));
+				resolved.set(
+					id,
+					resolve(sample, beatmapFolder, skinSamples, defaultSamples, count, skinClick)
+				);
 			return resolved.get(id)!;
 		};
 		const ready = await Promise.all(
@@ -410,7 +418,7 @@ export function startHitsounds() {
 	let last = '';
 	userSettings.subscribe(() => {
 		const s = settings();
-		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.skinsFolder}`;
+		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.skinClick}:${s.skinsFolder}`;
 		if (key === last) return;
 		last = key;
 		if (!s.on) stopScheduled();
@@ -419,6 +427,12 @@ export function startHitsounds() {
 	// Skins downloaded, imported or removed: read the folders again
 	skinsChanged.subscribe(() => forgetSkinFolders());
 	setInterval(tick, 15);
+	// The browser may keep audio made without a click silent: wake it up on any click or key
+	const wake = () => {
+		if (context?.state === 'suspended') context.resume();
+	};
+	window.addEventListener('pointerdown', wake, true);
+	window.addEventListener('keydown', wake, true);
 }
 
 /** Forget the read folders, e.g. after choosing another skins folder */

@@ -95,6 +95,12 @@
 				{@render toggle('Beatmap hitsounds', beatmapSounds, (checked) =>
 					updateUserSettings({ mapHitsounds: checked })
 				)}
+				{#if beatmapSounds}
+					{@render toggle('Skin click on every circle', settings.skinClick ?? true, (checked) =>
+						updateUserSettings({ skinClick: checked })
+					)}
+				{/if}
+
 				<div class="px-2.5 pt-2 pb-1">
 					<p class="text-xs font-bold uppercase tracking-wider text-secondary-600 mb-1.5">Skin</p>
 					<ul class="max-h-44 overflow-y-auto flex flex-col" role="listbox" aria-label="Skin">
