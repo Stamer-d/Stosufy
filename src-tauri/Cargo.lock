@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Stosfy"
-version = "0.6.10"
+version = "0.6.11"
 dependencies = [
  "reqwest 0.13.5",
  "serde",
