@@ -79,16 +79,20 @@
 	{#if backgroundOn}
 		<!-- Background of the current song behind the app, dimmed like osu!'s background dim -->
 		<div class="fixed inset-0 -z-10 bg-app">
-			<BeatmapBackground
-				setId={$currentSong.song.id}
-				mapId={$currentSong.song?.beatmaps?.[0]?.id}
-				title={$currentSong.song.title}
-				class="absolute inset-0"
-				imageClass="blur-2xl scale-110"
-				video
-				beat
-				storyboard={false}
-			/>
+			<!-- Drawn at a quarter of the size and scaled up: it's blurred anyway, and blurring a
+			     playing video over the whole window every frame made the app stutter -->
+			<div class="absolute top-0 left-0 w-1/4 h-1/4 origin-top-left scale-400">
+				<BeatmapBackground
+					setId={$currentSong.song.id}
+					mapId={$currentSong.song?.beatmaps?.[0]?.id}
+					title={$currentSong.song.title}
+					class="absolute inset-0"
+					imageClass="blur-[10px] scale-110"
+					video
+					beat
+					storyboard={false}
+				/>
+			</div>
 			<!-- A bit brighter in kiai time, like osu! -->
 			<div
 				class="absolute inset-0 bg-app"

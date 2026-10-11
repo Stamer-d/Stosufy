@@ -18,7 +18,7 @@ import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
 import { parseHitsounds, type HitSample, type HitsoundEvent } from './chart';
 import { builtinSample } from './builtin';
-import { skinFolder, hasDefaultSkin, downloadDefaultSkin, skinsChanged } from './skins';
+import { skinFolder, hasDefaultSkin, downloadDefaultSkin, skinsChanged, BUILTIN } from './skins';
 import type { MapSet, StoredMapSet } from '../types';
 
 export interface HitsoundStatus {
@@ -92,9 +92,12 @@ function audioContext() {
 	return context;
 }
 
-const buffers = new Map<string, Promise<AudioBuffer | null>>();
+const buffers = new Map<string, Promise<AudioBuffer | null | undefined>>();
 
-/** A sample file as audio; null for files that are empty on purpose (skins mute samples so) */
+/**
+ * A sample file as audio: null for files that are empty on purpose (skins mute samples with
+ * them), undefined if it can't be read or decoded (then the next source is tried)
+ */
 function decode(file: string) {
 	if (!buffers.has(file)) {
 		buffers.set(
@@ -102,9 +105,14 @@ function decode(file: string) {
 			readFile(file)
 				.then(async (data) => {
 					if (data.byteLength < 100) return null;
-					return audioContext().decodeAudioData(data.buffer.slice(0) as ArrayBuffer);
+					return audioContext()
+						.decodeAudioData(data.buffer.slice(0) as ArrayBuffer)
+						.catch((error) => {
+							console.warn('Could not decode the sample', file, error);
+							return undefined;
+						});
 				})
-				.catch(() => null)
+				.catch(() => undefined)
 		);
 	}
 	return buffers.get(file)!;
@@ -117,9 +125,15 @@ async function fromFolder(dir: Folder | null, name: string) {
 
 /**
  * The sound of a sample, like osu! picks it: the beatmap's own (custom index 1+ or a file),
- * else the skin's, else the built-in one. null plays nothing.
+ * else the skin's, else the osu! default one (skins only bring the samples they change),
+ * else the built-in one. null plays nothing.
  */
-async function resolve(sample: HitSample, beatmap: Folder | null, skin: Folder | null) {
+async function resolve(
+	sample: HitSample,
+	beatmap: Folder | null,
+	skin: Folder | null,
+	fallback: Folder | null
+) {
 	const name = `${sample.set}-hit${sample.sound}`;
 	if (beatmap) {
 		if (sample.file) {
@@ -131,8 +145,10 @@ async function resolve(sample: HitSample, beatmap: Folder | null, skin: Folder |
 			if (own !== undefined) return own;
 		}
 	}
-	const skinned = await fromFolder(skin, name);
-	if (skinned !== undefined) return skinned;
+	for (const folder of [skin, fallback]) {
+		const skinned = await fromFolder(folder, name);
+		if (skinned !== undefined) return skinned;
+	}
 	return builtinSample(audioContext(), sample.set, sample.sound);
 }
 
@@ -232,7 +248,7 @@ async function load() {
 	hitsoundStatus.set({ state: 'loading' });
 	try {
 		// The osu! default sounds are the default skin: downloaded the first time
-		if (!skin && !(await hasDefaultSkin())) await downloadDefaultSkin();
+		if (skin !== BUILTIN && !(await hasDefaultSkin())) await downloadDefaultSkin();
 		// (the setting "builtin" plays the simple built-in sounds)
 		if (loadingKey !== key) return;
 		const files = await beatmapFiles(song, stored);
@@ -242,15 +258,18 @@ async function load() {
 			return;
 		}
 		const events: HitsoundEvent[] = parseHitsounds(files.content);
-		const [beatmapFolder, skinSamples] = await Promise.all([
+		const [beatmapFolder, skinSamples, defaultSamples] = await Promise.all([
 			beatmap ? folder(files.samples) : null,
-			skinFolder(skin).then(folder)
+			skinFolder(skin).then(folder),
+			// The osu! default sounds fill in what a skin doesn't have (not for "Simple")
+			skin && skin !== BUILTIN ? skinFolder(null).then(folder) : null
 		]);
 		// Each different sample once
 		const resolved = new Map<string, Promise<AudioBuffer | null>>();
 		const sound = (sample: HitSample) => {
 			const id = `${sample.set}:${sample.sound}:${sample.index}:${sample.file ?? ''}`;
-			if (!resolved.has(id)) resolved.set(id, resolve(sample, beatmapFolder, skinSamples));
+			if (!resolved.has(id))
+				resolved.set(id, resolve(sample, beatmapFolder, skinSamples, defaultSamples));
 			return resolved.get(id)!;
 		};
 		const ready = await Promise.all(
