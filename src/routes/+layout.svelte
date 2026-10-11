@@ -3,6 +3,7 @@
 	import Songbar from '#lib/components/Songbar.svelte';
 	import Playlist from '#lib/components/Playlist.svelte';
 	import { onMount } from 'svelte';
+	import { fly } from 'svelte/transition';
 	import { startBeatEffects } from '#lib/stores/beat.ts';
 	import { joinSession } from '#lib/stores/listen.ts';
 	import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
@@ -171,6 +172,15 @@
 	{/if}
 	{#if $djOpen}
 		<DjView />
+	{/if}
+	<!-- Over the full-screen views (DJ, focus, playing) the friends panel floats on top -->
+	{#if $friendsPanelOpen && ($djOpen || $focusMode || $playingLive)}
+		<div
+			class="fixed right-2 top-12 bottom-2 z-50 w-80 rounded-lg bg-secondary-100/95 backdrop-blur-2xl ring-1 ring-white/10 shadow-2xl overflow-hidden"
+			transition:fly={{ x: 24, duration: 200 }}
+		>
+			<FriendsPanel />
+		</div>
 	{/if}
 	<Toasts />
 	<SettingsModal />
