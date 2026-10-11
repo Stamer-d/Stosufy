@@ -170,7 +170,8 @@ export function createGameplayRenderer(
 		let grow = 1;
 		if (hitTime !== null && time >= hitTime) {
 			const t = (time - hitTime) / HIT_FADE;
-			alpha = 1 - t;
+			// With Hidden it stays as faded as it was when hit (gone stays gone)
+			alpha = (hidden ? appearAlpha(object, hitTime) : 1) * (1 - t);
 			grow = 1 + 0.4 * t;
 		} else if (missedAt !== null && time >= missedAt) {
 			alpha *= 1 - (time - missedAt) / MISS_FADE;
