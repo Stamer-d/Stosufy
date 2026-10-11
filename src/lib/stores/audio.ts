@@ -5,6 +5,7 @@ import { applyMod, prepareBeats, startBeats } from './mods';
 import { track, untrack, setFade, setGain, rampGain } from './mixer';
 import { measureLoudness, gainFor } from './loudness';
 import { sameSong } from '../tracks';
+import { showToast } from './toast';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
 import type {
@@ -55,10 +56,15 @@ let measurements = Promise.resolve();
  * Loudness normalization: songs measured before get their volume right away; others are
  * measured in the background (one at a time) and adjusted smoothly once that's done.
  */
-function normalize(audio: HTMLAudioElement, song: MapSet, file: Uint8Array) {
+function normalize(
+	audio: HTMLAudioElement,
+	song: MapSet,
+	mapId: number | string,
+	file: Uint8Array
+) {
 	const setId = String(song.id);
 	const stored = get(mapDataStore)[setId];
-	const audioFile = stored?.beatmaps?.[song.beatmaps?.[0]?.id]?.audioFile;
+	const audioFile = stored?.beatmaps?.[mapId]?.audioFile;
 	if (!stored || !audioFile) return;
 	// Measured per audio file: sets can contain several songs
 	const known = Object.values(stored.beatmaps).find(
@@ -90,29 +96,46 @@ function normalize(audio: HTMLAudioElement, song: MapSet, file: Uint8Array) {
 // Set while the next song is loaded for a crossfade, so it starts silent
 let fadeInNext = false;
 
+/**
+ * The difficulty whose song is saved locally, if the set is downloaded: songs from the
+ * beatmap search then play in full from the disk instead of the osu! preview
+ */
+function localMapId(song: MapSet) {
+	const stored = get(mapDataStore)[song.id];
+	if (!stored) return null;
+	const own = song.beatmaps?.find((map) => stored.beatmaps?.[map.id]?.audioFile)?.id;
+	return own ?? Object.values(stored.beatmaps ?? {}).find((map) => map.audioFile)?.id ?? null;
+}
+
 async function getAudio(index: number, queue: MapSet[], type: QueueType, currentSeconds = 0) {
 	let audio: HTMLAudioElement = null;
 	const song = queue[index];
-	if (type == 'preview' && !song.queued) {
+	const mapId = localMapId(song);
+	if (type == 'preview' && !song.queued && mapId == null) {
 		audio = new Audio(`${song.preview_url}`);
 		track(audio, fadeInNext ? 0 : 1);
 	} else {
-		const file = bytesFromBase64(await downloadBeatmap(song, song.beatmaps[0].id));
+		const playedMapId = mapId ?? song.beatmaps[0].id;
+		const file = bytesFromBase64(await downloadBeatmap(song, playedMapId));
 		audio = new Audio(URL.createObjectURL(new Blob([file])));
 		track(audio, fadeInNext ? 0 : 1);
-		normalize(audio, song, file);
+		normalize(audio, song, playedMapId, file);
 	}
 	applyMod(audio);
 	audio.addEventListener('ended', () => {
 		// Ignore songs that were replaced in the meantime
 		if (get(songQueue).audio === audio) handleSongEnded();
 	});
-	await new Promise<void>((resolve) => {
+	await new Promise<void>((resolve, reject) => {
 		audio.addEventListener('loadedmetadata', () => {
 			if (audio.duration > currentSeconds) {
 				audio.currentTime = currentSeconds;
 			}
 			resolve();
+		});
+		// A missing preview would otherwise keep waiting forever; callers skip the song
+		audio.addEventListener('error', () => reject(new Error(`Could not load ${song.title}`)), {
+			once: true
 		});
 	});
 	return audio;
@@ -128,7 +151,18 @@ export async function setSongQueue(
 ) {
 	stopPlayback();
 	let audio: HTMLAudioElement;
-	if (index !== null) audio = await getAudio(index, queue, type, currentSeconds);
+	if (index !== null) {
+		try {
+			audio = await getAudio(index, queue, type, currentSeconds);
+		} catch (error) {
+			console.error('Could not play', queue[index]?.title, error);
+			showToast(
+				`Couldn't play ${queue[index]?.title ?? 'this song'}`,
+				'icon-[mingcute--warning-line]'
+			);
+			return;
+		}
+	}
 	songQueue.set({
 		currentIndex: index,
 		audio: audio,
@@ -443,7 +477,10 @@ if (typeof window !== 'undefined') {
 		const audio = current.audio;
 		const seconds = crossfadeSeconds();
 		if (!seconds || !audio || audio.paused || fadingOut || isSkipping) return;
-		if (current.type === 'preview' || !Number.isFinite(audio.duration)) return;
+		// Previews are only short clips; downloaded songs play in full, also in the search
+		const song = current.queue?.[current.currentIndex];
+		if (current.type === 'preview' && (!song || localMapId(song) == null)) return;
+		if (!Number.isFinite(audio.duration)) return;
 		if (repeatMode() === 'one' || !hasNext(current, get(upNext), repeatMode())) return;
 		// Remaining time in real seconds, so speed mods are taken into account
 		const length = audio.duration / audio.playbackRate;

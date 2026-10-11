@@ -42,7 +42,7 @@ function previewTimingFor(mapId: string): Timing | null {
 			)
 			.catch(() => previewTiming.set(mapId, null));
 	}
-	return cached && cached !== 'loading' ? cached : null;
+	return cached && cached !== 'loading' && cached.timing.length ? cached : null;
 }
 
 /** Timing of the current song, or null while it's unknown or loading */
@@ -52,7 +52,8 @@ function currentTiming(): Timing | null {
 	if (!song || !mapId) return null;
 	const set = get(mapDataStore)[song.id];
 	const map = set?.beatmaps?.[mapId];
-	if (set && get(songQueue).type !== 'preview') {
+	// Downloaded songs always play in full, also from the beatmap search
+	if (set) {
 		const timing = map?.timing ?? set.timing;
 		// Downloaded before kiai sections were saved: load them from the .osu file once
 		if (!timing || (map && map.kiai === undefined)) loadTiming(String(song.id), mapId);
