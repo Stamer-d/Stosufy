@@ -14,7 +14,7 @@
 		}
 		if (accessTokenValid.status) {
 			clearInterval(timer);
-			goto('/home');
+			goto('/home', { replaceState: true });
 		}
 	}
 
@@ -36,7 +36,7 @@
 		<p>Please try again later or contact the creator of Stosufy!</p>
 		<Button
 			on:click={() => {
-				goto('/login');
+				goto('/login', { replaceState: true });
 			}}>Back to Login</Button
 		>
 	{:else}

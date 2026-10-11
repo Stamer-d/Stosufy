@@ -149,7 +149,7 @@ export async function checkAccessToken(shouldPush = true, round = 0): Promise<bo
 	if (round > 1) {
 		console.log('Token refresh failed');
 		if (shouldPush) {
-			goto('/login');
+			goto('/login', { replaceState: true });
 		}
 		return false;
 	}
@@ -157,7 +157,7 @@ export async function checkAccessToken(shouldPush = true, round = 0): Promise<bo
 	let tokens = get(keyStore);
 	if (!tokens.access_token) {
 		if (shouldPush) {
-			goto('/login');
+			goto('/login', { replaceState: true });
 		}
 		return false;
 	}
@@ -171,7 +171,7 @@ export async function checkAccessToken(shouldPush = true, round = 0): Promise<bo
 	const isRefreshed = await refreshToken(tokens.refresh_token);
 	if (!isRefreshed) {
 		if (shouldPush) {
-			goto('/login');
+			goto('/login', { replaceState: true });
 		}
 		return false;
 	}
@@ -202,12 +202,12 @@ export async function startTokenRefresh() {
 	if (get(keyStore).expiry_time < Date.now()) {
 		const refreshed = await refreshToken(get(keyStore).refresh_token);
 		if (refreshed == null) {
-			goto('/login');
+			goto('/login', { replaceState: true });
 			return;
 		}
 	} else if (!(await checkAccessToken())) {
 		return;
 	}
-	goto('/home');
+	goto('/home', { replaceState: true });
 	scheduleTokenRefresh();
 }

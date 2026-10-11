@@ -6,7 +6,7 @@
 	import { user } from '#lib/stores/user.ts';
 	import Dropdown from './Dropdown.svelte';
 	import { refreshToken, keyStore } from '#lib/stores/auth.ts';
-	import { goto } from '$app/navigation';
+	import { goto, afterNavigate } from '$app/navigation';
 	import Modal from './Modal.svelte';
 	import { check } from '@tauri-apps/plugin-updater';
 	import { relaunch } from '@tauri-apps/plugin-process';
@@ -55,12 +55,60 @@
 			}, 1000);
 		}
 	}
+
+	// Back and forward like in a browser (also the mouse's side buttons and Alt+arrows)
+	let canGoBack = $state(false);
+	let canGoForward = $state(false);
+	afterNavigate(() => {
+		// The Navigation API knows the history; without it, allow going back after a navigation
+		const navigation = /** @type {any} */ (window).navigation;
+		canGoBack = navigation ? navigation.canGoBack : history.length > 1;
+		canGoForward = navigation ? navigation.canGoForward : false;
+	});
+
+	let historyButtons = $derived([
+		{
+			label: 'Back',
+			icon: 'icon-[mingcute--left-line]',
+			enabled: canGoBack,
+			go: () => history.back()
+		},
+		{
+			label: 'Forward',
+			icon: 'icon-[mingcute--right-line]',
+			enabled: canGoForward,
+			go: () => history.forward()
+		}
+	]);
+
+	function handleHistoryInput(event) {
+		if (event instanceof MouseEvent && (event.button === 3 || event.button === 4)) {
+			event.preventDefault();
+			event.button === 3 ? history.back() : history.forward();
+		} else if (event instanceof KeyboardEvent && event.altKey) {
+			if (event.key === 'ArrowLeft') history.back();
+			if (event.key === 'ArrowRight') history.forward();
+		}
+	}
 </script>
+
+<svelte:window onmouseup={handleHistoryInput} onkeydown={handleHistoryInput} />
 
 <header class="h-12 shrink-0 flex items-center" data-tauri-drag-region>
 	<div class="flex items-center gap-1 pl-3" data-tauri-drag-region>
 		<img src="/NoLetterLogo.png" alt="" class="beat-logo size-6 mr-2 pointer-events-none" />
 		{#if $user?.username}
+			{#each historyButtons as nav (nav.label)}
+				<button
+					title={nav.label}
+					aria-label={nav.label}
+					disabled={!nav.enabled}
+					class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition disabled:opacity-30 disabled:pointer-events-none"
+					onclick={nav.go}
+				>
+					<span class="{nav.icon} size-[18px]"></span>
+				</button>
+			{/each}
 			<button
 				title="Home"
 				aria-label="Home"
