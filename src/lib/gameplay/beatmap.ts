@@ -14,6 +14,8 @@ export interface HitObject {
 	/** Which combo colour */
 	colour: number;
 	slider?: { path: SliderPath; slides: number; spanDuration: number };
+	/** How many objects it's stacked on (osu! moves stacked objects up and left) */
+	stack: number;
 }
 
 export interface GameplayBeatmap {
@@ -139,6 +141,7 @@ export function parseGameplay(content: string): GameplayBeatmap | null {
 				y,
 				combo,
 				colour,
+				stack: 0,
 				slider: { path, slides, spanDuration }
 			});
 		} else if (isSpinner) {
@@ -149,13 +152,102 @@ export function parseGameplay(content: string): GameplayBeatmap | null {
 				x: 256,
 				y: 192,
 				combo: 0,
-				colour
+				colour,
+				stack: 0
 			});
 		} else {
-			objects.push({ kind: 'circle', time, endTime: time, x, y, combo, colour });
+			objects.push({ kind: 'circle', time, endTime: time, x, y, combo, colour, stack: 0 });
 		}
 	}
+	const version = Number(content.match(/osu file format v(\d+)/)?.[1] ?? 14);
+	const leniency = Number(value(parsed.General, 'StackLeniency') ?? 0.7);
+	const threshold = Math.trunc(preempt) * (isFinite(leniency) ? leniency : 0.7);
+	if (version >= 6) applyStacking(objects, threshold);
+	else applyStackingOld(objects, threshold);
+	// Move stacked objects like osu! does: up and left by a tenth of the radius per object
+	for (const object of objects) {
+		if (!object.stack || object.kind === 'spinner') continue;
+		const offset = -object.stack * (radius / 10);
+		object.x += offset;
+		object.y += offset;
+		object.slider?.path.shift(offset, offset);
+	}
 	return { objects, radius, preempt, fadeIn, colours };
+}
+
+// --- Stacking, as osu! does it (OsuBeatmapProcessor in ppy/osu) ------------------------
+
+/** Objects closer than this count as on the same spot */
+const STACK_DISTANCE = 3;
+
+const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const start = (object: HitObject): Point => ({ x: object.x, y: object.y });
+/** Where an object ends (the end of a slider's path, for an odd number of slides) */
+function end(object: HitObject): Point {
+	if (!object.slider) return start(object);
+	return object.slider.slides % 2 ? object.slider.path.at(1) : start(object);
+}
+
+function applyStacking(objects: HitObject[], threshold: number) {
+	for (let i = objects.length - 1; i > 0; i--) {
+		let n = i;
+		let objectI = objects[i];
+		if (objectI.stack !== 0 || objectI.kind === 'spinner') continue;
+
+		if (objectI.kind === 'circle') {
+			while (--n >= 0) {
+				const objectN = objects[n];
+				if (objectN.kind === 'spinner') continue;
+				if (Math.trunc(objectI.time) - Math.trunc(objectN.endTime) > threshold) break;
+
+				// Circles under the end of the last slider of a stack go down and right
+				if (objectN.kind === 'slider' && distance(end(objectN), start(objectI)) < STACK_DISTANCE) {
+					const offset = objectI.stack - objectN.stack + 1;
+					for (let j = n + 1; j <= i; j++) {
+						if (distance(end(objectN), start(objects[j])) < STACK_DISTANCE)
+							objects[j].stack -= offset;
+					}
+					break;
+				}
+				if (distance(start(objectN), start(objectI)) < STACK_DISTANCE) {
+					objectN.stack = objectI.stack + 1;
+					objectI = objectN;
+				}
+			}
+		} else if (objectI.kind === 'slider') {
+			while (--n >= 0) {
+				const objectN = objects[n];
+				if (objectN.kind === 'spinner') continue;
+				if (objectI.time - objectN.time > threshold) break;
+				if (distance(end(objectN), start(objectI)) < STACK_DISTANCE) {
+					objectN.stack = objectI.stack + 1;
+					objectI = objectN;
+				}
+			}
+		}
+	}
+}
+
+/** Stacking of beatmaps older than file format v6 */
+function applyStackingOld(objects: HitObject[], threshold: number) {
+	for (let i = 0; i < objects.length; i++) {
+		const current = objects[i];
+		if (current.stack !== 0 && current.kind !== 'slider') continue;
+		let startTime = current.endTime;
+		let sliderStack = 0;
+		const sliderEnd = current.slider ? current.slider.path.at(1) : start(current);
+		for (let j = i + 1; j < objects.length; j++) {
+			if (objects[j].time - threshold > startTime) break;
+			if (distance(start(objects[j]), start(current)) < STACK_DISTANCE) {
+				current.stack++;
+				startTime = objects[j].time;
+			} else if (distance(start(objects[j]), sliderEnd) < STACK_DISTANCE) {
+				sliderStack++;
+				objects[j].stack -= sliderStack;
+				startTime = objects[j].time;
+			}
+		}
+	}
 }
 
 /** Where a slider's ball is at a time */

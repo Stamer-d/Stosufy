@@ -157,6 +157,11 @@ export class SliderPath {
 		return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 	}
 
+	/** Moves the whole path (for stacked objects) */
+	shift(dx: number, dy: number) {
+		this.points = this.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+	}
+
 	/** The direction (radians) at a part of the path */
 	angleAt(progress: number) {
 		const a = this.at(Math.max(0, progress - 0.01));
