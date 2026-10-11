@@ -30,7 +30,7 @@
 	import BeatmapBackground from './BeatmapBackground.svelte';
 	import Triangles from './Triangles.svelte';
 	import PlayButton from './PlayButton.svelte';
-	import HomeCustomize from './HomeCustomize.svelte';
+	import { openSettings } from '#lib/stores/settings.ts';
 	import DesktopCanvas from './DesktopCanvas.svelte';
 	import WidgetStore from './WidgetStore.svelte';
 
@@ -68,7 +68,7 @@
 		{
 			icon: 'icon-[mingcute--palette-line]',
 			label: 'Customize',
-			action: () => (customizeOpen = true)
+			action: () => openSettings('home')
 		}
 	]);
 
@@ -80,7 +80,6 @@
 	import { wallpaper } from '#lib/stores/home.ts';
 	import { DEFAULT_HOME } from '#lib/stores/user.ts';
 
-	let customizeOpen = $state(false);
 	let homeSettings = $derived({ ...DEFAULT_HOME, ...$userSettings.settings?.home });
 
 	let hero = $derived($wallpaper);
@@ -495,7 +494,7 @@
 		class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold cursor-pointer transition {onWallpaper
 			? 'bg-black/30 backdrop-blur-2xl ring-1 ring-white/10 text-white/80 hover:text-white'
 			: 'text-secondary-600 hover:text-white hover:bg-white/10'}"
-		onclick={() => (customizeOpen = true)}
+		onclick={() => openSettings('home')}
 	>
 		<span class="icon-[mingcute--palette-line] size-[18px]"></span>
 		Customize
@@ -615,7 +614,6 @@
 	</div>
 {/if}
 
-<HomeCustomize bind:open={customizeOpen} />
 <WidgetStore bind:open={widgetStoreOpen} />
 
 <SongToPlaylistModal bind:open={addPlaylistModal.open} bind:map={addPlaylistModal.map} />

@@ -1,4 +1,5 @@
 <script>
+	import { openSettings } from '#lib/stores/settings.ts';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Button from './Button.svelte';
 	import { user } from '#lib/stores/user.ts';
@@ -89,6 +90,14 @@
 
 	<div class="flex items-center h-full">
 		{#if $user?.username}
+			<button
+				title="Settings"
+				aria-label="Settings"
+				class="mr-2 size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition"
+				onclick={() => openSettings()}
+			>
+				<span class="icon-[mingcute--settings-3-line] size-[18px]"></span>
+			</button>
 			<Dropdown>
 				<svelte:fragment slot="trigger">
 					<button
@@ -106,6 +115,14 @@
 					</button>
 				</svelte:fragment>
 				<svelte:fragment slot="menu">
+					<Button
+						type="ghost"
+						class="w-full rounded-md text-sm hover:bg-secondary-400"
+						icon="icon-[mingcute--settings-3-line]"
+						on:click={() => openSettings()}
+					>
+						Settings
+					</Button>
 					<Button
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
