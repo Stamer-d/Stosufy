@@ -134,7 +134,8 @@ async function resolve(
 	skin: Folder | null,
 	fallback: Folder | null
 ) {
-	const name = `${sample.set}-hit${sample.sound}`;
+	const name =
+		sample.sound === 'slidertick' ? `${sample.set}-slidertick` : `${sample.set}-hit${sample.sound}`;
 	if (beatmap) {
 		if (sample.file) {
 			const own = await fromFolder(beatmap, sample.file.replace(AUDIO_FILE, ''));

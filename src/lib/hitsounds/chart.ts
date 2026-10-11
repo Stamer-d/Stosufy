@@ -1,9 +1,9 @@
 // Reads the hitsounds of a beatmap (.osu): when which samples play, like osu! does with
-// autoplay. Circles, the heads, repeats and ends of sliders, the ends of spinners and the
-// notes of taiko and mania; slider ticks and the slider slide aren't played.
+// autoplay. Circles, the heads, repeats, ends and ticks of sliders, the ends of spinners
+// and the notes of taiko and mania; the slider slide isn't played.
 
 export type SampleSet = 'normal' | 'soft' | 'drum';
-export type HitSound = 'normal' | 'whistle' | 'finish' | 'clap';
+export type HitSound = 'normal' | 'whistle' | 'finish' | 'clap' | 'slidertick';
 
 export interface HitSample {
 	set: SampleSet;
@@ -88,6 +88,9 @@ export function parseHitsounds(content: string): HitsoundEvent[] {
 			(value(parsed.General, 'SampleSet') ?? 'Normal').toLowerCase()
 		] ?? 'normal';
 	const sliderMultiplier = Number(value(parsed.Difficulty, 'SliderMultiplier') ?? 1.4) || 1.4;
+	const tickRate = Number(value(parsed.Difficulty, 'SliderTickRate') ?? 1) || 1;
+	// Ticks only in osu! standard (taiko and mania have no slider ticks)
+	const standard = (Number(value(parsed.General, 'Mode') ?? 0) || 0) === 0;
 	const points = parseTimingPoints(parsed.TimingPoints);
 	const uninherited = points.filter((point) => point.uninherited);
 	const events: HitsoundEvent[] = [];
@@ -148,6 +151,24 @@ export function parseHitsounds(content: string): HitsoundEvent[] {
 			const edgeSounds = (p[8] ?? '').split('|');
 			const edgeSets = (p[9] ?? '').split('|');
 			const [, , index, volume] = sample(p[10]);
+			// The ticks in between: every beat / tick rate along each span, not too close to
+			// its ends, with the slider's normal sample set (like osu!)
+			if (standard && span > 0) {
+				const every = beat / tickRate;
+				const [normalSet] = sample(p[10]);
+				for (let slide = 0; slide < slides && every > 0; slide++) {
+					for (let at = every; at < span - 10; at += every) {
+						const tickTime = time + slide * span + (slide % 2 ? span - at : at);
+						const point = pointAt(points, tickTime);
+						const set = SETS[normalSet] ?? SETS[point?.sampleSet ?? 0] ?? generalSet;
+						events.push({
+							time: Math.round(tickTime),
+							volume: point?.volume || 100,
+							samples: [{ set, sound: 'slidertick', index: point?.sampleIndex ?? 0 }]
+						});
+					}
+				}
+			}
 			for (let edge = 0; edge <= slides; edge++) {
 				const [normalSet, additionSet] = (edgeSets[edge] ?? '0:0').split(':').map(Number);
 				const sound = edgeSounds[edge] !== undefined ? Number(edgeSounds[edge]) || 0 : hitSound;

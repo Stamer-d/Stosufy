@@ -28,7 +28,8 @@ const SOUNDS: Record<SampleSet, Record<HitSound, { length: number; synth: Synth 
 					decay(Math.max(0, t - 0.012), 0.01) * (t > 0.012 ? 1 : 0) +
 					decay(Math.max(0, t - 0.024), 0.05) * (t > 0.024 ? 1 : 0)) *
 				0.45
-		}
+		},
+		slidertick: { length: 0.04, synth: (t) => tone(t, 2600) * decay(t, 0.006) * 0.35 }
 	},
 	soft: {
 		normal: { length: 0.1, synth: (t) => tone(t, 700) * decay(t, 0.02) * 0.6 },
@@ -37,7 +38,8 @@ const SOUNDS: Record<SampleSet, Record<HitSound, { length: number; synth: Synth 
 			length: 0.8,
 			synth: (t) => (noise() * 0.4 + tone(t, 3100) * 0.2) * decay(t, 0.2) * 0.45
 		},
-		clap: { length: 0.15, synth: (t) => noise() * decay(t, 0.03) * 0.35 }
+		clap: { length: 0.15, synth: (t) => noise() * decay(t, 0.03) * 0.35 },
+		slidertick: { length: 0.04, synth: (t) => tone(t, 1500) * decay(t, 0.008) * 0.3 }
 	},
 	drum: {
 		normal: {
@@ -52,7 +54,8 @@ const SOUNDS: Record<SampleSet, Record<HitSound, { length: number; synth: Synth 
 		clap: {
 			length: 0.22,
 			synth: (t) => (noise() * 0.6 + tone(t, 190) * 0.4) * decay(t, 0.05) * 0.7
-		}
+		},
+		slidertick: { length: 0.05, synth: (t) => tone(t, 900) * decay(t, 0.01) * 0.35 }
 	}
 };
 
