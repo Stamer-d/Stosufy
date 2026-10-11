@@ -1,3 +1,36 @@
+<script module>
+	const loadable = new Map();
+
+	/**
+	 * The first of the candidate images that loads, decoded and ready to show. Trying them
+	 * out of sight avoids fading in an image that turns out to be missing (e.g. no raw.jpg).
+	 */
+	function firstLoadable(candidates) {
+		const key = candidates.join(' ');
+		if (!loadable.has(key)) {
+			loadable.set(
+				key,
+				(async () => {
+					for (const candidate of candidates) {
+						const image = new Image();
+						image.src = candidate;
+						try {
+							await image.decode();
+							return candidate;
+						} catch {
+							// Missing or broken: try the next one
+						}
+					}
+					// Nothing loaded (e.g. offline): try again next time
+					loadable.delete(key);
+					return null;
+				})()
+			);
+		}
+		return loadable.get(key);
+	}
+</script>
+
 <script>
 	import { fade } from 'svelte/transition';
 	import BeatmapVideo from './BeatmapVideo.svelte';
@@ -17,9 +50,7 @@
 		video = false
 	} = $props();
 
-	let urls = $state([]);
-	let attempt = $state(0);
-	let url = $derived(urls[attempt] ?? null);
+	let url = $state(null);
 	// Only this set's saved background, so other changes to the song data don't reload it
 	let localPath = $derived(
 		setId != null
@@ -33,17 +64,15 @@
 		const map = mapId;
 		void localPath;
 		if (id == null) {
-			urls = [];
-			attempt = 0;
+			url = null;
 			return;
 		}
-		backgroundUrls(id, map).then((result) => {
-			if (setId !== id || mapId !== map) return;
-			// Keep showing the current image when the candidates didn't change
-			if (result.join() === urls.join()) return;
-			urls = result;
-			attempt = 0;
-		});
+		// The current image stays until the next one is loaded, so there is only one fade
+		backgroundUrls(id, map)
+			.then(firstLoadable)
+			.then((result) => {
+				if (setId === id && mapId === map && result !== url) url = result;
+			});
 	});
 </script>
 
@@ -58,7 +87,6 @@
 				alt=""
 				class="absolute inset-0 size-full object-cover {imageClass}"
 				transition:fade={{ duration: 400 }}
-				onerror={() => attempt++}
 			/>
 		{/if}
 	{/key}

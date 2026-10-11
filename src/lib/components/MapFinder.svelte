@@ -18,7 +18,7 @@
 	import { keyStore } from '#lib/stores/auth.ts';
 	import Beatmap from './Beatmap.svelte';
 	import Input from './Input.svelte';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import Button from './Button.svelte';
 	import SongToPlaylistModal from './SongToPlaylistModal.svelte';
@@ -143,8 +143,9 @@
 	let allMaps = $state([]);
 
 	let endOfContent = $state(null);
-	let observer = null;
 	let loading = $state(true);
+	// Start loading the next page a bit before the end of the list is reached
+	const LOAD_AHEAD = 400;
 
 	let playMap = $state(null);
 	let addPlaylistModal = $state({
@@ -206,52 +207,61 @@
 		return !!$mapDataStore[setId];
 	}
 
-	const setupObserver = () => {
-		const options = {
-			root: null,
-			rootMargin: '0px',
-			threshold: 0
-		};
+	let loadingMore = false;
 
-		observer = new IntersectionObserver(handleIntersect, options);
-		if (endOfContent) {
-			observer.observe(endOfContent);
-		}
-	};
-
-	const handleIntersect = (entries) => {
-		entries.forEach(async (entry) => {
-			if (allMaps?.length < 50) return;
-			if (entry.isIntersecting) {
-				loading = true;
-				try {
-					osuMapsSearch = await fetchMaps(search, osuMapsSearch?.cursor_string, filters);
-
-					// Safely check that beatmapsets exists and is an array
-					if (osuMapsSearch && Array.isArray(osuMapsSearch.beatmapsets)) {
-						allMaps = [...allMaps, ...osuMapsSearch.beatmapsets];
-
-						if ($songQueue.type == 'preview') {
-							await updateSongQueue(null, allMaps);
-						}
-					} else {
-						console.error('Invalid response: beatmapsets is not an array', osuMapsSearch);
-					}
-				} catch (error) {
-					console.error('Error fetching more maps:', error);
-				} finally {
-					loading = false;
-				}
+	/** Loads the next page of the current search, until the end of the list is out of view */
+	async function loadMore() {
+		const cursor = osuMapsSearch?.cursor_string;
+		// No cursor: the last page is loaded (asking without one would start over)
+		if (loadingMore || searching || !cursor || !endOfContent) return;
+		const requestId = searchRequestId;
+		loadingMore = true;
+		loading = true;
+		try {
+			const result = await fetchMaps(search, cursor, filters);
+			// A new search started meanwhile: these results belong to the old one
+			if (requestId !== searchRequestId) return;
+			if (!Array.isArray(result?.beatmapsets)) {
+				console.error('Invalid response: beatmapsets is not an array', result);
+				return;
 			}
-		});
-	};
+			osuMapsSearch = result;
+			const known = new Set(allMaps.map((map) => map.id));
+			const added = result.beatmapsets.filter((map) => !known.has(map.id));
+			allMaps = [...allMaps, ...added];
+			// Nothing new: don't keep asking for more right away
+			if (!added.length) return;
+			if ($songQueue.type == 'preview') await updateSongQueue(null, allMaps);
+		} catch (error) {
+			console.error('Error fetching more maps:', error);
+			return;
+		} finally {
+			loadingMore = false;
+			loading = false;
+		}
+		// The new maps may not fill the screen; the observer only reports changes
+		await tick();
+		if (endOfContent && isInView(endOfContent)) loadMore();
+	}
 
+	// The list scrolls inside the main panel, not the window
+	const scrollRoot = (element) => element.closest('[data-scroll-container]');
+
+	function isInView(element) {
+		const bottom = scrollRoot(element)?.getBoundingClientRect().bottom ?? window.innerHeight;
+		return element.getBoundingClientRect().top < bottom + LOAD_AHEAD;
+	}
+
+	// Watches the end of the list. It is re-created with the list, so the observer follows it
 	$effect(() => {
-		if (endOfContent) {
-			if (!observer) {
-				setupObserver();
-			}
-		}
+		const sentinel = endOfContent;
+		if (!sentinel) return;
+		const observer = new IntersectionObserver(
+			(entries) => entries.some((entry) => entry.isIntersecting) && loadMore(),
+			{ root: scrollRoot(sentinel), rootMargin: `0px 0px ${LOAD_AHEAD}px 0px` }
+		);
+		observer.observe(sentinel);
+		return () => observer.disconnect();
 	});
 
 	// Load the maps once logged in, and again whenever the token changes (e.g. after it
@@ -267,8 +277,6 @@
 
 	onDestroy(() => {
 		if (searchTimeout) clearTimeout(searchTimeout);
-		observer?.disconnect();
-		observer = null;
 	});
 </script>
 
@@ -454,32 +462,30 @@
 					? 'opacity-50'
 					: ''}"
 			>
-				{#key allMaps}
-					{#each allMaps as map}
-						<ContextMenu>
-							<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
-							<svelte:fragment slot="menu">
-								{#if isMapDownloaded(map.id.toString())}
-									<QueueMenuItems song={map} />
-								{/if}
-								<Button
-									type="ghost"
-									icon="icon-[mingcute--add-circle-line]"
-									class="w-full rounded-md text-sm hover:bg-secondary-400"
-									on:click={() => {
-										addPlaylistModal.open = true;
-										addPlaylistModal.map = map;
-									}}
-								>
-									Add to Playlist
-								</Button>
-							</svelte:fragment>
-						</ContextMenu>
-					{/each}
-				{/key}
+				{#each allMaps as map (map.id)}
+					<ContextMenu>
+						<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
+						<svelte:fragment slot="menu">
+							{#if isMapDownloaded(map.id.toString())}
+								<QueueMenuItems song={map} />
+							{/if}
+							<Button
+								type="ghost"
+								icon="icon-[mingcute--add-circle-line]"
+								class="w-full rounded-md text-sm hover:bg-secondary-400"
+								on:click={() => {
+									addPlaylistModal.open = true;
+									addPlaylistModal.map = map;
+								}}
+							>
+								Add to Playlist
+							</Button>
+						</svelte:fragment>
+					</ContextMenu>
+				{/each}
 			</div>
 
-			<div bind:this={endOfContent} class=""></div>
+			<div bind:this={endOfContent}></div>
 		{/if}
 
 		{#if loading && !searchError}
