@@ -284,3 +284,21 @@ export async function getFriendActivity(
 	);
 	return data.getFriendActivity;
 }
+
+/** The user's settings saved on the server, or null */
+export async function getSettings(
+	token: string
+): Promise<{ settings: Record<string, unknown>; updatedAt: number } | null> {
+	const data = await graphql<any>(token, '{ getStosufySettings { settings updatedAt } }');
+	return data.getStosufySettings;
+}
+
+/** Saves the user's settings; returns the server time of the save */
+export async function saveSettings(token: string, settings: Record<string, unknown>) {
+	const data = await graphql<any>(
+		token,
+		'mutation ($settings: JSON!) { saveStosufySettings(settings: $settings) }',
+		{ settings }
+	);
+	return data.saveStosufySettings as number;
+}

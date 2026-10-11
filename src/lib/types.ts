@@ -166,6 +166,8 @@ export type AccentColor = 'violet' | 'pink' | 'blue' | 'teal' | 'orange';
 
 export interface Settings {
 	volume?: number;
+	/** Muted; volume keeps the level to come back to */
+	muted?: boolean;
 	shuffle?: boolean;
 	repeat?: RepeatMode;
 	searchFilters?: SearchFilters;
@@ -210,6 +212,13 @@ export interface StoredQueue {
 export interface UserSettings {
 	settings: Settings;
 	currentQueue: StoredQueue | null;
+	/** Syncing the settings with the account; see settingsSync.ts */
+	sync?: {
+		/** Server time of the account's settings this device has */
+		syncedAt?: number;
+		/** Changed here and not sent yet */
+		dirty?: boolean;
+	};
 }
 
 export interface User {

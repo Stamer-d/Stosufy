@@ -78,7 +78,8 @@ async function initializeStores() {
 		const unsubscribeMapData = mapDataStore.subscribe(checkIfReady);
 	}
 }
-initializeStores();
+/** Resolves once the settings are loaded from the device */
+export const userSettingsLoaded = initializeStores();
 
 export const DEFAULT_HOME: HomeSettings = {
 	layout: 'desktop',

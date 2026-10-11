@@ -15,7 +15,7 @@
 		queuePanelOpen
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
-	import { handleKeybind, toggleLyrics } from '#lib/stores/keybinds.ts';
+	import { toggleLyrics } from '#lib/stores/keybinds.ts';
 	import { page } from '$app/state';
 	import {
 		updateUserSettings,
@@ -24,7 +24,7 @@
 		updateAppearance
 	} from '#lib/stores/user.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
-	import { setVolume } from '#lib/stores/mixer.ts';
+	import { setVolume, toggleMute, DEFAULT_VOLUME, MAX_VOLUME } from '#lib/stores/mixer.ts';
 	import ModSelect from './ModSelect.svelte';
 	import SleepTimer from './SleepTimer.svelte';
 
@@ -32,8 +32,9 @@
 	let duration = 0;
 	let updateInterval;
 	let lastUpdateTime = 0;
-	let volume = $userSettings.settings?.volume || 0.05;
-	let previousVolume = 1;
+	// The volume lives in the settings (see mixer.ts); muted shows as 0
+	$: muted = $userSettings.settings?.muted ?? false;
+	$: volume = muted ? 0 : ($userSettings.settings?.volume ?? DEFAULT_VOLUME);
 	let shuffled = false;
 
 	$: hasVideo = !!(
@@ -77,45 +78,7 @@
 			updateInterval = setInterval(async () => {
 				updateTimeDisplay();
 			}, 500);
-			// The audio's own volume includes normalization and fades, so use the setting
-			volume = $userSettings.settings?.volume ?? volume;
 		}
-	}
-
-	// Handle volume change from slider
-	function handleVolumeChange(newVolume) {
-		if (!$songQueue?.audio) return;
-
-		volume = newVolume; // e.detail is already the volume value
-		setVolume(volume);
-		updateUserSettings({ volume: volume });
-		// If we adjust volume to above 0, make sure it's not muted
-		if (volume > 0 && $songQueue.audio.muted) {
-			$songQueue.audio.muted = false;
-		}
-		if (volume === 0) {
-			toggleMute();
-		}
-	}
-
-	// Toggle mute/unmute
-	function toggleMute() {
-		if (!$songQueue?.audio) return;
-		if ($songQueue.audio.muted) {
-			$songQueue.audio.muted = false;
-			volume = previousVolume > 0 ? previousVolume : 0.05;
-			setVolume(volume);
-		} else {
-			previousVolume = volume;
-			volume = 0.0;
-			setVolume(volume);
-			$songQueue.audio.muted = true;
-		}
-	}
-
-	// Get appropriate volume icon based on current volume
-	function getVolumeIcon() {
-		return volume === 0 ? 'icon-[mingcute--volume-mute-line]' : 'icon-[mingcute--volume-line]';
 	}
 
 	// Track changes to currentlyPlaying and set up time tracking
@@ -123,20 +86,11 @@
 		setupTimeTracking();
 	}
 
-	// The song bar owns the volume, so it does the volume shortcuts (see keybinds.ts)
-	const VOLUME_STEP = 0.01;
-	const MAX_VOLUME = 0.2;
-	const stopHandling = [
-		handleKeybind('volumeUp', () => handleVolumeChange(Math.min(MAX_VOLUME, volume + VOLUME_STEP))),
-		handleKeybind('volumeDown', () => handleVolumeChange(Math.max(0.001, volume - VOLUME_STEP))),
-		handleKeybind('mute', toggleMute)
-	];
 	onDestroy(async () => {
 		clearInterval(updateInterval);
 		if ($currentSong.isPlaying) {
 			stopPlayback();
 		}
-		stopHandling.forEach((stop) => stop());
 	});
 	$: shuffled = $userSettings.settings?.shuffle || false;
 	$: repeat = $userSettings.settings?.repeat ?? 'off';
@@ -295,18 +249,23 @@
 			<button
 				title={volume === 0 ? 'Unmute' : 'Mute'}
 				aria-label={volume === 0 ? 'Unmute' : 'Mute'}
+				aria-pressed={volume === 0}
 				class="{ICON_BUTTON} text-white/60 hover:text-white"
 				on:click={toggleMute}
 			>
-				<span class="{getVolumeIcon()} size-5"></span>
+				<span
+					class="{volume === 0
+						? 'icon-[mingcute--volume-mute-line]'
+						: 'icon-[mingcute--volume-line]'} size-5"
+				></span>
 			</button>
 			<div class="w-28">
 				<Range
-					bind:value={volume}
+					value={volume}
 					min={0}
-					max={0.2}
+					max={MAX_VOLUME}
 					step={0.001}
-					on:change={(e) => handleVolumeChange(e.detail)}
+					on:change={(e) => setVolume(e.detail)}
 				/>
 			</div>
 		</div>

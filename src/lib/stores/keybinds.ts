@@ -4,7 +4,7 @@
 import { derived, get, writable } from 'svelte/store';
 import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
 import { userSettings, updateUserSettings } from './user';
-import { setVolume } from './mixer';
+import { setVolume, toggleMute, DEFAULT_VOLUME } from './mixer';
 import { goto } from '$app/navigation';
 import {
 	togglePlayback,
@@ -172,18 +172,8 @@ export function keybindLabel(bind: Keybind): string[] {
 // --- Doing the actions --------------------------------------------------------------
 
 const VOLUME_STEP = 0.01;
-const MAX_VOLUME = 0.2;
 
 type Handler = () => void | Promise<void>;
-const overrides: Partial<Record<KeybindAction, Handler>> = {};
-
-/** Lets a component do an action itself (e.g. the song bar, which owns the volume) */
-export function handleKeybind(action: KeybindAction, handler: Handler) {
-	overrides[action] = handler;
-	return () => {
-		if (overrides[action] === handler) delete overrides[action];
-	};
-}
 
 function seek(seconds: number) {
 	const audio = get(songQueue).audio;
@@ -195,10 +185,11 @@ function seek(seconds: number) {
 }
 
 function changeVolume(step: number) {
-	const volume = get(userSettings).settings?.volume ?? 0.05;
-	const next = Math.max(0.001, Math.min(MAX_VOLUME, volume + step));
-	updateUserSettings({ volume: next });
-	setVolume(next);
+	const settings = get(userSettings).settings;
+	// Louder while muted continues from the volume before muting
+	const volume = settings?.muted && step < 0 ? 0 : (settings?.volume ?? DEFAULT_VOLUME);
+	// Down stops just above 0: muting is its own shortcut
+	setVolume(Math.max(step < 0 ? 0.001 : 0, volume + step));
 }
 
 const ACTIONS: Record<KeybindAction, Handler> = {
@@ -211,7 +202,7 @@ const ACTIONS: Record<KeybindAction, Handler> = {
 	seekBackward: () => seek(-5),
 	volumeUp: () => changeVolume(VOLUME_STEP),
 	volumeDown: () => changeVolume(-VOLUME_STEP),
-	mute: () => {},
+	mute: () => toggleMute(),
 	shuffle: async () => {
 		if (get(songQueue).type !== 'playlist') return;
 		updateUserSettings({ shuffle: !get(userSettings).settings?.shuffle });
@@ -237,7 +228,7 @@ export function toggleLyrics() {
 }
 
 export function runKeybind(action: KeybindAction) {
-	return (overrides[action] ?? ACTIONS[action])();
+	return ACTIONS[action]();
 }
 
 // --- Listening ----------------------------------------------------------------------
