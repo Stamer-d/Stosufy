@@ -191,6 +191,8 @@ export interface Settings {
 	mapHitsounds?: boolean;
 	/** The skin's hitnormal ("click") on every circle, also with mapHitsounds on (default on) */
 	skinClick?: boolean;
+	/** Hitsound parts turned off (false); all play by default */
+	hitsoundParts?: Partial<Record<'whistle' | 'finish' | 'clap' | 'slidertick', boolean>>;
 	/** Hitsounds later (positive) or earlier, in ms */
 	hitsoundOffset?: number;
 	/** The osu! Skins folder, if not the default one (per device) */

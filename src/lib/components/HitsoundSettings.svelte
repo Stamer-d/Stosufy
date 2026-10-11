@@ -4,6 +4,7 @@
 	import Range from './Range.svelte';
 	import Select from './Select.svelte';
 	import Button from './Button.svelte';
+	import HitsoundParts from './HitsoundParts.svelte';
 	import { userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { hitsoundStatus } from '#lib/hitsounds/player.ts';
 	import {
@@ -216,6 +217,11 @@
 				clickSwitch
 			)}
 		{/if}
+
+		<div class="mt-4">
+			<span class="block mb-2 text-sm font-semibold text-white">Sounds</span>
+			<HitsoundParts />
+		</div>
 
 		<div class="mt-4">
 			<div class="flex justify-between text-sm mb-2">

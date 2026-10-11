@@ -49,6 +49,10 @@ function settings() {
 		// The "click" of every circle (the hitnormal) from the skin, even with the beatmap's
 		// own samples on: maps often have quiet or silent hitnormals of their own
 		skinClick: s.skinClick ?? true,
+		/** Sounds turned off (whistle, finish, clap, slidertick) */
+		muted: (['whistle', 'finish', 'clap', 'slidertick'] as const).filter(
+			(sound) => s.hitsoundParts?.[sound] === false
+		),
 		offset: s.hitsoundOffset ?? 0,
 		skinsFolder: s.skinsFolder ?? null
 	};
@@ -255,8 +259,8 @@ let loadingKey: string | null = null;
 async function load() {
 	const song = get(currentSong).song;
 	const queue = get(songQueue);
-	const { on, skin, beatmap, skinClick } = settings();
-	const key = song && `${songKey(song)}:${skin}:${beatmap}:${skinClick}`;
+	const { on, skin, beatmap, skinClick, muted } = settings();
+	const key = song && `${songKey(song)}:${skin}:${beatmap}:${skinClick}:${muted}`;
 	if (!on || !song) {
 		chart = null;
 		loadingKey = null;
@@ -306,13 +310,18 @@ async function load() {
 				);
 			return resolved.get(id)!;
 		};
-		const ready = await Promise.all(
-			events.map(async (event) => ({
-				time: event.time,
-				volume: event.volume / 100,
-				buffers: await Promise.all(event.samples.map(sound))
-			}))
-		);
+		// Without the sounds turned off (a tick alone leaves nothing to play)
+		const ready = (
+			await Promise.all(
+				events.map(async (event) => ({
+					time: event.time,
+					volume: event.volume / 100,
+					buffers: await Promise.all(
+						event.samples.filter((sample) => !(muted as string[]).includes(sample.sound)).map(sound)
+					)
+				}))
+			)
+		).filter((event) => event.buffers.length);
 		if (loadingKey !== key) return;
 		chart = { key: key!, events: ready };
 		restart = true;
@@ -418,7 +427,7 @@ export function startHitsounds() {
 	let last = '';
 	userSettings.subscribe(() => {
 		const s = settings();
-		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.skinClick}:${s.skinsFolder}`;
+		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.skinClick}:${s.muted}:${s.skinsFolder}`;
 		if (key === last) return;
 		last = key;
 		if (!s.on) stopScheduled();
