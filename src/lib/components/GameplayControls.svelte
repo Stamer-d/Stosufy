@@ -87,6 +87,36 @@
 		}
 	}
 
+	/** Which part of the panel is shown: watching autoplay, playing, or the replays */
+	let tab = $state('watch');
+	$effect(() => {
+		if (open) tab = mode.kind === 'replay' ? 'replays' : mode.kind === 'live' ? 'play' : tab;
+	});
+	const TABS = [
+		{ id: 'watch', label: 'Watch', icon: 'icon-[mingcute--magic-2-line]' },
+		{ id: 'play', label: 'Play', icon: 'icon-[mingcute--cursor-3-line]' },
+		{ id: 'replays', label: 'Replays', icon: 'icon-[mingcute--trophy-line]' }
+	];
+
+	const MOD_NAMES = {
+		EZ: 'Easy',
+		HD: 'Hidden',
+		HR: 'Hard Rock',
+		HT: 'Half Time',
+		DT: 'Double Time',
+		NC: 'Nightcore',
+		RX: 'Relax'
+	};
+	const MOD_COLOURS = {
+		EZ: 'bg-lime-400 text-lime-950',
+		HT: 'bg-lime-400 text-lime-950',
+		HD: 'bg-rose-400 text-rose-950',
+		HR: 'bg-rose-400 text-rose-950',
+		DT: 'bg-rose-400 text-rose-950',
+		NC: 'bg-rose-400 text-rose-950',
+		RX: 'bg-sky-400 text-sky-950'
+	};
+
 	const MOD_TITLES = {
 		EZ: 'Easy: bigger circles, slower approach, more lenient',
 		HD: 'Hidden: no approach circles, circles fade out',
@@ -153,140 +183,191 @@
 
 	{#if open}
 		<div
-			class="absolute right-0 top-11 z-40 w-[22rem] max-h-[70vh] overflow-y-auto rounded-2xl bg-secondary-200/95 backdrop-blur-2xl ring-1 ring-white/10 shadow-2xl p-2 text-white"
+			class="absolute right-0 top-11 z-40 w-[24rem] max-h-[75vh] flex flex-col rounded-2xl bg-secondary-200/95 backdrop-blur-2xl ring-1 ring-white/10 shadow-2xl text-white overflow-hidden"
 			transition:fly={{ y: -6, duration: 150 }}
 		>
-			{#if diffs.length > 1}
-				<p class="px-2.5 pt-1.5 pb-1 text-xs font-bold uppercase tracking-wide text-white/50">
-					Difficulty
-				</p>
-				<div class="flex flex-col">
-					{#each diffs as diff (diff.id)}
-						<button
-							class="flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg text-sm text-left cursor-pointer hover:bg-white/5 {diff.id ===
-							mapId
-								? 'text-white font-semibold bg-white/10'
-								: 'text-white/80'}"
-							onclick={() => chooseDifficulty(song, diff.id)}
-						>
-							<span class="truncate">{diff.version}</span>
-							<span class="shrink-0 text-xs text-white/50">{stars(diff.stars)}</span>
-						</button>
-					{/each}
-				</div>
-				<div class="my-2 h-px bg-white/10"></div>
-			{/if}
-
-			<button
-				class="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm text-left cursor-pointer hover:bg-white/5 {mode.kind ===
-				'auto'
-					? 'text-white font-semibold bg-white/10'
-					: ''}"
-				onclick={() => {
-					setGameplayMode(song, { kind: 'auto' });
-					open = false;
-				}}
-			>
-				<span class="icon-[mingcute--magic-2-line] size-5"></span>
-				Autoplay
-			</button>
-			<button
-				class="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm text-left cursor-pointer hover:bg-white/5"
-				onclick={playYourself}
-			>
-				<span class="icon-[mingcute--cursor-3-line] size-5"></span>
-				<span class="flex-1">
-					Play it yourself
-					<span class="block text-xs text-white/50">
-						Aim with the mouse, click with the keys or mouse buttons. Starts the song over.
-					</span>
-				</span>
-			</button>
-			<div class="flex flex-wrap items-center gap-1.5 px-2.5 pb-2">
-				{#each PLAY_MODS as mod (mod)}
-					{@const on = playMods.includes(mod)}
-					<button
-						aria-pressed={on}
-						title={MOD_TITLES[mod]}
-						class="h-7 px-2.5 rounded-md text-xs font-bold ring-1 cursor-pointer transition {on
-							? 'ring-primary-300 bg-primary-500/30 text-white'
-							: 'ring-white/15 text-white/60 hover:text-white'}"
-						onclick={() => updateUserSettings({ gameplayMods: togglePlayMod(playMods, mod) })}
-					>
-						{mod}
-					</button>
-				{/each}
-			</div>
-			<div class="flex items-center gap-2 px-2.5 pb-2 text-xs text-white/60">
-				Keys
-				{#each [0, 1] as index (index)}
-					<button
-						class="min-w-8 h-7 px-2 rounded-md ring-1 font-semibold cursor-pointer {recording ===
-						index
-							? 'ring-primary-300 text-primary-100'
-							: 'ring-white/15 text-white hover:bg-white/5'}"
-						onclick={() => (recording = recording === index ? null : index)}
-					>
-						{recording === index ? 'Press a key' : keyLabel(gameKeys[index])}
-					</button>
-				{/each}
-			</div>
-
-			<div class="my-2 h-px bg-white/10"></div>
-			<p class="px-2.5 pt-1 pb-1 text-xs font-bold uppercase tracking-wide text-white/50">
-				Top 50 replays
-			</p>
-			{#if replayError}
-				<p class="px-2.5 py-1.5 text-xs text-red-300">{replayError}</p>
-			{/if}
-			{#if scoresError}
-				<p class="px-2.5 py-2 text-sm text-white/60">{scoresError}</p>
-			{:else if !scores}
-				<p class="px-2.5 py-2 text-sm text-white/60">Loading the leaderboard…</p>
-			{:else if !scores.length}
-				<p class="px-2.5 py-2 text-sm text-white/60">No scores on this difficulty yet.</p>
-			{:else}
-				<div class="flex flex-col">
-					{#each scores as score (score.id)}
-						<button
-							class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left cursor-pointer hover:bg-white/5 disabled:cursor-default disabled:opacity-40 {mode.kind ===
-								'replay' && mode.score.id === score.id
-								? 'bg-white/10'
-								: ''}"
-							disabled={!score.hasReplay}
-							title={score.hasReplay ? `Watch ${score.player}'s replay` : 'No replay saved'}
-							onclick={() => watch(score)}
-						>
-							<span class="w-6 shrink-0 text-xs font-bold text-white/50 text-right"
-								>#{score.position}</span
+			<div class="p-3 pb-2 flex flex-col gap-3 border-b border-white/5">
+				{#if diffs.length > 1}
+					<div class="flex gap-1.5 overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
+						{#each diffs as diff (diff.id)}
+							<button
+								class="shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold cursor-pointer transition {diff.id ===
+								mapId
+									? 'bg-white text-black'
+									: 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'}"
+								title={diff.version}
+								onclick={() => chooseDifficulty(song, diff.id)}
 							>
-							{#if score.avatar}
-								<img src={score.avatar} alt="" class="size-7 rounded-md shrink-0" />
-							{/if}
-							<span class="flex-1 min-w-0">
-								<span class="flex items-center gap-1.5 text-sm font-semibold">
-									<span class="truncate">{score.player}</span>
-									{#each score.mods as mod (mod)}
-										<span class="px-1 rounded bg-white/10 text-[10px] font-bold text-white/80"
-											>{mod}</span
-										>
-									{/each}
-								</span>
-								<span class="block text-xs text-white/50">
-									{(score.accuracy * 100).toFixed(2)}% · {score.maxCombo}x{score.misses
-										? ` · ${score.misses} miss`
-										: ''}{score.pp ? ` · ${Math.round(score.pp)}pp` : ''} · {date(score.date)}
-								</span>
-							</span>
-							{#if loadingScore === score.id}
-								<span class="icon-[mingcute--loading-line] size-4 animate-spin shrink-0"></span>
-							{:else if score.hasReplay}
-								<span class="icon-[mingcute--play-fill] size-4 shrink-0 text-white/60"></span>
-							{/if}
+								<span class="max-w-32 truncate">{diff.version}</span>
+								{#if diff.stars != null}
+									<span class="opacity-60">{stars(diff.stars)}</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				{/if}
+				<div class="grid grid-cols-3 gap-1 p-1 rounded-xl bg-black/25">
+					{#each TABS as t (t.id)}
+						<button
+							class="flex items-center justify-center gap-1.5 h-8 rounded-lg text-sm font-semibold cursor-pointer transition {tab ===
+							t.id
+								? 'bg-white/15 text-white'
+								: 'text-white/55 hover:text-white'}"
+							aria-pressed={tab === t.id}
+							onclick={() => (tab = t.id)}
+						>
+							<span class="{t.icon} size-4"></span>
+							{t.label}
 						</button>
 					{/each}
 				</div>
-			{/if}
+			</div>
+
+			<div class="overflow-y-auto p-3">
+				{#if tab === 'watch'}
+					<div class="flex flex-col items-center text-center gap-3 py-3">
+						<span
+							class="grid place-items-center size-14 rounded-2xl bg-primary-500/20 text-primary-200"
+						>
+							<span class="icon-[mingcute--magic-2-line] size-7"></span>
+						</span>
+						<div>
+							<p class="font-semibold">Autoplay</p>
+							<p class="text-sm text-white/55">The map played perfectly along with the song.</p>
+						</div>
+						<button
+							class="h-9 px-5 rounded-full text-sm font-semibold cursor-pointer transition {mode.kind ===
+							'auto'
+								? 'bg-white/10 text-white/60'
+								: 'bg-white text-black hover:scale-[1.03]'}"
+							disabled={mode.kind === 'auto'}
+							onclick={() => {
+								setGameplayMode(song, { kind: 'auto' });
+								open = false;
+							}}
+						>
+							{mode.kind === 'auto' ? 'Watching' : 'Watch autoplay'}
+						</button>
+					</div>
+				{:else if tab === 'play'}
+					<p class="mb-2 text-xs font-bold uppercase tracking-wide text-white/45">Mods</p>
+					<div class="grid grid-cols-4 gap-1.5">
+						{#each PLAY_MODS as mod (mod)}
+							{@const on = playMods.includes(mod)}
+							<button
+								aria-pressed={on}
+								title={MOD_TITLES[mod]}
+								class="flex flex-col items-center gap-1 py-2 rounded-xl ring-1 cursor-pointer transition {on
+									? 'ring-white/40 bg-white/10'
+									: 'ring-white/5 bg-white/[0.03] hover:bg-white/[0.07]'}"
+								onclick={() => updateUserSettings({ gameplayMods: togglePlayMod(playMods, mod) })}
+							>
+								<span
+									class="px-1.5 rounded text-[11px] font-black transition {on
+										? MOD_COLOURS[mod]
+										: 'bg-white/10 text-white/60'}">{mod}</span
+								>
+								<span class="text-[11px] {on ? 'text-white' : 'text-white/50'}"
+									>{MOD_NAMES[mod]}</span
+								>
+							</button>
+						{/each}
+					</div>
+
+					<p class="mt-4 mb-2 text-xs font-bold uppercase tracking-wide text-white/45">Keys</p>
+					<div class="flex items-center gap-2">
+						{#each [0, 1] as index (index)}
+							<button
+								class="min-w-10 h-9 px-3 rounded-lg ring-1 text-sm font-bold cursor-pointer transition {recording ===
+								index
+									? 'ring-primary-300 text-primary-100 bg-primary-500/15'
+									: 'ring-white/15 bg-white/5 hover:bg-white/10'}"
+								title="Change this key"
+								onclick={() => (recording = recording === index ? null : index)}
+							>
+								{recording === index ? 'Press a key…' : keyLabel(gameKeys[index])}
+							</button>
+						{/each}
+						<span class="text-xs text-white/45">or the mouse buttons</span>
+					</div>
+
+					<button
+						class="mt-4 w-full h-11 rounded-full bg-white text-black font-semibold hover:scale-[1.02] flex items-center justify-center gap-2 cursor-pointer transition"
+						onclick={playYourself}
+					>
+						<span class="icon-[mingcute--play-fill] size-5"></span>
+						Play it yourself
+					</button>
+					<p class="mt-1.5 text-center text-xs text-white/40">The song starts over</p>
+				{:else}
+					{#if replayError}
+						<p class="mb-2 px-2 py-1.5 rounded-lg bg-red-500/10 text-xs text-red-300">
+							{replayError}
+						</p>
+					{/if}
+					{#if scoresError}
+						<p class="py-6 text-center text-sm text-white/55">{scoresError}</p>
+					{:else if !scores}
+						<p class="py-6 flex items-center justify-center gap-2 text-sm text-white/55">
+							<span class="icon-[mingcute--loading-line] size-4 animate-spin"></span>
+							Loading the top 50…
+						</p>
+					{:else if !scores.length}
+						<p class="py-6 text-center text-sm text-white/55">No scores on this difficulty yet.</p>
+					{:else}
+						<div class="flex flex-col gap-0.5">
+							{#each scores as score (score.id)}
+								<button
+									class="flex items-center gap-3 px-2 py-2 rounded-xl text-left cursor-pointer hover:bg-white/5 disabled:cursor-default disabled:opacity-40 {mode.kind ===
+										'replay' && mode.score.id === score.id
+										? 'bg-white/10'
+										: ''}"
+									disabled={!score.hasReplay}
+									title={score.hasReplay ? `Watch ${score.player}'s replay` : 'No replay saved'}
+									onclick={() => watch(score)}
+								>
+									<span
+										class="w-7 shrink-0 text-sm font-bold text-right {score.position <= 3
+											? 'text-amber-300'
+											: 'text-white/40'}">#{score.position}</span
+									>
+									{#if score.avatar}
+										<img src={score.avatar} alt="" class="size-8 rounded-lg shrink-0" />
+									{:else}
+										<span class="size-8 rounded-lg shrink-0 bg-white/10"></span>
+									{/if}
+									<span class="flex-1 min-w-0">
+										<span class="flex items-center gap-1.5 text-sm font-semibold">
+											<span class="truncate">{score.player}</span>
+											{#each score.mods as mod (mod)}
+												<span
+													class="px-1 rounded text-[10px] font-black {MOD_COLOURS[mod] ??
+														'bg-white/10 text-white/80'}">{mod}</span
+												>
+											{/each}
+										</span>
+										<span class="block text-xs text-white/45 truncate">
+											{(score.accuracy * 100).toFixed(2)}% · {score.maxCombo}x{score.misses
+												? ` · ${score.misses} miss`
+												: ''} · {date(score.date)}
+										</span>
+									</span>
+									{#if score.pp}
+										<span class="shrink-0 text-sm font-semibold text-white/80"
+											>{Math.round(score.pp)}pp</span
+										>
+									{/if}
+									{#if loadingScore === score.id}
+										<span class="icon-[mingcute--loading-line] size-4 animate-spin shrink-0"></span>
+									{:else if score.hasReplay}
+										<span class="icon-[mingcute--play-fill] size-4 shrink-0 text-white/50"></span>
+									{/if}
+								</button>
+							{/each}
+						</div>
+					{/if}
+				{/if}
+			</div>
 		</div>
 	{/if}
 </div>
