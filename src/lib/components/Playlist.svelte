@@ -2,7 +2,7 @@
 	import { keyStore } from '#lib/stores/auth.ts';
 	import { user } from '#lib/stores/user.ts';
 	import Button from './Button.svelte';
-	import { getImageUrl, mapDataStore } from '#lib/stores/data.ts';
+	import { getImageUrl, mapDataStore, formatSongData } from '#lib/stores/data.ts';
 	import {
 		playlists,
 		getPlaylists,
@@ -31,6 +31,14 @@
 		imageError: ''
 	});
 
+	// "Downloaded Songs" counts songs, so a set with several songs counts each of them
+	let downloadedCount = $derived(formatSongData($mapDataStore).length);
+	$effect(() => {
+		if ($playlists.some((p) => p.id == -1 && p.song_amount !== downloadedCount)) {
+			$playlists = $playlists.map((p) => (p.id == -1 ? { ...p, song_amount: downloadedCount } : p));
+		}
+	});
+
 	async function getPlaylist() {
 		let playlist_list = await getPlaylists($keyStore.access_token);
 
@@ -39,7 +47,7 @@
 			title: 'Downloaded Songs',
 			description: 'Your downloaded music collection',
 			image_url: null,
-			song_amount: Object.keys($mapDataStore).length,
+			song_amount: formatSongData($mapDataStore).length,
 			created_at: null,
 			updated_at: null,
 			public: false

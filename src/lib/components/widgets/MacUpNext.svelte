@@ -15,7 +15,12 @@
 		onclick={skipForward}
 	>
 		<Widget size="small" class="!p-0">
-			<BeatmapBackground setId={next.id} title={next.title} class="absolute inset-0" />
+			<BeatmapBackground
+				setId={next.id}
+				mapId={next?.beatmaps?.[0]?.id}
+				title={next.title}
+				class="absolute inset-0"
+			/>
 			<div
 				class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"
 			></div>

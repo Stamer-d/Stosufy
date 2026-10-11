@@ -10,7 +10,6 @@
 	} from '#lib/stores/data.ts';
 	import { beatmapStatus, difficultyColor } from '#lib/beatmapStatus.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
-	import { playlists } from '#lib/stores/playlist.ts';
 
 	/** @type {import('#lib/types.ts').MapSet} */
 	export let map;
@@ -28,18 +27,6 @@
 	function startDownload(mapData, mapId) {
 		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
 			async () => {
-				playlists.update((allPlaylists) => {
-					return allPlaylists.map((playlist) => {
-						if (playlist.id == -1) {
-							return {
-								...playlist,
-								song_amount: playlist.song_amount + 1
-							};
-						}
-						return playlist;
-					});
-				});
-
 				if ($songQueue.type == 'playlist' && $songQueue.playlistId == -1) {
 					await updateSongQueue(
 						$songQueue.currentIndex + 1,

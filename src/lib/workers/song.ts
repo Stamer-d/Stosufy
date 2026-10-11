@@ -2,7 +2,7 @@
 // File system access and the opus conversion are delegated to the main thread.
 
 import JSZip from 'jszip';
-import { findBackground, findVideo, parseTimingPoints, type TimingPoint } from '../osuFile.ts';
+import { parseOsuFile, type OsuFileInfo } from '../osuFile.ts';
 
 // Message counter to track request/response pairs
 let messageId = 0;
@@ -60,6 +60,7 @@ self.onmessage = async function (event) {
 					backgroundPath: result.backgroundPath,
 					video: result.video,
 					timing: result.timing,
+					maps: result.maps,
 					beatmapId: result.mapId,
 					setId: data.setId
 				},
@@ -188,69 +189,71 @@ async function extractAudioFromBeatmap(
 
 		self.postMessage({ type: 'progress', progress: 60, setId });
 
-		// Process .osu files to find audio files
-		const audioFileMap = new Map<string, string>();
-		let foundMapId = '0';
-		let backgroundName: string | null = null;
-		let video: { file: string; offset: number } | null = null;
-		let timing: TimingPoint[] | null = null;
-
+		// Read every difficulty: a set can have a different song and background per difficulty
+		const diffs: (Omit<OsuFileInfo, 'beatmapId'> & { beatmapId: number | string })[] = [];
 		for (const osuFile of osuFiles) {
-			const content = await fs.readTextFile(osuFile);
-
-			// Extract beatmap ID and audio filename
-			const beatmapIdMatch = content.match(/BeatmapID:(\d+)/);
-			const audioFileMatch = content.match(/AudioFilename:(.+)/);
-
-			if (audioFileMatch) {
-				const beatmapId = beatmapIdMatch ? beatmapIdMatch[1].trim() : mapId.toString();
-				foundMapId = beatmapId;
-				let audioFileName = audioFileMatch[1].trim();
-
-				// Check if filename needed sanitization
-				for (const [original, sanitized] of filenameMap.entries()) {
-					if (original.endsWith(audioFileName)) {
-						audioFileName = sanitized.substring(sanitized.lastIndexOf('/') + 1);
-						break;
-					}
-				}
-
-				audioFileMap.set(beatmapId, audioFileName);
-			}
-
-			backgroundName ??= findBackground(content);
-			video ??= findVideo(content);
-			timing ??= parseTimingPoints(content);
+			const info = parseOsuFile(await fs.readTextFile(osuFile));
+			if (info.audioFile) diffs.push({ ...info, beatmapId: info.beatmapId ?? mapId });
 		}
 
 		self.postMessage({ type: 'progress', progress: 70, setId });
 
-		// Convert audio files
-		const convertedAudioFiles = new Set<string>();
-		const uniqueAudioFiles = new Set(audioFileMap.values());
-
-		for (const audioFileName of uniqueAudioFiles) {
-			const audioFilePath = await fs.path.join(extractDir, audioFileName);
-
-			if (await fs.exists(audioFilePath)) {
-				const targetPath = await fs.path.join(mapSetsDir, `${setId}-${foundMapId}.opus`);
-				await ffmpeg.convertToOpus(audioFilePath, targetPath);
-				convertedAudioFiles.add(targetPath);
+		// The extracted file of an audio or image name from a .osu file (names were sanitized)
+		const extractedName = (name: string) => {
+			for (const [original, sanitized] of filenameMap.entries()) {
+				if (original.toLowerCase().endsWith(name.toLowerCase())) {
+					return sanitized.substring(sanitized.lastIndexOf('/') + 1);
+				}
 			}
+			return name;
+		};
+
+		// Convert each song once, named after the first difficulty that uses it
+		const audioPaths = new Map<string, string>();
+		for (const diff of diffs) {
+			const name = diff.audioFile.toLowerCase();
+			if (audioPaths.has(name)) continue;
+			const sourcePath = await fs.path.join(extractDir, extractedName(diff.audioFile));
+			if (!(await fs.exists(sourcePath))) continue;
+			const targetPath = await fs.path.join(mapSetsDir, `${setId}-${diff.beatmapId}.opus`);
+			await ffmpeg.convertToOpus(sourcePath, targetPath);
+			audioPaths.set(name, targetPath);
 		}
 
-		// Save the background image next to the audio
-		let backgroundPath: string | null = null;
-		if (backgroundName) {
+		// Save each background once, next to the audio
+		const backgroundPaths = new Map<string, string>();
+		for (const diff of diffs) {
+			const name = diff.background?.toLowerCase();
+			if (!name || backgroundPaths.has(name)) continue;
 			const entry = Object.values(zip.files).find(
-				(file) => !file.dir && file.name.toLowerCase() === backgroundName.toLowerCase()
+				(file) => !file.dir && file.name.toLowerCase() === name
 			);
-			const extension = backgroundName.split('.').pop().toLowerCase();
-			if (entry && ['jpg', 'jpeg', 'png'].includes(extension)) {
-				backgroundPath = await fs.path.join(mapSetsDir, `${setId}-bg.${extension}`);
-				await fs.writeFile(backgroundPath, await entry.async('uint8array'));
-			}
+			const extension = name.split('.').pop();
+			if (!entry || !['jpg', 'jpeg', 'png'].includes(extension)) continue;
+			// The first background keeps the old name, so older code and data still match
+			const suffix = backgroundPaths.size ? `-${diff.beatmapId}` : '';
+			const backgroundPath = await fs.path.join(mapSetsDir, `${setId}-bg${suffix}.${extension}`);
+			await fs.writeFile(backgroundPath, await entry.async('uint8array'));
+			backgroundPaths.set(name, backgroundPath);
 		}
+
+		// What each difficulty uses
+		const maps: Record<string, Record<string, unknown>> = {};
+		for (const diff of diffs) {
+			maps[diff.beatmapId] = {
+				audioPath: audioPaths.get(diff.audioFile.toLowerCase()) ?? null,
+				backgroundPath: backgroundPaths.get(diff.background?.toLowerCase()) ?? null,
+				title: diff.title,
+				artist: diff.artist,
+				timing: diff.timingPoints
+			};
+		}
+		const first = diffs[0];
+		const backgroundPath = first
+			? (backgroundPaths.get(first.background?.toLowerCase()) ?? null)
+			: null;
+		const video = diffs.find((diff) => diff.video)?.video ?? null;
+		const timing = first?.timingPoints ?? null;
 
 		// Save the video as it is; formats the webview can't play are converted afterwards
 		let savedVideo: { path: string; offset: number } | null = null;
@@ -269,17 +272,19 @@ async function extractAudioFromBeatmap(
 		// Clean up
 		await fs.remove(extractDir);
 
-		// Return first converted audio file
-		if (convertedAudioFiles.size > 0) {
-			const firstAudioPath = [...convertedAudioFiles][0];
-			const audioData = await fs.readFile(firstAudioPath);
+		// Return the audio of the requested difficulty (or the first one) to play it right away
+		const audioPath =
+			(maps[mapId] as { audioPath?: string } | undefined)?.audioPath ?? [...audioPaths.values()][0];
+		if (audioPath) {
+			const audioData = await fs.readFile(audioPath);
 			return {
 				audioData,
-				audioPath: firstAudioPath,
+				audioPath,
 				backgroundPath,
 				video: savedVideo,
 				timing,
-				mapId: foundMapId
+				maps,
+				mapId: first.beatmapId
 			};
 		}
 

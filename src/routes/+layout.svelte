@@ -54,6 +54,7 @@
 		<div class="fixed inset-0 -z-10 bg-app">
 			<BeatmapBackground
 				setId={$currentSong.song.id}
+				mapId={$currentSong.song?.beatmaps?.[0]?.id}
 				title={$currentSong.song.title}
 				class="absolute inset-0"
 				imageClass="blur-2xl scale-110"

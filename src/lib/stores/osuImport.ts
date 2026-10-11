@@ -8,7 +8,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import * as path from '@tauri-apps/api/path';
 import { keyStore } from './auth';
 import { mapDataStore, saveMapData, backfillImages } from './data';
-import { getPlaylistSongs, playlists } from './playlist';
+import { getPlaylistSongs } from './playlist';
 import { parseOsuFile, mainBpm } from '../osuFile';
 import type { Beatmap, StoredMapSet } from '../types';
 
@@ -94,7 +94,12 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 			difficulty_rating: 0,
 			total_length: 0,
 			downloaded: true,
-			audioFile
+			audioFile,
+			// Sets with several songs: each difficulty keeps its own title, background and timing
+			title: diff.title,
+			artist: diff.artist,
+			background: await existing(diff.background),
+			timing: diff.timingPoints
 		};
 	}
 	if (!Object.keys(beatmaps).length) return null;
@@ -176,8 +181,6 @@ export async function importOsuFolder(folder: string) {
 		await flush();
 
 		await getPlaylistSongs(-1, true);
-		const count = Object.keys(get(mapDataStore)).length;
-		playlists.update((all) => all.map((p) => (p.id == -1 ? { ...p, song_amount: count } : p)));
 
 		osuImport.update((s) => ({ ...s, state: 'details' }));
 		await fillDetails(imported);

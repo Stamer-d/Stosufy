@@ -6,26 +6,39 @@
 	/**
 	 * Shows the background of a beatmap set, cross-fading when it changes. With `video`, the
 	 * beatmap video plays on top of it while the set is the current song.
-	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string, video?: boolean }}
+	 * @type {{ setId: number | string | null, title?: string, class?: string, imageClass?: string, video?: boolean, mapId?: number | string | null }}
 	 */
-	let { setId, title = '', class: className = '', imageClass = '', video = false } = $props();
+	let {
+		setId,
+		mapId = null,
+		title = '',
+		class: className = '',
+		imageClass = '',
+		video = false
+	} = $props();
 
 	let urls = $state([]);
 	let attempt = $state(0);
 	let url = $derived(urls[attempt] ?? null);
 	// Only this set's saved background, so other changes to the song data don't reload it
-	let localPath = $derived(setId != null ? ($mapDataStore[setId]?.background ?? null) : null);
+	let localPath = $derived(
+		setId != null
+			? (mapId != null && $mapDataStore[setId]?.beatmaps?.[mapId]?.background) ||
+					($mapDataStore[setId]?.background ?? null)
+			: null
+	);
 
 	$effect(() => {
 		const id = setId;
+		const map = mapId;
 		void localPath;
 		if (id == null) {
 			urls = [];
 			attempt = 0;
 			return;
 		}
-		backgroundUrls(id).then((result) => {
-			if (setId !== id) return;
+		backgroundUrls(id, map).then((result) => {
+			if (setId !== id || mapId !== map) return;
 			// Keep showing the current image when the candidates didn't change
 			if (result.join() === urls.join()) return;
 			urls = result;

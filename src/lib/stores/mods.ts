@@ -147,18 +147,28 @@ function playBeat(index: number, point: TimingPoint, when: number) {
 const loadingTiming = new Set<string>();
 
 /** Songs downloaded before timing points were saved: get them from the .osu file online */
-async function loadTiming(setId: string) {
+async function loadTiming(setId: string, mapId: string | null) {
 	const set = get(mapDataStore)[setId];
-	const beatmapId = Object.keys(set?.beatmaps ?? {}).find((id) => /^\d+$/.test(id));
-	if (!beatmapId || loadingTiming.has(setId)) return;
-	loadingTiming.add(setId);
+	const beatmapId =
+		mapId && /^\d+$/.test(mapId)
+			? mapId
+			: Object.keys(set?.beatmaps ?? {}).find((id) => /^\d+$/.test(id));
+	if (!beatmapId || loadingTiming.has(beatmapId)) return;
+	loadingTiming.add(beatmapId);
 	try {
 		const response = await fetch(`https://osu.ppy.sh/osu/${beatmapId}`);
 		if (!response.ok) return;
 		const timing = parseTimingPoints(await response.text());
-		mapDataStore.update((data) =>
-			data[setId] ? { ...data, [setId]: { ...data[setId], timing } } : data
-		);
+		mapDataStore.update((data) => {
+			const stored = data[setId];
+			if (!stored) return data;
+			const map = stored.beatmaps?.[beatmapId];
+			// Per difficulty: the songs of a set can have different timing
+			const beatmaps = map
+				? { ...stored.beatmaps, [beatmapId]: { ...map, timing } }
+				: stored.beatmaps;
+			return { ...data, [setId]: { ...stored, beatmaps, timing: stored.timing ?? timing } };
+		});
 		await saveMapData();
 	} catch (error) {
 		console.warn('Could not load the timing points of', setId, error);
@@ -167,13 +177,14 @@ async function loadTiming(setId: string) {
 
 /** Schedules the Nightcore beat for whatever `current` returns, while NC is on */
 export function startBeats(
-	current: () => { audio: HTMLAudioElement | null; setId: string | null }
+	current: () => { audio: HTMLAudioElement | null; setId: string | null; mapId: string | null }
 ) {
 	setInterval(() => {
-		const { audio, setId } = current();
-		const timing = setId ? get(mapDataStore)[setId]?.timing : null;
+		const { audio, setId, mapId } = current();
+		const stored = setId ? get(mapDataStore)[setId] : null;
+		const timing = (mapId && stored?.beatmaps?.[mapId]?.timing) || stored?.timing;
 		const playing = currentMod() === 'NC' && audio && !audio.paused && context;
-		if (playing && setId && !timing) loadTiming(setId);
+		if (playing && setId && !timing) loadTiming(setId, mapId);
 		if (!playing || !timing?.length) {
 			// Like osu!lazer: after a pause the beat waits for the next segment again
 			firstBeat = null;

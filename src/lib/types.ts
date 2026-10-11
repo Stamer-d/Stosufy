@@ -10,6 +10,14 @@ export interface Beatmap {
 	total_length?: number;
 	audioFile?: string | null;
 	downloaded?: boolean;
+	/** Background of this difficulty, when the set has more than one */
+	background?: string | null;
+	/** Title and artist from the .osu file; differ between the songs of a set */
+	title?: string;
+	artist?: string;
+	timing?: import('./osuFile').TimingPoint[];
+	/** Integrated loudness of this difficulty's audio in LUFS */
+	loudness?: number;
 	[key: string]: any;
 }
 
@@ -37,6 +45,8 @@ interface MapSetInfo {
 	songInfo?: PlaylistSongInfo;
 	/** Set on songs added to the queue by the user; they always play the full song */
 	queued?: boolean;
+	/** Which song of a set with several songs (see tracks.ts) */
+	track?: number;
 	/** Path of the full size background saved in the songs folder */
 	background?: string | null;
 	/** The full size background could not be loaded for this set, so it is not retried */

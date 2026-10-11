@@ -1,0 +1,45 @@
+// Beatmap sets can contain more than one song: difficulties with their own audio file (and
+// often their own title and background). Each distinct audio file is a "track", shown and
+// played as its own song.
+
+import type { Beatmap, MapSet, StoredMapSet } from './types';
+
+/** The beatmaps of a set grouped by audio file, in the order of the beatmaps */
+export function trackGroups(set: StoredMapSet): Beatmap[][] {
+	const groups = new Map<string, Beatmap[]>();
+	for (const beatmap of Object.values(set.beatmaps ?? {})) {
+		const key = beatmap.audioFile?.toLowerCase() ?? '';
+		groups.set(key, [...(groups.get(key) ?? []), beatmap]);
+	}
+	return [...groups.values()];
+}
+
+/** Which track of a downloaded set a beatmap belongs to; 0 when unknown */
+export function trackOf(set: StoredMapSet | undefined, mapId: number | string | undefined) {
+	if (!set || mapId == null) return 0;
+	const index = trackGroups(set).findIndex((group) => group.some((map) => map.id == mapId));
+	return Math.max(index, 0);
+}
+
+/** A downloaded set as songs: one per track, with the track's own title and artist */
+export function splitTracks(set: StoredMapSet): MapSet[] {
+	const groups = trackGroups(set);
+	if (groups.length <= 1) return [{ ...set, beatmaps: groups[0] ?? [] }];
+	return groups.map((beatmaps, track) => ({
+		...set,
+		title: beatmaps[0].title || set.title,
+		artist: beatmaps[0].artist || set.artist,
+		beatmaps,
+		track
+	}));
+}
+
+/** Whether two songs are the same track of the same set */
+export function sameSong(a: MapSet | null | undefined, b: MapSet | null | undefined) {
+	return !!a && !!b && a.id == b.id && (a.track ?? 0) == (b.track ?? 0);
+}
+
+/** A unique key for a song in lists, also for the songs of a set with several */
+export function songKey(song: MapSet) {
+	return `${song.id}:${song.track ?? 0}`;
+}

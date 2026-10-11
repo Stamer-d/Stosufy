@@ -1,9 +1,9 @@
 <script>
 	import Widget from './MacWidget.svelte';
-	import { mapDataStore } from '#lib/stores/data.ts';
+	import { mapDataStore, formatSongData } from '#lib/stores/data.ts';
 	import { playlists } from '#lib/stores/playlist.ts';
 
-	let songCount = $derived(Object.keys($mapDataStore).length);
+	let songCount = $derived(formatSongData($mapDataStore).length);
 	let playlistCount = $derived($playlists.filter((playlist) => playlist.id != -1).length);
 </script>
 

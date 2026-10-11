@@ -3,6 +3,7 @@ import { keyStore } from './auth';
 import { fetch } from '@tauri-apps/plugin-http';
 import JSZip from 'jszip';
 import { findVideo } from '../osuFile';
+import { splitTracks } from '../tracks';
 import {
 	writeTextFile,
 	exists,
@@ -16,7 +17,7 @@ import {
 } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { getPlaylistSongs, playlists } from './playlist';
+import { getPlaylistSongs } from './playlist';
 import { songQueue, updateSongQueue } from './audio';
 import { addSong } from '../api';
 import { showToast } from './toast';
@@ -147,18 +148,6 @@ export async function deleteSong(setId: number | string) {
 	delete mapData[setId];
 	mapDataStore.set(mapData);
 	await saveMapData();
-	playlists.update((allPlaylists) => {
-		return allPlaylists.map((playlist) => {
-			if (playlist.id == -1) {
-				// Decrement song_amount for the "All Songs" playlist
-				return {
-					...playlist,
-					song_amount: playlist.song_amount - 1
-				};
-			}
-			return playlist;
-		});
-	});
 
 	if (queue && queue.type === 'playlist') {
 		const playlistId = queue.playlistId;
@@ -347,11 +336,16 @@ async function processWithWorker(
 						}
 						console.log('Worker completed extraction for:', setId, 'Audio path:', audioPath);
 
-						if (audioPath) {
-							mapSetData.beatmaps.forEach((element) => {
-								element.audioFile = audioPath;
-							});
-						}
+						// Each difficulty gets its own song, background, title and timing
+						const maps = event.data.maps ?? {};
+						mapSetData.beatmaps.forEach((element) => {
+							const info = maps[element.id];
+							element.audioFile = info?.audioPath ?? audioPath ?? element.audioFile;
+							if (info?.backgroundPath) element.background = info.backgroundPath;
+							if (info?.title) element.title = info.title;
+							if (info?.artist) element.artist = info.artist;
+							if (info?.timing) element.timing = info.timing;
+						});
 
 						await updateMapsetData(mapSetData);
 						await getPlaylistSongs(-1, true);
@@ -744,7 +738,12 @@ async function updateMapsetData(mapsetData: MapSet) {
 				mode: beatmap.mode || '',
 				total_length: beatmap.total_length || 0,
 				downloaded: existing?.downloaded || false,
-				audioFile: beatmap.audioFile || existing?.audioFile || null
+				audioFile: beatmap.audioFile || existing?.audioFile || null,
+				background: beatmap.background || existing?.background || null,
+				title: beatmap.title || existing?.title,
+				artist: beatmap.artist || existing?.artist,
+				timing: beatmap.timing || existing?.timing,
+				loudness: existing?.loudness
 			};
 		});
 	}
@@ -759,11 +758,12 @@ export function getImageUrl(imageUrl: string | null | undefined) {
 
 /** Converts the stored map data into a list of map sets, sorted by download date */
 export function formatSongData(songData: Record<string, StoredMapSet>): MapSet[] {
-	const songs = Object.values(songData).map((song) => ({
-		...song,
-		beatmaps: song.beatmaps ? Object.values<Beatmap>(song.beatmaps) : []
-	}));
-	songs.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
+	// Sets with several songs show each of them
+	const songs = Object.values(songData).flatMap(splitTracks);
+	songs.sort(
+		(a, b) =>
+			Number(a.created_at || 0) - Number(b.created_at || 0) || (a.track ?? 0) - (b.track ?? 0)
+	);
 	return songs;
 }
 
@@ -916,8 +916,13 @@ function fullBackgroundUrls(setId: number | string) {
  * the songs folder (works offline), else the full size image online and, as a last resort,
  * the 1800x500 banner.
  */
-export async function backgroundUrls(setId: number | string): Promise<string[]> {
-	const imagePath = get(mapDataStore)[setId]?.background;
+export async function backgroundUrls(
+	setId: number | string,
+	mapId?: number | string
+): Promise<string[]> {
+	// A difficulty can have its own background (sets with several songs)
+	const set = get(mapDataStore)[setId];
+	const imagePath = (mapId != null && set?.beatmaps?.[mapId]?.background) || set?.background;
 	const local = imagePath && (await localImageUrl(imagePath));
 	if (local) return [local];
 	return [

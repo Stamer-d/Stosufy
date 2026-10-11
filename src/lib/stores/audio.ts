@@ -4,6 +4,7 @@ import { updateCurrentQueue, updateUserSettings, userSettings } from './user';
 import { applyMod, prepareBeats, startBeats } from './mods';
 import { track, untrack, setFade, setGain, rampGain } from './mixer';
 import { measureLoudness, gainFor } from './loudness';
+import { sameSong } from '../tracks';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
 import type {
@@ -57,17 +58,30 @@ let measurements = Promise.resolve();
 function normalize(audio: HTMLAudioElement, song: MapSet, file: Uint8Array) {
 	const setId = String(song.id);
 	const stored = get(mapDataStore)[setId];
-	if (!stored) return;
-	if (stored.loudness != null) {
-		setGain(audio, gainFor(stored.loudness));
+	const audioFile = stored?.beatmaps?.[song.beatmaps?.[0]?.id]?.audioFile;
+	if (!stored || !audioFile) return;
+	// Measured per audio file: sets can contain several songs
+	const known = Object.values(stored.beatmaps).find(
+		(map) => map.audioFile === audioFile && map.loudness != null
+	)?.loudness;
+	if (known != null) {
+		setGain(audio, gainFor(known));
 		return;
 	}
 	measurements = measurements.then(async () => {
 		const loudness = await measureLoudness(file);
 		if (loudness == null) return;
-		mapDataStore.update((data) =>
-			data[setId] ? { ...data, [setId]: { ...data[setId], loudness } } : data
-		);
+		mapDataStore.update((data) => {
+			const set = data[setId];
+			if (!set) return data;
+			const beatmaps = Object.fromEntries(
+				Object.entries(set.beatmaps).map(([id, map]) => [
+					id,
+					map.audioFile === audioFile ? { ...map, loudness } : map
+				])
+			);
+			return { ...data, [setId]: { ...set, beatmaps } };
+		});
 		await saveMapData();
 		rampGain(audio, gainFor(loudness));
 	});
@@ -359,8 +373,8 @@ export async function shuffleQueue() {
 	if (shuffle) {
 		const currentSongData = current.queue[current.currentIndex];
 		const shuffledQueue = [...current.queue].sort(() => Math.random() - 0.5);
-		const currentSongShuffledIndex = shuffledQueue.findIndex(
-			(song) => song.id === currentSongData.id
+		const currentSongShuffledIndex = shuffledQueue.findIndex((song) =>
+			sameSong(song, currentSongData)
 		);
 		if (currentSongShuffledIndex > 0) {
 			shuffledQueue.splice(currentSongShuffledIndex, 1);
@@ -371,7 +385,7 @@ export async function shuffleQueue() {
 	} else {
 		const songs = get(playlistSongsCache)[current.playlistId]?.songs || [];
 		const currentSongData = current.queue[current.currentIndex];
-		const currentIndex = songs.findIndex((song) => song.id === currentSongData.id);
+		const currentIndex = songs.findIndex((song) => sameSong(song, currentSongData));
 		// A queued song that isn't part of the playlist keeps playing; continue from the start
 		await updateSongQueue(Math.max(currentIndex, 0), songs, 'playlist', current.playlistId);
 	}
@@ -440,6 +454,7 @@ if (typeof window !== 'undefined') {
 
 	startBeats(() => ({
 		audio: get(songQueue).audio ?? null,
-		setId: get(currentSong).song?.id?.toString() ?? null
+		setId: get(currentSong).song?.id?.toString() ?? null,
+		mapId: get(currentSong).song?.beatmaps?.[0]?.id?.toString() ?? null
 	}));
 }

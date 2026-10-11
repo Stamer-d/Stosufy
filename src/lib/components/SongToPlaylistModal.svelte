@@ -1,4 +1,5 @@
 <script>
+	import { sameSong } from '#lib/tracks.ts';
 	import { songQueue, updateSongQueue } from '#lib/stores/audio.ts';
 	import { getImageUrl } from '#lib/stores/data.ts';
 	import {
@@ -20,8 +21,8 @@
 			<p class="text-sm leading-relaxed">Select a playlist to add the Song to</p>
 			<div class="flex flex-col gap-2 max-h-60 overflow-y-auto pr-2">
 				{#each $playlists as playlist}
-					{@const isSongInPlaylist = $playlistSongsCache[playlist.id]?.songs.some(
-						(song) => song.id == map.id
+					{@const isSongInPlaylist = $playlistSongsCache[playlist.id]?.songs.some((song) =>
+						sameSong(song, map)
 					)}
 					{#if playlist.id !== -1}
 						<button

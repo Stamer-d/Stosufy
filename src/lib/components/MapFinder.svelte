@@ -1,4 +1,5 @@
 <script>
+	import { sameSong, songKey } from '#lib/tracks.ts';
 	import {
 		songQueue,
 		setSongQueue,
@@ -83,10 +84,10 @@
 	let homeSettings = $derived({ ...DEFAULT_HOME, ...$userSettings.settings?.home });
 
 	let hero = $derived($wallpaper);
-	let heroPlaying = $derived($currentSong.song?.id == hero.song?.id && $currentSong.isPlaying);
+	let heroPlaying = $derived(sameSong($currentSong.song, hero.song) && $currentSong.isPlaying);
 
 	function playHero() {
-		if ($currentSong.song?.id == hero.song.id) togglePlayback();
+		if (sameSong($currentSong.song, hero.song)) togglePlayback();
 		else playDownloaded(hero.song);
 	}
 
@@ -100,7 +101,7 @@
 		// Play it within the "Downloaded Songs" playlist (sorted oldest first, like that page)
 		const songs = formatSongData($mapDataStore);
 		setSongQueue(
-			songs.findIndex((s) => s.id === song.id),
+			songs.findIndex((s) => sameSong(s, song)),
 			songs,
 			'playlist',
 			-1
@@ -274,7 +275,12 @@
 {#snippet heroSection()}
 	{#if hero.song}
 		<section class="relative h-64 xl:h-72 rounded-xl overflow-hidden">
-			<BeatmapBackground setId={hero.song.id} title={hero.song.title} class="absolute inset-0" />
+			<BeatmapBackground
+				setId={hero.song.id}
+				mapId={hero.song?.beatmaps?.[0]?.id}
+				title={hero.song.title}
+				class="absolute inset-0"
+			/>
 			<!-- Keeps the text readable on bright backgrounds -->
 			<div class="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/5"></div>
 			<Triangles count={14} seed={Number(hero.song.id)} />
@@ -346,11 +352,16 @@
 				</a>
 			</div>
 			<div class="grid grid-cols-3 xl:grid-cols-6 gap-4">
-				{#each downloadedSongs.slice(0, 6) as song, index (song.id)}
-					{@const playingThis = $currentSong.song?.id == song.id && $currentSong.isPlaying}
+				{#each downloadedSongs.slice(0, 6) as song, index (songKey(song))}
+					{@const playingThis = sameSong($currentSong.song, song) && $currentSong.isPlaying}
 					<div class="group min-w-0 {index >= 3 ? 'hidden xl:block' : ''}">
 						<div class="relative aspect-square rounded-md overflow-hidden mb-2">
-							<BeatmapBackground setId={song.id} title={song.title} class="absolute inset-0" />
+							<BeatmapBackground
+								setId={song.id}
+								mapId={song?.beatmaps?.[0]?.id}
+								title={song.title}
+								class="absolute inset-0"
+							/>
 							<button
 								aria-label="Play {song.title}"
 								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
@@ -512,6 +523,7 @@
 		>
 			<BeatmapBackground
 				setId={$wallpaper.song?.id ?? null}
+				mapId={$wallpaper.song?.beatmaps?.[0]?.id}
 				title={$wallpaper.song?.title}
 				class="absolute inset-0"
 				video

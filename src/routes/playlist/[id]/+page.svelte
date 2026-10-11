@@ -1,4 +1,5 @@
 <script>
+	import { sameSong, songKey } from '#lib/tracks.ts';
 	import SongCover from '#lib/components/SongCover.svelte';
 	import Button from '#lib/components/Button.svelte';
 	import {
@@ -63,12 +64,13 @@
 
 	$: isPlayingThis = $songQueue.playlistId == playlistId && $currentSong?.isPlaying;
 	$: shuffleOn = $userSettings.settings?.shuffle || false;
-	$: isCurrent = (song) => $currentSong?.song?.id == song.id && $songQueue.playlistId == playlistId;
+	$: isCurrent = (song) =>
+		sameSong($currentSong?.song, song) && $songQueue.playlistId == playlistId;
 
 	async function playSong(index, song) {
 		if ($songQueue.type !== 'playlist' || $songQueue.playlistId != playlistId) {
 			await setSongQueue(index, songs, 'playlist', playlistId);
-		} else if ($currentSong?.song?.id == song.id) {
+		} else if (sameSong($currentSong?.song, song)) {
 			togglePlayback();
 		} else if ($userSettings.settings.shuffle) {
 			await setSongQueue(index, songs, 'playlist', playlistId);
@@ -110,17 +112,6 @@
 			setTimeout(() => {
 				songs = [...songs];
 			}, 500);
-			playlists.update((allPlaylists) => {
-				return allPlaylists.map((playlist) => {
-					if (playlist.id == -1) {
-						return {
-							...playlist,
-							song_amount: playlist.song_amount + 1
-						};
-					}
-					return playlist;
-				});
-			});
 		} catch (error) {
 			console.error(`Failed to download map ${song.id}:`, error);
 		}
@@ -383,7 +374,7 @@
 
 		{#if songs?.length}
 			{#key playlistId}
-				{#each songs as song, index (song.id)}
+				{#each songs as song, index (songKey(song))}
 					{@const downloaded = isSongDownloaded(song.id)}
 					{@const current = isCurrent(song)}
 					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}

@@ -30,6 +30,7 @@
 		<div class="flex gap-4 h-full">
 			<BeatmapBackground
 				setId={$currentSong.song.id}
+				mapId={$currentSong.song?.beatmaps?.[0]?.id}
 				title={$currentSong.song.title}
 				class="relative size-32 shrink-0 rounded-2xl shadow-lg shadow-black/30"
 			/>

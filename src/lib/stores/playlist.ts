@@ -1,3 +1,4 @@
+import { sameSong, trackOf } from '../tracks';
 import { fetch } from '@tauri-apps/plugin-http';
 import { get, writable } from 'svelte/store';
 import { keyStore } from './auth';
@@ -6,6 +7,7 @@ import * as api from '../api';
 import type { MapSet, Playlist, PlaylistId } from '../types';
 
 export const playlists = writable<Playlist[]>([]);
+
 export const playlistSongsCache = writable<Record<string, { songs: MapSet[] }>>({});
 export const playlistLoadingStatus = writable<Record<string, boolean>>({});
 
@@ -75,7 +77,7 @@ export async function addSongToPlaylist(playlistId: PlaylistId, mapSetData: MapS
 		}
 
 		const updatedSongs = cache[playlistId].songs.map((song, index) => {
-			if (index === cache[playlistId].songs.length - 1 && song.id === mapSetData.id) {
+			if (index === cache[playlistId].songs.length - 1 && sameSong(song, mapSetData)) {
 				return {
 					...song,
 					songInfo
@@ -204,21 +206,28 @@ export async function getPlaylistSongs(
 
 		const beatmapsetGroups: Record<string, MapSet> = {};
 
+		const downloaded = get(mapDataStore);
 		enhancedSongs.forEach((song) => {
 			if (!song.beatmap || !song.beatmap.beatmapset) return;
 
 			const beatmapsetId = song.beatmap.beatmapset.id;
+			// Sets with several songs: each song of the set is its own entry
+			const stored = downloaded[beatmapsetId];
+			const track = trackOf(stored, song.beatmap.id);
+			const key = `${beatmapsetId}:${track}`;
+			const local = stored?.beatmaps?.[song.beatmap.id];
 
-			if (!beatmapsetGroups[beatmapsetId]) {
-				beatmapsetGroups[beatmapsetId] = {
+			if (!beatmapsetGroups[key]) {
+				beatmapsetGroups[key] = {
 					...song.beatmap.beatmapset,
+					...(track ? { title: local?.title, artist: local?.artist, track } : {}),
 					songInfo: { ...song },
 					beatmaps: [],
 					// Store the position for sorting
 					position: song.position
 				};
 			}
-			beatmapsetGroups[beatmapsetId].beatmaps.push({
+			beatmapsetGroups[key].beatmaps.push({
 				...song.beatmap
 			});
 		});
