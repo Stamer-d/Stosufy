@@ -1,6 +1,7 @@
 <script>
 	import { onDestroy } from 'svelte';
 	import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
+	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { songQueue, currentSong } from '#lib/stores/audio.ts';
 	import { mapDataStore, ensureVideo } from '#lib/stores/data.ts';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
@@ -30,10 +31,18 @@
 	let video = $state(null);
 	let running = $state(false);
 
+	// The video streams from the disk (Tauri's asset protocol): it starts right away instead
+	// of after reading the whole file. Reading it into memory is the fallback.
+	/** The video that couldn't be streamed */
+	let streamFailed = $state(null);
 	$effect(() => {
 		const path = videoPath;
 		url = null;
 		if (!path) return;
+		if (streamFailed !== path) {
+			url = convertFileSrc(path);
+			return;
+		}
 		let objectUrl = null;
 		let cancelled = false;
 		readFile(path, { baseDir: BaseDirectory.Home })
@@ -48,7 +57,6 @@
 			if (objectUrl) URL.revokeObjectURL(objectUrl);
 		};
 	});
-
 	function sync() {
 		const audio = $songQueue.audio;
 		if (!video || !audio || !video.duration) {
@@ -84,5 +92,10 @@
 			? 'opacity-100'
 			: 'opacity-0'} {className}"
 		onloadedmetadata={sync}
+		onerror={() => {
+			if (url?.startsWith('blob:')) return;
+			console.warn('Could not stream the video, reading it instead', videoPath);
+			streamFailed = videoPath;
+		}}
 	></video>
 {/if}
