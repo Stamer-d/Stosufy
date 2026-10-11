@@ -15,7 +15,9 @@ import {
 	setSongQueue,
 	setPlaybackMod,
 	togglePlayback,
-	stopPlayback
+	stopPlayback,
+	setPlaybackLock,
+	withoutPlaybackLock
 } from './audio';
 import { librarySong } from './radio';
 import { showToast } from './toast';
@@ -218,9 +220,14 @@ async function sendPlayback(force = false) {
 	const state = get(listen);
 	const song = get(currentSong).song;
 	const audio = get(songQueue).audio;
-	if (state.status !== 'live' || !state.isHost || !song || !audio || !get(mapDataStore)[song.id]) {
-		return;
-	}
+	if (state.status !== 'live' || !state.isHost || !song || !audio) return;
+	// Previews (songs not downloaded) are only a cut of the song: they aren't shared
+	const shareable = !!get(mapDataStore)[song.id];
+	const note = shareable
+		? null
+		: 'Previews aren’t shared: download the song to play it for everyone.';
+	if (state.activity !== note) listen.update((s) => ({ ...s, activity: note }));
+	if (!shareable) return;
 	const playback: api.ListenPlaybackInput = {
 		setId: Number(song.id),
 		mapId: Number(song.beatmaps?.[0]?.id ?? 0),
@@ -251,6 +258,10 @@ function hostPosition(playback: ListenPlayback) {
 	return playback.position + ((serverNow() - playback.updatedAt) / 1000) * MODS[playback.mod].rate;
 }
 
+/** Songs that couldn't be downloaded: not tried again for a while (osu! would rate limit) */
+const RETRY_AFTER = 60_000;
+const failedDownloads = new Map<string, { until: number; reason: string }>();
+
 /** The library song for the host's song, downloading it first if needed */
 export async function songFor(playback: ListenPlayback): Promise<MapSet | null> {
 	const wanted = { id: playback.setId, beatmaps: [{ id: playback.mapId }] } as MapSet;
@@ -258,6 +269,15 @@ export async function songFor(playback: ListenPlayback): Promise<MapSet | null> 
 	if (local) return local;
 	const key = `${playback.setId}`;
 	if (loadingSong === key) return null;
+	const failed = failedDownloads.get(key);
+	if (failed && failed.until > Date.now()) {
+		const seconds = Math.ceil((failed.until - Date.now()) / 1000);
+		listen.update((state) => ({
+			...state,
+			activity: `Couldn't download ${playback.title}: ${failed.reason} Trying again in ${seconds} s.`
+		}));
+		return null;
+	}
 	loadingSong = key;
 	listen.update((state) => ({ ...state, activity: `Downloading ${playback.title}…` }));
 	try {
@@ -269,7 +289,12 @@ export async function songFor(playback: ListenPlayback): Promise<MapSet | null> 
 		await downloadBeatmap(await response.json(), playback.mapId, sessionKey, token);
 		return librarySong(wanted);
 	} catch (error) {
-		listen.update((state) => ({ ...state, activity: `Couldn't download ${playback.title}` }));
+		const reason = error instanceof Error ? error.message : String(error);
+		failedDownloads.set(key, { until: Date.now() + RETRY_AFTER, reason });
+		listen.update((state) => ({
+			...state,
+			activity: `Couldn't download ${playback.title}: ${reason}`
+		}));
 		console.error('Could not download the song of the session:', error);
 		return null;
 	} finally {
@@ -290,9 +315,14 @@ async function follow() {
 			current?.id == playback.setId && current?.beatmaps?.some((map) => map.id == playback.mapId);
 		if (!sameMap) {
 			const song = await songFor(playback);
-			if (!song || get(listen).playback !== playback) return;
+			// The host may have moved on while the song downloaded (the state itself is
+			// sent again every few seconds, so compare the song, not the object)
+			const now = get(listen).playback;
+			if (!song || now?.setId !== playback.setId || now?.mapId !== playback.mapId) return;
 			listen.update((s) => ({ ...s, activity: null }));
-			await setSongQueue(0, [song], 'playlist', null, false, hostPosition(playback));
+			await withoutPlaybackLock(() =>
+				setSongQueue(0, [song], 'playlist', null, false, hostPosition(now))
+			);
 		}
 		const audio = get(songQueue).audio;
 		if (!audio) return;
@@ -312,12 +342,25 @@ const onChange = (event: Event) => {
 	const state = get(listen);
 	if (state.status !== 'live') return;
 	if (state.isHost) sendPlayback(true);
-	else if (!syncing && (event.type === 'pause' || event.type === 'seeked') && state.following) {
+	else if (
+		!syncing &&
+		(event.type === 'pause' || event.type === 'seeked') &&
+		state.following &&
+		// A song that ends pauses too: that isn't the member pausing
+		!(event.target as HTMLAudioElement).ended
+	) {
 		listen.update((s) => ({ ...s, following: false }));
 	}
 };
 
 if (typeof window !== 'undefined') {
+	// Members can't pick songs themselves: the host does (pausing and seeking still work)
+	setPlaybackLock(() => {
+		const state = get(listen);
+		return state.status === 'live' && !state.isHost
+			? "You're listening along, so the host picks the songs. Leave the session to choose your own."
+			: null;
+	});
 	songQueue.subscribe(({ audio }) => {
 		if (audio === watched) return;
 		for (const type of ['play', 'pause', 'seeked', 'ratechange']) {

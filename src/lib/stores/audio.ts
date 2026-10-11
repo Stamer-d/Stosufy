@@ -157,6 +157,35 @@ async function getAudio(index: number, queue: MapSet[], type: QueueType, current
 	return audio;
 }
 
+/**
+ * While listening along in a session the host picks the songs: a lock set by listen.ts
+ * returns why the user can't change the song (null when they can). Following the host
+ * itself goes through withoutPlaybackLock.
+ */
+let playbackLock: (() => string | null) | null = null;
+let lockBypass = 0;
+
+export function setPlaybackLock(lock: (() => string | null) | null) {
+	playbackLock = lock;
+}
+
+export async function withoutPlaybackLock<T>(change: () => Promise<T>) {
+	lockBypass++;
+	try {
+		return await change();
+	} finally {
+		lockBypass--;
+	}
+}
+
+/** Whether a song change by the user is blocked (and says why) */
+function locked(quiet = false) {
+	if (lockBypass || !playbackLock) return false;
+	const reason = playbackLock();
+	if (reason && !quiet) showToast(reason, 'icon-[mingcute--group-line]');
+	return !!reason;
+}
+
 export async function setSongQueue(
 	index: number,
 	queue: MapSet[],
@@ -165,6 +194,7 @@ export async function setSongQueue(
 	playSong = true,
 	currentSeconds = 0
 ) {
+	if (locked()) return;
 	stopPlayback();
 	const generation = ++loadGeneration;
 	let audio: HTMLAudioElement;
@@ -332,6 +362,7 @@ export function hasNext(queue: SongQueue, queuedSongs: MapSet[], repeat: RepeatM
 let isSkipping = false;
 
 export async function skipForward() {
+	if (locked()) return;
 	if (isSkipping) return; // Prevent concurrent skips
 	isSkipping = true;
 
@@ -361,6 +392,7 @@ export async function skipForward() {
 }
 
 export async function skipBackward() {
+	if (locked()) return;
 	if (isSkipping) return; // Prevent concurrent skips
 	isSkipping = true;
 
@@ -379,6 +411,7 @@ export async function skipBackward() {
 
 /** Plays the song at `index` of the current queue (used by the queue panel) */
 export async function jumpTo(index: number) {
+	if (locked()) return;
 	const current = get(songQueue);
 	if (!current.queue?.[index]) return;
 	await playAt(index, current.queue);
@@ -386,6 +419,8 @@ export async function jumpTo(index: number) {
 
 async function handleSongEnded() {
 	const current = get(songQueue);
+	// Listening along: the host's next song comes from the session, not this queue
+	if (locked(true)) return;
 	if (get(sleepTimer).endOfSong) {
 		// Sleep timer "end of song": stop here, rewound for the next play
 		sleepTimer.set({ until: null, endOfSong: false });
@@ -513,6 +548,7 @@ if (typeof window !== 'undefined') {
 		const audio = current.audio;
 		const seconds = crossfadeSeconds();
 		if (!seconds || !audio || audio.paused || fadingOut || isSkipping) return;
+		if (locked(true)) return;
 		// The sleep timer stops at the end of this song: no next song to fade into
 		if (get(sleepTimer).endOfSong) return;
 		// Previews are only short clips; downloaded songs play in full, also in the search

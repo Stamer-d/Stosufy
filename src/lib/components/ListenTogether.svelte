@@ -86,7 +86,9 @@
 
 			{#if live}
 				<p class="mt-1 text-sm text-secondary-600">
-					{#if $listen.isHost}
+					{#if $listen.isHost && $listen.activity}
+						<span class="text-yellow-300">{$listen.activity}</span>
+					{:else if $listen.isHost}
 						Everyone hears what you play, at the same moment, mods included.
 					{:else if !$listen.following}
 						You're listening on your own.
