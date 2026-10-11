@@ -12,6 +12,7 @@
 	import { check } from '@tauri-apps/plugin-updater';
 	import { relaunch } from '@tauri-apps/plugin-process';
 	import { focusMode } from '#lib/stores/audio.ts';
+	import { djOpen } from '#lib/dj/engine.ts';
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 
 	const appWindow = getCurrentWindow();
@@ -118,6 +119,17 @@
 				onclick={() => goto('/home')}
 			>
 				<span class="icon-[mingcute--home-4-fill] size-[18px]"></span>
+			</button>
+			<button
+				title={$djOpen ? 'Leave DJ mode' : 'DJ mode'}
+				aria-label={$djOpen ? 'Leave DJ mode' : 'DJ mode'}
+				aria-pressed={$djOpen}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {$djOpen
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={() => djOpen.update((on) => !on)}
+			>
+				<span class="icon-[mingcute--disc-line] size-[18px]"></span>
 			</button>
 			<button
 				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}

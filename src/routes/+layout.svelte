@@ -22,6 +22,8 @@
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import { playingLive } from '#lib/gameplay/play.ts';
 	import PlayOverlay from '#lib/components/PlayOverlay.svelte';
+	import DjView from '#lib/components/dj/DjView.svelte';
+	import { djOpen } from '#lib/dj/engine.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
@@ -146,6 +148,9 @@
 	{/if}
 	{#if $playingLive}
 		<PlayOverlay />
+	{/if}
+	{#if $djOpen}
+		<DjView />
 	{/if}
 	<Toasts />
 	<SettingsModal />
