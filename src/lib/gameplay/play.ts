@@ -1,13 +1,14 @@
 // What the gameplay view shows: autoplay, a replay of one of the top 50 scores, or the
 // user playing it themselves; and which difficulty of the song (also for the hitsounds).
 
-import { get, writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
 import { readFile, writeFile, mkdir, exists, readTextFile } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
 import { fetch } from '@tauri-apps/plugin-http';
 import { keyStore } from '../stores/auth';
 import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
+import { currentSong } from '../stores/audio';
 import { parseReplay, type Replay } from './replay';
 import type { Judge } from './judge';
 import type { MapSet, StoredMapSet } from '../types';
@@ -229,3 +230,9 @@ export function modNames(mods: number) {
 	}
 	return result;
 }
+
+/** The user is playing the song themselves (the gameplay then fills the window) */
+export const playingLive = derived(
+	[gameplayMode, currentSong, userSettings],
+	([$mode, $song]) => $mode.mode.kind === 'live' && $mode.key === playKey($song.song)
+);

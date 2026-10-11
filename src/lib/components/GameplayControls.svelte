@@ -71,9 +71,9 @@
 		try {
 			const replay = await downloadReplay(score);
 			if (playKey(song) !== key) return;
+			// It plays from where the song is
 			setGameplayMode(song, { kind: 'replay', score, replay });
 			open = false;
-			restartSong();
 		} catch (error) {
 			replayError = error.message ?? String(error);
 		} finally {

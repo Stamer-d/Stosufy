@@ -3,6 +3,7 @@
 	// top score, or the user playing it (mouse or tablet to aim, two keys or the mouse
 	// buttons to click, Esc to stop)
 	import { onMount, untrack } from 'svelte';
+	import { get } from 'svelte/store';
 	import { currentSong, songQueue, setPlaybackLock } from '#lib/stores/audio.ts';
 	import { userSettings } from '#lib/stores/user.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
@@ -51,9 +52,9 @@
 		const playing = key;
 		const difficulty = mapId;
 		void $skinsChanged;
+		if (view && get(activePlay)?.judge === view.judge) activePlay.set(null);
 		renderer = null;
 		view = null;
-		activePlay.set(null);
 		message = '';
 		if (!current || !target) return;
 		// Only the song, difficulty, skin and mode rebuild the play (not every queue update)
@@ -102,7 +103,8 @@
 		})();
 		return () => {
 			cancelled = true;
-			activePlay.set(null);
+			// Only its own: the other view may already show the play
+			if (view && get(activePlay)?.judge === view.judge) activePlay.set(null);
 		};
 	});
 
@@ -198,21 +200,27 @@
 
 	onMount(() => {
 		let frame;
+		let reported = false;
 		const loop = () => {
+			// Whatever happens in a frame, the next one still comes
+			frame = requestAnimationFrame(loop);
 			const audio = $songQueue.audio;
-			if (renderer && view && audio) {
+			if (!renderer || !view || !audio) return;
+			try {
 				const time = songTime();
 				if (live) {
-					if (!view.judge.frames.length) feed();
 					// Jumped (seeked): start over from here
 					if (time < lastTime - 300 || time > lastTime + 1500) view.judge.reset(time);
+					if (!view.judge.frames.length) feed();
 					if (!audio.paused) view.judge.update(time);
 				}
 				lastTime = time;
 				view.finished = audio.ended;
 				renderer.draw(time, view);
+			} catch (error) {
+				if (!reported) console.error('Could not draw the gameplay:', error);
+				reported = true;
 			}
-			frame = requestAnimationFrame(loop);
 		};
 		frame = requestAnimationFrame(loop);
 		return () => cancelAnimationFrame(frame);

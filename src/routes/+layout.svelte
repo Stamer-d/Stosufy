@@ -20,6 +20,8 @@
 	import { startSettingsSync } from '#lib/stores/settingsSync.ts';
 	import { startHitsounds } from '#lib/hitsounds/player.ts';
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
+	import { playingLive } from '#lib/gameplay/play.ts';
+	import PlayOverlay from '#lib/components/PlayOverlay.svelte';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
@@ -141,6 +143,9 @@
 	</div>
 	{#if $focusMode}
 		<FocusView />
+	{/if}
+	{#if $playingLive}
+		<PlayOverlay />
 	{/if}
 	<Toasts />
 	<SettingsModal />

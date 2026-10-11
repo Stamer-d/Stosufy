@@ -477,6 +477,7 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 		lastAngle = null;
 		comboPerfect = comboGood = true;
 		started = NOT_STARTED;
+		snapshot(-Infinity);
 		void time;
 	}
 

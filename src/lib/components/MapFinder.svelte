@@ -33,6 +33,7 @@
 	import BeatmapBackground from './BeatmapBackground.svelte';
 	import Gameplay from './Gameplay.svelte';
 	import GameplayControls from './GameplayControls.svelte';
+	import { playingLive } from '#lib/gameplay/play.ts';
 	import Triangles from './Triangles.svelte';
 	import PlayButton from './PlayButton.svelte';
 	import { openSettings } from '#lib/stores/settings.ts';
@@ -589,7 +590,10 @@
 			{#if gameplayOn && $currentSong.song}
 				<!-- The song's gameplay, like osu!'s autoplay, over a dimmed background -->
 				<div class="absolute inset-0 bg-black/45"></div>
-				<Gameplay class="absolute inset-0" />
+				<!-- (playing it yourself, it fills the window instead: PlayOverlay) -->
+				{#if !$playingLive}
+					<Gameplay class="absolute inset-0" />
+				{/if}
 			{/if}
 			<!-- The widgets make way for the gameplay (unless they're being edited) -->
 			{#if !gameplayOn || !$currentSong.song || editingWidgets}

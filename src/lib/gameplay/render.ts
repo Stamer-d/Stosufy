@@ -599,7 +599,6 @@ export function createGameplayRenderer(
 			ctx.fill();
 			ctx.stroke();
 		}
-		image(element('cursormiddle'), at.x, at.y, size, 1);
 	}
 
 	// --- HUD (in screen pixels) -------------------------------------------------------------
@@ -661,7 +660,7 @@ export function createGameplayRenderer(
 			ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
 			ctx.shadowBlur = 4;
 			ctx.textBaseline = 'top';
-			ctx.fillText(view.label, margin, margin);
+			ctx.fillText(view.label, margin, 48 * devicePixelRatio);
 			ctx.restore();
 		}
 		drawKeys(time, view.judge, width, height, unit);
