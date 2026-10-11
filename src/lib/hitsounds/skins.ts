@@ -166,6 +166,28 @@ async function rename(from: string, to: string) {
 	await remove(from, { recursive: true }).catch(() => {});
 }
 
+/** Depth of a folder in an archive ("" is the top) */
+const depth = (folder: string) => (folder ? folder.split('/').length : 0);
+const folderOf = (file: string) => (file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '');
+
+/**
+ * The hitsound files of a skin archive that osu! would use: the ones right in the skin's
+ * folder (where skin.ini is, else the topmost folder with hitsounds). Skins often keep
+ * spare versions in subfolders (e.g. "hitsound/"), which must not replace the real ones.
+ */
+export function skinHitsoundFiles(names: string[]): { root: string; files: string[] } | null {
+	const ini = names
+		.filter((name) => /(^|\/)skin\.ini$/i.test(name))
+		.sort((a, b) => depth(folderOf(a)) - depth(folderOf(b)))[0];
+	const hitsounds = names.filter((name) => HITSOUND_FILE.test(name.split('/').pop() ?? ''));
+	const root =
+		ini !== undefined
+			? folderOf(ini)
+			: hitsounds.map(folderOf).sort((a, b) => depth(a) - depth(b))[0];
+	const files = hitsounds.filter((name) => folderOf(name) === root);
+	return files.length ? { root: root ?? '', files } : null;
+}
+
 /** Imports the hitsounds of a skin file (.osk) the user picks; returns its option */
 export async function importSkin(): Promise<SkinOption | null> {
 	const picked = await open({
@@ -176,22 +198,28 @@ export async function importSkin(): Promise<SkinOption | null> {
 	skinTask.set({ state: 'working', message: 'Importing the skin…' });
 	try {
 		const zip = await JSZip.loadAsync(await readFile(picked));
-		const samples = Object.values(zip.files).filter(
-			(file) => !file.dir && HITSOUND_FILE.test(file.name.split('/').pop() ?? '')
-		);
-		if (!samples.length) {
+		const entries = Object.values(zip.files).filter((file) => !file.dir);
+		const found = skinHitsoundFiles(entries.map((file) => file.name));
+		if (!found) {
 			skinTask.set({ state: 'error', message: 'This skin has no hitsounds of its own.' });
 			return null;
 		}
-		const name = (picked.split(/[\\/]/).pop() ?? 'Skin')
-			.replace(/\.(osk|zip)$/i, '')
-			.replace(/[\\/:*?"<>|]/g, '_');
+		// The skin's name from its skin.ini, else the file's name
+		const ini = entries.find(
+			(file) => folderOf(file.name) === found.root && /(^|\/)skin\.ini$/i.test(file.name)
+		);
+		const iniName = ini && (await ini.async('string')).match(/^\s*Name\s*:\s*(.+?)\s*$/im)?.[1];
+		const name = (iniName || (picked.split(/[\\/]/).pop() ?? 'Skin').replace(/\.(osk|zip)$/i, ''))
+			.replace(/[\\/:*?"<>|]/g, '_')
+			.trim();
 		const dir = await path.join(await stosufySkinsDir(), name);
+		// Importing again replaces the skin (also its samples from an earlier import)
+		await remove(dir, { recursive: true }).catch(() => {});
 		await mkdir(dir, { recursive: true });
-		for (const file of samples) {
+		for (const file of found.files) {
 			await writeFile(
-				await path.join(dir, file.name.split('/').pop()!),
-				await file.async('uint8array')
+				await path.join(dir, file.split('/').pop()!),
+				await zip.files[file].async('uint8array')
 			);
 		}
 		skinTask.set({ state: 'idle' });
