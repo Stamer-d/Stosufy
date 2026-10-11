@@ -188,7 +188,9 @@ export function startBeats(
 		const { audio, setId, mapId } = current();
 		const stored = setId ? get(mapDataStore)[setId] : null;
 		const timing = (mapId && stored?.beatmaps?.[mapId]?.timing) || stored?.timing;
-		const playing = currentMod() === 'NC' && audio && !audio.paused && context;
+		// The beat can be turned off (Nightcore stays faster and higher)
+		const beatOn = get(userSettings).settings?.nightcoreBeat ?? true;
+		const playing = beatOn && currentMod() === 'NC' && audio && !audio.paused && context;
 		if (playing && setId && !timing) loadTiming(setId, mapId);
 		if (!playing || !timing?.length) {
 			// Like osu!lazer: after a pause the beat waits for the next segment again

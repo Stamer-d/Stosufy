@@ -258,6 +258,12 @@ async function beatmapFiles(song: MapSet, stored: StoredMapSet | undefined) {
 	return { content, samples };
 }
 
+/** The .osu file of the difficulty that plays (also for the gameplay view) */
+export async function beatmapContent(song: MapSet) {
+	const stored = get(mapDataStore)[song.id] as StoredMapSet | undefined;
+	return (await beatmapFiles(song, stored)).content;
+}
+
 function songKey(song: MapSet | null) {
 	return song ? `${song.id}:${song.beatmaps?.[0]?.id}` : null;
 }

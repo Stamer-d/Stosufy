@@ -195,6 +195,10 @@ export interface Settings {
 	hitsoundOffset?: number;
 	/** The osu! Skins folder, if not the default one (per device) */
 	skinsFolder?: string | null;
+	/** Play Nightcore's drum beat with the NC mod (default on) */
+	nightcoreBeat?: boolean;
+	/** Show the song's gameplay (like autoplay) on the desktop home page */
+	gameplay?: boolean;
 	/** Show Japanese lyrics in romaji (Latin letters) */
 	lyricsRomaji?: boolean;
 	/** Lyrics moved earlier or later (seconds), by song; see lyrics.ts */

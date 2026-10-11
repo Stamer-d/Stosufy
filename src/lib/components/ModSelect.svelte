@@ -1,6 +1,6 @@
 <script>
 	import { fly } from 'svelte/transition';
-	import { userSettings } from '#lib/stores/user.ts';
+	import { userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { setPlaybackMod } from '#lib/stores/audio.ts';
 	import { MODS } from '#lib/stores/mods.ts';
 
@@ -14,6 +14,7 @@
 	let open = $state(false);
 	let root = $state(null);
 	let mod = $derived($userSettings.settings?.mod ?? 'NM');
+	let beatOn = $derived($userSettings.settings?.nightcoreBeat ?? true);
 
 	function select(choice) {
 		setPlaybackMod(mod === choice ? 'NM' : choice);
@@ -91,6 +92,26 @@
 					{/each}
 				</div>
 			{/each}
+			{#if mod === 'NC'}
+				<!-- Nightcore's drum beat can be turned off (it stays faster and higher) -->
+				<label
+					class="mt-1 flex items-center justify-between gap-3 px-1 py-1.5 text-sm cursor-pointer"
+				>
+					<span>
+						<span class="block font-semibold text-white">Nightcore beat</span>
+						<span class="block text-xs text-secondary-600">The drums under the song</span>
+					</span>
+					<input
+						type="checkbox"
+						class="peer sr-only"
+						checked={beatOn}
+						onchange={(e) => updateUserSettings({ nightcoreBeat: e.currentTarget.checked })}
+					/>
+					<span
+						class="relative w-9 h-5 shrink-0 rounded-full bg-secondary-500 transition peer-checked:bg-primary-300 peer-focus-visible:ring-2 peer-focus-visible:ring-primary-400 after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4"
+					></span>
+				</label>
+			{/if}
 		</div>
 	{/if}
 </div>

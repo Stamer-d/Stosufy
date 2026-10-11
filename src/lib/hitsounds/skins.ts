@@ -119,7 +119,17 @@ export function downloadDefaultSkin(): Promise<boolean> {
 					([a, filesA], [b, filesB]) =>
 						Number(/legacy/i.test(b)) - Number(/legacy/i.test(a)) || filesB.length - filesA.length
 				);
-			const files = candidates[0]?.[1];
+			const folder = candidates[0]?.[0];
+			const files = candidates[0]?.[1].concat(
+				tree
+					.filter(
+						(entry) =>
+							entry.type === 'blob' &&
+							entry.path.slice(0, entry.path.lastIndexOf('/')) === folder &&
+							GAMEPLAY_FILE.test(entry.path.split('/').pop() ?? '')
+					)
+					.map((entry) => entry.path)
+			);
 			if (files) {
 				const dir = await path.join(await stosufySkinsDir(), DEFAULT_SKIN);
 				const temp = dir + '.part';
@@ -166,6 +176,10 @@ async function rename(from: string, to: string) {
 	}
 	await remove(from, { recursive: true }).catch(() => {});
 }
+
+/** The images the gameplay view uses (see gameplay/skin.ts) */
+const GAMEPLAY_FILE =
+	/^(hitcircle|hitcircleoverlay|approachcircle|sliderb0?|sliderfollowcircle|reversearrow|cursor|cursortrail|spinner-approachcircle|spinner-circle|[a-z0-9_ -]+-\d)(@2x)?\.png$/i;
 
 /** Depth of a folder in an archive ("" is the top) */
 const depth = (folder: string) => (folder ? folder.split('/').length : 0);
@@ -217,11 +231,31 @@ export async function importSkin(): Promise<SkinOption | null> {
 		// Importing again replaces the skin (also its samples from an earlier import)
 		await remove(dir, { recursive: true }).catch(() => {});
 		await mkdir(dir, { recursive: true });
-		for (const file of found.files) {
-			await writeFile(
-				await path.join(dir, file.split('/').pop()!),
-				await zip.files[file].async('uint8array')
-			);
+		// The hitsounds, and for the gameplay view its images, skin.ini and number images
+		// (which can be in a folder of their own, named in skin.ini)
+		const iniText = ini ? await ini.async('string') : '';
+		const prefix = (iniText.match(/^\s*HitCirclePrefix\s*:\s*(.+?)\s*$/im)?.[1] ?? '').replace(
+			/\\/g,
+			'/'
+		);
+		const prefixDir = prefix.includes('/')
+			? `${found.root ? found.root + '/' : ''}${prefix.split('/').slice(0, -1).join('/')}`
+			: null;
+		const extras = entries
+			.map((entry) => entry.name)
+			.filter((file) => {
+				const base = file.split('/').pop() ?? '';
+				const folder = folderOf(file);
+				if (folder === found.root) return GAMEPLAY_FILE.test(base) || /^skin\.ini$/i.test(base);
+				return folder === prefixDir && /-\d(@2x)?\.png$/i.test(base);
+			});
+		for (const file of [...found.files, ...extras]) {
+			const inPrefix = prefixDir && folderOf(file) === prefixDir;
+			const target = inPrefix
+				? await path.join(dir, ...prefix.split('/').slice(0, -1), file.split('/').pop()!)
+				: await path.join(dir, file.split('/').pop()!);
+			if (inPrefix) await mkdir(await path.dirname(target), { recursive: true });
+			await writeFile(target, await zip.files[file].async('uint8array'));
 		}
 		skinTask.set({ state: 'idle' });
 		skinsChanged.update((n) => n + 1);

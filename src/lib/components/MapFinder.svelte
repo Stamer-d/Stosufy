@@ -31,6 +31,7 @@
 	import { goto } from '$app/navigation';
 	import { BEATMAP_STATUS } from '#lib/beatmapStatus.ts';
 	import BeatmapBackground from './BeatmapBackground.svelte';
+	import Gameplay from './Gameplay.svelte';
 	import Triangles from './Triangles.svelte';
 	import PlayButton from './PlayButton.svelte';
 	import { openSettings } from '#lib/stores/settings.ts';
@@ -38,6 +39,9 @@
 	import WidgetStore from './WidgetStore.svelte';
 
 	let editingWidgets = $state(false);
+	// The gameplay of the song on the desktop, like osu!'s autoplay
+	let gameplayOn = $derived($userSettings.settings?.gameplay ?? false);
+	const toggleGameplay = () => updateUserSettings({ gameplay: !gameplayOn });
 	let widgetStoreOpen = $state(false);
 
 	// The desktop controls only show while the mouse moves over the desktop, like on macOS,
@@ -62,6 +66,11 @@
 				editingWidgets = true;
 				widgetStoreOpen = true;
 			}
+		},
+		{
+			icon: 'icon-[mingcute--target-line]',
+			label: gameplayOn ? 'Hide gameplay' : 'Show gameplay',
+			action: toggleGameplay
 		},
 		{
 			icon: 'icon-[mingcute--fullscreen-line]',
@@ -576,7 +585,15 @@
 			<div
 				class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60"
 			></div>
-			<DesktopCanvas editing={editingWidgets} />
+			{#if gameplayOn && $currentSong.song}
+				<!-- The song's gameplay, like osu!'s autoplay, over a dimmed background -->
+				<div class="absolute inset-0 bg-black/45"></div>
+				<Gameplay class="absolute inset-0" />
+			{/if}
+			<!-- The widgets make way for the gameplay (unless they're being edited) -->
+			{#if !gameplayOn || !$currentSong.song || editingWidgets}
+				<DesktopCanvas editing={editingWidgets} />
+			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="absolute top-6 right-6 z-30 flex gap-2 transition-opacity duration-300 focus-within:opacity-100 {showControls
@@ -602,6 +619,11 @@
 						'icon-[mingcute--layout-4-line]',
 						'Edit widgets',
 						() => (editingWidgets = true)
+					)}
+					{@render desktopButton(
+						gameplayOn ? 'icon-[mingcute--target-fill]' : 'icon-[mingcute--target-line]',
+						gameplayOn ? 'Hide gameplay' : 'Gameplay',
+						toggleGameplay
 					)}
 					{@render desktopButton('icon-[mingcute--fullscreen-line]', 'Focus', () =>
 						focusMode.set(true)
