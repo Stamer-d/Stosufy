@@ -32,6 +32,7 @@
 	import { BEATMAP_STATUS } from '#lib/beatmapStatus.ts';
 	import BeatmapBackground from './BeatmapBackground.svelte';
 	import Gameplay from './Gameplay.svelte';
+	import GameplayControls from './GameplayControls.svelte';
 	import Triangles from './Triangles.svelte';
 	import PlayButton from './PlayButton.svelte';
 	import { openSettings } from '#lib/stores/settings.ts';
@@ -625,6 +626,9 @@
 						gameplayOn ? 'Hide gameplay' : 'Gameplay',
 						toggleGameplay
 					)}
+					{#if gameplayOn && $currentSong.song}
+						<GameplayControls />
+					{/if}
 					{@render desktopButton('icon-[mingcute--fullscreen-line]', 'Focus', () =>
 						focusMode.set(true)
 					)}

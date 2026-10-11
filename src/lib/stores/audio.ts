@@ -162,11 +162,13 @@ async function getAudio(index: number, queue: MapSet[], type: QueueType, current
  * returns why the user can't change the song (null when they can). Following the host
  * itself goes through withoutPlaybackLock.
  */
-let playbackLock: (() => string | null) | null = null;
+const playbackLocks = new Map<string, () => string | null>();
 let lockBypass = 0;
 
-export function setPlaybackLock(lock: (() => string | null) | null) {
-	playbackLock = lock;
+/** Sets (or with null removes) a lock by name: listen.ts, the gameplay while playing */
+export function setPlaybackLock(name: string, lock: (() => string | null) | null) {
+	if (lock) playbackLocks.set(name, lock);
+	else playbackLocks.delete(name);
 }
 
 export async function withoutPlaybackLock<T>(change: () => Promise<T>) {
@@ -180,8 +182,9 @@ export async function withoutPlaybackLock<T>(change: () => Promise<T>) {
 
 /** Whether a song change by the user is blocked (and says why) */
 function locked(quiet = false) {
-	if (lockBypass || !playbackLock) return false;
-	const reason = playbackLock();
+	if (lockBypass || !playbackLocks.size) return false;
+	let reason: string | null = null;
+	for (const lock of playbackLocks.values()) reason ??= lock();
 	if (reason && !quiet) showToast(reason, 'icon-[mingcute--group-line]');
 	return !!reason;
 }

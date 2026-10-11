@@ -190,7 +190,9 @@ export interface Settings {
 	 */
 	mapHitsounds?: boolean;
 	/** Hitsound parts turned off (false); all play by default */
-	hitsoundParts?: Partial<Record<'whistle' | 'finish' | 'clap' | 'slidertick', boolean>>;
+	hitsoundParts?: Partial<
+		Record<'whistle' | 'finish' | 'clap' | 'slidertick' | 'sliderslide' | 'spinner', boolean>
+	>;
 	/** Hitsounds later (positive) or earlier, in ms */
 	hitsoundOffset?: number;
 	/** The osu! Skins folder, if not the default one (per device) */
@@ -199,6 +201,10 @@ export interface Settings {
 	nightcoreBeat?: boolean;
 	/** Show the song's gameplay (like autoplay) on the desktop home page */
 	gameplay?: boolean;
+	/** The difficulty the gameplay and hitsounds use, by beatmap set (when not the song's own) */
+	gameplayDifficulty?: Record<string, string>;
+	/** Keys to play with: two keys (KeyboardEvent.code) */
+	gameplayKeys?: [string, string];
 	/** Show Japanese lyrics in romaji (Latin letters) */
 	lyricsRomaji?: boolean;
 	/** Lyrics moved earlier or later (seconds), by song; see lyrics.ts */

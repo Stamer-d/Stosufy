@@ -1,9 +1,22 @@
-// Draws a beatmap's gameplay like osu!'s autoplay: hit circles with approach circles and
-// combo numbers, sliders with their ball, spinners and the cursor moving from object to
-// object. With the skin's images where it has them, simple shapes where it doesn't.
+// Draws a play of a beatmap like osu! does: hit circles with approach circles and combo
+// numbers, sliders with ticks and their ball, spinners, follow points, the 300s, 100s and
+// misses, the cursor, and the HUD (score, accuracy, combo, keys, the results at the end).
+// With the skin's images where it has them, simple shapes where it doesn't.
 
-import { sliderBall, type GameplayBeatmap, type HitObject } from './beatmap';
-import type { GameplaySkin, SkinImage } from './skin';
+import { MOD, sliderBall, type GameplayBeatmap, type HitObject } from './beatmap';
+import type { GameplaySkin, SkinImage, ElementName } from './skin';
+import {
+	cursorAt,
+	keyCounts,
+	snapshotAt,
+	spinAt,
+	trackingAt,
+	KEY,
+	type Judge,
+	type Judgement,
+	type ObjectState,
+	type Snapshot
+} from './judge';
 
 type Colour = [number, number, number];
 
@@ -15,12 +28,45 @@ const DEFAULT_COLOURS: Colour[] = [
 ];
 /** How long a hit object takes to fade out after it's hit (ms) */
 const HIT_FADE = 240;
-const TRAIL_LENGTH = 12;
+const MISS_FADE = 120;
+const JUDGEMENT_TIME = 700;
+/** Images not sized by the circle size: 1 pixel (at 1x) is this much of the playfield */
+const PLAYFIELD_PIXEL = 480 / 768;
+const FOLLOW_POINT_SPACING = 32;
 
 const css = ([r, g, b]: Colour, alpha = 1) => `rgba(${r}, ${g}, ${b}, ${alpha})`;
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+export interface PlayView {
+	judge: Judge;
+	/** Shown at the top: "Autoplay", who's replay it is, … */
+	label: string;
+	/** Show the results at the end */
+	results: boolean;
+	/** The song is over: show the results now */
+	finished?: boolean;
+}
 
 export interface GameplayRenderer {
-	draw(time: number): void;
+	draw(time: number, view: PlayView): void;
+	/** A point on the canvas (CSS pixels) in the playfield's coordinates */
+	toPlayfield(x: number, y: number): { x: number; y: number };
+}
+
+/** osu!'s grade of a play */
+export function grade(snapshot: Snapshot, mods: number) {
+	const { counts } = snapshot;
+	const total = counts[300] + counts[100] + counts[50] + counts[0];
+	if (!total) return 'X';
+	const p300 = counts[300] / total;
+	const p50 = counts[50] / total;
+	const silver = !!(mods & (MOD.Hidden | MOD.Flashlight));
+	if (counts[300] === total) return silver ? 'XH' : 'X';
+	if (p300 > 0.9 && p50 < 0.01 && !counts[0]) return silver ? 'SH' : 'S';
+	if ((p300 > 0.8 && !counts[0]) || p300 > 0.9) return 'A';
+	if ((p300 > 0.7 && !counts[0]) || p300 > 0.8) return 'B';
+	if (p300 > 0.6) return 'C';
+	return 'D';
 }
 
 export function createGameplayRenderer(
@@ -35,7 +81,9 @@ export function createGameplayRenderer(
 			? beatmap.colours
 			: DEFAULT_COLOURS;
 	const colourOf = (object: HitObject) => colours[object.colour % colours.length];
-	const { objects, radius, preempt, fadeIn } = beatmap;
+	const { objects, radius, preempt, fadeIn, windows } = beatmap;
+	const hidden = !!(beatmap.mods & MOD.Hidden);
+	const images = skin.images;
 
 	// Tinted copies of the skin's white images, once per colour
 	const tinted = new Map<string, HTMLCanvasElement>();
@@ -60,7 +108,7 @@ export function createGameplayRenderer(
 
 	/** Draws a skin image centred at a point, scaled like osu! (1 = the skin's size at 1x) */
 	function image(
-		source: SkinImage | undefined,
+		source: SkinImage | null | undefined,
 		x: number,
 		y: number,
 		size: number,
@@ -82,29 +130,53 @@ export function createGameplayRenderer(
 		return true;
 	}
 
+	const element = (name: ElementName) => images[name];
+
 	// The hit circle images are 128 px wide at 1x for a circle of radius 64
 	const circleScale = radius / 64;
 
-	function drawCircle(object: HitObject, x: number, y: number, time: number, number = true) {
+	// --- Hit circles ------------------------------------------------------------------------
+
+	/** How visible an object is before it's hit: fading in, and out with Hidden */
+	function appearAlpha(object: HitObject, time: number) {
 		const appear = object.time - preempt;
-		let alpha = Math.min(1, (time - appear) / fadeIn);
+		let alpha = clamp01((time - appear) / fadeIn);
+		if (hidden) {
+			const fadeOutStart = appear + fadeIn;
+			alpha *= 1 - clamp01((time - fadeOutStart) / (preempt * 0.3));
+		}
+		return alpha;
+	}
+
+	function drawCircle(
+		object: HitObject,
+		x: number,
+		y: number,
+		time: number,
+		hitTime: number | null,
+		missedAt: number | null,
+		number = true
+	) {
+		let alpha = appearAlpha(object, time);
 		let grow = 1;
-		if (time > object.time) {
-			const t = (time - object.time) / HIT_FADE;
+		if (hitTime !== null && time >= hitTime) {
+			const t = (time - hitTime) / HIT_FADE;
 			alpha = 1 - t;
 			grow = 1 + 0.4 * t;
+		} else if (missedAt !== null && time >= missedAt) {
+			alpha *= 1 - (time - missedAt) / MISS_FADE;
 		}
 		if (alpha <= 0) return;
 		const colour = colourOf(object);
 		const size = circleScale * grow;
-		if (!image(skin.images.hitcircle, x, y, size, alpha, colour, 'hitcircle')) {
+		if (!image(element('hitcircle'), x, y, size, alpha, colour, 'hitcircle')) {
 			ctx.globalAlpha = alpha;
 			ctx.fillStyle = css(colour, 0.85);
 			ctx.beginPath();
 			ctx.arc(x, y, radius * grow * 0.92, 0, Math.PI * 2);
 			ctx.fill();
 		}
-		if (!image(skin.images.hitcircleoverlay, x, y, size, alpha)) {
+		if (!image(element('hitcircleoverlay'), x, y, size, alpha)) {
 			ctx.globalAlpha = alpha;
 			ctx.strokeStyle = 'white';
 			ctx.lineWidth = radius * 0.12 * grow;
@@ -112,42 +184,72 @@ export function createGameplayRenderer(
 			ctx.arc(x, y, radius * grow * 0.92, 0, Math.PI * 2);
 			ctx.stroke();
 		}
-		if (number && time <= object.time) drawNumber(object.combo, x, y, alpha);
+		if (number && (hitTime === null || time < hitTime)) drawNumber(object.combo, x, y, alpha);
 		ctx.globalAlpha = 1;
+	}
+
+	/** Text in a skin's font (digits and "x%.,"), else plain text; returns its width */
+	function drawText(
+		text: string,
+		font: Record<string, SkinImage | null>,
+		overlap: number,
+		x: number,
+		y: number,
+		scale: number,
+		alpha: number,
+		align: 'left' | 'center' | 'right' = 'center',
+		fallbackSize = 24
+	) {
+		const glyphs = text.split('').map((c) => font[c] ?? null);
+		if (glyphs.every(Boolean)) {
+			const widths = glyphs.map((g) => g!.image.width * g!.scale * scale);
+			const total = widths.reduce((a, b) => a + b, 0) - overlap * scale * (widths.length - 1);
+			let left = align === 'left' ? x : align === 'right' ? x - total : x - total / 2;
+			glyphs.forEach((g, i) => {
+				image(g!, left + widths[i] / 2, y, scale, alpha);
+				left += widths[i] - overlap * scale;
+			});
+			return total;
+		}
+		ctx.save();
+		ctx.globalAlpha = alpha;
+		ctx.fillStyle = 'white';
+		ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+		ctx.lineWidth = fallbackSize * 0.12;
+		ctx.font = `bold ${Math.round(fallbackSize)}px sans-serif`;
+		ctx.textAlign = align;
+		ctx.textBaseline = 'middle';
+		ctx.strokeText(text, x, y + 1);
+		ctx.fillText(text, x, y + 1);
+		const width = ctx.measureText(text).width;
+		ctx.restore();
+		return width;
 	}
 
 	function drawNumber(combo: number, x: number, y: number, alpha: number) {
-		const digits = String(combo).split('').map(Number);
-		const images = digits.map((d) => skin.numbers[d]);
-		if (images.every(Boolean)) {
-			const scale = circleScale * 0.8;
-			const widths = images.map((img) => img!.image.width * img!.scale * scale);
-			const overlap = skin.numberOverlap * scale;
-			const total = widths.reduce((a, b) => a + b, 0) - overlap * (widths.length - 1);
-			let left = x - total / 2;
-			images.forEach((img, i) => {
-				image(img!, left + widths[i] / 2, y, scale, alpha);
-				left += widths[i] - overlap;
-			});
-			return;
-		}
-		ctx.globalAlpha = alpha;
-		ctx.fillStyle = 'white';
-		ctx.font = `bold ${Math.round(radius * 0.8)}px sans-serif`;
-		ctx.textAlign = 'center';
-		ctx.textBaseline = 'middle';
-		ctx.fillText(String(combo), x, y + 1);
-		ctx.globalAlpha = 1;
+		const font = Object.fromEntries(skin.numbers.map((n, i) => [String(i), n]));
+		drawText(
+			String(combo),
+			font,
+			skin.numberOverlap,
+			x,
+			y,
+			circleScale * 0.8,
+			alpha,
+			'center',
+			radius * 0.8
+		);
 	}
 
-	function drawApproach(object: HitObject, x: number, y: number, time: number) {
-		if (time > object.time) return;
+	function drawApproach(object: HitObject, x: number, y: number, time: number, state: ObjectState) {
+		if (time > object.time || hidden) return;
+		if (state.headAt !== null && state.headAt <= time) return;
 		const appear = object.time - preempt;
 		const progress = (time - appear) / preempt;
 		const alpha = Math.min(0.9, ((time - appear) / Math.min(fadeIn * 2, preempt)) * 0.9);
 		const size = circleScale * (4 - 3 * progress);
 		const colour = colourOf(object);
-		if (!image(skin.images.approachcircle, x, y, size, alpha, colour, 'approachcircle')) {
+		if (!image(element('approachcircle'), x, y, size, alpha, colour, 'approachcircle')) {
 			ctx.globalAlpha = alpha;
 			ctx.strokeStyle = css(colour);
 			ctx.lineWidth = radius * 0.1;
@@ -158,44 +260,66 @@ export function createGameplayRenderer(
 		}
 	}
 
-	function drawSlider(object: HitObject, time: number) {
-		const slider = object.slider!;
-		const appear = object.time - preempt;
-		let alpha = Math.min(1, (time - appear) / fadeIn);
-		if (time > object.endTime) alpha = 1 - (time - object.endTime) / HIT_FADE;
-		if (alpha <= 0) return;
-		const colour = colourOf(object);
-		const points = slider.path.points;
-		ctx.save();
-		ctx.globalAlpha = alpha * 0.9;
-		ctx.lineCap = 'round';
-		ctx.lineJoin = 'round';
-		ctx.beginPath();
-		ctx.moveTo(points[0].x, points[0].y);
-		for (const p of points) ctx.lineTo(p.x, p.y);
-		ctx.strokeStyle = css(skin.sliderBorder ?? [255, 255, 255]);
-		ctx.lineWidth = radius * 2 * 0.95;
-		ctx.stroke();
-		const track = skin.sliderTrack ?? (colour.map((c) => Math.round(c * 0.4)) as Colour);
-		ctx.strokeStyle = css(track);
-		ctx.lineWidth = radius * 2 * 0.8;
-		ctx.stroke();
-		ctx.restore();
+	// --- Sliders --------------------------------------------------------------------------
 
-		// The end of the slider and the arrows where it turns around
+	function drawSlider(object: HitObject, time: number, state: ObjectState) {
+		const slider = object.slider!;
+		let alpha = appearAlpha(object, time);
+		if (hidden) {
+			// The body fades over the slider's length
+			const fadeOutStart = object.time - preempt + fadeIn;
+			alpha =
+				clamp01((time - (object.time - preempt)) / fadeIn) *
+				(1 - clamp01((time - fadeOutStart) / (object.endTime - fadeOutStart || 1)));
+		}
+		if (time > object.endTime) alpha = 1 - (time - object.endTime) / HIT_FADE;
+		const colour = colourOf(object);
+		if (alpha > 0) {
+			const points = slider.path.points;
+			ctx.save();
+			ctx.globalAlpha = alpha * 0.9;
+			ctx.lineCap = 'round';
+			ctx.lineJoin = 'round';
+			ctx.beginPath();
+			ctx.moveTo(points[0].x, points[0].y);
+			for (const p of points) ctx.lineTo(p.x, p.y);
+			ctx.strokeStyle = css(skin.sliderBorder ?? [255, 255, 255]);
+			ctx.lineWidth = radius * 2 * 0.95;
+			ctx.stroke();
+			const track = skin.sliderTrack ?? (colour.map((c) => Math.round(c * 0.4)) as Colour);
+			ctx.strokeStyle = css(track);
+			ctx.lineWidth = radius * 2 * 0.8;
+			ctx.stroke();
+			ctx.restore();
+		}
+
+		const span = time < object.time ? 0 : Math.floor((time - object.time) / slider.spanDuration);
 		const end = slider.path.at(1);
-		if (time < object.endTime) {
-			drawCircle(object, end.x, end.y, Math.min(time, object.time), false);
-			const remainingTurns =
-				slider.slides - 1 - Math.max(0, Math.floor((time - object.time) / slider.spanDuration));
+		if (time < object.endTime && alpha > 0) {
+			// The ticks still to come in this span
+			for (const point of slider.points) {
+				if (point.kind !== 'tick' || point.time <= time) continue;
+				if (Math.floor((point.time - object.time) / slider.spanDuration) !== span) continue;
+				const at = slider.path.at(point.progress);
+				if (!image(element('sliderscorepoint'), at.x, at.y, circleScale, alpha)) {
+					ctx.globalAlpha = alpha;
+					ctx.fillStyle = 'white';
+					ctx.beginPath();
+					ctx.arc(at.x, at.y, radius * 0.12, 0, Math.PI * 2);
+					ctx.fill();
+					ctx.globalAlpha = 1;
+				}
+			}
+			// The end, and the arrow where it turns around
+			drawCircle(object, end.x, end.y, Math.min(time, object.time), null, null, false);
+			const remainingTurns = slider.slides - 1 - Math.max(0, span);
 			if (remainingTurns > 0) {
-				const elapsedSpans = Math.max(0, Math.floor((time - object.time) / slider.spanDuration));
-				const atEnd = elapsedSpans % 2 === 0;
+				const atEnd = Math.max(0, span) % 2 === 0;
 				const where = atEnd ? end : slider.path.at(0);
 				const angle = atEnd ? slider.path.angleAt(1) + Math.PI : slider.path.angleAt(0);
 				if (
 					!image(
-						skin.images.reversearrow,
+						element('reversearrow'),
 						where.x,
 						where.y,
 						circleScale,
@@ -221,50 +345,82 @@ export function createGameplayRenderer(
 		}
 
 		// The head, then the ball while it slides
-		drawCircle(object, object.x, object.y, time);
-		if (time <= object.time) drawApproach(object, object.x, object.y, time);
+		const headMissed = state.head === 0 ? state.headAt : null;
+		drawCircle(object, object.x, object.y, time, state.hitTime, headMissed);
+		drawApproach(object, object.x, object.y, time, state);
 		if (time >= object.time && time <= object.endTime) {
 			const ball = sliderBall(object, time);
-			const sliderb = skin.images.sliderb0 ?? skin.images.sliderb;
+			const sliderb = element('sliderb0') ?? element('sliderb');
 			if (!image(sliderb, ball.x, ball.y, circleScale, 1)) {
 				ctx.fillStyle = css(colour);
 				ctx.beginPath();
 				ctx.arc(ball.x, ball.y, radius * 0.85, 0, Math.PI * 2);
 				ctx.fill();
 			}
-			if (!image(skin.images.sliderfollowcircle, ball.x, ball.y, circleScale, 1)) {
-				ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-				ctx.lineWidth = radius * 0.08;
-				ctx.beginPath();
-				ctx.arc(ball.x, ball.y, radius * 2, 0, Math.PI * 2);
-				ctx.stroke();
+			if (trackingAt(state, time)) {
+				const since = state.tracking.find((t) => t.start <= time && time < t.end)!.start;
+				const grow = 0.6 + 0.4 * clamp01((time - since) / 150);
+				if (!image(element('sliderfollowcircle'), ball.x, ball.y, circleScale * grow, 1)) {
+					ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+					ctx.lineWidth = radius * 0.08;
+					ctx.beginPath();
+					ctx.arc(ball.x, ball.y, radius * 2 * grow, 0, Math.PI * 2);
+					ctx.stroke();
+				}
 			}
 		}
 	}
 
-	function drawSpinner(object: HitObject, time: number) {
+	// --- Spinners -------------------------------------------------------------------------
+
+	function drawSpinner(object: HitObject, time: number, state: ObjectState, judge: Judge) {
 		const appear = object.time - fadeIn;
-		let alpha = Math.min(1, (time - appear) / fadeIn);
+		let alpha = clamp01((time - appear) / fadeIn);
 		if (time > object.endTime) alpha = 1 - (time - object.endTime) / HIT_FADE;
 		if (alpha <= 0) return;
-		const progress = Math.max(
-			0,
-			Math.min(1, (time - object.time) / (object.endTime - object.time || 1))
-		);
-		const spin = Math.max(0, time - object.time) * 0.012;
-		if (!image(skin.images['spinner-circle'], 256, 192, 0.8, alpha, undefined, '', spin)) {
-			ctx.save();
-			ctx.globalAlpha = alpha;
-			ctx.translate(256, 192);
-			ctx.rotate(spin);
-			ctx.strokeStyle = 'white';
-			ctx.lineWidth = 6;
-			ctx.beginPath();
-			ctx.arc(0, 0, 150, 0, Math.PI * 1.6);
-			ctx.stroke();
-			ctx.restore();
+		const progress = clamp01((time - object.time) / (object.endTime - object.time || 1));
+		const { total, rpm } = spinAt(state, time);
+		const spun = total / (Math.PI * 2);
+		const required = object.spinner!.required || 1;
+		const cleared = spun >= required;
+		const px = PLAYFIELD_PIXEL;
+
+		if (element('spinner-top')) {
+			// The newer style: a bottom and top turning, a glow as it's spun
+			image(
+				element('spinner-glow'),
+				256,
+				192,
+				px,
+				alpha * clamp01(spun / required),
+				[3, 151, 255],
+				'glow'
+			);
+			image(element('spinner-bottom'), 256, 192, px, alpha, undefined, '', total * 0.2);
+			image(element('spinner-top'), 256, 192, px, alpha, undefined, '', total * 0.5);
+			const middleColour: Colour = [
+				255,
+				Math.round(255 * (1 - progress)),
+				Math.round(255 * (1 - progress))
+			];
+			image(element('spinner-middle2'), 256, 192, px, alpha, undefined, '', 0);
+			image(element('spinner-middle'), 256, 192, px, alpha, middleColour, 'middle');
+		} else {
+			image(element('spinner-background'), 256, 192, px, alpha * 0.8);
+			if (!image(element('spinner-circle'), 256, 192, px, alpha, undefined, '', total)) {
+				ctx.save();
+				ctx.globalAlpha = alpha;
+				ctx.translate(256, 192);
+				ctx.rotate(total);
+				ctx.strokeStyle = 'white';
+				ctx.lineWidth = 6;
+				ctx.beginPath();
+				ctx.arc(0, 0, 150, 0, Math.PI * 1.6);
+				ctx.stroke();
+				ctx.restore();
+			}
 		}
-		if (!image(skin.images['spinner-approachcircle'], 256, 192, 1 - progress * 0.95, alpha)) {
+		if (!image(element('spinner-approachcircle'), 256, 192, px * 1.9 * (1 - progress), alpha)) {
 			ctx.globalAlpha = alpha;
 			ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
 			ctx.lineWidth = 3;
@@ -273,75 +429,345 @@ export function createGameplayRenderer(
 			ctx.stroke();
 			ctx.globalAlpha = 1;
 		}
-	}
-
-	// --- Autoplay cursor -----------------------------------------------------------------
-
-	function cursorAt(time: number) {
-		// The object being played, or the last one before this time
-		let index = -1;
-		for (let low = 0, high = objects.length - 1; low <= high;) {
-			const mid = (low + high) >> 1;
-			if (objects[mid].time <= time) {
-				index = mid;
-				low = mid + 1;
-			} else high = mid - 1;
+		// "Spin!" at the start, "Clear!" once spun enough
+		if (time < object.time + 600 && time >= object.time - 200 && !cleared) {
+			image(element('spinner-spin'), 256, 192 + 110, px, alpha);
 		}
-		const current = objects[index];
-		if (current && time <= current.endTime) return position(current, time);
-		const next = objects[index + 1];
-		const from = current ? position(current, current.endTime) : { x: 256, y: 192 };
-		if (!next) return from;
-		const to = position(next, next.time);
-		const start = current ? current.endTime : next.time - 1000;
-		const t = Math.max(0, Math.min(1, (time - start) / (next.time - start || 1)));
-		// Eased like a player's hand: quick start, gentle arrival
-		const eased = 1 - (1 - t) * (1 - t);
-		return { x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased };
-	}
-
-	function position(object: HitObject, time: number) {
-		if (object.kind === 'slider') return sliderBall(object, time);
-		if (object.kind === 'spinner') {
-			const angle = Math.max(0, time - object.time) * 0.02;
-			return { x: 256 + Math.cos(angle) * 60, y: 192 + Math.sin(angle) * 60 };
+		if (cleared && time <= object.endTime) {
+			image(element('spinner-clear'), 256, 192 - 100, px, alpha);
 		}
-		return { x: object.x, y: object.y };
+		// The bonus so far
+		const bonuses = judge.sounds.filter(
+			(s) =>
+				s.kind === 'spinnerbonus' && s.at >= object.time && s.at <= Math.min(time, object.endTime)
+		).length;
+		if (bonuses && time <= object.endTime + HIT_FADE) {
+			drawText(
+				String(bonuses * 1000),
+				skin.score,
+				skin.scoreOverlap,
+				256,
+				192 + 80,
+				px * 1.3,
+				alpha,
+				'center',
+				28
+			);
+		}
+		// The RPM
+		if (time >= object.time && time <= object.endTime) {
+			image(element('spinner-rpm'), 256, 384 + 6, px, alpha);
+			drawText(
+				`${Math.round(Math.max(0, rpm))}`,
+				skin.score,
+				skin.scoreOverlap,
+				256 + 40,
+				384 + 8,
+				px * 0.6,
+				alpha,
+				'right',
+				14
+			);
+		}
 	}
 
-	const trail: { x: number; y: number }[] = [];
-	let lastTime = -Infinity;
+	// --- Follow points --------------------------------------------------------------------
 
-	function drawCursor(time: number) {
-		const at = cursorAt(time);
-		// Seeking clears the trail
-		if (Math.abs(time - lastTime) > 200) trail.length = 0;
-		lastTime = time;
-		trail.push(at);
-		if (trail.length > TRAIL_LENGTH) trail.shift();
-		trail.forEach((p, i) => {
-			const alpha = (i / trail.length) * 0.6;
-			if (!image(skin.images.cursortrail, p.x, p.y, circleScale * 1.2, alpha)) {
+	const followLines = objects.slice(1).flatMap((to, i) => {
+		const from = objects[i];
+		if (to.combo === 1 || from.kind === 'spinner' || to.kind === 'spinner') return [];
+		const start = from.slider
+			? from.slider.path.at(from.slider.slides % 2)
+			: { x: from.x, y: from.y };
+		const dx = to.x - start.x;
+		const dy = to.y - start.y;
+		const length = Math.hypot(dx, dy);
+		if (length < FOLLOW_POINT_SPACING * 2.5) return [];
+		return [{ from, to, start, dx, dy, length, angle: Math.atan2(dy, dx) }];
+	});
+
+	function drawFollowPoints(time: number) {
+		for (const line of followLines) {
+			if (line.from.endTime - preempt > time) break;
+			if (line.to.time < time) continue;
+			for (
+				let d = FOLLOW_POINT_SPACING * 1.5;
+				d < line.length - FOLLOW_POINT_SPACING;
+				d += FOLLOW_POINT_SPACING
+			) {
+				const fraction = d / line.length;
+				const at = line.from.endTime + fraction * (line.to.time - line.from.endTime);
+				const fadeInAt = at - preempt;
+				if (time < fadeInAt) continue;
+				const alpha = clamp01((time - fadeInAt) / 400) * (1 - clamp01((time - at) / 400));
+				if (alpha <= 0) continue;
+				const x = line.start.x + line.dx * fraction;
+				const y = line.start.y + line.dy * fraction;
+				if (
+					!image(element('followpoint'), x, y, PLAYFIELD_PIXEL, alpha, undefined, '', line.angle)
+				) {
+					ctx.save();
+					ctx.globalAlpha = alpha * 0.8;
+					ctx.translate(x, y);
+					ctx.rotate(line.angle);
+					ctx.fillStyle = 'white';
+					ctx.fillRect(-6, -1.5, 12, 3);
+					ctx.restore();
+				}
+			}
+		}
+	}
+
+	// --- Judgements -----------------------------------------------------------------------
+
+	const JUDGEMENT_IMAGE: Record<string, ElementName> = {
+		'300': 'hit300',
+		'300geki': 'hit300g',
+		'300katu': 'hit300k',
+		'100': 'hit100',
+		'100katu': 'hit100k',
+		'100geki': 'hit100',
+		'50': 'hit50',
+		'0': 'hit0'
+	};
+	const JUDGEMENT_COLOUR: Record<number, string> = {
+		300: 'rgb(102, 204, 255)',
+		100: 'rgb(136, 255, 102)',
+		50: 'rgb(255, 204, 34)',
+		0: 'rgb(255, 34, 34)'
+	};
+
+	function drawJudgement(j: Judgement, time: number) {
+		const age = time - j.time;
+		if (age < 0 || age > JUDGEMENT_TIME) return;
+		const alpha = 1 - clamp01((age - JUDGEMENT_TIME * 0.6) / (JUDGEMENT_TIME * 0.4));
+		const pop = age < 80 ? 0.7 + (age / 80) * 0.45 : 1.15 - 0.15 * clamp01((age - 80) / 100);
+		const small = j.sliderBreak ? 0.6 : 1;
+		const miss = j.result === 0;
+		const drop = miss ? 25 * clamp01(age / JUDGEMENT_TIME) ** 2 : 0;
+		const rotation = miss ? 0.25 * clamp01(age / JUDGEMENT_TIME) * (j.time % 2 ? 1 : -1) : 0;
+		const name = JUDGEMENT_IMAGE[`${j.result}${j.special ?? ''}`] ?? JUDGEMENT_IMAGE[j.result];
+		const picture = element(name) ?? element(JUDGEMENT_IMAGE[j.result]);
+		const size = circleScale * (miss ? 1 : pop) * small;
+		if (!image(picture, j.x, j.y + drop, size, alpha, undefined, '', rotation)) {
+			ctx.save();
+			ctx.globalAlpha = alpha;
+			ctx.translate(j.x, j.y + drop);
+			ctx.rotate(rotation);
+			ctx.fillStyle = JUDGEMENT_COLOUR[j.result];
+			ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+			ctx.lineWidth = 3;
+			ctx.font = `bold ${Math.round((radius * 0.8 * size) / circleScale)}px sans-serif`;
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			const text = miss ? '✕' : String(j.result);
+			ctx.strokeText(text, 0, 0);
+			ctx.fillText(text, 0, 0);
+			ctx.restore();
+		}
+	}
+
+	// --- Cursor ---------------------------------------------------------------------------
+
+	function drawCursor(time: number, judge: Judge) {
+		const frames = judge.frames;
+		if (!frames.length) return;
+		const at = cursorAt(frames, time);
+		if (!at || at.y < -100) return;
+		// The trail: where it was a moment ago
+		for (let i = 8; i >= 1; i--) {
+			const p = cursorAt(frames, time - i * 12);
+			if (!p) continue;
+			const alpha = (1 - i / 9) * 0.6;
+			if (!image(element('cursortrail'), p.x, p.y, PLAYFIELD_PIXEL, alpha)) {
 				ctx.globalAlpha = alpha * 0.6;
 				ctx.fillStyle = 'rgb(255, 230, 120)';
 				ctx.beginPath();
-				ctx.arc(p.x, p.y, radius * 0.25, 0, Math.PI * 2);
+				ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
 				ctx.fill();
 				ctx.globalAlpha = 1;
 			}
-		});
-		if (!image(skin.images.cursor, at.x, at.y, circleScale * 1.2, 1)) {
+		}
+		// Bigger while a key is held, like osu!
+		const size = PLAYFIELD_PIXEL * ((at.keys & 3) !== 0 ? 1.2 : 1);
+		if (!image(element('cursor'), at.x, at.y, size, 1)) {
 			ctx.fillStyle = 'rgb(255, 230, 120)';
 			ctx.strokeStyle = 'white';
 			ctx.lineWidth = 3;
 			ctx.beginPath();
-			ctx.arc(at.x, at.y, radius * 0.35, 0, Math.PI * 2);
+			ctx.arc(at.x, at.y, (10 * size) / PLAYFIELD_PIXEL, 0, Math.PI * 2);
 			ctx.fill();
 			ctx.stroke();
 		}
+		image(element('cursormiddle'), at.x, at.y, size, 1);
 	}
 
-	function draw(time: number) {
+	// --- HUD (in screen pixels) -------------------------------------------------------------
+
+	function drawHud(time: number, view: PlayView, width: number, height: number) {
+		const unit = height / 768;
+		const snapshot = snapshotAt(view.judge, time);
+		// Score and accuracy, top right
+		const score = String(snapshot.score).padStart(8, '0');
+		const margin = 12 * unit;
+		// Below the view's buttons at the top
+		const top = 72 * devicePixelRatio;
+		const scoreHeight =
+			(skin.score['0']?.image.height ?? 30) * (skin.score['0']?.scale ?? 1) * unit;
+		drawText(
+			score,
+			skin.score,
+			skin.scoreOverlap,
+			width - margin,
+			top + scoreHeight / 2,
+			unit,
+			1,
+			'right',
+			34 * unit
+		);
+		const accuracy = `${(snapshot.accuracy * 100).toFixed(2)}%`;
+		drawText(
+			accuracy,
+			skin.score,
+			skin.scoreOverlap,
+			width - margin,
+			top + scoreHeight + 22 * unit,
+			unit * 0.6,
+			1,
+			'right',
+			22 * unit
+		);
+		// Combo, bottom left
+		if (snapshot.combo > 0) {
+			const comboHeight =
+				(skin.combo['0']?.image.height ?? 30) * (skin.combo['0']?.scale ?? 1) * unit * 1.2;
+			drawText(
+				`${snapshot.combo}x`,
+				skin.combo,
+				skin.comboOverlap,
+				margin,
+				height - margin - comboHeight / 2,
+				unit * 1.2,
+				1,
+				'left',
+				40 * unit
+			);
+		}
+		// Who plays, top left
+		if (view.label) {
+			ctx.save();
+			ctx.font = `600 ${Math.round(15 * unit)}px sans-serif`;
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+			ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+			ctx.shadowBlur = 4;
+			ctx.textBaseline = 'top';
+			ctx.fillText(view.label, margin, margin);
+			ctx.restore();
+		}
+		drawKeys(time, view.judge, width, height, unit);
+	}
+
+	function drawKeys(time: number, judge: Judge, width: number, height: number, unit: number) {
+		const counts = keyCounts(judge, time);
+		const keys = cursorAt(judge.frames, time)?.keys ?? 0;
+		const list: [number, string, boolean][] = [
+			[KEY.K1, 'K1', !!(keys & KEY.K1)],
+			[KEY.K2, 'K2', !!(keys & KEY.K2)],
+			[KEY.M1, 'M1', !!(keys & KEY.M1) && !(keys & KEY.K1)],
+			[KEY.M2, 'M2', !!(keys & KEY.M2) && !(keys & KEY.K2)]
+		];
+		const size = 46 * unit;
+		const x = width - size / 2 - 10 * unit;
+		const top = height / 2 - size * 2;
+		list.forEach(([key, label, down], i) => {
+			const y = top + i * size + size / 2;
+			const colour: Colour = key === KEY.K1 || key === KEY.K2 ? [255, 222, 0] : [248, 0, 158];
+			const scale = down ? 0.85 : 1;
+			const keyImage = element('inputoverlay-key');
+			if (keyImage) {
+				const s = (size / (keyImage.image.width * keyImage.scale)) * scale;
+				image(keyImage, x, y, s, 1, down ? colour : undefined, `key${key}`);
+			} else {
+				ctx.save();
+				ctx.fillStyle = down ? css(colour, 0.9) : 'rgba(255, 255, 255, 0.15)';
+				ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+				ctx.lineWidth = 2 * unit;
+				const s = size * 0.82 * scale;
+				ctx.beginPath();
+				ctx.roundRect(x - s / 2, y - s / 2, s, s, 6 * unit);
+				ctx.fill();
+				ctx.stroke();
+				ctx.restore();
+			}
+			ctx.save();
+			ctx.font = `bold ${Math.round(13 * unit)}px sans-serif`;
+			ctx.fillStyle = down || keyImage ? 'black' : 'white';
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.fillText(counts[key] ? String(counts[key]) : label, x, y);
+			ctx.restore();
+		});
+	}
+
+	function drawResults(time: number, view: PlayView, width: number, height: number) {
+		const lastObject = objects[objects.length - 1];
+		if (!view.results || !lastObject) return;
+		const shownAt = lastObject.endTime + 1200;
+		if (time < shownAt && !view.finished) return;
+		const alpha = view.finished ? 1 : clamp01((time - shownAt) / 400);
+		const unit = height / 768;
+		const snapshot = snapshotAt(view.judge, time);
+		const rank = grade(snapshot, view.judge.mods);
+		const w = 420 * unit;
+		const h = 300 * unit;
+		const x = width / 2 - w / 2;
+		const y = height / 2 - h / 2;
+		ctx.save();
+		ctx.globalAlpha = alpha;
+		ctx.fillStyle = 'rgba(10, 10, 20, 0.82)';
+		ctx.beginPath();
+		ctx.roundRect(x, y, w, h, 18 * unit);
+		ctx.fill();
+		ctx.restore();
+		const rankImage = element(`ranking-${rank}` as ElementName);
+		if (rankImage) {
+			const s = (150 * unit) / (rankImage.image.height * rankImage.scale);
+			image(rankImage, x + w - 95 * unit, y + h / 2, s, alpha);
+		} else {
+			ctx.save();
+			ctx.globalAlpha = alpha;
+			ctx.font = `900 ${Math.round(120 * unit)}px sans-serif`;
+			ctx.fillStyle = rank.startsWith('X') || rank.startsWith('S') ? 'rgb(255, 220, 90)' : 'white';
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.fillText(rank.replace('X', 'SS').replace('H', ''), x + w - 95 * unit, y + h / 2);
+			ctx.restore();
+		}
+		ctx.save();
+		ctx.globalAlpha = alpha;
+		ctx.fillStyle = 'white';
+		ctx.textBaseline = 'top';
+		ctx.font = `800 ${Math.round(34 * unit)}px sans-serif`;
+		ctx.fillText(snapshot.score.toLocaleString('en-US'), x + 28 * unit, y + 26 * unit);
+		ctx.font = `600 ${Math.round(16 * unit)}px sans-serif`;
+		const lines = [
+			`Accuracy  ${(snapshot.accuracy * 100).toFixed(2)}%`,
+			`Max combo  ${snapshot.maxCombo}x`,
+			`300  ${snapshot.counts[300]}    100  ${snapshot.counts[100]}`,
+			`50  ${snapshot.counts[50]}    Miss  ${snapshot.counts[0]}`
+		];
+		lines.forEach((line, i) => ctx.fillText(line, x + 28 * unit, y + (86 + i * 30) * unit));
+		ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+		ctx.font = `500 ${Math.round(13 * unit)}px sans-serif`;
+		ctx.fillText(view.label, x + 28 * unit, y + h - 36 * unit);
+		ctx.restore();
+	}
+
+	// --- Frame ------------------------------------------------------------------------------
+
+	let transform = { scale: 1, x: 0, y: 0 };
+
+	function draw(time: number, view: PlayView) {
 		const width = Math.round(canvas.clientWidth * devicePixelRatio);
 		const height = Math.round(canvas.clientHeight * devicePixelRatio);
 		if (canvas.width !== width || canvas.height !== height) {
@@ -353,25 +779,52 @@ export function createGameplayRenderer(
 		if (!width || !height) return;
 		// The 512×384 playfield, as large as fits with a margin, centred
 		const scale = Math.min(width / 640, height / 480);
-		ctx.setTransform(scale, 0, 0, scale, (width - 512 * scale) / 2, (height - 384 * scale) / 2);
+		transform = { scale, x: (width - 512 * scale) / 2, y: (height - 384 * scale) / 2 };
+		ctx.setTransform(scale, 0, 0, scale, transform.x, transform.y);
 
+		drawFollowPoints(time);
+		const { states } = view.judge;
 		// Visible objects; earlier ones are drawn on top, so from the last one back
 		const visible: HitObject[] = [];
 		for (const object of objects) {
 			if (object.time - preempt > time) break;
-			if (object.endTime + HIT_FADE >= time) visible.push(object);
+			const state = states[object.index];
+			const gone = Math.max(
+				object.endTime,
+				state.judgedAt ?? object.endTime + windows[50],
+				state.headAt ?? 0
+			);
+			if (gone + HIT_FADE >= time) visible.push(object);
 		}
 		for (let i = visible.length - 1; i >= 0; i--) {
 			const object = visible[i];
-			if (object.kind === 'spinner') drawSpinner(object, time);
-			else if (object.kind === 'slider') drawSlider(object, time);
+			const state = states[object.index];
+			if (object.kind === 'spinner') drawSpinner(object, time, state, view.judge);
+			else if (object.kind === 'slider') drawSlider(object, time, state);
 			else {
-				drawCircle(object, object.x, object.y, time);
-				drawApproach(object, object.x, object.y, time);
+				const missedAt = state.result === 0 ? state.judgedAt : null;
+				drawCircle(object, object.x, object.y, time, state.hitTime, missedAt);
+				drawApproach(object, object.x, object.y, time, state);
 			}
 		}
-		drawCursor(time);
+		const judgements = view.judge.judgements;
+		for (let i = judgements.length - 1; i >= 0; i--) {
+			if (judgements[i].time < time - JUDGEMENT_TIME - 2000) break;
+			drawJudgement(judgements[i], time);
+		}
+		drawCursor(time, view.judge);
+
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		drawHud(time, view, width, height);
+		drawResults(time, view, width, height);
 	}
 
-	return { draw };
+	function toPlayfield(x: number, y: number) {
+		return {
+			x: (x * devicePixelRatio - transform.x) / transform.scale,
+			y: (y * devicePixelRatio - transform.y) / transform.scale
+		};
+	}
+
+	return { draw, toPlayfield };
 }

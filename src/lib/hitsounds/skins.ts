@@ -14,10 +14,13 @@ import { userSettings } from '../stores/user';
 export const BUILTIN = 'builtin';
 /** The osu! default sounds, saved as a skin under this name */
 export const DEFAULT_SKIN = 'osu! default';
-/** The samples a skin needs for the hitsounds */
 /** The samples a skin's hitsounds use (osu! doesn't use numbered ones from skins) */
 const HITSOUND_FILE =
 	/^((normal|soft|drum)-)?(hit(normal|whistle|finish|clap)|slider(slide|tick|whistle))\.(wav|ogg|mp3)$/i;
+/** The play's other sounds: the spinner's, the combo break */
+const PLAY_SOUND_FILE = /^(spinnerspin|spinnerbonus|combobreak)\.(wav|ogg|mp3)$/i;
+/** Marks a downloaded osu! default skin that has everything the gameplay view uses */
+const COMPLETE_MARKER = '.stosufy-gameplay-v2';
 
 export interface SkinOption {
 	/** "stosufy:<name>" or "osu:<name>" */
@@ -92,64 +95,91 @@ export async function hasDefaultSkin() {
 
 let downloading: Promise<boolean> | null = null;
 
-/** Downloads the osu! default hitsounds once; true when they're there */
+const RESOURCES = 'https://raw.githubusercontent.com/ppy/osu-resources/HEAD/';
+
+/** The files of the osu! default skin in ppy/osu-resources: hitsounds, images, sounds */
+async function defaultSkinFiles() {
+	// The repository's files, to find the folder with the default hitsounds: the classic
+	// (Legacy) ones if there, else the folder with the most of them
+	const response = await fetch(
+		'https://api.github.com/repos/ppy/osu-resources/git/trees/HEAD?recursive=1',
+		{ headers: { Accept: 'application/vnd.github+json' } }
+	);
+	if (!response.ok) throw new Error(`GitHub answered with HTTP ${response.status}`);
+	const { tree } = (await response.json()) as { tree: { path: string; type: string }[] };
+	const byFolder = new Map<string, string[]>();
+	for (const entry of tree) {
+		const name = entry.path.split('/').pop()!;
+		if (entry.type !== 'blob' || !HITSOUND_FILE.test(name)) continue;
+		const folder = entry.path.slice(0, -name.length - 1);
+		byFolder.set(folder, [...(byFolder.get(folder) ?? []), entry.path]);
+	}
+	const candidates = [...byFolder.entries()]
+		.filter(([folder, files]) => files.length >= 4 && !/argon/i.test(folder))
+		.sort(
+			([a, filesA], [b, filesB]) =>
+				Number(/legacy/i.test(b)) - Number(/legacy/i.test(a)) || filesB.length - filesA.length
+		);
+	const folder = candidates[0]?.[0];
+	if (!folder) throw new Error("Couldn't find the osu! default sounds");
+	const inFolder = (path: string) => path.slice(0, path.lastIndexOf('/')) === folder;
+	const name = (path: string) => path.split('/').pop() ?? '';
+	const blobs = tree.filter((entry) => entry.type === 'blob').map((entry) => entry.path);
+	const files = blobs.filter(
+		(path) =>
+			inFolder(path) &&
+			(HITSOUND_FILE.test(name(path)) ||
+				GAMEPLAY_FILE.test(name(path)) ||
+				PLAY_SOUND_FILE.test(name(path)))
+	);
+	// The spinner's sounds aren't in the classic folder: the general gameplay ones
+	for (const sound of ['spinnerspin', 'spinnerbonus', 'combobreak']) {
+		if (
+			files.some((path) =>
+				name(path)
+					.toLowerCase()
+					.startsWith(sound + '.')
+			)
+		)
+			continue;
+		const found = blobs.find(
+			(path) =>
+				/samples\/gameplay\/[^/]+$/i.test(path) &&
+				name(path)
+					.toLowerCase()
+					.replace(/\.(wav|ogg|mp3)$/, '') === sound
+		);
+		if (found) files.push(found);
+	}
+	return files;
+}
+
+async function downloadFiles(files: string[], dir: string, only?: (name: string) => boolean) {
+	for (const file of files) {
+		const name = file.split('/').pop()!;
+		if (only && !only(name)) continue;
+		const data = await fetch(RESOURCES + file.split('/').map(encodeURIComponent).join('/'));
+		if (!data.ok) throw new Error(`GitHub answered with HTTP ${data.status}`);
+		await writeFile(await path.join(dir, name), new Uint8Array(await data.arrayBuffer()));
+	}
+}
+
+/** Downloads the osu! default skin once; true when it's there */
 export function downloadDefaultSkin(): Promise<boolean> {
 	downloading ??= (async () => {
 		if (await hasDefaultSkin()) return true;
 		skinTask.set({ state: 'working', message: 'Downloading the osu! default sounds…' });
 		try {
-			// The repository's files, to find the folder with the default hitsounds: the
-			// classic (Legacy) ones if there, else the folder with the most of them
-			const response = await fetch(
-				'https://api.github.com/repos/ppy/osu-resources/git/trees/HEAD?recursive=1',
-				{ headers: { Accept: 'application/vnd.github+json' } }
-			);
-			if (!response.ok) throw new Error(`GitHub answered with HTTP ${response.status}`);
-			const { tree } = (await response.json()) as { tree: { path: string; type: string }[] };
-			const byFolder = new Map<string, string[]>();
-			for (const entry of tree) {
-				const name = entry.path.split('/').pop()!;
-				if (entry.type !== 'blob' || !HITSOUND_FILE.test(name)) continue;
-				const folder = entry.path.slice(0, -name.length - 1);
-				byFolder.set(folder, [...(byFolder.get(folder) ?? []), entry.path]);
-			}
-			const candidates = [...byFolder.entries()]
-				.filter(([folder, files]) => files.length >= 4 && !/argon/i.test(folder))
-				.sort(
-					([a, filesA], [b, filesB]) =>
-						Number(/legacy/i.test(b)) - Number(/legacy/i.test(a)) || filesB.length - filesA.length
-				);
-			const folder = candidates[0]?.[0];
-			const files = candidates[0]?.[1].concat(
-				tree
-					.filter(
-						(entry) =>
-							entry.type === 'blob' &&
-							entry.path.slice(0, entry.path.lastIndexOf('/')) === folder &&
-							GAMEPLAY_FILE.test(entry.path.split('/').pop() ?? '')
-					)
-					.map((entry) => entry.path)
-			);
-			if (files) {
-				const dir = await path.join(await stosufySkinsDir(), DEFAULT_SKIN);
-				const temp = dir + '.part';
-				await mkdir(temp, { recursive: true });
-				for (const file of files) {
-					const data = await fetch(
-						`https://raw.githubusercontent.com/ppy/osu-resources/HEAD/${file.split('/').map(encodeURIComponent).join('/')}`
-					);
-					if (!data.ok) throw new Error(`GitHub answered with HTTP ${data.status}`);
-					await writeFile(
-						await path.join(temp, file.split('/').pop()!),
-						new Uint8Array(await data.arrayBuffer())
-					);
-				}
-				await rename(temp, dir);
-				skinTask.set({ state: 'idle' });
-				skinsChanged.update((n) => n + 1);
-				return true;
-			}
-			throw new Error("Couldn't find the osu! default sounds");
+			const files = await defaultSkinFiles();
+			const dir = await path.join(await stosufySkinsDir(), DEFAULT_SKIN);
+			const temp = dir + '.part';
+			await mkdir(temp, { recursive: true });
+			await downloadFiles(files, temp);
+			await writeFile(await path.join(temp, COMPLETE_MARKER), new Uint8Array());
+			await rename(temp, dir);
+			skinTask.set({ state: 'idle' });
+			skinsChanged.update((n) => n + 1);
+			return true;
 		} catch (error) {
 			console.error('Could not download the osu! default sounds:', error);
 			skinTask.set({
@@ -162,6 +192,32 @@ export function downloadDefaultSkin(): Promise<boolean> {
 		}
 	})();
 	return downloading;
+}
+
+let completing: Promise<void> | null = null;
+
+/**
+ * Adds what the gameplay view uses to an osu! default skin downloaded before it existed
+ * (judgements, spinners, fonts, the spinner's sounds). Once; quietly if it fails.
+ */
+export function completeDefaultSkin(): Promise<void> {
+	completing ??= (async () => {
+		const dir = await path.join(await stosufySkinsDir(), DEFAULT_SKIN);
+		if (!(await exists(dir).catch(() => false))) return;
+		if (await exists(await path.join(dir, COMPLETE_MARKER)).catch(() => true)) return;
+		try {
+			const have = new Set(
+				(await readDir(dir)).filter((e) => e.isFile).map((e) => e.name.toLowerCase())
+			);
+			await downloadFiles(await defaultSkinFiles(), dir, (name) => !have.has(name.toLowerCase()));
+			await writeFile(await path.join(dir, COMPLETE_MARKER), new Uint8Array());
+			skinsChanged.update((n) => n + 1);
+		} catch (error) {
+			console.warn('Could not complete the osu! default skin:', error);
+			completing = null;
+		}
+	})();
+	return completing;
 }
 
 async function rename(from: string, to: string) {
@@ -179,7 +235,7 @@ async function rename(from: string, to: string) {
 
 /** The images the gameplay view uses (see gameplay/skin.ts) */
 const GAMEPLAY_FILE =
-	/^(hitcircle|hitcircleoverlay|approachcircle|sliderb0?|sliderfollowcircle|reversearrow|cursor|cursortrail|spinner-approachcircle|spinner-circle|[a-z0-9_ -]+-\d)(@2x)?\.png$/i;
+	/^(hitcircle|hitcircleoverlay|approachcircle|sliderb\d*|sliderfollowcircle|sliderscorepoint|reversearrow|cursor|cursormiddle|cursortrail|spinner-[a-z0-9]+|hit(0|50|100k?|300[gk]?)(-\d+)?|followpoint(-\d+)?|inputoverlay-(key|background)|ranking-(xh|x|sh|s|a|b|c|d)|[a-z0-9_ -]+-(\d|x|percent|dot|comma))(@2x)?\.png$/i;
 
 /** Depth of a folder in an archive ("" is the top) */
 const depth = (folder: string) => (folder ? folder.split('/').length : 0);
@@ -231,30 +287,39 @@ export async function importSkin(): Promise<SkinOption | null> {
 		// Importing again replaces the skin (also its samples from an earlier import)
 		await remove(dir, { recursive: true }).catch(() => {});
 		await mkdir(dir, { recursive: true });
-		// The hitsounds, and for the gameplay view its images, skin.ini and number images
-		// (which can be in a folder of their own, named in skin.ini)
+		// The hitsounds, and for the gameplay view its images, sounds, skin.ini and fonts
+		// (which can be in folders of their own, named in skin.ini)
 		const iniText = ini ? await ini.async('string') : '';
-		const prefix = (iniText.match(/^\s*HitCirclePrefix\s*:\s*(.+?)\s*$/im)?.[1] ?? '').replace(
-			/\\/g,
-			'/'
-		);
-		const prefixDir = prefix.includes('/')
-			? `${found.root ? found.root + '/' : ''}${prefix.split('/').slice(0, -1).join('/')}`
-			: null;
+		const fontFolders = ['HitCirclePrefix', 'ScorePrefix', 'ComboPrefix']
+			.map((key) =>
+				(iniText.match(new RegExp(`^\\s*${key}\\s*:\\s*(.+?)\\s*$`, 'im'))?.[1] ?? '').replace(
+					/\\/g,
+					'/'
+				)
+			)
+			.filter((prefix) => prefix.includes('/'))
+			.map((prefix) => prefix.split('/').slice(0, -1).join('/'));
+		const inRoot = (folder: string) => `${found.root ? found.root + '/' : ''}${folder}`;
 		const extras = entries
 			.map((entry) => entry.name)
 			.filter((file) => {
 				const base = file.split('/').pop() ?? '';
 				const folder = folderOf(file);
-				if (folder === found.root) return GAMEPLAY_FILE.test(base) || /^skin\.ini$/i.test(base);
-				return folder === prefixDir && /-\d(@2x)?\.png$/i.test(base);
+				if (folder === found.root)
+					return (
+						GAMEPLAY_FILE.test(base) || PLAY_SOUND_FILE.test(base) || /^skin\.ini$/i.test(base)
+					);
+				return (
+					fontFolders.some((font) => inRoot(font) === folder) &&
+					/-(\d|x|percent|dot|comma)(@2x)?\.png$/i.test(base)
+				);
 			});
 		for (const file of [...found.files, ...extras]) {
-			const inPrefix = prefixDir && folderOf(file) === prefixDir;
-			const target = inPrefix
-				? await path.join(dir, ...prefix.split('/').slice(0, -1), file.split('/').pop()!)
+			const font = fontFolders.find((f) => inRoot(f) === folderOf(file));
+			const target = font
+				? await path.join(dir, ...font.split('/'), file.split('/').pop()!)
 				: await path.join(dir, file.split('/').pop()!);
-			if (inPrefix) await mkdir(await path.dirname(target), { recursive: true });
+			if (font) await mkdir(await path.dirname(target), { recursive: true });
 			await writeFile(target, await zip.files[file].async('uint8array'));
 		}
 		skinTask.set({ state: 'idle' });

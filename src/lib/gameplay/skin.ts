@@ -15,8 +15,54 @@ export const ELEMENTS = [
 	'cursor',
 	'cursortrail',
 	'spinner-approachcircle',
-	'spinner-circle'
+	'spinner-circle',
+	'spinner-background',
+	'spinner-metre',
+	'spinner-bottom',
+	'spinner-top',
+	'spinner-middle',
+	'spinner-middle2',
+	'spinner-glow',
+	'spinner-clear',
+	'spinner-spin',
+	'spinner-rpm',
+	'hit0',
+	'hit50',
+	'hit100',
+	'hit100k',
+	'hit300',
+	'hit300g',
+	'hit300k',
+	'followpoint',
+	'sliderscorepoint',
+	'cursormiddle',
+	'inputoverlay-key',
+	'inputoverlay-background',
+	'ranking-XH',
+	'ranking-X',
+	'ranking-SH',
+	'ranking-S',
+	'ranking-A',
+	'ranking-B',
+	'ranking-C',
+	'ranking-D'
 ] as const;
+
+/** Animated elements: the first frame ("hit300-0") if there's no still one */
+const ANIMATED = new Set<string>([
+	'hit0',
+	'hit50',
+	'hit100',
+	'hit100k',
+	'hit300',
+	'hit300g',
+	'hit300k',
+	'followpoint',
+	'sliderb'
+]);
+
+/** Characters of the score and combo fonts besides the digits */
+const SCORE_EXTRAS = { x: 'x', percent: '%', dot: '.', comma: ',' } as const;
 
 export type ElementName = (typeof ELEMENTS)[number];
 
@@ -30,6 +76,14 @@ export interface GameplaySkin {
 	images: Partial<Record<ElementName, SkinImage>>;
 	/** The combo number images, 0–9 */
 	numbers: (SkinImage | null)[];
+	/** The score font: digits and "x", "%", ".", "," */
+	score: Record<string, SkinImage | null>;
+	scoreOverlap: number;
+	/** The combo counter's font */
+	combo: Record<string, SkinImage | null>;
+	comboOverlap: number;
+	/** Whether the spinner's sound rises in pitch */
+	spinnerFrequencyModulate: boolean;
 	colours: [number, number, number][];
 	sliderBorder: [number, number, number] | null;
 	sliderTrack: [number, number, number] | null;
@@ -40,6 +94,11 @@ export interface GameplaySkin {
 export const EMPTY_SKIN: GameplaySkin = {
 	images: {},
 	numbers: [],
+	score: {},
+	scoreOverlap: 0,
+	combo: {},
+	comboOverlap: 0,
+	spinnerFrequencyModulate: true,
 	colours: [],
 	sliderBorder: null,
 	sliderTrack: null,
@@ -102,6 +161,10 @@ async function load(dir: string): Promise<GameplaySkin> {
 		return null;
 	};
 
+	const element = async (name: string) =>
+		(await image(dir, byName, name)) ??
+		(ANIMATED.has(name) ? await image(dir, byName, `${name}-0`) : null);
+
 	const iniFile = byName.get('skin.ini');
 	const settings = iniFile
 		? ini(
@@ -114,32 +177,44 @@ async function load(dir: string): Promise<GameplaySkin> {
 	const images: GameplaySkin['images'] = {};
 	await Promise.all(
 		ELEMENTS.map(async (name) => {
-			const found = await image(dir, byName, name);
+			const found = await element(name);
 			if (found) images[name] = found;
 		})
 	);
 
-	// Combo numbers: "default-0.png" or the skin.ini's HitCirclePrefix (may be in a folder)
-	const prefix = (settings.HitCirclePrefix || 'default').replace(/\\/g, '/');
-	let numberDir = dir;
-	let numberFiles = byName;
-	if (prefix.includes('/')) {
-		numberDir = await path.join(dir, ...prefix.split('/').slice(0, -1));
-		try {
-			const inner = await readDir(numberDir);
-			numberFiles = new Map(
-				inner.filter((e) => e.isFile).map((e) => [e.name.toLowerCase(), e.name])
-			);
-		} catch {
-			numberFiles = new Map();
+	// Fonts: "default-0.png" for the circles, "score-0.png" for the score and combo, or the
+	// prefixes from skin.ini (which can be in a folder)
+	const font = async (prefixSetting: string | undefined, fallback: string) => {
+		const prefix = (prefixSetting || fallback).replace(/\\/g, '/');
+		let folder = dir;
+		let files = byName;
+		if (prefix.includes('/')) {
+			folder = await path.join(dir, ...prefix.split('/').slice(0, -1));
+			try {
+				const inner = await readDir(folder);
+				files = new Map(inner.filter((e) => e.isFile).map((e) => [e.name.toLowerCase(), e.name]));
+			} catch {
+				files = new Map();
+			}
 		}
-	}
-	const numberName = prefix.split('/').pop()!;
-	const numbers = await Promise.all(
-		Array.from({ length: 10 }, (_, digit) =>
-			image(numberDir, numberFiles, `${numberName}-${digit}`)
-		)
-	);
+		const name = prefix.split('/').pop()!;
+		const glyphs: Record<string, SkinImage | null> = {};
+		await Promise.all([
+			...Array.from({ length: 10 }, async (_, digit) => {
+				glyphs[digit] = await image(folder, files, `${name}-${digit}`);
+			}),
+			...Object.entries(SCORE_EXTRAS).map(async ([file, char]) => {
+				glyphs[char] = await image(folder, files, `${name}-${file}`);
+			})
+		]);
+		return glyphs;
+	};
+	const [circleFont, scoreFont, comboFont] = await Promise.all([
+		font(settings.HitCirclePrefix, 'default'),
+		font(settings.ScorePrefix, 'score'),
+		font(settings.ComboPrefix ?? settings.ScorePrefix, 'score')
+	]);
+	const numbers = Array.from({ length: 10 }, (_, digit) => circleFont[digit] ?? null);
 
 	const colours = Object.entries(settings)
 		.filter(([key]) => /^Combo\d$/.test(key))
@@ -153,7 +228,37 @@ async function load(dir: string): Promise<GameplaySkin> {
 		colours,
 		sliderBorder: rgb(settings.SliderBorder),
 		sliderTrack: rgb(settings.SliderTrackOverride),
-		numberOverlap: Number(settings.HitCircleOverlap ?? -2) || -2
+		numberOverlap: Number(settings.HitCircleOverlap ?? -2) || -2,
+		score: scoreFont,
+		scoreOverlap: Number(settings.ScoreOverlap ?? 0) || 0,
+		combo: comboFont,
+		comboOverlap: Number(settings.ComboOverlap ?? 0) || 0,
+		spinnerFrequencyModulate: settings.SpinnerFrequencyModulate !== '0'
+	};
+}
+
+/**
+ * A skin with what it lacks taken from another (the osu! default skin), like osu! does.
+ * Only images: the colours stay the skin's own.
+ */
+export function withFallback(skin: GameplaySkin, fallback: GameplaySkin): GameplaySkin {
+	if (skin === fallback) return skin;
+	const fill = <T>(own: Record<string, T | null>, other: Record<string, T | null>) => {
+		const result = { ...own };
+		for (const [key, value] of Object.entries(other)) result[key] ??= value;
+		return result;
+	};
+	// A font is used whole: from the skin if it has its digits, else the fallback's
+	const font = (own: Record<string, SkinImage | null>, other: Record<string, SkinImage | null>) =>
+		Array.from({ length: 10 }).every((_, d) => own[d]) ? own : other;
+	const ownNumbers = skin.numbers.length === 10 && skin.numbers.every(Boolean);
+	return {
+		...skin,
+		images: fill(skin.images, fallback.images),
+		numbers: ownNumbers ? skin.numbers : fallback.numbers,
+		numberOverlap: ownNumbers ? skin.numberOverlap : fallback.numberOverlap,
+		score: font(skin.score, fallback.score),
+		combo: font(skin.combo, fallback.combo)
 	};
 }
 

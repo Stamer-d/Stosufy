@@ -1,12 +1,14 @@
 <script>
 	import { userSettings, updateUserSettings } from '#lib/stores/user.ts';
 
-	/** Which parts of the hitsounds play: whistle, clap, finish and the slider ticks */
+	/** Which parts of the hitsounds play: whistle, clap, finish, the slider ticks and slide, the spinner */
 	const PARTS = [
 		{ id: 'whistle', label: 'Whistle' },
 		{ id: 'clap', label: 'Clap' },
 		{ id: 'finish', label: 'Finish' },
-		{ id: 'slidertick', label: 'Slider ticks' }
+		{ id: 'slidertick', label: 'Slider ticks' },
+		{ id: 'sliderslide', label: 'Slider slide' },
+		{ id: 'spinner', label: 'Spinner' }
 	];
 
 	let parts = $derived($userSettings.settings?.hitsoundParts ?? {});

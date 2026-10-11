@@ -78,3 +78,50 @@ export function builtinSample(context: BaseAudioContext, set: SampleSet, sound: 
 	}
 	return buffer;
 }
+
+export type ExtraSound =
+	| 'spinnerspin'
+	| 'spinnerbonus'
+	| 'combobreak'
+	| 'normal-sliderslide'
+	| 'soft-sliderslide'
+	| 'drum-sliderslide';
+
+const EXTRAS: Record<ExtraSound, { length: number; synth: Synth; loop?: boolean }> = {
+	// A steady hum that loops (its pitch rises with the spin)
+	spinnerspin: {
+		length: 0.5,
+		loop: true,
+		synth: (t) => (tone(t, 220) * 0.5 + tone(t, 440) * 0.25 + tone(t, 660) * 0.1) * 0.35
+	},
+	spinnerbonus: {
+		length: 0.5,
+		synth: (t) => (tone(t, 1760) * 0.5 + tone(t, 2637) * 0.3) * decay(t, 0.12) * 0.5
+	},
+	combobreak: {
+		length: 0.6,
+		synth: (t) => tone(t, 300 - 200 * Math.min(1, t / 0.5)) * decay(t, 0.25) * 0.5
+	},
+	'normal-sliderslide': { length: 0.5, loop: true, synth: () => noise() * 0.05 },
+	'soft-sliderslide': { length: 0.5, loop: true, synth: () => noise() * 0.035 },
+	'drum-sliderslide': { length: 0.5, loop: true, synth: () => noise() * 0.04 }
+};
+
+/** A built-in sound of the play besides the hitsounds */
+export function builtinExtra(context: BaseAudioContext, name: ExtraSound) {
+	const key = `extra-${name}`;
+	let buffer = cache.get(key);
+	if (!buffer) {
+		const { length, synth, loop } = EXTRAS[name];
+		const rate = context.sampleRate;
+		buffer = context.createBuffer(1, Math.ceil(length * rate), rate);
+		const data = buffer.getChannelData(0);
+		for (let i = 0; i < data.length; i++) data[i] = synth(i / rate);
+		if (!loop) {
+			const fade = Math.min(data.length, Math.round(rate * 0.005));
+			for (let i = 0; i < fade; i++) data[data.length - 1 - i] *= i / fade;
+		}
+		cache.set(key, buffer);
+	}
+	return buffer;
+}

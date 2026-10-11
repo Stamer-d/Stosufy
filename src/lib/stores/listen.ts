@@ -355,7 +355,7 @@ const onChange = (event: Event) => {
 
 if (typeof window !== 'undefined') {
 	// Members can't pick songs themselves: the host does (pausing and seeking still work)
-	setPlaybackLock(() => {
+	setPlaybackLock('listen', () => {
 		const state = get(listen);
 		return state.status === 'live' && !state.isHost
 			? "You're listening along, so the host picks the songs. Leave the session to choose your own."

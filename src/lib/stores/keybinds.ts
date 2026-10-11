@@ -242,6 +242,9 @@ export function runKeybind(action: KeybindAction) {
 /** While a shortcut is being recorded in the settings, no shortcut does anything */
 export const recordingKeybind = writable(false);
 
+/** While playing a beatmap, the keys are for the game: no shortcut does anything */
+export const keybindsPaused = writable(false);
+
 let registered: string[] = [];
 
 /** Turns a shortcut into what the global shortcut plugin understands */
@@ -276,7 +279,7 @@ async function registerGlobal() {
 }
 
 function onKeydown(event: KeyboardEvent) {
-	if (get(recordingKeybind)) return;
+	if (get(recordingKeybind) || get(keybindsPaused)) return;
 	const bind = keybindFromEvent(event);
 	if (!bind) return;
 	// The global shortcut already reacts to it

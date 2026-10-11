@@ -18,7 +18,26 @@ import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
 import { parseHitsounds, type HitSample, type HitsoundEvent } from './chart';
 import { builtinSample } from './builtin';
-import { skinFolder, hasDefaultSkin, downloadDefaultSkin, skinsChanged, BUILTIN } from './skins';
+import {
+	skinFolder,
+	hasDefaultSkin,
+	downloadDefaultSkin,
+	completeDefaultSkin,
+	skinsChanged,
+	BUILTIN
+} from './skins';
+import { builtinExtra, type ExtraSound } from './builtin';
+import { parseGameplay, type GameplayBeatmap } from '../gameplay/beatmap';
+import {
+	autoplayFrames,
+	judgeFrames,
+	lastAtOrBefore,
+	spinAt,
+	trackingAt,
+	type Judge,
+	type PlaySound
+} from '../gameplay/judge';
+import { activePlay, chosenMapId } from '../gameplay/play';
 import type { MapSet, StoredMapSet } from '../types';
 
 export type SampleSource = 'beatmap' | 'skin' | 'default' | 'simple';
@@ -44,14 +63,15 @@ const AUDIO_FILE = /\.(wav|ogg|mp3)$/i;
 function settings() {
 	const s = get(userSettings).settings ?? {};
 	return {
-		on: s.hitsounds ?? false,
+		// Playing a map yourself always has its sounds
+		on: (s.hitsounds ?? false) || get(activePlay)?.kind === 'live',
 		volume: s.hitsoundVolume ?? DEFAULT_VOLUME,
 		skin: s.hitsoundSkin ?? null,
 		// Off by default: many maps mute the hitnormal with their own silent samples, and a
 		// music player should sound like the skin on every circle
 		beatmap: s.mapHitsounds ?? false,
 		/** Sounds turned off (whistle, finish, clap, slidertick) */
-		muted: (['whistle', 'finish', 'clap', 'slidertick'] as const).filter(
+		muted: (['whistle', 'finish', 'clap', 'slidertick', 'sliderslide', 'spinner'] as const).filter(
 			(sound) => s.hitsoundParts?.[sound] === false
 		),
 		offset: s.hitsoundOffset ?? 0,
@@ -193,11 +213,56 @@ async function resolve(
 	return builtinSample(audioContext(), sample.set, sample.sound);
 }
 
+/** A sound of the play besides the hitsounds (spinner, slider slide, combo break) */
+async function resolveExtra(
+	name: ExtraSound,
+	skin: Folder | null,
+	fallback: Folder | null,
+	simple: boolean
+) {
+	const names = name.endsWith('sliderslide') ? [name, 'sliderslide'] : [name];
+	if (!simple) {
+		for (const folder of [skin, fallback]) {
+			for (const candidate of names) {
+				const found = await fromFolder(folder, candidate);
+				if (found !== undefined) return found;
+			}
+		}
+	}
+	return builtinExtra(audioContext(), name);
+}
+
+/** The index of the event nearest to a time */
+function nearestEvent<T extends { time: number }>(events: T[], time: number) {
+	let low = 0;
+	let high = events.length - 1;
+	while (low < high) {
+		const mid = (low + high) >> 1;
+		if (events[mid].time < time) low = mid + 1;
+		else high = mid;
+	}
+	if (low > 0 && Math.abs(events[low - 1].time - time) <= Math.abs(events[low]?.time - time))
+		return low - 1;
+	return low;
+}
+
 // --- The chart of the playing song ------------------------------------------------------
+
+type ChartEvent = { time: number; volume: number; buffers: (AudioBuffer | null)[] };
 
 interface Chart {
 	key: string;
-	events: { time: number; volume: number; buffers: (AudioBuffer | null)[] }[];
+	/** The song and difficulty (to match the gameplay view's play) */
+	playKey: string;
+	events: ChartEvent[];
+	/** The osu!standard objects, for autoplay's play when the gameplay view doesn't show one */
+	beatmap: GameplayBeatmap | null;
+	/** Sounds of the play besides the hitsounds: spinner, slider slide, combo break */
+	extras: Partial<Record<ExtraSound, AudioBuffer | null>>;
+	/** The slider slide's sample set at each slider (by the time of its head) */
+	slideSets: Map<number, string>;
+	spinnerModulate: boolean;
+	muted: string[];
 }
 
 let chart: Chart | null = null;
@@ -207,8 +272,11 @@ async function chartsDir(setId: string | number) {
 }
 
 /** The .osu file of a difficulty and the folder with the beatmap's own samples */
-async function beatmapFiles(song: MapSet, stored: StoredMapSet | undefined) {
-	const mapId = String(song.beatmaps?.[0]?.id ?? '');
+async function beatmapFiles(
+	song: MapSet,
+	stored: StoredMapSet | undefined,
+	mapId = chosenMapId(song) ?? ''
+) {
 	const local = stored?.beatmaps?.[mapId];
 	let content: string | null = null;
 	let samples = stored?.hitsounds?.dir ?? null;
@@ -258,14 +326,14 @@ async function beatmapFiles(song: MapSet, stored: StoredMapSet | undefined) {
 	return { content, samples };
 }
 
-/** The .osu file of the difficulty that plays (also for the gameplay view) */
-export async function beatmapContent(song: MapSet) {
+/** The .osu file of a difficulty (by default the chosen one; also for the gameplay view) */
+export async function beatmapContent(song: MapSet, mapId?: string | null) {
 	const stored = get(mapDataStore)[song.id] as StoredMapSet | undefined;
-	return (await beatmapFiles(song, stored)).content;
+	return (await beatmapFiles(song, stored, mapId ?? chosenMapId(song) ?? '')).content;
 }
 
 function songKey(song: MapSet | null) {
-	return song ? `${song.id}:${song.beatmaps?.[0]?.id}` : null;
+	return song ? `${song.id}:${chosenMapId(song)}` : null;
 }
 
 let loadingKey: string | null = null;
@@ -333,8 +401,41 @@ async function load() {
 				}))
 			)
 		).filter((event) => event.buffers.length);
+		// The play's other sounds, from the skin, the osu! default ones, else built in
+		const gameplay = parseGameplay(files.content);
+		const extraNames: ExtraSound[] = [
+			'spinnerspin',
+			'spinnerbonus',
+			'combobreak',
+			'normal-sliderslide',
+			'soft-sliderslide',
+			'drum-sliderslide'
+		];
+		const extras: Chart['extras'] = {};
+		await Promise.all(
+			extraNames.map(async (name) => {
+				extras[name] = await resolveExtra(name, skinSamples, defaultSamples, skin === BUILTIN);
+			})
+		);
+		const slideSets = new Map<number, string>();
+		for (const object of gameplay?.objects ?? []) {
+			if (object.kind !== 'slider') continue;
+			const head = events[nearestEvent(events, object.time)];
+			if (head && Math.abs(head.time - object.time) <= 3)
+				slideSets.set(object.time, head.samples[0]?.set ?? 'normal');
+		}
 		if (loadingKey !== key) return;
-		chart = { key: key!, events: ready };
+		chart = {
+			key: key!,
+			playKey: songKey(song)!,
+			events: ready,
+			beatmap: gameplay,
+			extras,
+			slideSets,
+			spinnerModulate: true,
+			muted: muted as string[]
+		};
+		autoplay = null;
 		restart = true;
 		// The skin is the osu! default sounds unless one is chosen
 		if (!skin && sources.default) {
@@ -368,11 +469,38 @@ let next = 0;
 let lastTime: number | null = null;
 let restart = true;
 let playing: { source: AudioBufferSourceNode; at: number }[] = [];
+/** Autoplay's play of the song, when the gameplay view doesn't show one */
+let autoplay: Judge | null = null;
+/** The play whose sounds are scheduled (to start over when it changes) */
+let scheduledFor: Judge | null = null;
 
 function stopScheduled() {
 	const now = context?.currentTime ?? 0;
 	for (const { source, at } of playing) if (at > now) source.stop();
 	playing = [];
+}
+
+/** The play the sounds follow: the gameplay view's, else autoplay's; null without objects */
+function currentPlay(): { judge: Judge; live: boolean } | null {
+	if (!chart) return null;
+	const shown = get(activePlay);
+	if (shown && shown.key === chart.playKey)
+		return { judge: shown.judge, live: shown.kind === 'live' };
+	if (!chart.beatmap) return null;
+	autoplay ??= judgeFrames(chart.beatmap, autoplayFrames(chart.beatmap));
+	return { judge: autoplay, live: false };
+}
+
+/** The first sound at or after a time */
+function soundIndexAt(sounds: PlaySound[], time: number) {
+	let low = 0;
+	let high = sounds.length;
+	while (low < high) {
+		const mid = (low + high) >> 1;
+		if (sounds[mid].at < time) low = mid + 1;
+		else high = mid;
+	}
+	return low;
 }
 
 /** The first event at or after a time */
@@ -388,10 +516,130 @@ function indexAt(time: number) {
 	return low;
 }
 
+function schedule(buffers: (AudioBuffer | null | undefined)[], volume: number, delay: number) {
+	const ctx = audioContext();
+	const at = ctx.currentTime + Math.max(0, delay);
+	for (const buffer of buffers) {
+		if (!buffer) continue;
+		const source = ctx.createBufferSource();
+		source.buffer = buffer;
+		const gain = ctx.createGain();
+		gain.gain.value = volume;
+		source.connect(gain).connect(master!);
+		source.start(at);
+		playing.push({ source, at });
+	}
+}
+
+/** The samples of a sound of a play */
+function soundBuffers(sound: PlaySound): {
+	buffers: (AudioBuffer | null | undefined)[];
+	volume: number;
+} {
+	if (!chart) return { buffers: [], volume: 1 };
+	if (sound.kind === 'hit') {
+		const event = chart.events[nearestEvent(chart.events, sound.time)];
+		if (!event || Math.abs(event.time - sound.time) > 3) return { buffers: [], volume: 1 };
+		return { buffers: event.buffers, volume: event.volume };
+	}
+	if (sound.kind === 'spinnerbonus' && chart.muted.includes('spinner'))
+		return { buffers: [], volume: 1 };
+	return { buffers: [chart.extras[sound.kind]], volume: sound.kind === 'combobreak' ? 0.8 : 0.7 };
+}
+
+/** Plays a sound of the user's own play right away (or when it's due) */
+export function playSoundNow(sound: PlaySound, judge: Judge) {
+	const audio = get(songQueue).audio;
+	const shown = get(activePlay);
+	if (!chart || !audio || shown?.judge !== judge || chart.playKey !== shown.key) return;
+	const ctx = audioContext();
+	if (ctx.state === 'suspended') ctx.resume();
+	const { offset } = settings();
+	const time = audio.currentTime * 1000 - offset;
+	const { buffers, volume } = soundBuffers(sound);
+	schedule(buffers, volume, (sound.at - time) / (audio.playbackRate || 1) / 1000);
+}
+
+// --- Loops: the slider slide and the spinner's spin ---------------------------------------
+
+type Loop = { source: AudioBufferSourceNode; gain: GainNode; buffer: AudioBuffer } | null;
+let slideLoop: Loop = null;
+let spinLoop: Loop = null;
+
+function loop(
+	current: Loop,
+	buffer: AudioBuffer | null | undefined,
+	volume: number,
+	rate = 1
+): Loop {
+	if (!buffer || volume <= 0) {
+		current?.source.stop();
+		return null;
+	}
+	if (current && current.buffer !== buffer) {
+		current.source.stop();
+		current = null;
+	}
+	if (!current) {
+		const ctx = audioContext();
+		const source = ctx.createBufferSource();
+		source.buffer = buffer;
+		source.loop = true;
+		const gain = ctx.createGain();
+		source.connect(gain).connect(master!);
+		source.start();
+		current = { source, gain, buffer };
+	}
+	current.gain.gain.value = volume;
+	current.source.playbackRate.value = rate;
+	return current;
+}
+
+function stopLoops() {
+	slideLoop = loop(slideLoop, null, 0);
+	spinLoop = loop(spinLoop, null, 0);
+}
+
+/** The slider being slid and the spinner being spun at a time */
+function updateLoops(judge: Judge, time: number) {
+	const objects = judge.beatmap.objects;
+	let slide: AudioBuffer | null | undefined = null;
+	let spin: { rate: number } | null = null;
+	// Objects around this time
+	let i = Math.max(0, lastAtOrBefore(objects, time));
+	for (; i >= 0 && i > lastAtOrBefore(objects, time) - 8; i--) {
+		const object = objects[i];
+		if (time < object.time || time > object.endTime) continue;
+		const state = judge.states[object.index];
+		if (
+			object.kind === 'slider' &&
+			!chart!.muted.includes('sliderslide') &&
+			trackingAt(state, time)
+		) {
+			const set = chart!.slideSets.get(object.time) ?? 'normal';
+			slide = chart!.extras[`${set}-sliderslide` as ExtraSound];
+		}
+		if (object.kind === 'spinner' && !chart!.muted.includes('spinner')) {
+			const { total, rpm } = spinAt(state, time);
+			if (rpm > 30) {
+				const progress = total / (Math.PI * 2) / (object.spinner!.required || 1);
+				// Higher as it's spun, like osu! (DrawableSpinner)
+				const rate = chart!.spinnerModulate
+					? Math.min(100000 / 44100, (20000 + progress * 40000) / 44100)
+					: 1;
+				spin = { rate };
+			}
+		}
+	}
+	slideLoop = loop(slideLoop, slide, 0.6);
+	spinLoop = loop(spinLoop, spin ? chart!.extras.spinnerspin : null, 0.6, spin?.rate ?? 1);
+}
+
 function tick() {
 	const audio = get(songQueue).audio;
 	if (!chart || !audio || audio.paused || audio.ended) {
 		if (playing.length) stopScheduled();
+		stopLoops();
 		lastTime = null;
 		return;
 	}
@@ -405,30 +653,44 @@ function tick() {
 	const rate = audio.playbackRate || 1;
 	// The song's position, with the offset: positive offsets play the hitsounds later
 	const time = audio.currentTime * 1000 - offset;
-	// Jumped (seek, new song, repeat): start over from here
-	if (restart || lastTime === null || time < lastTime - 50 || time > lastTime + 2000) {
+	const play = currentPlay();
+	// Jumped (seek, new song, repeat) or another play: start over from here
+	if (
+		restart ||
+		lastTime === null ||
+		time < lastTime - 50 ||
+		time > lastTime + 2000 ||
+		scheduledFor !== (play?.judge ?? null)
+	) {
 		stopScheduled();
-		next = indexAt(time);
+		next = play ? soundIndexAt(play.judge.sounds, time) : indexAt(time);
 		restart = false;
+		scheduledFor = play?.judge ?? null;
 	}
 	lastTime = time;
 
 	const ahead = (document.hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD) * 1000 * rate;
-	const events = chart.events;
-	while (next < events.length && events[next].time <= time + ahead) {
-		const event = events[next++];
-		const delay = (event.time - time) / rate / 1000;
-		if (delay < -0.03) continue;
-		const at = ctx.currentTime + Math.max(0, delay);
-		for (const buffer of event.buffers) {
-			if (!buffer) continue;
-			const source = ctx.createBufferSource();
-			source.buffer = buffer;
-			const gain = ctx.createGain();
-			gain.gain.value = event.volume;
-			source.connect(gain).connect(master!);
-			source.start(at);
-			playing.push({ source, at });
+	if (play) {
+		// The play's sounds: only what's hit. The user's own play plays them as they happen.
+		if (!play.live) {
+			const sounds = play.judge.sounds;
+			while (next < sounds.length && sounds[next].at <= time + ahead) {
+				const sound = sounds[next++];
+				const delay = (sound.at - time) / rate / 1000;
+				if (delay < -0.03) continue;
+				const { buffers, volume: eventVolume } = soundBuffers(sound);
+				schedule(buffers, eventVolume, delay);
+			}
+		}
+		updateLoops(play.judge, time);
+	} else {
+		// No osu!standard objects (taiko, mania): the beatmap's hitsounds as they are
+		const events = chart.events;
+		while (next < events.length && events[next].time <= time + ahead) {
+			const event = events[next++];
+			const delay = (event.time - time) / rate / 1000;
+			if (delay < -0.03) continue;
+			schedule(event.buffers, event.volume, delay);
 		}
 	}
 	const now = ctx.currentTime;
@@ -446,13 +708,22 @@ export function startHitsounds() {
 		load();
 	});
 	let last = '';
-	userSettings.subscribe(() => {
+	const reload = () => {
 		const s = settings();
-		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.muted}:${s.skinsFolder}`;
+		const song = get(currentSong).song;
+		const key = `${s.on}:${s.skin}:${s.beatmap}:${s.muted}:${s.skinsFolder}:${songKey(song)}`;
 		if (key === last) return;
 		last = key;
-		if (!s.on) stopScheduled();
+		if (!s.on) {
+			stopScheduled();
+			stopLoops();
+		}
 		load();
+	};
+	userSettings.subscribe(reload);
+	activePlay.subscribe(() => {
+		restart = true;
+		reload();
 	});
 	// Skins downloaded, imported or removed: read the folders again
 	skinsChanged.subscribe(() => forgetSkinFolders());
