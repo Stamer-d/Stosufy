@@ -21,9 +21,13 @@ import { builtinSample } from './builtin';
 import { skinFolder, hasDefaultSkin, downloadDefaultSkin, skinsChanged, BUILTIN } from './skins';
 import type { MapSet, StoredMapSet } from '../types';
 
+export type SampleSource = 'beatmap' | 'skin' | 'default' | 'simple';
+
 export interface HitsoundStatus {
 	state: 'off' | 'loading' | 'ready' | 'unavailable' | 'error';
 	message?: string;
+	/** How many of the song's different samples come from where */
+	sources?: Partial<Record<SampleSource, number>>;
 }
 
 export const hitsoundStatus = writable<HitsoundStatus>({ state: 'off' });
@@ -41,7 +45,7 @@ function settings() {
 		skin: s.hitsoundSkin ?? null,
 		// Off by default: many maps mute the hitnormal with their own silent samples, and a
 		// music player should sound like the skin on every circle
-		beatmap: s.beatmapHitsounds ?? false,
+		beatmap: s.mapHitsounds ?? false,
 		offset: s.hitsoundOffset ?? 0,
 		skinsFolder: s.skinsFolder ?? null
 	};
@@ -137,7 +141,8 @@ async function resolve(
 	sample: HitSample,
 	beatmap: Folder | null,
 	skin: Folder | null,
-	fallback: Folder | null
+	fallback: Folder | null,
+	from: (source: SampleSource) => void = () => {}
 ) {
 	const sound = sample.sound === 'slidertick' ? 'slidertick' : `hit${sample.sound}`;
 	const name = `${sample.set}-${sound}`;
@@ -149,15 +154,25 @@ async function resolve(
 				: [name, sound];
 		for (const candidate of names) {
 			const own = await fromFolder(beatmap, candidate);
-			if (own !== undefined) return own;
+			if (own !== undefined) {
+				from('beatmap');
+				return own;
+			}
 		}
 	}
-	for (const folder of [skin, fallback]) {
+	for (const [folder, source] of [
+		[skin, 'skin'],
+		[fallback, 'default']
+	] as const) {
 		for (const candidate of [name, sound]) {
 			const skinned = await fromFolder(folder, candidate);
-			if (skinned !== undefined) return skinned;
+			if (skinned !== undefined) {
+				from(source);
+				return skinned;
+			}
 		}
 	}
+	from('simple');
 	return builtinSample(audioContext(), sample.set, sample.sound);
 }
 
@@ -275,10 +290,12 @@ async function load() {
 		]);
 		// Each different sample once
 		const resolved = new Map<string, Promise<AudioBuffer | null>>();
+		const sources: Partial<Record<SampleSource, number>> = {};
+		const count = (source: SampleSource) => (sources[source] = (sources[source] ?? 0) + 1);
 		const sound = (sample: HitSample) => {
 			const id = `${sample.set}:${sample.sound}:${sample.index}:${sample.file ?? ''}`;
 			if (!resolved.has(id))
-				resolved.set(id, resolve(sample, beatmapFolder, skinSamples, defaultSamples));
+				resolved.set(id, resolve(sample, beatmapFolder, skinSamples, defaultSamples, count));
 			return resolved.get(id)!;
 		};
 		const ready = await Promise.all(
@@ -291,7 +308,12 @@ async function load() {
 		if (loadingKey !== key) return;
 		chart = { key: key!, events: ready };
 		restart = true;
-		hitsoundStatus.set({ state: 'ready' });
+		// The skin is the osu! default sounds unless one is chosen
+		if (!skin && sources.default) {
+			sources.skin = (sources.skin ?? 0) + sources.default;
+			delete sources.default;
+		}
+		hitsoundStatus.set({ state: 'ready', sources });
 	} catch (error) {
 		console.error('Could not load the hitsounds:', error);
 		if (loadingKey === key) hitsoundStatus.set({ state: 'error', message: String(error) });

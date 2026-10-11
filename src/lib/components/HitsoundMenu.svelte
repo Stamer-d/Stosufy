@@ -12,11 +12,18 @@
 		BUILTIN
 	} from '#lib/hitsounds/skins.ts';
 
+	const SOURCE_NAMES = {
+		skin: 'skin',
+		default: 'osu! default',
+		beatmap: 'beatmap',
+		simple: 'simple'
+	};
+
 	let open = $state(false);
 	let root = $state(null);
 	let settings = $derived($userSettings.settings ?? {});
 	let on = $derived(settings.hitsounds ?? false);
-	let beatmapSounds = $derived(settings.beatmapHitsounds ?? false);
+	let beatmapSounds = $derived(settings.mapHitsounds ?? false);
 	let skins = $state([]);
 
 	$effect(() => {
@@ -86,7 +93,7 @@
 			{@render toggle('Hitsounds', on, (checked) => updateUserSettings({ hitsounds: checked }))}
 			{#if on}
 				{@render toggle('Beatmap hitsounds', beatmapSounds, (checked) =>
-					updateUserSettings({ beatmapHitsounds: checked })
+					updateUserSettings({ mapHitsounds: checked })
 				)}
 				<div class="px-2.5 pt-2 pb-1">
 					<p class="text-xs font-bold uppercase tracking-wider text-secondary-600 mb-1.5">Skin</p>
@@ -126,6 +133,15 @@
 						on:change={(e) => updateUserSettings({ hitsoundVolume: e.detail })}
 					/>
 				</div>
+				{#if $hitsoundStatus.state === 'ready' && $hitsoundStatus.sources}
+					<!-- Where this song's sounds come from, to see at a glance if the skin is used -->
+					<p class="px-2.5 pb-1 text-xs text-secondary-600" aria-live="polite">
+						From:
+						{Object.entries($hitsoundStatus.sources)
+							.map(([source, n]) => `${SOURCE_NAMES[source]} ${n}`)
+							.join(' · ')}
+					</p>
+				{/if}
 				{#if $skinTask.state !== 'idle' || ['loading', 'unavailable', 'error'].includes($hitsoundStatus.state)}
 					<p
 						class="px-2.5 pb-1 text-xs {$skinTask.state === 'error' ||

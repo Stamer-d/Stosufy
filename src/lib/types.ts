@@ -183,8 +183,12 @@ export interface Settings {
 	hitsoundVolume?: number;
 	/** Folder name of the osu! skin for the hitsounds; null for the built-in ones */
 	hitsoundSkin?: string | null;
-	/** Use the beatmap's own samples where it has them (like osu!) */
-	beatmapHitsounds?: boolean;
+	/**
+	 * Play the beatmap's own samples where it has them, instead of the skin's (off: every
+	 * circle sounds like the skin, like playing). Replaces beatmapHitsounds, which was on
+	 * before; a new name, so it's off for everyone.
+	 */
+	mapHitsounds?: boolean;
 	/** Hitsounds later (positive) or earlier, in ms */
 	hitsoundOffset?: number;
 	/** The osu! Skins folder, if not the default one (per device) */

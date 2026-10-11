@@ -192,8 +192,8 @@
 
 		{#snippet beatmapSwitch()}
 			{@render switchControl(
-				settings.beatmapHitsounds ?? false,
-				(checked) => updateUserSettings({ beatmapHitsounds: checked }),
+				settings.mapHitsounds ?? false,
+				(checked) => updateUserSettings({ mapHitsounds: checked }),
 				'Beatmap hitsounds'
 			)}
 		{/snippet}
