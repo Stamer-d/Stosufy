@@ -6,6 +6,7 @@ import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
 import { userSettings, updateUserSettings } from './user';
 import { setVolume, toggleMute, DEFAULT_VOLUME } from './mixer';
 import { goto } from '$app/navigation';
+import { toggleHitsounds } from '../hitsounds/player';
 import {
 	togglePlayback,
 	skipForward,
@@ -31,7 +32,8 @@ export type KeybindAction =
 	| 'search'
 	| 'queue'
 	| 'focusMode'
-	| 'lyrics';
+	| 'lyrics'
+	| 'hitsounds';
 
 export type KeybindScope = 'app' | 'global';
 
@@ -46,6 +48,7 @@ export const KEYBIND_ACTIONS: { id: KeybindAction; label: string; group: string 
 	{ id: 'seekBackward', label: 'Back 5 seconds', group: 'Playback' },
 	{ id: 'shuffle', label: 'Shuffle', group: 'Playback' },
 	{ id: 'repeat', label: 'Repeat', group: 'Playback' },
+	{ id: 'hitsounds', label: 'Hitsounds', group: 'Playback' },
 	{ id: 'volumeUp', label: 'Volume up', group: 'Volume' },
 	{ id: 'volumeDown', label: 'Volume down', group: 'Volume' },
 	{ id: 'mute', label: 'Mute', group: 'Volume' },
@@ -70,7 +73,8 @@ export const DEFAULT_KEYBINDS: Record<KeybindScope, Record<KeybindAction, Keybin
 		search: 'Ctrl+KeyK',
 		queue: 'KeyQ',
 		focusMode: 'KeyF',
-		lyrics: 'KeyL'
+		lyrics: 'KeyL',
+		hitsounds: 'KeyH'
 	},
 	global: {
 		playPause: 'MediaPlayPause',
@@ -86,7 +90,8 @@ export const DEFAULT_KEYBINDS: Record<KeybindScope, Record<KeybindAction, Keybin
 		search: null,
 		queue: null,
 		focusMode: null,
-		lyrics: null
+		lyrics: null,
+		hitsounds: null
 	}
 };
 
@@ -216,6 +221,7 @@ const ACTIONS: Record<KeybindAction, Handler> = {
 	},
 	queue: () => queuePanelOpen.update((open) => !open),
 	lyrics: () => toggleLyrics(),
+	hitsounds: () => toggleHitsounds(),
 	focusMode: () => {
 		if (get(songQueue).audio) focusMode.update((on) => !on);
 	}

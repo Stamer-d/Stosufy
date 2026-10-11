@@ -104,6 +104,7 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 			background: await existing(diff.background),
 			// Difficulties with their own storyboard read it from their .osu file
 			osuFile: diff.storyboard ? diff.filePath : undefined,
+			chartFile: diff.filePath,
 			timing: diff.timingPoints,
 			kiai: diff.kiai
 		};
@@ -141,6 +142,7 @@ async function readSetFolder(folder: string, name: string): Promise<StoredMapSet
 		videoOffset: videoInfo?.offset ?? 0,
 		hasVideo: !!video,
 		storyboard: withStoryboard ? { dir: folder, osb: osbHasStoryboard ? osb : null } : null,
+		hitsounds: { dir: folder },
 		hasStoryboard: withStoryboard,
 		timing,
 		source: 'osu',

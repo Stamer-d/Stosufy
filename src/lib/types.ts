@@ -19,6 +19,8 @@ export interface Beatmap {
 	kiai?: import('./osuFile').KiaiSection[];
 	/** The .osu file of this difficulty, for its own storyboard */
 	osuFile?: string;
+	/** The .osu file of this difficulty, for its hitsounds */
+	chartFile?: string;
 	/** Integrated loudness of this difficulty's audio in LUFS */
 	loudness?: number;
 	[key: string]: any;
@@ -76,6 +78,8 @@ interface MapSetInfo {
 	source?: 'osu';
 	/** Integrated loudness in LUFS, measured the first time the song plays */
 	loudness?: number;
+	/** The beatmap's own hitsound samples and .osu files (see hitsounds/player.ts) */
+	hitsounds?: { dir: string } | null;
 	[key: string]: any;
 }
 
@@ -179,6 +183,18 @@ export interface Settings {
 	crossfade?: number;
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
+	/** Play the beatmap's hitsounds with the music */
+	hitsounds?: boolean;
+	/** Hitsound volume relative to the music, 0–1 */
+	hitsoundVolume?: number;
+	/** Folder name of the osu! skin for the hitsounds; null for the built-in ones */
+	hitsoundSkin?: string | null;
+	/** Use the beatmap's own samples where it has them (like osu!) */
+	beatmapHitsounds?: boolean;
+	/** Hitsounds later (positive) or earlier, in ms */
+	hitsoundOffset?: number;
+	/** The osu! Skins folder, if not the default one (per device) */
+	skinsFolder?: string | null;
 	/** Show Japanese lyrics in romaji (Latin letters) */
 	lyricsRomaji?: boolean;
 	/** Lyrics moved earlier or later (seconds), by song; see lyrics.ts */

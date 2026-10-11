@@ -18,6 +18,7 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { startKeybinds } from '#lib/stores/keybinds.ts';
 	import { startSettingsSync } from '#lib/stores/settingsSync.ts';
+	import { startHitsounds } from '#lib/hitsounds/player.ts';
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
@@ -48,6 +49,7 @@
 		startBeatEffects();
 		startKeybinds();
 		startSettingsSync();
+		startHitsounds();
 		// Invites to listening sessions: stosufynew://listen/CODE
 		const joinFromLink = (urls) => {
 			const link = urls?.find((url) => url.includes('listen/'));

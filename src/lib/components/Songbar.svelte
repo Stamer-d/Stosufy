@@ -16,6 +16,7 @@
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
 	import { toggleLyrics } from '#lib/stores/keybinds.ts';
+	import { toggleHitsounds } from '#lib/hitsounds/player.ts';
 	import { page } from '$app/state';
 	import {
 		updateUserSettings,
@@ -93,6 +94,7 @@
 		}
 	});
 	$: shuffled = $userSettings.settings?.shuffle || false;
+	$: hitsoundsOn = $userSettings.settings?.hitsounds ?? false;
 	$: repeat = $userSettings.settings?.repeat ?? 'off';
 	$: canSkipForward = hasNext($songQueue, $upNext, repeat);
 
@@ -217,6 +219,15 @@
 					<span class="icon-[mingcute--video-line] size-5"></span>
 				</button>
 			{/if}
+			<button
+				title={hitsoundsOn ? 'Turn hitsounds off' : 'Play hitsounds'}
+				aria-label="Hitsounds"
+				aria-pressed={hitsoundsOn}
+				class="{ICON_BUTTON} {hitsoundsOn ? 'text-primary-500' : 'text-white/60 hover:text-white'}"
+				on:click={toggleHitsounds}
+			>
+				<span class="icon-[mingcute--drum-line] size-5"></span>
+			</button>
 			<button
 				title="Lyrics"
 				aria-label="Lyrics"

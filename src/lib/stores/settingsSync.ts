@@ -10,7 +10,7 @@ import { user, userSettings, userSettingsLoaded } from './user';
 import type { Settings } from '../types';
 
 /** Settings that belong to the device, not the account */
-const DEVICE_ONLY: (keyof Settings)[] = ['volume', 'muted'];
+const DEVICE_ONLY: (keyof Settings)[] = ['volume', 'muted', 'skinsFolder'];
 const SAVE_AFTER = 2000;
 
 function shared(settings: Settings = {}) {

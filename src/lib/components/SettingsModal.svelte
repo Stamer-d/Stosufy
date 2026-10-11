@@ -24,6 +24,7 @@
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
 	import VisibilityPicker from './VisibilityPicker.svelte';
 	import KeybindSettings from './KeybindSettings.svelte';
+	import HitsoundSettings from './HitsoundSettings.svelte';
 
 	let osuFolder = $state(null);
 	defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
@@ -415,6 +416,10 @@
 							on:change={(e) => updateUserSettings({ crossfade: e.detail })}
 						/>
 					</div>
+				</section>
+				<section>
+					{@render heading('Hitsounds')}
+					<HitsoundSettings />
 				</section>
 				<section>
 					{@render heading('Lyrics')}

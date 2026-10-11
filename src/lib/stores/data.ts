@@ -142,6 +142,11 @@ export async function deleteSong(setId: number | string) {
 	if (storyboard?.dir?.startsWith(mapSetsDir)) {
 		await remove(storyboard.dir, { baseDir: BaseDirectory.Home, recursive: true }).catch(() => {});
 	}
+	// The hitsounds (also the .osu files fetched for songs downloaded before they were saved)
+	await remove(`${mapSetsDir}/${setId}-hitsounds`, {
+		baseDir: BaseDirectory.Home,
+		recursive: true
+	}).catch(() => {});
 	// Only files in Stosufy's own folder: songs imported from osu! keep their files
 	for (const filePath of [audioFilePath, background, thumbnail, video]) {
 		if (!filePath?.startsWith(mapSetsDir)) continue;
@@ -340,7 +345,8 @@ async function processWithWorker(
 							hasVideo: !!video,
 							timing: event.data.timing ?? [],
 							storyboard: event.data.storyboard ?? null,
-							hasStoryboard: !!event.data.storyboard
+							hasStoryboard: !!event.data.storyboard,
+							hitsounds: event.data.hitsounds ?? null
 						};
 						if (video && isPlayableVideo(video.path)) {
 							mapSetData = { ...mapSetData, video: video.path, videoOffset: video.offset };
@@ -360,6 +366,7 @@ async function processWithWorker(
 							if (info?.timing) element.timing = info.timing;
 							if (info?.kiai) element.kiai = info.kiai;
 							if (info?.osuFile) element.osuFile = info.osuFile;
+							if (info?.chartFile) element.chartFile = info.chartFile;
 						});
 
 						await updateMapsetData(mapSetData);
@@ -758,6 +765,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 			timing: mapsetData.timing,
 			storyboard: mapsetData.storyboard,
 			hasStoryboard: mapsetData.hasStoryboard,
+			hitsounds: mapsetData.hitsounds ?? null,
 			beatmaps: {},
 			created_at: mapsetData.createdAt || Date.now()
 		};
@@ -776,6 +784,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 			hasVideo: mapsetData.hasVideo ?? updatedMapData[setId].hasVideo,
 			storyboard: mapsetData.storyboard ?? updatedMapData[setId].storyboard,
 			hasStoryboard: mapsetData.hasStoryboard ?? updatedMapData[setId].hasStoryboard,
+			hitsounds: mapsetData.hitsounds ?? updatedMapData[setId].hitsounds,
 			timing: mapsetData.timing ?? updatedMapData[setId].timing
 		});
 	}
@@ -804,6 +813,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 				timing: beatmap.timing || existing?.timing,
 				kiai: beatmap.kiai || existing?.kiai,
 				osuFile: beatmap.osuFile || existing?.osuFile,
+				chartFile: beatmap.chartFile || existing?.chartFile,
 				loudness: existing?.loudness
 			};
 		});

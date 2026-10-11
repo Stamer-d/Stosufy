@@ -63,6 +63,7 @@ self.onmessage = async function (event) {
 					timing: result.timing,
 					maps: result.maps,
 					storyboard: result.storyboard,
+					hitsounds: result.hitsounds,
 					beatmapId: result.mapId,
 					setId: data.setId
 				},
@@ -286,6 +287,25 @@ async function extractAudioFromBeatmap(
 			if (maps[beatmapId]) maps[beatmapId].osuFile = osuFile;
 		}
 
+		// The hitsounds: each difficulty's .osu file and the beatmap's own samples (small audio
+		// files next to the .osu files that aren't a song)
+		const hitsoundDir = await fs.path.join(mapSetsDir, `${setId}-hitsounds`);
+		await fs.mkdir(hitsoundDir);
+		for (const diff of diffs) {
+			const chartFile = await fs.path.join(hitsoundDir, `${diff.beatmapId}.osu`);
+			await fs.writeFile(chartFile, new TextEncoder().encode(diff.content));
+			if (maps[diff.beatmapId]) maps[diff.beatmapId].chartFile = chartFile;
+		}
+		const songFiles = new Set(diffs.map((diff) => diff.audioFile.toLowerCase()));
+		for (const entry of Object.values(zip.files)) {
+			const name = entry.name;
+			if (entry.dir || name.includes('/') || !/\.(wav|ogg|mp3)$/i.test(name)) continue;
+			if (songFiles.has(name.toLowerCase())) continue;
+			const data = await entry.async('uint8array');
+			if (data.byteLength > 2 * 1024 * 1024) continue;
+			await fs.writeFile(await fs.path.join(hitsoundDir, sanitizeFilename(name)), data);
+		}
+
 		// Clean up
 		await fs.remove(extractDir);
 
@@ -302,6 +322,7 @@ async function extractAudioFromBeatmap(
 				timing,
 				maps,
 				storyboard: storyboard && { dir: storyboard.dir, osb: storyboard.osb },
+				hitsounds: { dir: hitsoundDir },
 				mapId: first.beatmapId
 			};
 		}
