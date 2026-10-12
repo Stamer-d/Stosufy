@@ -61,14 +61,14 @@
 			tip: 'A small tempo change, nobody will notice'
 		},
 		tricky: {
-			label: 'Tricky',
+			label: 'Tempo ride',
 			class: 'text-amber-300 bg-amber-400/15',
-			tip: 'A bigger tempo change: a filter mix hides it'
+			tip: 'Tempos far apart: they meet in the middle, slowly, and the new song glides back after'
 		},
 		clash: {
-			label: 'Different tempos',
+			label: 'No beat to match',
 			class: 'text-white/70 bg-white/10',
-			tip: 'Too far apart to blend: the old one echoes out'
+			tip: 'A song without a tempo: the old one echoes out'
 		}
 	};
 	const typeName = (id) => TRANSITIONS.find((t) => t.id === id)?.name ?? id;

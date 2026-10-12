@@ -10,6 +10,7 @@
 
 	let meters = $state({ A: 0, B: 0, master: 0 });
 	let progress = $state(0);
+	let waitBars = $state(0);
 
 	onMount(() => {
 		let frame;
@@ -24,6 +25,10 @@
 			progress = t
 				? Math.max(0, Math.min(1, (mixer.ctx.currentTime - t.start) / (t.end - t.start)))
 				: 0;
+			waitBars =
+				t && mixer.ctx.currentTime < t.start
+					? Math.ceil((t.start - mixer.ctx.currentTime) / (t.beat * 4))
+					: 0;
 			frame = requestAnimationFrame(loop);
 		};
 		frame = requestAnimationFrame(loop);
@@ -219,7 +224,10 @@
 				>
 					<span class="absolute inset-y-0 left-0 bg-white/25" style="width: {progress * 100}%"
 					></span>
-					<span class="relative">STOP MIX {mix.transition.from}→{mix.transition.to}</span>
+					<span class="relative"
+						>{waitBars ? `MIX IN ${waitBars} ${waitBars === 1 ? 'BAR' : 'BARS'}` : 'STOP MIX'}
+						{mix.transition.from}→{mix.transition.to}</span
+					>
 				</button>
 			{:else}
 				<button

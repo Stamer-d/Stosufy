@@ -47,12 +47,12 @@
 		return Math.min(...[1, 2, 0.5].map((f) => Math.abs((leadBpm * f) / bpm - 1)));
 	}
 	const fitOf = (d) =>
-		d == null ? null : d <= 0.03 ? 'perfect' : d <= 0.07 ? 'good' : d <= 0.15 ? 'tricky' : 'clash';
+		d == null ? null : d <= 0.03 ? 'perfect' : d <= 0.07 ? 'good' : d <= 0.43 ? 'tricky' : 'clash';
 	const FIT = {
 		perfect: { label: 'Perfect', class: 'bg-green-400/20 text-green-300' },
 		good: { label: 'Good', class: 'bg-lime-400/15 text-lime-300' },
-		tricky: { label: 'Tricky', class: 'bg-amber-400/15 text-amber-300' },
-		clash: { label: 'Echo out', class: 'bg-white/10 text-white/50' }
+		tricky: { label: 'Tempo ride', class: 'bg-amber-400/15 text-amber-300' },
+		clash: { label: 'No beat', class: 'bg-white/10 text-white/50' }
 	};
 
 	let songs = $derived.by(() => {

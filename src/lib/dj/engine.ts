@@ -673,11 +673,15 @@ export class Deck {
 		const own = bpmOf(sectionAt(this.grid, this.position())) || this.state.baseBpm;
 		const target = master.bpm();
 		if (!own || !target) return null;
-		for (const factor of [1, 2, 0.5, 1.5, 2 / 3]) {
+		// Its own tempo, or half or double of it: whichever is nearest (beats and bars line
+		// up with all three, so any two songs can be matched)
+		let best: { rate: number; factor: number } | null = null;
+		for (const factor of [1, 2, 0.5]) {
 			const rate = (target * factor) / own;
-			if (rate >= 0.85 && rate <= 1.15) return { rate, factor };
+			if (!best || Math.abs(Math.log(rate)) < Math.abs(Math.log(best.rate)))
+				best = { rate, factor };
 		}
-		return null;
+		return best && best.rate >= 0.7 && best.rate <= 1.43 ? best : null;
 	}
 
 	/** Takes the other deck's tempo and lines up the beats and bars with it */
@@ -1159,19 +1163,21 @@ class Mixer {
 	}
 
 	/**
-	 * How a pro DJ mixes two songs, from what's in them (see analysis.ts):
-	 * - Tempos within 8 % (the new song plays at the old one's tempo, gliding back after):
-	 *   an EQ blend. The new song's intro (up to where it gets going) plays under the old
-	 *   one's outro, or its last phrase if it has none, both on their phrases; the basslines
-	 *   swap on the one (never two at once), the old song's mids and highs go in the last
-	 *   phrase and it fades out over two beats after the swap.
-	 * - Keys that clash (after the tempo change), or no intro to speak of: the same with only
-	 *   the new song's drums until the swap.
-	 * - Tempos further apart: an echo out on the last beat of a phrase, ringing out over a
-	 *   few bars, and the new song in on the one at its own tempo.
+	 * How a pro DJ mixes two songs, from what's in them (see analysis.ts): always an EQ blend,
+	 * beatmatched. The new song's intro (up to where it gets going) plays under the old one's
+	 * outro, or its last phrase if it has none, both on their phrases; the basslines swap on
+	 * the one (never two at once), the old song's mids and highs go in the last phrase, its
+	 * last beat goes into its echo and it fades out over the bar after the swap.
+	 * - Keys that clash (after the tempo change), or no intro to speak of: only the new song's
+	 *   drums until the swap.
+	 * - Tempos up to 6 % apart: the new song plays at the old one's tempo; further apart they
+	 *   meet in the middle (the old song moves there slowly before the mix). Either way the new
+	 *   song glides back to its own tempo after it. Half and double tempo count too.
+	 * - An echo out only for a song without a beat, or one that's ending right now.
 	 * With Auto DJ it leaves over the playing song's end, or, in a long song, in a quiet
 	 * breakdown after one of its drops, so the new song's drop comes where the old one's next
-	 * drop would have (see exitWindow); mixed by hand, on the next phrase (or bar).
+	 * drop would have (see exitWindow); mixed by hand, from the next 4 bars, so the swap lands
+	 * on a phrase.
 	 */
 	proPlan(from: Deck, to: Deck, auto = false) {
 		const fit = this.compat(from, to);
@@ -1182,10 +1188,19 @@ class Mixer {
 		const now = pos + 0.15;
 		const bar = a.bar;
 		const rate = fit.change != null ? 1 + fit.change : 1;
-		const keys = keyFit(a.key, b.key, rate);
-		// Up to 8 % a song can be played faster or slower under the other (and glides back to
-		// its own tempo after the mix); further apart, beats can't be matched for long
-		const tempoClose = fit.rating !== 'clash' && Math.abs(fit.change ?? 1) <= 0.08;
+		// (The pitch between the two moves with the tempo change, wherever it's made)
+		const keys = keyFit(a.key, b.key, rate / from.rate);
+		const canBlend = fit.rating !== 'clash';
+		// Tempos more than 6 % apart meet in the middle: the old song moves halfway, slowly,
+		// before the mix, the new one plays there and glides back to its own tempo after it
+		// (half the change each, never a jump: the pitch moves with the tempo)
+		const native = from.bpm() / from.rate;
+		// The new song's tempo as it lines up with the old one's (its own, or half or double)
+		const newBpm = from.bpm() / rate;
+		const gap = newBpm / native - 1;
+		const meet = canBlend && Math.abs(gap) > 0.06;
+		const shared = Math.sqrt(native * newBpm);
+		const rampTo = meet ? shared / native - 1 : null;
 
 		// Where the new song starts: its cue, or where the user put it
 		const cue = Math.max(
@@ -1214,23 +1229,49 @@ class Mixer {
 		const until = exit?.until ?? a.lastBar;
 		const where = exit?.mid ? ' in the breakdown' : '';
 		const longest = (limit: number) => [32, 16, 8].find((n) => n <= limit) ?? 0;
+		// Mixed by hand with tempos to meet: a few bars for the old song to get there first
+		const ready =
+			!exit && meet && Math.abs(from.state.tempo - rampTo!) > 0.003 ? now + 4 * bar : now;
 
 		const blend = () => {
-			// How far back from where the old song ends the mix may start
-			// (a phrase: most of a last chorus plays on its own)
-			const back = exit ? Math.max(now, phraseFloor(a, exit.from - (exit.mid ? 0 : 8 * bar))) : now;
-			const start = nextBoundary(back);
-			const room = Math.floor((until - start) / bar + 1e-6);
-			// Over the new song's intro, or (too short) its start with only its highs
 			const drums = keys === 0 || introBars < 8;
-			const bars = longest(drums ? Math.min(room, 16) : Math.min(introBars, room, 32));
-			if (bars < 8) return null;
-			// With a long outro: so the mix ends where the old song does (or the new song's
-			// drop takes the place of the old one's next drop)
-			let startAt = start;
-			if (auto) {
-				const late = phraseFloor(a, until - bars * bar);
-				if (late > startAt) startAt = late;
+			let bars = 0;
+			let startAt = 0;
+			if (exit) {
+				// Auto DJ: how far back from where the old song ends the mix may start (a phrase:
+				// most of a last chorus plays on its own)
+				const back = Math.max(now, phraseFloor(a, exit.from - (exit.mid ? 0 : 8 * bar)));
+				const start = nextBoundary(back);
+				const room = Math.floor((until - start) / bar + 1e-6);
+				// Over the new song's intro, or (too short) its start with only its highs
+				bars = longest(drums ? Math.min(room, 16) : Math.min(introBars, room, 32));
+				// Little left of the old song: a short one still beats an echo
+				if (bars < 8 && room >= 4) bars = 4;
+				if (bars < 4) return null;
+				// With a long outro: so the mix ends where the old song does (or the new song's
+				// drop takes the place of the old one's next drop)
+				startAt = Math.max(start, phraseFloor(a, until - bars * bar));
+			} else {
+				// By hand: right away on the next 4 bars, and so the swap lands on a phrase of
+				// the old song (12 or 4 bars from the middle of a phrase, 16 or 8 from its start)
+				const half = bar * 4;
+				startAt = a.anchor + Math.ceil((ready - a.anchor) / half - 1e-6) * half;
+				const toPhrase = Math.round((phraseCeil(a, startAt + 0.01) - startAt) / bar);
+				const room = Math.floor((a.lastBar - startAt) / bar + 1e-6);
+				const limit = Math.min(
+					room,
+					16,
+					drums ? (toPhrase < 8 ? 12 : 8) : Math.max(introBars, toPhrase)
+				);
+				bars = [toPhrase + 8, toPhrase].find((n) => n >= 8 && n <= limit) ?? 0;
+				// Mid-phrase with no room for 12 bars: on the next phrase, 8 bars (a DJ waits for
+				// the phrase rather than rush a 4-bar mix)
+				if (!bars && toPhrase < 8 && room >= toPhrase + 8) {
+					startAt += toPhrase * bar;
+					bars = 8;
+				}
+				if (bars < 8 && room >= 4) bars = Math.min(room, toPhrase);
+				if (bars < 4) return null;
 			}
 			// The new song so it gets going right on the swap, if its intro is long enough
 			const lead = body - bars * b.bar;
@@ -1249,13 +1290,34 @@ class Mixer {
 				drums,
 				swap: 1,
 				onOne: false,
-				why: `Blend${where} over ${bars} bars (${how}), the basslines swap on the one`
+				rampTo,
+				why:
+					`Blend${where} over ${bars} bars (${how}), the basslines swap on the one` +
+					(meet ? ` · the tempos meet at ${Math.round(shared)} BPM` : '')
 			};
 		};
 
-		let plan = tempoClose ? blend() : null;
+		let plan = canBlend ? blend() : null;
+		if (!plan && canBlend) {
+			// Almost at the end: two bars from the next one, still beatmatched
+			const startAt = nextDownbeat(from.grid, now, 0.1);
+			if (a.lastBar - startAt >= bar * 2 - 0.05)
+				plan = {
+					type: 'blend' as TransitionType,
+					bars: 2,
+					startAt,
+					inPoint: userPlaced ? placed : from0,
+					fit,
+					drums: false,
+					swap: 1,
+					onOne: false,
+					rampTo: null,
+					why: 'Quick blend: the song is nearly over'
+				};
+		}
 		if (!plan) {
-			// Echo out on the last beat of a phrase, ringing on over the new song, which comes in
+			// (Only for a song without a beat, or one that's ending right now.) Echo out on the
+			// last beat of a phrase, ringing on over the new song, which comes in
 			// on the one at its own tempo. Mid-song, after the old song's drop: straight into
 			// the new song's drop, the energy stays up
 			const earliest = exit ? Math.max(now, exit.from) : now;
@@ -1274,11 +1336,12 @@ class Mixer {
 				drums: false,
 				swap: 1,
 				onOne: true,
+				rampTo: null as number | null,
 				why: slam
 					? 'Echo out after the drop, straight into the next drop'
-					: !tempoClose
-						? 'Echo out: the tempos are too far apart to blend'
-						: 'Echo out on the phrase, the new song in on the one'
+					: !canBlend
+						? 'Echo out: no beat to match'
+						: 'Echo out: too little left of the song to blend'
 			};
 		}
 		return plan;
@@ -1304,6 +1367,7 @@ class Mixer {
 		drums?: boolean;
 		swap?: number;
 		onOne?: boolean;
+		rampTo?: number | null;
 		why?: string;
 	} {
 		const fit = this.compat(from, to);
@@ -1311,7 +1375,7 @@ class Mixer {
 			const pro = this.proPlan(from, to, auto);
 			if (pro) return pro;
 			// Not analysed (yet): a blend, or an echo out if the tempos don't go
-			type = fit.rating === 'clash' || fit.rating === 'tricky' ? 'echo' : 'bassswap';
+			type = fit.rating === 'clash' ? 'echo' : 'bassswap';
 			bars = type === 'echo' ? 2 : 16;
 		}
 		if (
@@ -1376,11 +1440,17 @@ class Mixer {
 			to.state = { ...to.state, synced: true };
 			from.state = { ...from.state, synced: false };
 		}
-		const section = sectionAt(from.grid, from.position());
-		const beatSeconds = (section?.beat ?? 0.5) / from.rate;
-		const meter = section?.meter ?? 4;
 		const pos = from.position();
-		const start = this.ctx.currentTime + Math.max(0.05, (plan.startAt - pos) / from.rate);
+		// Tempos to meet: the old song gets there before the mix (if it isn't already)
+		if (plan.rampTo != null && Math.abs(from.state.tempo - plan.rampTo) > 0.003) {
+			const seconds = ((plan.startAt - pos - 0.05) / (from.rate + (1 + plan.rampTo))) * 2;
+			if (seconds > 0.5) this.startRamp(from, plan.rampTo, seconds);
+		}
+		const finalRate = this.rampState?.deck === from ? 1 + this.rampState.to : from.rate;
+		const section = sectionAt(from.grid, from.position());
+		const beatSeconds = (section?.beat ?? 0.5) / finalRate;
+		const meter = section?.meter ?? 4;
+		const start = this.ctx.currentTime + Math.max(0.05, this.realTimeTo(from, plan.startAt));
 		// An echo out starts on the old song's last beat: the new one comes in on the one after
 		const lead = plan.onOne ? beatSeconds : 0;
 		if (!to.state.playing) {
@@ -1400,7 +1470,11 @@ class Mixer {
 			reverb: from.state.reverb,
 			volume: from.state.volume
 		};
-		this.before[to.id] = { eq: to.state.eq, filter: to.state.filter };
+		this.before[to.id] = {
+			eq: to.state.eq,
+			filter: to.state.filter,
+			volume: Math.max(to.state.volume, 0.9)
+		};
 		to.set({
 			volume: Math.max(to.state.volume, 0.9),
 			kill: { low: false, mid: false, high: false }
@@ -1545,10 +1619,13 @@ class Mixer {
 				// its bass to the swap; its mids and highs go (and it thins out) in its last
 				// phrase. On the swap (the drop) the basslines change places on the one.
 				const swapAt = t.swap ?? 1;
+				const full = was[t.to]?.volume ?? 1;
 				const barPart = beat * 4;
 				const fadeFrom = Math.max(0, swapAt - Math.min(0.5, barPart * 8));
 				const swapped = p >= swapAt - beat * 0.05;
 				to.set({
+					// A little lower until the swap: two songs at once add up
+					volume: swapped ? full : lerp(full * 0.8, full * 0.9, p / swapAt),
 					eq: {
 						high: lerp(-18, toEq.high, p / 0.35),
 						mid: t.drums ? (swapped ? toEq.mid : EQ_MIN) : lerp(-12, toEq.mid, p / 0.6),
@@ -1556,20 +1633,26 @@ class Mixer {
 					}
 				});
 				const fade = (p - fadeFrom) / Math.max(0.0001, swapAt - fadeFrom);
+				// The old song's last beat before the swap goes into its echo: its last word rings
+				// on over the new song's one while it fades out over the bar after the swap
+				const throwAt = swapAt - beat;
 				from.set({
 					eq: {
 						low: swapped ? EQ_MIN : fromEq.low,
-						mid: lerp(fromEq.mid, -14, fade),
-						high: lerp(fromEq.high, -18, fade)
+						// Not all the way down: its last word still carries into the echo
+						mid: lerp(fromEq.mid, -9, fade),
+						high: lerp(fromEq.high, -12, fade)
 					},
 					filter: swapped
-						? lerp(0.3, 0.6, (p - swapAt) / (beat * 2))
-						: lerp(was[t.from]?.filter ?? 0, 0.3, (p - (swapAt - barPart * 2)) / (barPart * 2))
+						? lerp(0.3, 0.6, (p - swapAt) / Math.max(0.0001, 1 - swapAt))
+						: lerp(was[t.from]?.filter ?? 0, 0.3, (p - (swapAt - barPart * 2)) / (barPart * 2)),
+					echo: p >= throwAt ? lerp(0, 0.7, (p - throwAt) / (beat * 0.5)) : (was[t.from]?.echo ?? 0)
 				});
-				// The new song up over its first bars; after the swap the old one fades in two beats
+				// The new song up over its first bars; after the swap the old one (and its echo)
+				// fades over a bar
 				this.setCrossfader(
 					swapped
-						? lerp(0.5, toSide, (p - swapAt) / (beat * 2))
+						? lerp(0.5, toSide, (p - swapAt) / Math.max(0.0001, 1 - swapAt))
 						: lerp(fromSide, 0.5, p / Math.max(0.06, barPart * 2))
 				);
 				break;
@@ -1669,19 +1752,53 @@ class Mixer {
 		};
 		if (echo) setTimeout(done, t.onOne ? 300 : 3000);
 		else done();
-		to.set({ eq: this.before[t.to]?.eq ?? { low: 0, mid: 0, high: 0 }, filter: 0 });
+		to.set({
+			eq: this.before[t.to]?.eq ?? { low: 0, mid: 0, high: 0 },
+			filter: 0,
+			volume: this.before[t.to]?.volume ?? to.state.volume
+		});
 		// The new song leads now
 		to.unsync();
 		const tempo = to.state.tempo;
-		if (this.glide && Math.abs(tempo) > 0.004 && Math.abs(tempo) <= 0.15) {
+		if (this.glide && Math.abs(tempo) > 0.004 && Math.abs(tempo) <= 0.45) {
+			// 32 beats, longer for a bigger change (the pitch moves with it)
+			const beats = Math.max(32, Math.abs(tempo) * 400);
 			this.glideState = {
 				deck: to,
 				from: tempo,
 				start: this.ctx.currentTime + t.beat * 4,
-				end: this.ctx.currentTime + t.beat * 36
+				end: this.ctx.currentTime + t.beat * (4 + beats)
 			};
 		}
 		this.emit();
+	}
+
+	/** A deck's tempo moving slowly to another one (before a mix: the tempos meet) */
+	private rampState: { deck: Deck; from: number; to: number; start: number; end: number } | null =
+		null;
+	private startRamp(deck: Deck, to: number, seconds: number) {
+		const now = this.ctx.currentTime;
+		if (this.glideState?.deck === deck) this.glideState = null;
+		this.rampState = { deck, from: deck.state.tempo, to, start: now, end: now + seconds };
+	}
+	private stepRamp() {
+		const r = this.rampState!;
+		const p = Math.min(1, (this.ctx.currentTime - r.start) / (r.end - r.start || 1));
+		const eased = p * p * (3 - 2 * p);
+		r.deck.setTempo(r.from + (r.to - r.from) * eased, r.deck.state.synced);
+		if (p >= 1) this.rampState = null;
+	}
+	/** Real seconds until a deck plays to a point of its song (with its tempo ramp, if any) */
+	private realTimeTo(deck: Deck, songTime: number) {
+		const left = songTime - deck.position();
+		const r = this.rampState;
+		if (!r || r.deck !== deck) return left / deck.rate;
+		const rampLeft = Math.max(0, r.end - this.ctx.currentTime);
+		const end = 1 + r.to;
+		// The rest of the ramp at about the average of where it is and where it goes
+		const during = (rampLeft * (deck.rate + end)) / 2;
+		if (left <= during) return left / ((deck.rate + end) / 2);
+		return rampLeft + (left - during) / end;
 	}
 
 	private stepGlide() {
@@ -1805,6 +1922,16 @@ class Mixer {
 		const remaining = (playing.state.duration - playing.position()) / (playing.rate || 1);
 		if (this.transitionType === 'smart' && (!playing.analysis || !next.analysis) && remaining > 25)
 			return;
+		// Tempos to meet: the old song moves over the 16 bars before the mix
+		if (this.transitionType === 'smart' && !this.rampState) {
+			const pro = this.proPlan(playing, next, true);
+			if (pro?.rampTo != null && Math.abs(playing.state.tempo - pro.rampTo) > 0.003) {
+				const bar = playing.analysis!.bar;
+				const left = pro.startAt - playing.position();
+				if (left <= bar * 16 && left > bar * 1.5)
+					this.startRamp(playing, pro.rampTo, ((left - bar) * 2) / (playing.rate + 1 + pro.rampTo));
+			}
+		}
 		// A moment early, so the mix starts right on its phrase
 		if (playing.position() >= this.mixOutPoint(playing, next) - 0.3 * (playing.rate || 1)) {
 			// Not while the user works the decks (syncing, cueing…), unless the song is about
@@ -1863,6 +1990,7 @@ class Mixer {
 		this.keepSync();
 		if (this.transition) this.stepTransition();
 		if (this.glideState) this.stepGlide();
+		if (this.rampState) this.stepRamp();
 		this.autoStep();
 		if (this.recorder) this.emit();
 	}
