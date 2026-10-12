@@ -23,6 +23,8 @@ export interface SongAnalysis {
 	introEnd: number;
 	/** Where the last peak ends: the start of the outro */
 	outroStart: number;
+	/** How loud the song's peaks are (0–1, like the bars' energy) */
+	peakLevel: number;
 	/** The end of the last bar that's still heard */
 	lastBar: number;
 	/** The first downbeat that's heard */
@@ -48,6 +50,20 @@ export function phraseCeil(a: SongAnalysis, time: number) {
 export function phraseRound(a: SongAnalysis, time: number) {
 	const phrase = a.bar * PHRASE_BARS;
 	return a.anchor + Math.round((time - a.anchor) / phrase) * phrase;
+}
+
+/**
+ * Where a song really gets going after a point: its next peak, or before it the first bar
+ * nearly as loud as its peaks (a verse with vocals, the full beat). What comes before is its
+ * intro, the part a DJ plays under the song before.
+ */
+export function kickIn(a: SongAnalysis, from: number) {
+	const peak = a.drops.find((d) => d.start > from + a.bar * 2)?.start ?? Infinity;
+	const loud = a.bars.find(
+		(b) => b.start >= from + a.bar * 2 - 0.01 && b.energy >= a.peakLevel * 0.78
+	)?.start;
+	const at = Math.min(peak, loud ?? Infinity);
+	return Number.isFinite(at) ? at : a.introEnd;
 }
 
 const yieldNow = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -284,12 +300,19 @@ export async function analyzeSong(
 		anchor,
 		bars,
 		drops,
+		peakLevel: 1,
 		introEnd: 0,
 		outroStart: 0,
 		lastBar,
 		firstBar,
 		key: null
 	};
+	// The peaks' loudness: the middle of the bars in them, else of the loudest bars
+	const inPeaks = bars
+		.filter((b) => drops.some((d) => b.start >= d.start - 0.01 && b.start < d.end - 0.01))
+		.map((b) => b.energy)
+		.sort((x, y) => x - y);
+	partial.peakLevel = inPeaks.length ? inPeaks[inPeaks.length >> 1] : high;
 	partial.introEnd = drops.length ? phraseRound(partial, drops[0].start) : firstBar;
 	partial.outroStart = drops.length
 		? Math.min(lastBar, phraseRound(partial, drops[drops.length - 1].end))
