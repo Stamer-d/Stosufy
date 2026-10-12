@@ -39,17 +39,31 @@ const KILL_DB = -60;
 export const HOT_CUES = 8;
 export const TEMPO_RANGES = [0.08, 0.16, 0.5];
 
-export type TransitionType = 'smart' | 'crossfade' | 'bassswap' | 'filter' | 'echo' | 'cut';
+export type TransitionType =
+	'smart' | 'crossfade' | 'bassswap' | 'dropswap' | 'loopout' | 'filter' | 'echo' | 'brake' | 'cut';
 export const TRANSITIONS: { id: TransitionType; name: string; description: string }[] = [
 	{
 		id: 'smart',
 		name: 'Smart',
-		description: 'Picks the mix that fits the two songs, and lands the new one on its drop'
+		description:
+			'Mixes like a DJ: picks the style that fits the two songs (tempo, drops), varies it, and lands the new one on its drop'
 	},
 	{
 		id: 'bassswap',
 		name: 'Bass swap',
 		description: 'Both play, the basslines swap on the middle bar'
+	},
+	{
+		id: 'dropswap',
+		name: 'Drop swap',
+		description:
+			'The new one builds up under the old one, which stutters out; the swap hits on the drop'
+	},
+	{
+		id: 'loopout',
+		name: 'Loop out',
+		description:
+			'The old one loops and the loop gets shorter and shorter while the new one comes in'
 	},
 	{ id: 'crossfade', name: 'Crossfade', description: 'A smooth fade from one to the other' },
 	{
@@ -58,6 +72,11 @@ export const TRANSITIONS: { id: TransitionType; name: string; description: strin
 		description: 'The old one thins out, the new one opens up'
 	},
 	{ id: 'echo', name: 'Echo out', description: 'The old one echoes away, the new one takes over' },
+	{
+		id: 'brake',
+		name: 'Brake',
+		description: 'The old one stops like a record being halted as the new one takes over'
+	},
 	{ id: 'cut', name: 'Cut', description: 'A hard switch on the bar' }
 ];
 
@@ -570,6 +589,15 @@ export class Deck {
 		this.emit();
 	}
 
+	/** A loop of a number of beats from where the loop starts (or this beat) */
+	loopBeats(beats: number) {
+		if (!this.buffer) return;
+		const pos = this.position();
+		const beat = sectionAt(this.grid, pos)?.beat ?? 0.5;
+		const start = this.state.loop?.start ?? beatFloor(this.grid, pos);
+		this.setLoopRange(start, start + beats * beat, beats);
+	}
+
 	halveLoop() {
 		const loop = this.state.loop;
 		if (loop)
@@ -841,6 +869,8 @@ export interface TransitionState {
 	end: number;
 	/** One beat (s, real time) */
 	beat: number;
+	/** Where a stepped effect (shrinking loops, the brake) is */
+	stage?: number;
 }
 
 export interface AutoDjState {
@@ -1046,6 +1076,59 @@ class Mixer {
 		return { rating: rating as 'perfect' | 'good' | 'tricky', change, factor: match.factor };
 	}
 
+	/** The style Smart chose for a pair of songs (the same each time it's asked) */
+	private styles = new Map<string, [TransitionType, number]>();
+	private lastStyle: TransitionType | null = null;
+
+	/**
+	 * How a DJ would mix two songs: with the tempos close, long blends and swaps on the
+	 * drop; further apart, shorter tricks (loops, filters, a brake); far apart, an echo out
+	 * or a brake. Never the same style twice in a row if another fits.
+	 */
+	private smartStyle(
+		from: Deck,
+		to: Deck,
+		fit: ReturnType<Mixer['compat']>
+	): [TransitionType, number] {
+		const key = `${from.state.song?.id}:${from.state.song?.track ?? 0}>${to.state.song?.id}:${to.state.song?.track ?? 0}`;
+		const known = this.styles.get(key);
+		if (known) return known;
+		const size = Math.abs(fit.change ?? 1);
+		const base = to.state.hotCues[0] ?? to.state.cue;
+		const toSection = sectionAt(to.grid, to.state.cue);
+		const toBar = (toSection?.beat ?? 0.5) * (toSection?.meter ?? 4);
+		const drop = to.state.kiai.find((k) => k.start > base + toBar)?.start;
+		// Room before the new song's drop for a build-up of that many bars
+		const intro = (bars: number) => drop !== undefined && drop - bars * toBar >= base - 0.01;
+		let options: [TransitionType, number][];
+		if (fit.rating === 'clash')
+			options = [
+				['echo', 4],
+				['brake', 2]
+			];
+		else if (size <= 0.06)
+			options = [
+				...(intro(16) ? ([['dropswap', 16]] as [TransitionType, number][]) : []),
+				['bassswap', intro(32) ? 32 : 16],
+				['loopout', 8],
+				...(intro(8) ? ([['dropswap', 8]] as [TransitionType, number][]) : [])
+			];
+		else
+			options = [
+				['filter', 8],
+				['loopout', 4],
+				['brake', 4],
+				...(intro(8) ? ([['dropswap', 8]] as [TransitionType, number][]) : [])
+			];
+		const fresh = options.filter(([type]) => type !== this.lastStyle);
+		const pool = fresh.length ? fresh : options;
+		// Mostly the first (the best fit), sometimes another, for variety
+		const seed = [...key].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
+		const choice = pool[seed % 10 < 6 ? 0 : 1 + (seed % Math.max(1, pool.length - 1))] ?? pool[0];
+		this.styles.set(key, choice);
+		return choice;
+	}
+
 	/**
 	 * How a mix goes: its kind and length (Smart picks them from how well the songs fit),
 	 * when it starts in the playing song (on its next bar, or phrase if that's close) and
@@ -1053,11 +1136,7 @@ class Mixer {
 	 */
 	plan(from: Deck, to: Deck, type = this.transitionType, bars = this.transitionBars) {
 		const fit = this.compat(from, to);
-		if (type === 'smart') {
-			const size = Math.abs(fit.change ?? 1);
-			[type, bars] =
-				fit.rating === 'clash' ? ['echo', 4] : size <= 0.06 ? ['bassswap', 16] : ['filter', 8];
-		}
+		if (type === 'smart') [type, bars] = this.smartStyle(from, to, fit);
 		if (
 			fit.rating === 'clash' &&
 			(type === 'bassswap' || type === 'crossfade' || type === 'filter')
@@ -1066,6 +1145,7 @@ class Mixer {
 			bars = Math.min(bars, 4);
 		}
 		if (type === 'cut') bars = 1;
+		const smartCut = type === 'dropswap' || type === 'brake';
 		const pos = from.position();
 		const section = sectionAt(from.grid, pos);
 		const meter = section?.meter ?? 4;
@@ -1084,7 +1164,7 @@ class Mixer {
 		let inPoint = base;
 		const drop = to.state.kiai.find((k) => k.start > base + toBar)?.start;
 		if (drop !== undefined) {
-			if (type === 'cut' || type === 'echo') inPoint = drop - toBar;
+			if (type === 'cut' || type === 'echo' || (smartCut && bars <= 2)) inPoint = drop - toBar;
 			else {
 				const lead = drop - bars * toBar;
 				// Not skipping more than a little intro
@@ -1142,6 +1222,7 @@ class Mixer {
 			volume: Math.max(to.state.volume, 0.9),
 			kill: { low: false, mid: false, high: false }
 		});
+		this.lastStyle = plan.type;
 		this.transition = {
 			from: from.id,
 			to: to.id,
@@ -1153,7 +1234,18 @@ class Mixer {
 		};
 		if (this.hype && plan.bars >= 4 && plan.type !== 'cut') {
 			// Up to the swap (the middle) of a bass swap, else most of the mix
-			const until = plan.type === 'bassswap' ? 0.5 : plan.type === 'echo' ? 0.3 : 0.65;
+			const until =
+				plan.type === 'bassswap'
+					? 0.5
+					: plan.type === 'echo'
+						? 0.3
+						: plan.type === 'dropswap'
+							? 1
+							: plan.type === 'loopout'
+								? 0.94
+								: plan.type === 'brake'
+									? 0.8
+									: 0.65;
 			this.riser(start, start + length * until);
 		}
 		this.emit();
@@ -1267,6 +1359,52 @@ class Mixer {
 				this.setCrossfader(lerp(fromSide, 0.5, p / 0.3));
 				if (p >= 0.3 && from.state.playing) from.pause();
 				break;
+			case 'dropswap': {
+				// The new one builds up under the old one: no bass yet, its low-pass opening.
+				// The old one thins out, then stutters in shorter and shorter rolls; on the drop
+				// it's cut and the new one's bass comes in
+				const beatsLeft = (1 - p) / beat;
+				to.set({
+					eq: { ...toEq, low: EQ_MIN },
+					filter: lerp(-0.7, -0.05, p / 0.92)
+				});
+				this.setCrossfader(lerp(fromSide, 0.5, p / 0.2));
+				from.set({
+					eq: { ...fromEq, low: lerp(fromEq.low, -8, (p - 0.55) / 0.35) },
+					filter: lerp(0, 0.55, 1 - (beatsLeft - 0) / 8)
+				});
+				const stage = beatsLeft <= 1 ? 3 : beatsLeft <= 2 ? 2 : beatsLeft <= 4 ? 1 : 0;
+				if (stage > (t.stage ?? 0)) {
+					t.stage = stage;
+					from.loopBeats([0, 1, 0.5, 0.25][stage]);
+				}
+				break;
+			}
+			case 'loopout': {
+				// The old one loops its bar, the loop halves (8, 4, 2, 1, ½ beats) and thins
+				// out; the new one comes in, its bass with the last loops
+				const stage = p >= 0.94 ? 5 : p >= 0.875 ? 4 : p >= 0.75 ? 3 : p >= 0.5 ? 2 : 1;
+				if (stage > (t.stage ?? 0)) {
+					t.stage = stage;
+					from.loopBeats([0, 8, 4, 2, 1, 0.5][stage]);
+				}
+				from.set({ filter: lerp(0, 0.6, (p - 0.3) / 0.7) });
+				to.set({ eq: { ...toEq, low: lerp(EQ_MIN, toEq.low, (p - 0.72) / 0.1) } });
+				this.setCrossfader(lerp(fromSide, toSide, (p - 0.05) / 0.85));
+				break;
+			}
+			case 'brake': {
+				// The new one comes in under the old one without bass; on the last bar the old
+				// one stops like a halted record and the new one takes over
+				to.set({ eq: { ...toEq, low: p < 0.8 ? EQ_MIN : toEq.low } });
+				if (p < 0.8) this.setCrossfader(lerp(fromSide, 0.5, p / 0.3));
+				else if (!t.stage) {
+					t.stage = 1;
+					from.brake();
+					this.setCrossfader(toSide);
+				}
+				break;
+			}
 			case 'cut':
 				this.setCrossfader(toSide);
 				break;
@@ -1288,6 +1426,7 @@ class Mixer {
 		const done = () => {
 			this.setCrossfader(t.to === 'A' ? 0 : 1);
 			from.pause();
+			if (from.state.loop) from.exitLoop();
 			from.setDry(1);
 			from.set({
 				...this.before[t.from],
