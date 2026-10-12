@@ -31,12 +31,17 @@
 	import { tileBounds, distanceKm } from '#lib/map.ts';
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { showToast } from '#lib/stores/toast.ts';
-	import { layerReady } from '#lib/radarClean.ts';
 	import { thunderOn, toggleThunder, setListener, setView } from '#lib/stores/thunder.ts';
 	import { goto } from '$app/navigation';
 	import FlightPanel from '#lib/components/flights/FlightPanel.svelte';
-	import { planes, followed, setFlightArea, useFlights } from '#lib/stores/flights.ts';
-	import { kmBetween } from '#lib/flights.ts';
+	import {
+		planes,
+		followed,
+		followedTrack,
+		setFlightArea,
+		useFlights
+	} from '#lib/stores/flights.ts';
+	import { kmBetween, flightInfo } from '#lib/flights.ts';
 
 	const UID = '_storm';
 	let saved = $derived($widgetData[UID] ?? {});
@@ -130,26 +135,20 @@
 		const b = tileBounds(x, y, z);
 		return `https://view.eumetsat.int/geoserver/wms?service=WMS&version=1.1.1&request=GetMap&layers=msg_fes:ir108&styles=&format=image/png&transparent=true&srs=EPSG:3857&width=256&height=256&bbox=${b.minX},${b.minY},${b.maxX},${b.maxY}`;
 	};
-	// The radar frame shown and the next few (loading, unseen): the loop plays on without
-	// waiting, and only a few frames' tiles load at a time (RainViewer limits how many)
-	const PRELOAD = 3;
-	let layers = $derived([
-		...(mode === 'live' && shown.satellite
+	let layers = $derived(
+		mode === 'live' && shown.satellite
 			? [{ key: 'satellite', url: satelliteUrl, opacity: 0.55, maxZoom: 9 }]
-			: []),
-		...(mode === 'live' && shown.radar
-			? frames
-					.map((f, i) => ({ f, i, ahead: (i - frame + frames.length) % frames.length }))
-					.filter(({ ahead }) => ahead <= PRELOAD)
-					.map(({ f, i }) => ({
-						key: f.path,
-						url: (z, x, y) => `${host}${f.path}/256/${z}/${x}/${y}/2/1_1.png`,
-						opacity: i === frame ? 0.9 : 0,
-						maxZoom: 7,
-						clean: true
-					}))
-			: [])
-	]);
+			: []
+	);
+	// The radar: all frames' tiles kept as pictures, the one shown drawn (see StormMap)
+	let radar = $derived(
+		mode === 'live' && shown.radar && frames.length ? { host, frames, frame, opacity: 0.85 } : null
+	);
+	/** The frames whose tiles are all here for the view */
+	let radarReady = new Set();
+	function setRadarReady(paths) {
+		radarReady = new Set(paths);
+	}
 
 	// --- DWD warnings as areas ----------------------------------------------------------------
 	let warnings = $state(null);
@@ -315,6 +314,21 @@
 	});
 	let flight = $derived(flightsOn ? ($planes.find((p) => p.hex === $followed) ?? null) : null);
 
+	// Where the plane picked comes from and goes (for its route on the map)
+	let route = $state(null);
+	let routeFor = '';
+	$effect(() => {
+		const p = flight;
+		const key = p ? `${p.hex}/${p.callsign}` : '';
+		if (key === routeFor) return;
+		routeFor = key;
+		route = null;
+		if (!p) return;
+		flightInfo(p).then((info) => {
+			if (routeFor === key) route = { from: info.origin, to: info.destination };
+		});
+	});
+
 	// --- A place looked at --------------------------------------------------------------------
 	let probe = $state(null);
 	let probeName = $state('');
@@ -426,7 +440,7 @@
 			if (frame === frames.length - 1 && wait++ < 4) return;
 			const next = (frame + 1) % frames.length;
 			// The next frame's tiles first (a few seconds at most)
-			if (!layerReady(frames[next].path) && waitLoad++ < 12) return;
+			if (!radarReady.has(frames[next].path) && waitLoad++ < 12) return;
 			wait = 0;
 			waitLoad = 0;
 			frame = next;
@@ -471,6 +485,8 @@
 			lon={view.lon}
 			zoom={view.zoom}
 			{layers}
+			{radar}
+			onradarready={setRadarReady}
 			field={mapField}
 			warnings={shown.warnings ? warnings : null}
 			strikes={mode === 'live' && shown.lightning ? $strikes : null}
@@ -480,7 +496,8 @@
 			planes={flightsOn ? $planes : null}
 			selectedPlane={$followed}
 			planeColour="#f8fafc"
-			trailMinutes={10}
+			track={$followedTrack}
+			{route}
 			onplane={(plane) => {
 				followed.set(plane.hex);
 				panelOpen = true;
@@ -796,6 +813,7 @@
 		<aside class="absolute top-3 right-3 bottom-3 w-[23rem] overflow-y-auto rounded-2xl {glass}">
 			<FlightPanel
 				plane={flight}
+				track={$followedTrack}
 				onclose={() => followed.set(null)}
 				onopen={() => goto(`/flights?hex=${flight.hex}`)}
 			/>

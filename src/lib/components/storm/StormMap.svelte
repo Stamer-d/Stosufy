@@ -7,7 +7,8 @@
 	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
 	import { drawStrikes, SEVERITY_COLOURS } from '#lib/storm.ts';
 	import { radarSrc } from '#lib/radarClean.ts';
-	import { planeNow, drawPlane, drawTrail, altitudeColour } from '#lib/flights.ts';
+	import RadarCanvas from './RadarCanvas.svelte';
+	import { planeNow, drawPlane, drawTrail, altitudeColour, greatCircle } from '#lib/flights.ts';
 
 	/**
 	 * @type {{
@@ -19,8 +20,12 @@
 	 *   home?: { lat: number, lon: number } | null,
 	 *   probe?: { lat: number, lon: number } | null,
 	 *   rings?: number[],
+	 *   radar?: { host: string, frames: { path: string, time: number }[], frame: number, opacity?: number } | null,
+	 *   onradarready?: (paths: string[]) => void,
 	 *   planes?: import('#lib/flights.ts').Plane[] | null,
 	 *   selectedPlane?: string | null,
+	 *   track?: import('#lib/flights.ts').TrailPoint[] | null,
+	 *   route?: { from: { lat: number, lon: number } | null, to: { lat: number, lon: number } | null } | null,
 	 *   planeColour?: string | null,
 	 *   trailMinutes?: number,
 	 *   onplane?: (plane: import('#lib/flights.ts').Plane) => void,
@@ -41,8 +46,12 @@
 		home = null,
 		probe = null,
 		rings = [],
+		radar = null,
+		onradarready = () => {},
 		planes = null,
 		selectedPlane = null,
+		track = null,
+		route = null,
 		planeColour = null,
 		trailMinutes = 0,
 		onplane = () => {},
@@ -303,6 +312,9 @@
 		};
 		drawStrikes(c, strikes, screen, width, height, zoom >= 8 ? 1.4 : 1, kmPerPixel);
 	}
+	// --- The rain radar (see RadarCanvas) ------------------------------------------------------
+	let radarTiles = $derived(radar && width && height ? tiles(7) : []);
+
 	// --- Planes, every frame (they fly on between updates) ------------------------------------
 	function drawPlanes() {
 		if (!planeCanvas || !width || !height) return;
@@ -339,7 +351,27 @@
 		}
 		if (picked) {
 			const { plane, place, x, y } = picked;
-			drawTrail(c, plane, toScreen, { width: 3, now: place });
+			// The route: dashed from where it took off (when its track isn't known) and on to
+			// where it goes, like the flight radars show it
+			const dashed = (points) => {
+				c.save();
+				c.setLineDash([6, 6]);
+				c.lineWidth = 1.6;
+				c.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+				c.beginPath();
+				points.forEach((p, i) => {
+					const s = toScreen(p.lat, p.lon);
+					if (i) c.lineTo(s.x, s.y);
+					else c.moveTo(s.x, s.y);
+				});
+				c.stroke();
+				c.restore();
+			};
+			if (route?.to) dashed(greatCircle(place, route.to));
+			const first = track?.[0] ?? plane.trail[0];
+			if (route?.from && first && (!track?.length || first.alt > 3000))
+				dashed(greatCircle(route.from, first));
+			drawTrail(c, plane, toScreen, { width: 3, now: place, track });
 			c.beginPath();
 			c.arc(x, y, 15 * scale, 0, Math.PI * 2);
 			c.fillStyle = 'rgba(239, 68, 68, 0.22)';
@@ -426,6 +458,7 @@
 			/>
 		{/each}
 	{/each}
+	<RadarCanvas {radar} tiles={radarTiles} {width} {height} onready={onradarready} />
 	<canvas bind:this={areaCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	<!-- City names above the weather -->
 	{#each baseTiles as tile (tile.key)}

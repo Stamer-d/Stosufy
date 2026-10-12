@@ -3,15 +3,28 @@
 	// radar) and whatever the widget draws over it
 	import { tilesAround, baseTile, labelTile } from '#lib/map.ts';
 	import { radarSrc } from '#lib/radarClean.ts';
+	import RadarCanvas from '../storm/RadarCanvas.svelte';
 
 	/**
 	 * @type {{
 	 *   lat: number, lon: number, zoom: number, width: number, height: number,
 	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number, clean?: boolean }[],
+	 *   radar?: { host: string, frames: { path: string, time: number }[], frame: number, opacity?: number } | null,
+	 *   onradarready?: (paths: string[]) => void,
 	 *   children?: import('svelte').Snippet
 	 * }}
 	 */
-	let { lat, lon, zoom, width, height, layers = [], children } = $props();
+	let {
+		lat,
+		lon,
+		zoom,
+		width,
+		height,
+		layers = [],
+		radar = null,
+		onradarready = () => {},
+		children
+	} = $props();
 
 	let tiles = $derived(tilesAround(lat, lon, zoom, width, height));
 </script>
@@ -37,6 +50,15 @@
 			/>
 		{/each}
 	{/each}
+	{#if radar}
+		<RadarCanvas
+			{radar}
+			tiles={tiles.map((t) => ({ ...t, size: 256 }))}
+			{width}
+			{height}
+			onready={onradarready}
+		/>
+	{/if}
 	{#each tiles as tile (tile.key + '/' + tile.z)}
 		<img
 			src={labelTile(tile.z, tile.x, tile.y)}

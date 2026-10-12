@@ -16,16 +16,24 @@
 		useFlights,
 		useTopFlights,
 		topList,
-		showPlane
+		showPlane,
+		followedTrack
 	} from '#lib/stores/flights.ts';
-	import { findPlanes, planeOf, planeNow, kmBetween, altitudeColour } from '#lib/flights.ts';
+	import {
+		findPlanes,
+		planeOf,
+		planeNow,
+		kmBetween,
+		altitudeColour,
+		flightInfo
+	} from '#lib/flights.ts';
 	import { strikes, useLightning } from '#lib/stores/lightning.ts';
 	import { fastFetch } from '#lib/fastFetch.ts';
 
 	const UID = '_flights';
 	let saved = $derived($widgetData[UID] ?? {});
 	let home = $derived(placeOf($widgetData, '_storm') ?? $detectedPlace);
-	let shown = $derived({ weather: false, lightning: false, trails: true, ...saved.layers });
+	let shown = $derived({ weather: false, lightning: false, ...saved.layers });
 	const toggle = (key) => setWidgetData(UID, { layers: { ...shown, [key]: !shown[key] } });
 
 	// --- The view --------------------------------------------------------------------------
@@ -67,6 +75,21 @@
 
 	// --- The plane picked ----------------------------------------------------------------------
 	let selected = $derived($planes.find((p) => p.hex === $followed) ?? null);
+
+	// Where the plane picked comes from and goes (for its route on the map)
+	let route = $state(null);
+	let routeFor = '';
+	$effect(() => {
+		const p = selected;
+		const key = p ? `${p.hex}/${p.callsign}` : '';
+		if (key === routeFor) return;
+		routeFor = key;
+		route = null;
+		if (!p) return;
+		flightInfo(p).then((info) => {
+			if (routeFor === key) route = { from: info.origin, to: info.destination };
+		});
+	});
 	let why = $state('');
 	let follow = $state(true);
 	function pick(plane, reason = '') {
@@ -136,18 +159,10 @@
 			radar = null;
 		}
 	}
-	let layers = $derived(
+	let radarLayer = $derived(
 		shown.weather && radar
-			? [
-					{
-						key: radar.path,
-						url: (z, x, y) => `${radar.host}${radar.path}/256/${z}/${x}/${y}/2/1_1.png`,
-						opacity: 0.7,
-						maxZoom: 7,
-						clean: true
-					}
-				]
-			: []
+			? { host: radar.host, frames: [{ path: radar.path, time: 0 }], frame: 0, opacity: 0.7 }
+			: null
 	);
 
 	let stopLightning = null;
@@ -193,12 +208,13 @@
 			lat={view.lat}
 			lon={view.lon}
 			zoom={view.zoom}
-			{layers}
+			radar={radarLayer}
 			strikes={shown.lightning ? $strikes : null}
 			planes={$planes}
 			selectedPlane={$followed}
 			planeColour="#facc15"
-			trailMinutes={shown.trails ? 4 : 0}
+			track={$followedTrack}
+			{route}
 			onplane={(plane) => pick(plane)}
 			onmove={(next) => {
 				// Dragged away (zooming keeps following)
@@ -338,7 +354,7 @@
 
 	<!-- Bottom left: the layers -->
 	<div class="absolute bottom-3 left-3 flex p-1 gap-1 rounded-2xl {glass}">
-		{#each [['weather', 'Weather', 'icon-[mingcute--rainstorm-line]'], ['lightning', 'Lightning', 'icon-[mingcute--flash-line]'], ['trails', 'Trails', 'icon-[mingcute--route-line]']] as [key, label, icon] (key)}
+		{#each [['weather', 'Weather', 'icon-[mingcute--rainstorm-line]'], ['lightning', 'Lightning', 'icon-[mingcute--flash-line]']] as [key, label, icon] (key)}
 			<button
 				class="flex items-center gap-1.5 h-9 px-3 rounded-xl text-sm font-medium cursor-pointer transition {shown[
 					key
@@ -386,7 +402,7 @@
 	<!-- Right: the plane picked -->
 	{#if selected}
 		<aside class="absolute top-3 right-3 bottom-3 w-[23rem] overflow-y-auto rounded-2xl {glass}">
-			<FlightPanel plane={selected} {why} onclose={unpick} />
+			<FlightPanel plane={selected} {why} track={$followedTrack} onclose={unpick} />
 		</aside>
 	{/if}
 </div>

@@ -7,8 +7,10 @@ import {
 	planesAround,
 	planeByHex,
 	topFlights,
+	flightTrack,
 	type Plane,
-	type TopFlight
+	type TopFlight,
+	type TrailPoint
 } from '../flights';
 
 /** Every few seconds, like the flight radars (and within the network's limits) */
@@ -23,6 +25,26 @@ export const flightStatus = writable<{
 });
 /** The plane picked (ICAO hex), followed wherever it flies */
 export const followed = writable<string | null>(null);
+
+/** The whole flight of the plane followed (since it took off), when the networks have it */
+export const followedTrack = writable<TrailPoint[] | null>(null);
+let trackFor: string | null = null;
+let trackTimer: ReturnType<typeof setTimeout> | undefined;
+followed.subscribe((hex) => {
+	if (hex === trackFor) return;
+	trackFor = hex;
+	clearTimeout(trackTimer);
+	followedTrack.set(null);
+	if (!hex) return;
+	const load = async () => {
+		const track = await flightTrack(hex).catch(() => null);
+		if (trackFor !== hex) return;
+		if (track) followedTrack.set(track);
+		// Again now and then: it flies on (what's seen meanwhile is added on the map)
+		trackTimer = setTimeout(load, 2 * 60 * 1000);
+	};
+	load();
+});
 
 let area: { lat: number; lon: number; radiusNm: number } | null = null;
 let users = 0;

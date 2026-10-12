@@ -156,6 +156,111 @@ export async function findPlanes(query: string) {
 	return planesByRegistration(q).catch(() => []);
 }
 
+// --- The whole flight -------------------------------------------------------------------------
+
+/**
+ * Where a plane has flown on this flight (since it took off), from the networks' track of its
+ * day (tar1090 traces). Null where none of them has it.
+ */
+export async function flightTrack(hex: string): Promise<TrailPoint[] | null> {
+	if (!/^[0-9a-f]{6}$/.test(hex)) return null;
+	const file = (kind: string) => `data/traces/${hex.slice(-2)}/trace_${kind}_${hex}.json`;
+	const hosts = [
+		'https://globe.airplanes.live/',
+		'https://globe.adsb.lol/',
+		'https://adsb.lol/',
+		'https://globe.adsb.fi/'
+	];
+	for (const host of hosts) {
+		try {
+			const [full, recent] = await Promise.all(
+				['full', 'recent'].map(async (kind) => {
+					const response = await fastFetch(host + file(kind));
+					return response.ok ? response.json() : null;
+				})
+			);
+			const points = [...traceOf(full), ...traceOf(recent)].sort((a, b) => a.time - b.time);
+			if (points.length) return currentFlight(points);
+		} catch {
+			// the next network
+		}
+	}
+	return null;
+}
+
+interface TracePoint extends TrailPoint {
+	ground: boolean;
+	/** The networks mark where a new flight (leg) starts */
+	legStart: boolean;
+}
+
+function traceOf(data: any): TracePoint[] {
+	if (!data?.trace || typeof data.timestamp !== 'number') return [];
+	const points: TracePoint[] = [];
+	for (const row of data.trace) {
+		const [dt, lat, lon, alt, , , flags] = row;
+		if (typeof lat !== 'number' || typeof lon !== 'number') continue;
+		points.push({
+			time: (data.timestamp + dt) * 1000,
+			lat,
+			lon,
+			alt: typeof alt === 'number' ? alt : 0,
+			ground: alt === 'ground',
+			legStart: !!((flags ?? 0) & 2)
+		});
+	}
+	return points;
+}
+
+/** The last flight of a day's track: from where it last took off (or a long gap) */
+function currentFlight(points: TracePoint[]): TrailPoint[] {
+	let start = 0;
+	for (let i = points.length - 1; i > 0; i--) {
+		const p = points[i];
+		const before = points[i - 1];
+		if (p.legStart || (before.ground && !p.ground) || p.time - before.time > 30 * 60 * 1000) {
+			start = before.ground ? i - 1 : i;
+			break;
+		}
+	}
+	// Doubles (the full and the recent track overlap) out
+	const out: TrailPoint[] = [];
+	for (const p of points.slice(start))
+		if (!out.length || p.time - out[out.length - 1].time > 500)
+			out.push({ lat: p.lat, lon: p.lon, alt: p.alt, time: p.time });
+	return out;
+}
+
+/** Points along the great circle between two places (for a route on the map) */
+export function greatCircle(
+	a: { lat: number; lon: number },
+	b: { lat: number; lon: number },
+	steps = 64
+) {
+	const rad = Math.PI / 180;
+	const [la1, lo1, la2, lo2] = [a.lat * rad, a.lon * rad, b.lat * rad, b.lon * rad];
+	const d =
+		2 *
+		Math.asin(
+			Math.sqrt(
+				Math.sin((la2 - la1) / 2) ** 2 +
+					Math.cos(la1) * Math.cos(la2) * Math.sin((lo2 - lo1) / 2) ** 2
+			)
+		);
+	if (!d) return [a, b];
+	const points = [];
+	for (let i = 0; i <= steps; i++) {
+		const f = i / steps;
+		const A = Math.sin((1 - f) * d) / Math.sin(d);
+		const B = Math.sin(f * d) / Math.sin(d);
+		const x = A * Math.cos(la1) * Math.cos(lo1) + B * Math.cos(la2) * Math.cos(lo2);
+		const y = A * Math.cos(la1) * Math.sin(lo1) + B * Math.cos(la2) * Math.sin(lo2);
+		const z = A * Math.sin(la1) + B * Math.sin(la2);
+		points.push({ lat: Math.atan2(z, Math.hypot(x, y)) / rad, lon: Math.atan2(y, x) / rad });
+	}
+	return points;
+}
+
 // --- The ones everybody watches -----------------------------------------------------------------
 
 /** What makes a flight one to watch, by ICAO type: the giants and rarities */
@@ -411,23 +516,42 @@ export function drawTrail(
 		width?: number;
 		since?: number;
 		now?: { lat: number; lon: number };
+		/** The whole flight (the networks' track), with what was seen since after it */
+		track?: TrailPoint[] | null;
 	} = {}
 ) {
-	const points = options.since ? plane.trail.filter((p) => p.time >= options.since!) : plane.trail;
+	const seen = options.since ? plane.trail.filter((p) => p.time >= options.since!) : plane.trail;
+	const trackEnd = options.track?.at(-1)?.time ?? 0;
+	const points = options.track?.length
+		? [...options.track, ...seen.filter((p) => p.time > trackEnd)]
+		: seen;
 	if (!points.length) return;
 	c.save();
 	c.globalAlpha = options.alpha ?? 1;
 	c.lineWidth = options.width ?? 2;
 	c.lineCap = 'round';
-	let previous = toScreen(points[0].lat, points[0].lon);
+	c.lineJoin = 'round';
 	const all = options.now ? [...points, { ...options.now, alt: plane.alt, time: 0 }] : points;
+	// One path per stretch of the same colour (heights in steps of 2000 ft), points that
+	// fall on the same pixel left out: thousands of points stay quick
+	const bucket = (alt: number) => Math.round(Math.max(0, Math.min(40000, alt)) / 2000);
+	let previous = toScreen(all[0].lat, all[0].lon);
+	let colour = bucket(all[0].alt);
+	c.beginPath();
+	c.moveTo(previous.x, previous.y);
 	for (let i = 1; i < all.length; i++) {
 		const p = toScreen(all[i].lat, all[i].lon);
-		c.strokeStyle = altitudeColour(all[i].alt, plane.ground);
-		c.beginPath();
-		c.moveTo(previous.x, previous.y);
+		const last = i === all.length - 1;
+		if (!last && Math.abs(p.x - previous.x) + Math.abs(p.y - previous.y) < 2) continue;
+		const next = bucket(all[i].alt);
 		c.lineTo(p.x, p.y);
-		c.stroke();
+		if (next !== colour || last) {
+			c.strokeStyle = altitudeColour(colour * 2000, plane.ground);
+			c.stroke();
+			c.beginPath();
+			c.moveTo(p.x, p.y);
+			colour = next;
+		}
 		previous = p;
 	}
 	c.restore();

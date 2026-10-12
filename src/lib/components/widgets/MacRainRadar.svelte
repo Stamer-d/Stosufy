@@ -70,11 +70,16 @@
 		const refresh = setInterval(load, 5 * 60 * 1000);
 		// The loop: a frame every half second, a pause on the newest
 		let wait = 0;
+		let waitLoad = 0;
 		const step = setInterval(() => {
 			if (!playing || frames.length < 2) return;
 			if (shown === frames.length - 1 && wait++ < 3) return;
+			const next = (shown + 1) % frames.length;
+			// Its tiles first (a few seconds at most)
+			if (!ready.has(frames[next].path) && waitLoad++ < 10) return;
 			wait = 0;
-			shown = (shown + 1) % frames.length;
+			waitLoad = 0;
+			shown = next;
 		}, 500);
 		return () => {
 			stopLightning();
@@ -84,19 +89,9 @@
 		};
 	});
 
-	// The frame shown and the next few are layers (only one seen): the loop plays on without
-	// waiting, and only a few frames' tiles load at a time
-	let layers = $derived(
-		frames
-			.map((frame, i) => ({ frame, i, ahead: (i - shown + frames.length) % frames.length }))
-			.filter(({ ahead }) => ahead <= 3)
-			.map(({ frame, i }) => ({
-				key: frame.path,
-				url: (z, x, y) => `${host}${frame.path}/256/${z}/${x}/${y}/2/1_1.png`,
-				opacity: i === shown ? 0.8 : 0,
-				clean: true
-			}))
-	);
+	// The radar on a canvas (all frames kept as pictures, the one shown drawn)
+	let radar = $derived(frames.length ? { host, frames, frame: shown, opacity: 0.8 } : null);
+	let ready = new Set();
 	const ago = (time) => {
 		const minutes = Math.round((Date.now() / 1000 - time) / 60);
 		return minutes <= 0 ? (minutes < -2 ? `in ${-minutes} min` : 'now') : `${minutes} min ago`;
@@ -116,7 +111,15 @@
 		<PlacePicker {uid} label="Show radar" ondone={() => (asking = false)} />
 	{:else}
 		<div class="absolute inset-0" bind:clientWidth={width} bind:clientHeight={height}>
-			<WidgetMap lat={place.lat} lon={place.lon} {zoom} {width} {height} {layers}>
+			<WidgetMap
+				lat={place.lat}
+				lon={place.lon}
+				{zoom}
+				{width}
+				{height}
+				{radar}
+				onradarready={(paths) => (ready = new Set(paths))}
+			>
 				<canvas bind:this={canvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 				<span
 					class="absolute size-3 -ml-1.5 -mt-1.5 rounded-full bg-white ring-4 ring-primary-400/60 left-1/2 top-1/2"

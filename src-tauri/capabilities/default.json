@@ -65,6 +65,18 @@
 				},
 				{
 					"url": "https://api.planespotters.net/*"
+				},
+				{
+					"url": "https://globe.airplanes.live/*"
+				},
+				{
+					"url": "https://globe.adsb.lol/*"
+				},
+				{
+					"url": "https://adsb.lol/*"
+				},
+				{
+					"url": "https://globe.adsb.fi/*"
 				}
 			],
 			"deny": [

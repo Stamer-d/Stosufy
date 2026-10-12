@@ -7,13 +7,21 @@
 	/**
 	 * @type {{
 	 *   plane: import('#lib/flights.ts').Plane,
+	 *   track?: import('#lib/flights.ts').TrailPoint[] | null,
 	 *   why?: string,
 	 *   compact?: boolean,
 	 *   onclose?: () => void,
 	 *   onopen?: (() => void) | null
 	 * }}
 	 */
-	let { plane, why = '', compact = false, onclose = () => {}, onopen = null } = $props();
+	let {
+		plane,
+		track = null,
+		why = '',
+		compact = false,
+		onclose = () => {},
+		onopen = null
+	} = $props();
 
 	let info = $state(null);
 	let infoFor = '';
@@ -66,7 +74,11 @@
 
 	// The height over the last hour, as a line
 	let profile = $derived.by(() => {
-		const points = plane.trail.filter((p) => p.time > now - 60 * 60 * 1000);
+		// The whole flight when the networks have it, else what was seen of it
+		const end = track?.at(-1)?.time ?? 0;
+		const points = track?.length
+			? [...track, ...plane.trail.filter((p) => p.time > end)]
+			: plane.trail.filter((p) => p.time > now - 60 * 60 * 1000);
 		if (points.length < 3 || points.at(-1).time - points[0].time < 2 * 60 * 1000) return null;
 		const t0 = points[0].time;
 		const t1 = Math.max(t0 + 1, points.at(-1).time);
@@ -257,7 +269,9 @@
 				<p
 					class="flex justify-between text-[10px] font-bold uppercase tracking-wider text-white/45 mb-1"
 				>
-					<span>Altitude</span><span>last {profile.minutes} min</span>
+					<span>Altitude</span><span
+						>{track?.length ? 'this flight' : 'last'} · {duration(profile.minutes)}</span
+					>
 				</p>
 				<svg viewBox="0 0 100 42" preserveAspectRatio="none" class="w-full h-16">
 					<polyline
