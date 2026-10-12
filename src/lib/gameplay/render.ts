@@ -606,6 +606,9 @@ export function createGameplayRenderer(
 			if (pop(at.x, at.y, point.time, state.points[i] !== false)) continue;
 			// Only the next turn at each end shows
 			if (before !== point && before?.progress === point.progress) continue;
+			// A turn at the slider's start shows once its head is gone (hit, or its time
+			// passed): before, it would sit in the head circle, on its number
+			if (point.progress === 0 && state.hitTime == null && time < object.time) continue;
 			drawCircle(
 				object,
 				at.x,
