@@ -1,8 +1,7 @@
 <script>
 	import { fade } from 'svelte/transition';
 	import BeatmapBackground from '../BeatmapBackground.svelte';
-	import ClockWidget from '../widgets/MinimalClock.svelte';
-	import NowPlayingWidget from '../widgets/MacNowPlaying.svelte';
+	import DesktopCanvas from '../DesktopCanvas.svelte';
 	import Titlebar from '../Titlebar.svelte';
 	import { focusMode, currentSong } from '#lib/stores/audio.ts';
 	import { wallpaper } from '#lib/stores/home.ts';
@@ -45,16 +44,22 @@
 		<Titlebar />
 	</div>
 
-	<div class="relative flex-1 flex flex-col justify-between p-12">
-		<ClockWidget size="lg" />
+	<!-- Your widgets, as on the home screen (they make way for the gameplay) -->
+	{#if !gameplayOn || !$currentSong.song}
+		<div class="absolute inset-x-0 top-12 bottom-20">
+			<DesktopCanvas />
+		</div>
+	{/if}
+
+	<div class="relative flex-1 flex flex-col justify-between px-12 pt-12 pb-5 pointer-events-none">
+		<div></div>
 		{#if showLyrics && $currentSong.song && !gameplayOn}
 			<div class="flex-1 grid place-items-center px-8">
 				<FocusLyrics />
 			</div>
 		{/if}
-		<div class="flex items-end justify-between gap-6">
-			<NowPlayingWidget />
-			<div class="flex items-center gap-2">
+		<div class="flex items-end justify-end gap-6">
+			<div class="flex items-center gap-2 pointer-events-auto">
 				<div
 					class="flex items-center gap-1 px-2 h-10 rounded-full bg-black/30 backdrop-blur-2xl ring-1 ring-white/10"
 				>
