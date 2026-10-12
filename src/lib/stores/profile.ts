@@ -75,12 +75,16 @@ export const BEATMAP_LISTS: { id: BeatmapList; label: string }[] = [
 	{ id: 'most_played', label: 'Most played' }
 ];
 
-async function osuApi(path: string) {
+/** The osu! API; `latest` asks for the newer formats (only the scores need that) */
+async function osuApi(path: string, { latest = false } = {}) {
 	let response!: Response;
 	for (let attempt = 0; attempt < 3; attempt++) {
 		const token = await freshToken(attempt > 0 && response?.status === 401);
 		response = await fetch(`https://osu.ppy.sh/api/v2/${path}`, {
-			headers: { Authorization: `Bearer ${token}`, 'x-api-version': '20240529' }
+			headers: {
+				Authorization: `Bearer ${token}`,
+				...(latest ? { 'x-api-version': '20240529' } : {})
+			}
 		});
 		if (response.ok || (response.status < 500 && response.status !== 401)) break;
 		await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
@@ -219,7 +223,8 @@ export async function userScores(
 	limit = 10
 ): Promise<UserScore[]> {
 	const result = await osuApi(
-		`users/${osuId}/scores/${kind}?mode=osu&limit=${limit}&offset=${offset}`
+		`users/${osuId}/scores/${kind}?mode=osu&limit=${limit}&offset=${offset}`,
+		{ latest: true }
 	);
 	return result.map((score: any) => ({
 		id: score.id,

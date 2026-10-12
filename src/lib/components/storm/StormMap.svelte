@@ -3,7 +3,8 @@
 	// Tile layers (radar, warnings) can have a lower top zoom than the map: their tiles are
 	// then shown bigger. The CAPE map is drawn from a grid of forecast points.
 	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
-	import { capeColour } from '#lib/storm.ts';
+	import { capeColour, drawStrikes } from '#lib/storm.ts';
+	import { onMount } from 'svelte';
 
 	/**
 	 * @type {{
@@ -11,6 +12,7 @@
 	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number, maxZoom?: number }[],
 	 *   cape?: { lat: number, lon: number, value: number }[][] | null,
 	 *   markers?: { lat: number, lon: number, kind: string }[],
+	 *   strikes?: { time: number, lat: number, lon: number }[] | null,
 	 *   onmove?: (view: { lat: number, lon: number, zoom: number }) => void,
 	 *   onpick?: (place: { lat: number, lon: number }) => void,
 	 *   onbounds?: (bounds: { north: number, south: number, west: number, east: number }) => void
@@ -23,6 +25,7 @@
 		layers = [],
 		cape = null,
 		markers = [],
+		strikes = null,
 		onmove = () => {},
 		onpick = () => {},
 		onbounds = () => {}
@@ -31,6 +34,23 @@
 	let width = $state(0);
 	let height = $state(0);
 	let canvas = $state();
+	let lightningCanvas = $state();
+
+	// Lightning, redrawn a few times a second (new strikes flash, old ones fade)
+	function drawLightning() {
+		if (!lightningCanvas || !width || !height) return;
+		const ratio = devicePixelRatio || 1;
+		if (lightningCanvas.width !== width * ratio) lightningCanvas.width = width * ratio;
+		if (lightningCanvas.height !== height * ratio) lightningCanvas.height = height * ratio;
+		const c = lightningCanvas.getContext('2d');
+		c.setTransform(ratio, 0, 0, ratio, 0, 0);
+		c.clearRect(0, 0, width, height);
+		if (strikes?.length) drawStrikes(c, strikes, toScreen, width, height, zoom >= 8 ? 1.4 : 1);
+	}
+	onMount(() => {
+		const timer = setInterval(drawLightning, 100);
+		return () => clearInterval(timer);
+	});
 
 	let centre = $derived(worldPixel(lat, lon, zoom));
 
@@ -205,6 +225,8 @@
 			/>
 		{/each}
 	{/each}
+	<canvas bind:this={lightningCanvas} class="absolute inset-0 size-full pointer-events-none"
+	></canvas>
 	<!-- City names above the weather -->
 	{#each baseTiles as tile (tile.key)}
 		<img

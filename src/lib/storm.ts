@@ -166,3 +166,254 @@ export function capeColour(cape: number): [number, number, number, number] {
 	}
 	return stops[stops.length - 1][1];
 }
+
+// --- The air above a place: sounding, hodograph and the parameters chasers use -------------
+
+export const LEVELS_HPA = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200];
+
+export interface ProfileLevel {
+	/** hPa */
+	p: number;
+	/** °C */
+	t: number;
+	td: number;
+	/** Height above ground, m */
+	h: number;
+	/** Wind, m/s (u to the east, v to the north) */
+	u: number;
+	v: number;
+	speed: number;
+}
+
+export interface StormProfile {
+	time: number;
+	/** From the ground up (levels below the ground left out) */
+	levels: ProfileLevel[];
+	surface: { t: number; td: number; p: number; u: number; v: number };
+	cape: number;
+	cin: number;
+	li: number;
+	/** Cloud base, m above ground */
+	lcl: number;
+	freezing: number;
+	/** Bulk shear 0–1 km and 0–6 km, m/s */
+	shear1: number;
+	shear6: number;
+	/** Storm relative helicity, m²/s² */
+	srh1: number;
+	srh3: number;
+	/** How a right-moving supercell would move (Bunkers), m/s */
+	motion: { u: number; v: number; speed: number; towards: number };
+	/** Significant tornado and supercell composite */
+	stp: number;
+	scp: number;
+	hail: boolean;
+}
+
+const uv = (speed: number, from: number) => {
+	const rad = (from * Math.PI) / 180;
+	return { u: -speed * Math.sin(rad), v: -speed * Math.cos(rad) };
+};
+
+/** The wind at a height above ground, between the levels */
+function windAt(levels: ProfileLevel[], height: number) {
+	if (height <= levels[0].h) return { u: levels[0].u, v: levels[0].v };
+	for (let i = 1; i < levels.length; i++) {
+		if (levels[i].h >= height) {
+			const a = levels[i - 1];
+			const b = levels[i];
+			const t = (height - a.h) / (b.h - a.h || 1);
+			return { u: a.u + (b.u - a.u) * t, v: a.v + (b.v - a.v) * t };
+		}
+	}
+	const last = levels[levels.length - 1];
+	return { u: last.u, v: last.v };
+}
+
+/** Storm relative helicity from the ground to a height, for a storm motion */
+function helicity(levels: ProfileLevel[], top: number, motion: { u: number; v: number }) {
+	const points: { u: number; v: number }[] = [];
+	for (let h = 0; h <= top; h += 250) points.push(windAt(levels, h));
+	let srh = 0;
+	for (let i = 0; i < points.length - 1; i++) {
+		const a = points[i];
+		const b = points[i + 1];
+		srh += (b.u - motion.u) * (a.v - motion.v) - (a.u - motion.u) * (b.v - motion.v);
+	}
+	return srh;
+}
+
+/** The sounding and parameters at a place, at the hour nearest a time */
+export async function stormProfile(
+	lat: number,
+	lon: number,
+	time = Date.now()
+): Promise<StormProfile> {
+	const levelVars = LEVELS_HPA.flatMap((p) => [
+		`temperature_${p}hPa`,
+		`dew_point_${p}hPa`,
+		`wind_speed_${p}hPa`,
+		`wind_direction_${p}hPa`,
+		`geopotential_height_${p}hPa`
+	]);
+	const vars = [
+		'temperature_2m',
+		'dew_point_2m',
+		'surface_pressure',
+		'wind_speed_10m',
+		'wind_direction_10m',
+		'cape',
+		'convective_inhibition',
+		'lifted_index',
+		'freezing_level_height',
+		...levelVars
+	].join(',');
+	const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&wind_speed_unit=ms&timezone=GMT&forecast_days=3`;
+	const data = await (await fetch(url)).json();
+	const h = data.hourly;
+	const elevation = data.elevation ?? 0;
+	const times: number[] = h.time.map((t: string) => new Date(t + 'Z').getTime());
+	let i = 0;
+	for (let k = 0; k < times.length; k++)
+		if (Math.abs(times[k] - time) < Math.abs(times[i] - time)) i = k;
+	const value = (name: string) => h[name]?.[i] ?? null;
+
+	const surfaceWind = uv(value('wind_speed_10m') ?? 0, value('wind_direction_10m') ?? 0);
+	const surface = {
+		t: value('temperature_2m') ?? 15,
+		td: value('dew_point_2m') ?? 10,
+		p: value('surface_pressure') ?? 1013,
+		...surfaceWind
+	};
+	const levels: ProfileLevel[] = [
+		{
+			p: surface.p,
+			t: surface.t,
+			td: surface.td,
+			h: 10,
+			u: surface.u,
+			v: surface.v,
+			speed: Math.hypot(surface.u, surface.v)
+		}
+	];
+	for (const p of LEVELS_HPA) {
+		const z = value(`geopotential_height_${p}hPa`);
+		if (p >= surface.p || z == null || z - elevation <= 10) continue;
+		const wind = uv(value(`wind_speed_${p}hPa`) ?? 0, value(`wind_direction_${p}hPa`) ?? 0);
+		levels.push({
+			p,
+			t: value(`temperature_${p}hPa`) ?? 0,
+			td: value(`dew_point_${p}hPa`) ?? value(`temperature_${p}hPa`) - 20,
+			h: z - elevation,
+			...wind,
+			speed: Math.hypot(wind.u, wind.v)
+		});
+	}
+
+	// Bunkers: the mean wind of the lowest 6 km, 7.5 m/s to the right of the shear
+	const mean = { u: 0, v: 0 };
+	const samples = 25;
+	for (let k = 0; k < samples; k++) {
+		const w = windAt(levels, (6000 * k) / (samples - 1));
+		mean.u += w.u / samples;
+		mean.v += w.v / samples;
+	}
+	const top = windAt(levels, 6000);
+	const low = windAt(levels, 0);
+	const shearU = top.u - low.u;
+	const shearV = top.v - low.v;
+	const shear6 = Math.hypot(shearU, shearV);
+	const motionU = mean.u + (7.5 * shearV) / (shear6 || 1);
+	const motionV = mean.v - (7.5 * shearU) / (shear6 || 1);
+	const motion = {
+		u: motionU,
+		v: motionV,
+		speed: Math.hypot(motionU, motionV),
+		towards: ((Math.atan2(motionU, motionV) * 180) / Math.PI + 360) % 360
+	};
+	const one = windAt(levels, 1000);
+	const shear1 = Math.hypot(one.u - low.u, one.v - low.v);
+	const srh1 = helicity(levels, 1000, motion);
+	const srh3 = helicity(levels, 3000, motion);
+	const cape = value('cape') ?? 0;
+	const cin = value('convective_inhibition') ?? 0;
+	// Cloud base from the spread of temperature and dew point
+	const lcl = Math.max(0, 125 * (surface.t - surface.td));
+	const freezing = value('freezing_level_height') ?? 0;
+
+	const lclTerm = lcl < 1000 ? 1 : lcl > 2000 ? 0 : (2000 - lcl) / 1000;
+	const cinTerm = cin > -50 ? 1 : cin < -200 ? 0 : (200 + cin) / 150;
+	const shearTerm = shear6 < 12.5 ? 0 : Math.min(1.5, shear6 / 20);
+	const stp = Math.max(0, (cape / 1500) * lclTerm * (srh1 / 150) * shearTerm * cinTerm);
+	const scp = Math.max(
+		0,
+		(cape / 1000) * (srh3 / 50) * (shear6 < 10 ? 0 : Math.min(1, shear6 / 20))
+	);
+	return {
+		time: times[i],
+		levels,
+		surface,
+		cape,
+		cin,
+		li: value('lifted_index') ?? 0,
+		lcl,
+		freezing,
+		shear1,
+		shear6,
+		srh1,
+		srh3,
+		motion,
+		stp,
+		scp,
+		hail: cape >= 1000 && shear6 >= 15 && freezing > 0 && freezing < 4000
+	};
+}
+
+/** A compass direction for degrees */
+export function compass(degrees: number) {
+	const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+	return names[Math.round((((degrees % 360) + 360) % 360) / 45) % 8];
+}
+
+/**
+ * Lightning on a map: older strikes fade from white to red, new ones flash as a cross
+ * (like on lightning maps)
+ */
+export function drawStrikes(
+	c: CanvasRenderingContext2D,
+	list: { time: number; lat: number; lon: number }[],
+	toScreen: (lat: number, lon: number) => { x: number; y: number },
+	width: number,
+	height: number,
+	size = 1
+) {
+	const now = Date.now();
+	for (const strike of list) {
+		const age = (now - strike.time) / 60000;
+		if (age > 30) continue;
+		const { x, y } = toScreen(strike.lat, strike.lon);
+		if (x < -10 || y < -10 || x > width + 10 || y > height + 10) continue;
+		const colour =
+			age < 1 ? '#ffffff' : age < 5 ? '#fde047' : age < 10 ? '#fb923c' : age < 20 ? '#ef4444' : '#7f1d1d';
+		if (age < 0.25) {
+			// Just now: a bright cross with a glow
+			const grow = 1 + (0.25 - age) * 8;
+			c.strokeStyle = '#ffffff';
+			c.lineWidth = 2 * size;
+			c.shadowColor = '#fde047';
+			c.shadowBlur = 12;
+			c.beginPath();
+			c.moveTo(x - 6 * size * grow, y);
+			c.lineTo(x + 6 * size * grow, y);
+			c.moveTo(x, y - 6 * size * grow);
+			c.lineTo(x, y + 6 * size * grow);
+			c.stroke();
+			c.shadowBlur = 0;
+		} else {
+			c.fillStyle = colour;
+			c.beginPath();
+			c.arc(x, y, (age < 5 ? 2.4 : 1.8) * size, 0, Math.PI * 2);
+			c.fill();
+		}
+	}
+}

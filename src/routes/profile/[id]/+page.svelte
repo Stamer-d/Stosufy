@@ -115,8 +115,10 @@
 			const items = await userBeatmapsets(osuId, kind, list.items.length, 12);
 			if (osuId !== id) return;
 			// Most played can have several difficulties of one set
+			// (also within one page: two difficulties of a set are one card)
 			const known = new Set(list.items.map((set) => set.id));
-			list.items = [...list.items, ...items.filter((set) => !known.has(set.id))];
+			const added = items.filter((set) => !known.has(set.id) && known.add(set.id));
+			list.items = [...list.items, ...added];
 			list.done = items.length < 12;
 		} catch (e) {
 			noteNetworkError(e);
@@ -616,7 +618,7 @@
 				</div>
 				{#if scoreLists[scoreTab]?.items.length}
 					<div class="flex flex-col gap-1.5">
-						{#each scoreLists[scoreTab].items as score (score.id)}
+						{#each scoreLists[scoreTab].items as score, i (score.id ?? i)}
 							<div
 								class="group relative flex items-center gap-4 h-16 pe-3 rounded-xl overflow-hidden bg-white/[0.04] hover:bg-white/[0.08] ring-1 ring-white/5 transition"
 							>
