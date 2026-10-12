@@ -1,3 +1,4 @@
+import { stosufyDir } from '../platform';
 // What the gameplay view shows: autoplay, a replay of one of the top 50 scores, or the
 // user playing it themselves; and which difficulty of the song (also for the hitsounds).
 
@@ -183,7 +184,7 @@ export function leaderboard(mapId: string): Promise<LeaderboardScore[]> {
 }
 
 async function replaysDir() {
-	return path.join(await path.homeDir(), 'Stosufy', 'Replays');
+	return path.join(await stosufyDir(), 'Replays');
 }
 
 /** A score's replay: from the disk if downloaded before, else from osu! (kept for next time) */

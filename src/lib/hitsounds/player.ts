@@ -1,3 +1,4 @@
+import { stosufyDir } from '../platform';
 // Plays the hitsounds of the beatmap with the music, like watching osu!'s autoplay: the
 // samples are scheduled with Web Audio slightly ahead of the music's position. Samples come
 // from the beatmap (its own hitsounds), the chosen osu! skin, or the built-in ones.
@@ -268,7 +269,7 @@ interface Chart {
 let chart: Chart | null = null;
 
 async function chartsDir(setId: string | number) {
-	return path.join(await path.homeDir(), 'Stosufy', 'Songs', `${setId}-hitsounds`);
+	return path.join(await stosufyDir(), 'Songs', `${setId}-hitsounds`);
 }
 
 /** The .osu file of a difficulty and the folder with the beatmap's own samples */

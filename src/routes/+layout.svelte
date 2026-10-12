@@ -5,6 +5,8 @@
 	import { onMount } from 'svelte';
 	import { fly, slide } from 'svelte/transition';
 	import { offline } from '#lib/stores/network.ts';
+	import { isMobile } from '#lib/platform.ts';
+	import MobileShell from '#lib/components/mobile/MobileShell.svelte';
 	import { startBeatEffects } from '#lib/stores/beat.ts';
 	import { joinSession } from '#lib/stores/listen.ts';
 	import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
@@ -151,59 +153,64 @@
 			></div>
 		</div>
 	{/if}
-	<div class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'}">
-		<Titlebar />
-		{#if $offline}
-			<div
-				class="mx-2 mb-2 flex items-center gap-2.5 px-4 h-9 shrink-0 rounded-lg bg-amber-400/10 ring-1 ring-amber-300/20 text-sm text-amber-100"
-				transition:slide={{ duration: 200 }}
-			>
-				<span class="icon-[mingcute--wifi-off-line] size-4 text-amber-300"></span>
-				<span class="font-semibold">You're offline.</span>
-				<span class="text-amber-100/70 truncate"
-					>Your downloaded songs and playlists still play; the rest comes back with the connection.</span
+	{#if isMobile}
+		<MobileShell bind:scroller>{@render children()}</MobileShell>
+	{:else}
+		<div class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'}">
+			<Titlebar />
+			{#if $offline}
+				<div
+					class="mx-2 mb-2 flex items-center gap-2.5 px-4 h-9 shrink-0 rounded-lg bg-amber-400/10 ring-1 ring-amber-300/20 text-sm text-amber-100"
+					transition:slide={{ duration: 200 }}
 				>
-			</div>
-		{/if}
+					<span class="icon-[mingcute--wifi-off-line] size-4 text-amber-300"></span>
+					<span class="font-semibold">You're offline.</span>
+					<span class="text-amber-100/70 truncate"
+						>Your downloaded songs and playlists still play; the rest comes back with the
+						connection.</span
+					>
+				</div>
+			{/if}
 
-		<div class="flex flex-1 min-h-0 px-2 gap-2">
-			<aside class="w-72 shrink-0 rounded-lg {panel} overflow-hidden transition-colors">
-				<Playlist />
-			</aside>
+			<div class="flex flex-1 min-h-0 px-2 gap-2">
+				<aside class="w-72 shrink-0 rounded-lg {panel} overflow-hidden transition-colors">
+					<Playlist />
+				</aside>
 
-			<main
-				bind:this={scroller}
-				class="flex-1 min-w-0 rounded-lg {panel} overflow-y-auto transition-colors"
-				data-scroll-container
-			>
-				{@render children()}
-			</main>
+				<main
+					bind:this={scroller}
+					class="flex-1 min-w-0 rounded-lg {panel} overflow-y-auto transition-colors"
+					data-scroll-container
+				>
+					{@render children()}
+				</main>
 
-			<!-- The width animates, so the content next to it shrinks smoothly instead of jumping -->
-			<div
-				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$queuePanelOpen
-					? 'w-80'
-					: 'w-0 -ml-2'}"
-				inert={!$queuePanelOpen}
-			>
-				<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
-					<QueuePanel />
+				<!-- The width animates, so the content next to it shrinks smoothly instead of jumping -->
+				<div
+					class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$queuePanelOpen
+						? 'w-80'
+						: 'w-0 -ml-2'}"
+					inert={!$queuePanelOpen}
+				>
+					<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
+						<QueuePanel />
+					</div>
+				</div>
+				<div
+					class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$friendsPanelOpen
+						? 'w-80'
+						: 'w-0 -ml-2'}"
+					inert={!$friendsPanelOpen}
+				>
+					<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
+						<FriendsPanel />
+					</div>
 				</div>
 			</div>
-			<div
-				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$friendsPanelOpen
-					? 'w-80'
-					: 'w-0 -ml-2'}"
-				inert={!$friendsPanelOpen}
-			>
-				<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
-					<FriendsPanel />
-				</div>
-			</div>
+
+			<Songbar />
 		</div>
-
-		<Songbar />
-	</div>
+	{/if}
 	{#if $focusMode}
 		<FocusView />
 	{/if}

@@ -46,22 +46,24 @@
 
 <div class="pb-12">
 	<!-- Header: the osu! cover, avatar and name -->
-	<div class="relative h-72 overflow-hidden">
+	<div class="relative h-72 max-md:h-auto max-md:min-h-80 overflow-hidden">
 		{#if profile?.coverUrl}
 			<img src={profile.coverUrl} alt="" class="absolute inset-0 size-full object-cover" />
 		{:else}
 			<div class="absolute inset-0 bg-gradient-to-br from-primary-700/60 to-secondary-200"></div>
 		{/if}
 		<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/60 to-black/20"></div>
-		<div class="absolute bottom-6 left-6 right-6 flex items-end gap-6">
+		<div
+			class="absolute bottom-6 left-6 right-6 flex items-end gap-6 max-md:relative max-md:flex-col max-md:items-start max-md:gap-3 max-md:px-4 max-md:pt-10 max-md:pb-4"
+		>
 			<img
 				src={profile?.avatarUrl ?? friend?.avatarUrl ?? '/logo.png'}
 				alt=""
-				class="size-36 rounded-full object-cover shadow-2xl shadow-black/50 ring-4 ring-white/10"
+				class="size-36 max-md:size-24 rounded-full object-cover shadow-2xl shadow-black/50 ring-4 ring-white/10"
 			/>
-			<div class="min-w-0 flex-1 pb-2">
+			<div class="min-w-0 flex-1 pb-2 max-md:pb-0 max-md:w-full">
 				<p class="text-sm font-semibold text-white/70">{mine ? 'Your profile' : 'Profile'}</p>
-				<h1 class="text-5xl font-extrabold tracking-tight truncate">
+				<h1 class="text-5xl max-md:text-3xl font-extrabold tracking-tight truncate">
 					{profile?.username ?? friend?.username ?? (error ? 'Unknown user' : '…')}
 				</h1>
 				{#if profile}
@@ -86,7 +88,7 @@
 		</div>
 	</div>
 
-	<div class="px-6 flex flex-col gap-10">
+	<div class="px-6 max-md:px-4 flex flex-col gap-10">
 		{#if error && !profile}
 			<p class="text-secondary-600">Couldn't load the osu! profile: {error}</p>
 		{/if}

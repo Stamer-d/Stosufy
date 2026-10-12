@@ -1,4 +1,5 @@
 <script>
+	import { HOME_BASE } from '#lib/platform.ts';
 	import { onDestroy } from 'svelte';
 	import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
 	import { convertFileSrc } from '@tauri-apps/api/core';
@@ -45,7 +46,7 @@
 		}
 		let objectUrl = null;
 		let cancelled = false;
-		readFile(path, { baseDir: BaseDirectory.Home })
+		readFile(path, { baseDir: HOME_BASE })
 			.then((data) => {
 				if (cancelled) return;
 				objectUrl = URL.createObjectURL(new Blob([data], { type: 'video/mp4' }));

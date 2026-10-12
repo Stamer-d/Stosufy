@@ -380,11 +380,13 @@
 		style="background: linear-gradient(to bottom, {headerColor ??
 			'transparent'} 0, transparent 26rem)"
 	>
-		<header class="relative flex items-end gap-6 px-6 pt-14 pb-6 overflow-hidden">
+		<header
+			class="relative flex items-end gap-6 px-6 pt-14 pb-6 overflow-hidden max-md:flex-col max-md:items-start max-md:gap-4 max-md:px-4 max-md:pt-6"
+		>
 			<Triangles count={16} seed={Number(playlistId) || 7} />
 			<PlaylistCover
 				playlist={playlistData}
-				class="relative size-44 xl:size-52 rounded-md shadow-2xl shadow-black/50"
+				class="relative size-44 xl:size-52 max-md:size-40 max-md:self-center rounded-md shadow-2xl shadow-black/50"
 				iconClass="size-16"
 			/>
 			<div class="relative min-w-0 pb-1">
@@ -398,7 +400,7 @@
 								: 'Private playlist'}
 				</p>
 				<h1
-					class="mt-1 text-4xl xl:text-6xl font-extrabold tracking-tight leading-[1.05] line-clamp-2 break-words"
+					class="mt-1 text-4xl xl:text-6xl max-md:text-3xl font-extrabold tracking-tight leading-[1.05] line-clamp-2 break-words"
 				>
 					{playlistData.title}
 				</h1>
@@ -440,7 +442,7 @@
 			</div>
 		</header>
 
-		<div class="flex items-center gap-5 px-6 py-4 bg-black/10">
+		<div class="flex flex-wrap items-center gap-5 max-md:gap-3 px-6 max-md:px-4 py-4 bg-black/10">
 			<PlayButton
 				playing={isPlayingThis}
 				disabled={!visibleSongs.length}
@@ -542,8 +544,8 @@
 				{/if}
 			{/if}
 
-			<div class="ml-auto flex items-center gap-2">
-				<div class="relative flex items-center">
+			<div class="ml-auto flex flex-wrap items-center gap-2 max-md:ml-0 max-md:w-full">
+				<div class="relative flex items-center max-md:flex-1">
 					<span
 						class="icon-[mingcute--search-line] absolute left-3 size-4 text-secondary-600 pointer-events-none"
 					></span>
@@ -578,7 +580,7 @@
 		</div>
 	</div>
 
-	<div class="px-6 pb-10">
+	<div class="px-6 max-md:px-2 pb-10">
 		{#if genres.length > 1}
 			<!-- The genres in the playlist, to listen to one of them -->
 			<div class="flex flex-wrap gap-1.5 mb-4">
@@ -597,11 +599,13 @@
 			</div>
 		{/if}
 		<div
-			class="grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] items-center gap-4 px-4 h-9 mb-2 border-b border-white/10 text-sm text-secondary-600"
+			class="grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] max-md:grid-cols-[minmax(0,1fr)_2rem_2.5rem] items-center gap-4 max-md:gap-2 px-4 max-md:px-2 h-9 mb-2 border-b border-white/10 text-sm text-secondary-600"
 		>
-			<span class="text-end">#</span>
+			<span class="text-end max-md:hidden">#</span>
 			<span>Title</span>
-			<span>{isDownloadedPlaylist ? 'Downloaded' : isLiked ? 'Date liked' : 'Date added'}</span>
+			<span class="max-md:hidden"
+				>{isDownloadedPlaylist ? 'Downloaded' : isLiked ? 'Date liked' : 'Date added'}</span
+			>
 			<span></span>
 			<span></span>
 		</div>
@@ -629,7 +633,7 @@
 							on:dragover={(e) => dragOver(e, index)}
 							on:drop={drop}
 							on:dragend={() => (dragFrom = dropAt = null)}
-							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] items-center gap-4 px-4 h-14 rounded-md cursor-pointer transition-colors {current
+							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] max-md:grid-cols-[minmax(0,1fr)_2rem_2.5rem] items-center gap-4 max-md:gap-2 px-4 max-md:px-2 h-14 rounded-md cursor-pointer transition-colors {current
 								? 'bg-white/[0.08]'
 								: 'hover:bg-white/[0.06]'} {dragFrom === index ? 'opacity-40' : ''}"
 							on:click={async () => {
@@ -658,7 +662,7 @@
 								></span>
 							{/if}
 							<div
-								class="relative h-5 flex items-center justify-end text-secondary-600 tabular-nums"
+								class="relative h-5 flex items-center justify-end text-secondary-600 tabular-nums max-md:hidden"
 							>
 								{#if !downloaded}
 									<span class="group-hover:opacity-0 {download?.isDownloading ? 'opacity-0' : ''}">
@@ -707,7 +711,7 @@
 								</div>
 							</div>
 
-							<span class="text-sm text-secondary-600 truncate">
+							<span class="text-sm text-secondary-600 truncate max-md:hidden">
 								{getDateString(song?.created_at || song?.songInfo?.created_at)}
 							</span>
 

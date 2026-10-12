@@ -1,0 +1,111 @@
+name: Android
+permissions:
+  contents: write
+on:
+  workflow_dispatch:
+
+# Builds the Android app (an APK for phones with 64-bit and 32-bit ARM) and attaches it to
+# the release of the same version (made by release.yml), or keeps it as a build artifact.
+#
+# Signing: with the secrets ANDROID_KEYSTORE (the keystore, base64), ANDROID_KEYSTORE_PASSWORD
+# and ANDROID_KEY_ALIAS the APK is signed with that key, so new versions install over old
+# ones. Without them a key is made for this build only (installing a new version then needs
+# the old one removed first).
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK and build tools
+        run: sdkmanager "ndk;${NDK_VERSION}" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: tauri-android
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Create .env file
+        run: echo "VITE_CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" >> .env
+
+      - name: Create the Android project
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+        run: |
+          npx tauri android init --ci
+          npx tauri icon src-tauri/icons/icon.png
+
+      - name: Build the APK
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+        run: npx tauri android build --apk --target aarch64 --target armv7
+
+      - name: Sign the APK
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          UNSIGNED=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release-unsigned.apk' | head -1)
+          echo "Unsigned APK: $UNSIGNED"
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > release.keystore
+          else
+            echo "::warning::No ANDROID_KEYSTORE secret: signing with a key made for this build only"
+            KEYSTORE_PASSWORD=stosufy-temporary
+            KEY_ALIAS=stosufy
+            keytool -genkeypair -keystore release.keystore -storepass "$KEYSTORE_PASSWORD" \
+              -keypass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Stosufy"
+          fi
+          BUILD_TOOLS=$ANDROID_HOME/build-tools/34.0.0
+          $BUILD_TOOLS/zipalign -f 4 "$UNSIGNED" aligned.apk
+          $BUILD_TOOLS/apksigner sign --ks release.keystore --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" --out "Stosufy-$VERSION.apk" aligned.apk
+          $BUILD_TOOLS/apksigner verify "Stosufy-$VERSION.apk"
+          rm -f release.keystore
+          echo "APK=Stosufy-$VERSION.apk" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK }}
+          path: ${{ env.APK }}
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "Stosufy-v$VERSION" > /dev/null 2>&1; then
+            gh release upload "Stosufy-v$VERSION" "$APK" --clobber
+          else
+            echo "::notice::No release Stosufy-v$VERSION yet: the APK is in the build artifacts"
+          fi

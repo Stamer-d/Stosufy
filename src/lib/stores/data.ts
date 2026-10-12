@@ -1,3 +1,4 @@
+import { HOME_BASE, stosufyDir } from '../platform';
 import { get, writable } from 'svelte/store';
 import { keyStore, freshToken } from './auth';
 import { fetch } from '@tauri-apps/plugin-http';
@@ -8,7 +9,6 @@ import {
 	writeTextFile,
 	exists,
 	mkdir,
-	BaseDirectory,
 	create,
 	readTextFile,
 	writeFile,
@@ -36,26 +36,28 @@ export const downloads = writable<Record<string, DownloadState>>({});
 (async function initialize() {
 	try {
 		// Get required paths
-		homeDir = await path.homeDir();
-		mapSetsDir = await path.join(homeDir, 'Stosufy/Songs');
+		// The folder Stosufy's own is in (the home folder on the desktop)
+		homeDir = await path.dirname(await stosufyDir());
+		mapSetsDir = await path.join(await stosufyDir(), 'Songs');
 		mapDataFile = await path.join(mapSetsDir, 'songData.json');
 
 		// Create directories if they don't exist
-		if (!(await exists(homeDir + '/Stosufy', { baseDir: BaseDirectory.Home }))) {
-			await mkdir(homeDir + '/Stosufy', { baseDir: BaseDirectory.Home });
+		const root = await stosufyDir();
+		if (!(await exists(root, { baseDir: HOME_BASE }))) {
+			await mkdir(root, { baseDir: HOME_BASE, recursive: true });
 		}
 
-		if (!(await exists(mapSetsDir, { baseDir: BaseDirectory.Home }))) {
-			await mkdir(mapSetsDir, { baseDir: BaseDirectory.Home });
+		if (!(await exists(mapSetsDir, { baseDir: HOME_BASE }))) {
+			await mkdir(mapSetsDir, { baseDir: HOME_BASE });
 		}
 
 		// Create or load map data file
-		if (!(await exists(mapDataFile, { baseDir: BaseDirectory.Home }))) {
-			const file = await create(mapDataFile, { baseDir: BaseDirectory.Home });
+		if (!(await exists(mapDataFile, { baseDir: HOME_BASE }))) {
+			const file = await create(mapDataFile, { baseDir: HOME_BASE });
 			file.write(new TextEncoder().encode('{}'));
 			file.close();
 		} else {
-			const mapData = JSON.parse(await readTextFile(mapDataFile, { baseDir: BaseDirectory.Home }));
+			const mapData = JSON.parse(await readTextFile(mapDataFile, { baseDir: HOME_BASE }));
 			mapDataStore.set(mapData);
 			removeStoryboards();
 		}
@@ -76,7 +78,7 @@ async function removeStoryboards() {
 	for (const set of withStoryboard) {
 		const dir = set.storyboard?.dir;
 		if (dir?.startsWith(mapSetsDir)) {
-			await remove(dir, { baseDir: BaseDirectory.Home, recursive: true }).catch(() => {});
+			await remove(dir, { baseDir: HOME_BASE, recursive: true }).catch(() => {});
 		}
 	}
 	mapDataStore.update((current) => {
@@ -105,14 +107,14 @@ export function handleImageError(event: Event) {
 
 export async function saveMapData() {
 	await writeTextFile(mapDataFile, JSON.stringify(get(mapDataStore)), {
-		baseDir: BaseDirectory.Home
+		baseDir: HOME_BASE
 	});
 }
 
 async function getCachedAudio(setId: string, mapId: number | string) {
 	const audioFile = get(mapDataStore)[setId]?.beatmaps[mapId]?.audioFile;
-	if (audioFile && (await exists(audioFile, { baseDir: BaseDirectory.Home }))) {
-		return readFile(audioFile, { baseDir: BaseDirectory.Home });
+	if (audioFile && (await exists(audioFile, { baseDir: HOME_BASE }))) {
+		return readFile(audioFile, { baseDir: HOME_BASE });
 	}
 	return null;
 }
@@ -176,14 +178,14 @@ export async function deleteSong(setId: number | string) {
 	const { background, thumbnail, video } = mapData[setId];
 	// The hitsounds (also the .osu files fetched for songs downloaded before they were saved)
 	await remove(`${mapSetsDir}/${setId}-hitsounds`, {
-		baseDir: BaseDirectory.Home,
+		baseDir: HOME_BASE,
 		recursive: true
 	}).catch(() => {});
 	// Only files in Stosufy's own folder: songs imported from osu! keep their files
 	for (const filePath of [audioFilePath, background, thumbnail, video]) {
 		if (!filePath?.startsWith(mapSetsDir)) continue;
-		if (await exists(filePath, { baseDir: BaseDirectory.Home })) {
-			await remove(filePath, { baseDir: BaseDirectory.Home });
+		if (await exists(filePath, { baseDir: HOME_BASE })) {
+			await remove(filePath, { baseDir: HOME_BASE });
 		}
 	}
 	delete mapData[setId];
@@ -332,24 +334,24 @@ async function processWithWorker(
 								break;
 
 							case 'exists':
-								result = await exists(data.path, { baseDir: BaseDirectory.Home });
+								result = await exists(data.path, { baseDir: HOME_BASE });
 								break;
 
 							case 'writeFile':
-								await writeFile(data.path, data.data, { baseDir: BaseDirectory.Home });
+								await writeFile(data.path, data.data, { baseDir: HOME_BASE });
 								result = true;
 								break;
 
 							case 'readFile':
-								result = await readFile(data.path, { baseDir: BaseDirectory.Home });
+								result = await readFile(data.path, { baseDir: HOME_BASE });
 								break;
 
 							case 'readTextFile':
-								result = await readTextFile(data.path, { baseDir: BaseDirectory.Home });
+								result = await readTextFile(data.path, { baseDir: HOME_BASE });
 								break;
 
 							case 'remove':
-								await remove(data.path, { baseDir: BaseDirectory.Home, recursive: true });
+								await remove(data.path, { baseDir: HOME_BASE, recursive: true });
 								result = true;
 								break;
 
@@ -628,7 +630,7 @@ async function saveVideoFromSet(setId: string, zip: JSZip) {
 	}
 	const extension = video.file.split('.').pop().toLowerCase();
 	const videoPath = await path.join(mapSetsDir, `${setId}-video.${extension}`);
-	await writeFile(videoPath, await entry.async('uint8array'), { baseDir: BaseDirectory.Home });
+	await writeFile(videoPath, await entry.async('uint8array'), { baseDir: HOME_BASE });
 	if (isPlayableVideo(videoPath)) {
 		setStoredFields(setId, { video: videoPath, videoOffset: video.offset });
 		await saveMapData();
@@ -662,7 +664,7 @@ function queueVideoConversion(
 			const ffmpeg = new FFmpeg();
 			await ffmpeg.load();
 			const input = `input.${sourcePath.split('.').pop()}`;
-			await ffmpeg.writeFile(input, await readFile(sourcePath, { baseDir: BaseDirectory.Home }));
+			await ffmpeg.writeFile(input, await readFile(sourcePath, { baseDir: HOME_BASE }));
 			// Muted 720p H.264; quick to encode and plays everywhere
 			await ffmpeg.exec([
 				'-i',
@@ -685,7 +687,7 @@ function queueVideoConversion(
 			const data = (await ffmpeg.readFile('output.mp4')) as Uint8Array;
 			ffmpeg.terminate();
 			if (!data.length) throw new Error('empty output');
-			await writeFile(targetPath, data, { baseDir: BaseDirectory.Home });
+			await writeFile(targetPath, data, { baseDir: HOME_BASE });
 			mapDataStore.update((all) =>
 				all[setId]
 					? { ...all, [setId]: { ...all[setId], video: targetPath, videoOffset: offset } }
@@ -696,7 +698,7 @@ function queueVideoConversion(
 			console.warn('Could not convert the video of', setId, error);
 		} finally {
 			if (removeSource) {
-				await remove(sourcePath, { baseDir: BaseDirectory.Home }).catch(() => {});
+				await remove(sourcePath, { baseDir: HOME_BASE }).catch(() => {});
 			}
 		}
 	});
@@ -746,7 +748,7 @@ async function convertToOpus(inputPath: string, targetPath: string) {
 	]);
 	const data = (await ffmpeg.readFile(`${now}.opus`)) as Uint8Array;
 	await writeFile(targetPath, data, {
-		baseDir: BaseDirectory.Home
+		baseDir: HOME_BASE
 	});
 	await ffmpeg.deleteFile(inputFileName);
 	await ffmpeg.deleteFile(`${now}.opus`);
@@ -920,7 +922,7 @@ async function saveLocalImage(setId: string, kind: LocalImage): Promise<number> 
 		const name = `${setId}-${kind === 'background' ? 'bg' : 'thumb'}.jpg`;
 		const imagePath = await path.join(mapSetsDir, name);
 		await writeFile(imagePath, new Uint8Array(await response.arrayBuffer()), {
-			baseDir: BaseDirectory.Home
+			baseDir: HOME_BASE
 		});
 		change = { [kind]: imagePath };
 	}
@@ -1046,7 +1048,7 @@ function localImageUrl(imagePath: string) {
 	if (!localImages.has(imagePath)) {
 		localImages.set(
 			imagePath,
-			readFile(imagePath, { baseDir: BaseDirectory.Home })
+			readFile(imagePath, { baseDir: HOME_BASE })
 				.then((data) => URL.createObjectURL(new Blob([data])))
 				.catch(() => null)
 		);
@@ -1090,7 +1092,7 @@ function smallImageUrl(imagePath: string) {
 	if (!smallImages.has(imagePath)) {
 		smallImages.set(
 			imagePath,
-			readFile(imagePath, { baseDir: BaseDirectory.Home })
+			readFile(imagePath, { baseDir: HOME_BASE })
 				.then(async (data) => {
 					const bitmap = await createImageBitmap(new Blob([data]));
 					const size = 160;
