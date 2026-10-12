@@ -13,6 +13,7 @@
 	import { relaunch } from '@tauri-apps/plugin-process';
 	import { focusMode } from '#lib/stores/audio.ts';
 	import { djOpen } from '#lib/dj/engine.ts';
+	import { page } from '$app/state';
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 
 	const appWindow = getCurrentWindow();
@@ -130,6 +131,18 @@
 				onclick={() => djOpen.update((on) => !on)}
 			>
 				<span class="icon-[mingcute--disc-line] size-[18px]"></span>
+			</button>
+			<button
+				title="Storm center"
+				aria-label="Storm center"
+				aria-pressed={page.url.pathname === '/storm'}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
+					.url.pathname === '/storm'
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={() => goto('/storm')}
+			>
+				<span class="icon-[mingcute--thunderstorm-line] size-[18px]"></span>
 			</button>
 			<button
 				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}

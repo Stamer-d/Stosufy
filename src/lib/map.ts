@@ -61,3 +61,24 @@ export function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lo
 		Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
 	return 12742 * Math.asin(Math.sqrt(h));
 }
+
+/** The place at pixels of the whole world at a zoom level */
+export function fromWorldPixel(x: number, y: number, zoom: number) {
+	const size = TILE * 2 ** zoom;
+	const lon = (x / size) * 360 - 180;
+	const n = Math.PI - (2 * Math.PI * y) / size;
+	const lat = (180 / Math.PI) * Math.atan(Math.sinh(n));
+	return { lat, lon };
+}
+
+/** A tile's corners in web mercator metres (for WMS maps) */
+export function tileBounds(x: number, y: number, z: number) {
+	const half = 20037508.342789244;
+	const span = (2 * half) / 2 ** z;
+	return {
+		minX: -half + x * span,
+		maxX: -half + (x + 1) * span,
+		maxY: half - y * span,
+		minY: half - (y + 1) * span
+	};
+}

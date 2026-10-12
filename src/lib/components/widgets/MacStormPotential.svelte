@@ -6,6 +6,8 @@
 	import Widget from './MacWidget.svelte';
 	import PlacePicker from './PlacePicker.svelte';
 	import { widgetData, placeOf } from '#lib/stores/widgetData.ts';
+	import { goto } from '$app/navigation';
+	import { LEVELS, stormOutlook } from '#lib/storm.ts';
 
 	/** @type {{ uid?: string }} */
 	let { uid = 'storm' } = $props();
@@ -15,79 +17,10 @@
 	let storm = $state(null);
 	let error = $state('');
 
-	const LEVELS = [
-		{ label: 'Quiet', colour: '#4ade80' },
-		{ label: 'Marginal', colour: '#facc15' },
-		{ label: 'Slight', colour: '#fb923c' },
-		{ label: 'Enhanced', colour: '#f43f5e' },
-		{ label: 'High', colour: '#d946ef' }
-	];
-
-	/** The wind vector (m/s, the way it blows to) */
-	const vector = (speed, from) => {
-		const rad = (from * Math.PI) / 180;
-		return [-speed * Math.sin(rad), -speed * Math.cos(rad)];
-	};
-
 	async function load() {
 		if (!place) return;
 		try {
-			const hourly = [
-				'cape',
-				'lifted_index',
-				'wind_gusts_10m',
-				'dew_point_2m',
-				'precipitation_probability',
-				'wind_speed_10m',
-				'wind_direction_10m',
-				'wind_speed_500hPa',
-				'wind_direction_500hPa',
-				'weather_code'
-			].join(',');
-			const url = `https://api.open-meteo.com/v1/forecast?latitude=${place.lat}&longitude=${place.lon}&hourly=${hourly}&wind_speed_unit=ms&timezone=auto&forecast_days=2`;
-			const data = await (await fetch(url)).json();
-			const h = data.hourly;
-			// The next 24 hours from now (times are local to the place)
-			const now = Date.now();
-			const offset = (data.utc_offset_seconds ?? 0) * 1000;
-			const start = Math.max(
-				0,
-				h.time.findIndex((t) => new Date(t + 'Z').getTime() - offset > now - 3600e3)
-			);
-			const hours = h.time.slice(start, start + 24).map((t, j) => {
-				const i = start + j;
-				const [u1, v1] = vector(h.wind_speed_10m[i] ?? 0, h.wind_direction_10m[i] ?? 0);
-				const [u2, v2] = vector(h.wind_speed_500hPa[i] ?? 0, h.wind_direction_500hPa[i] ?? 0);
-				return {
-					hour: Number(t.slice(11, 13)),
-					cape: h.cape[i] ?? 0,
-					li: h.lifted_index[i] ?? 0,
-					gust: h.wind_gusts_10m[i] ?? 0,
-					dew: h.dew_point_2m[i] ?? 0,
-					rain: h.precipitation_probability[i] ?? 0,
-					shear: Math.hypot(u2 - u1, v2 - v1),
-					thunder: (h.weather_code[i] ?? 0) >= 95
-				};
-			});
-			const peak = hours.reduce((a, b) => (b.cape > a.cape ? b : a), hours[0]);
-			const shear = Math.max(...hours.map((x) => x.shear));
-			const li = Math.min(...hours.map((x) => x.li));
-			const thunder = hours.find((x) => x.thunder);
-			let level = 0;
-			if (peak.cape >= 100 || thunder) level = 1;
-			if (peak.cape >= 500 && (peak.shear >= 10 || li <= -2)) level = 2;
-			if (peak.cape >= 1000 && peak.shear >= 15) level = 3;
-			if (peak.cape >= 2000 && peak.shear >= 20) level = 4;
-			storm = {
-				hours,
-				peak,
-				shear,
-				li,
-				thunder,
-				level,
-				gust: Math.max(...hours.map((x) => x.gust)),
-				dew: Math.max(...hours.map((x) => x.dew))
-			};
+			storm = await stormOutlook(place.lat, place.lon);
 			error = '';
 		} catch {
 			error = "Couldn't load the forecast";
@@ -134,8 +67,15 @@
 				title="Change the city"
 				onclick={() => (asking = true)}>Storms · {place.name}</button
 			>
+			<button
+				class="grid place-items-center size-6 shrink-0 ms-auto rounded-full text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
+				title="Open the storm center"
+				aria-label="Open the storm center"
+				onclick={() => goto('/storm')}
+				><span class="icon-[mingcute--fullscreen-2-line] size-3.5"></span></button
+			>
 			<span
-				class="ms-auto px-2 py-0.5 rounded-full text-[11px] font-extrabold text-black"
+				class="px-2 py-0.5 rounded-full text-[11px] font-extrabold text-black"
 				style="background: {level.colour}">{level.label}</span
 			>
 		</div>

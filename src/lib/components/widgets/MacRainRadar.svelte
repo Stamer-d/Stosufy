@@ -2,6 +2,7 @@
 	// The rain radar around you, the last two hours as a loop (RainViewer), on a dark map
 	import { onMount } from 'svelte';
 	import { fetch } from '@tauri-apps/plugin-http';
+	import { goto } from '$app/navigation';
 	import Widget from './MacWidget.svelte';
 	import WidgetMap from './WidgetMap.svelte';
 	import PlacePicker from './PlacePicker.svelte';
@@ -94,6 +95,13 @@
 				>
 				<span class="ms-auto text-xs tabular-nums text-white/70"
 					>{frames[shown] ? ago(frames[shown].time) : error || 'Loading…'}</span
+				>
+				<button
+					class="grid place-items-center size-6 shrink-0 rounded-full text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
+					title="Open the storm center"
+					aria-label="Open the storm center"
+					onclick={() => goto('/storm')}
+					><span class="icon-[mingcute--fullscreen-2-line] size-3.5"></span></button
 				>
 			</div>
 			<div class="absolute bottom-3 left-3 right-3 flex items-center gap-2">

@@ -2,6 +2,7 @@
 	// The weather warnings of the German weather service (DWD) where you are, via Bright Sky
 	import { onMount } from 'svelte';
 	import { fetch } from '@tauri-apps/plugin-http';
+	import { goto } from '$app/navigation';
 	import Widget from './MacWidget.svelte';
 	import PlacePicker from './PlacePicker.svelte';
 	import { widgetData, placeOf } from '#lib/stores/widgetData.ts';
@@ -82,11 +83,17 @@
 				title="Change the city"
 				onclick={() => (asking = true)}>Warnings · {place.name}</button
 			>
+			<span class="ms-auto"></span>
 			{#if alerts?.length > 1}
-				<span class="ms-auto text-[11px] font-semibold text-white/50"
-					>+{alerts.length - 1} more</span
-				>
+				<span class="text-[11px] font-semibold text-white/50">+{alerts.length - 1} more</span>
 			{/if}
+			<button
+				class="grid place-items-center size-6 shrink-0 rounded-full text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
+				title="Open the storm center"
+				aria-label="Open the storm center"
+				onclick={() => goto('/storm')}
+				><span class="icon-[mingcute--fullscreen-2-line] size-3.5"></span></button
+			>
 		</div>
 		{#if outsideGermany}
 			<p class="mt-auto text-sm text-white/60">
