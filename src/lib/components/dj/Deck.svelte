@@ -140,7 +140,10 @@
 		<div class="shrink-0 {side === 'right' ? 'text-left' : 'text-right'}">
 			<p class="text-xl font-black tabular-nums leading-none" style="color: {color}">{bpm}</p>
 			<p class="text-[10px] font-bold text-white/40 tracking-wide">
-				BPM {ds.tempo ? tempoText(ds.tempo) : ''}
+				BPM {ds.tempo ? tempoText(ds.tempo) : ''}{#if ds.key}<span
+						class="ml-1.5 px-1 rounded bg-white/10 text-white/70"
+						title="The song's key (Camelot): neighbours on the wheel mix in harmony">{ds.key}</span
+					>{/if}
 			</p>
 		</div>
 	</div>

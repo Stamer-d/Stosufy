@@ -148,7 +148,11 @@
 				<p class="text-white/50">Drag a song from the list onto this deck</p>
 			{/if}
 			<p class="mt-2 text-3xl font-black tabular-nums leading-none" style="color: {color}">
-				{bpm}<span class="text-xs text-white/40 font-bold ml-1">{bpm ? 'BPM' : ''}</span>
+				{bpm}<span class="text-xs text-white/40 font-bold ml-1">{bpm ? 'BPM' : ''}</span
+				>{#if ds.key}<span
+						class="ml-2 align-middle px-1.5 py-0.5 rounded-md bg-white/10 text-xs font-bold text-white/70"
+						title="The song's key (Camelot): neighbours on the wheel mix in harmony">{ds.key}</span
+					>{/if}
 			</p>
 			<p class="text-sm tabular-nums text-white/60">{loaded ? remaining : ''}</p>
 		</div>

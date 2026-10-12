@@ -144,7 +144,7 @@
 								: 'bg-white/[0.06] ring-white/10 text-white/75'}"
 						>
 							<span class="font-black tracking-wide">AUTO DJ</span>
-							<span class="max-w-56 truncate">
+							<span class="max-w-[28rem] truncate">
 								{#if auto.mixing}
 									Mixing into {auto.song?.title ?? 'the next song'}…
 								{:else if !auto.song}
@@ -152,7 +152,9 @@
 								{:else if auto.seconds == null}
 									Next: {auto.song.title} · waiting for you
 								{:else}
-									Mixes into {auto.song.title} in {clock(auto.seconds)}
+									Mixes into {auto.song.title} in {clock(auto.seconds)}{auto.how
+										? ` · ${auto.how}`
+										: ''}
 								{/if}
 							</span>
 							<button

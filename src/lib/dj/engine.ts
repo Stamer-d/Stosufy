@@ -26,6 +26,14 @@ import {
 	type Grid
 } from './grid';
 import { computePeaks, type Peaks } from './peaks';
+import {
+	analyzeSong,
+	keyFit,
+	phraseCeil,
+	phraseFloor,
+	PHRASE_BARS,
+	type SongAnalysis
+} from './analysis';
 import type { MapSet } from '../types';
 
 export type DeckId = 'A' | 'B';
@@ -40,18 +48,33 @@ export const HOT_CUES = 8;
 export const TEMPO_RANGES = [0.08, 0.16, 0.5];
 
 export type TransitionType =
-	'smart' | 'crossfade' | 'bassswap' | 'dropswap' | 'loopout' | 'filter' | 'echo' | 'brake' | 'cut';
+	| 'smart'
+	| 'blend'
+	| 'crossfade'
+	| 'bassswap'
+	| 'dropswap'
+	| 'loopout'
+	| 'filter'
+	| 'echo'
+	| 'brake'
+	| 'cut';
 export const TRANSITIONS: { id: TransitionType; name: string; description: string }[] = [
 	{
 		id: 'smart',
 		name: 'Smart',
 		description:
-			'Mixes like a DJ: picks the style that fits the two songs (tempo, drops), varies it, and lands the new one on its drop'
+			'Mixes like a pro DJ: at the end of the playing song, on its phrases, with the style that fits the two songs (tempo, key, intro and outro)'
 	},
 	{
 		id: 'bassswap',
 		name: 'Bass swap',
 		description: 'Both play, the basslines swap on the middle bar'
+	},
+	{
+		id: 'blend',
+		name: 'Pro blend',
+		description:
+			"The new song's intro under the old one's outro, the bass swapping on the new song's drop"
 	},
 	{
 		id: 'dropswap',
@@ -107,6 +130,8 @@ export interface DeckState {
 	/** Following the other deck's tempo */
 	synced: boolean;
 	kiai: { start: number; end: number }[];
+	/** The song's key (Camelot, like 8A), once analysed */
+	key: string | null;
 }
 
 const freshState = (): DeckState => ({
@@ -129,8 +154,12 @@ const freshState = (): DeckState => ({
 	echo: 0,
 	reverb: 0,
 	synced: false,
-	kiai: []
+	kiai: [],
+	key: null
 });
+
+/** Songs analysed before, by their audio file */
+const analysed = new Map<string, SongAnalysis>();
 
 const dbToGain = (db: number) => 10 ** (db / 20);
 
@@ -176,6 +205,8 @@ export class Deck {
 	peaks: Peaks | null = null;
 	/** Loudness normalization */
 	private normalize = 1;
+	/** The song's structure and key (see analysis.ts), once worked out */
+	analysis: SongAnalysis | null = null;
 
 	private ctx: AudioContext;
 	private input: GainNode;
@@ -272,6 +303,7 @@ export class Deck {
 		this.state = { ...freshState(), ...keep, song, loading: true };
 		this.buffer = null;
 		this.peaks = null;
+		this.analysis = null;
 		this.grid = [];
 		this.pausedAt = 0;
 		this.apply();
@@ -337,6 +369,19 @@ export class Deck {
 			const peaks = await computePeaks(buffer);
 			if (id === this.loadId) {
 				this.peaks = peaks;
+				this.emit();
+			}
+			// What a DJ hears in it: energy, intro, peaks, outro, phrases, key
+			const analysis =
+				analysed.get(map.audioFile) ??
+				(await analyzeSong(buffer, this.grid, this.state.kiai, cue).catch((error) => {
+					console.warn('Could not analyse the song', error);
+					return null;
+				}));
+			if (analysis) analysed.set(map.audioFile, analysis);
+			if (id === this.loadId) {
+				this.analysis = analysis;
+				this.state = { ...this.state, key: analysis?.key?.camelot ?? null };
 				this.emit();
 			}
 		} catch (error) {
@@ -871,6 +916,10 @@ export interface TransitionState {
 	beat: number;
 	/** Where a stepped effect (shrinking loops, the brake) is */
 	stage?: number;
+	/** Pro blend: only the new song's drums until the swap (keys that clash) */
+	drums?: boolean;
+	/** Pro blend: when the basslines swap (part of the mix; 1: at its end, on the drop) */
+	swap?: number;
 }
 
 export interface AutoDjState {
@@ -1076,57 +1125,103 @@ class Mixer {
 		return { rating: rating as 'perfect' | 'good' | 'tricky', change, factor: match.factor };
 	}
 
-	/** The style Smart chose for a pair of songs (the same each time it's asked) */
-	private styles = new Map<string, [TransitionType, number]>();
-	private lastStyle: TransitionType | null = null;
-
 	/**
-	 * How a DJ would mix two songs: with the tempos close, long blends and swaps on the
-	 * drop; further apart, shorter tricks (loops, filters, a brake); far apart, an echo out
-	 * or a brake. Never the same style twice in a row if another fits.
+	 * How a pro DJ mixes two songs, from what's in them (see analysis.ts):
+	 * - Tempos close and keys that go together: an EQ blend. The new song's intro plays under
+	 *   the old one's outro, both on their phrases, and the basslines swap on the new song's
+	 *   drop (never two basslines at once); the old one's mids and highs go in its last phrase.
+	 * - Tempos close but keys that clash: the same with only the new song's drums until the drop.
+	 * - Tempos far apart, no intro to blend over, or no outro left: an echo out on the last beat
+	 *   of a phrase and the new song in on the one.
+	 * With Auto DJ it starts where the playing song's outro starts (its last peak is over);
+	 * mixed by hand, on the next phrase (or bar).
 	 */
-	private smartStyle(
-		from: Deck,
-		to: Deck,
-		fit: ReturnType<Mixer['compat']>
-	): [TransitionType, number] {
-		const key = `${from.state.song?.id}:${from.state.song?.track ?? 0}>${to.state.song?.id}:${to.state.song?.track ?? 0}`;
-		const known = this.styles.get(key);
-		if (known) return known;
-		const size = Math.abs(fit.change ?? 1);
-		const base = to.state.hotCues[0] ?? to.state.cue;
-		const toSection = sectionAt(to.grid, to.state.cue);
-		const toBar = (toSection?.beat ?? 0.5) * (toSection?.meter ?? 4);
-		const drop = to.state.kiai.find((k) => k.start > base + toBar)?.start;
-		// Room before the new song's drop for a build-up of that many bars
-		const intro = (bars: number) => drop !== undefined && drop - bars * toBar >= base - 0.01;
-		let options: [TransitionType, number][];
-		if (fit.rating === 'clash')
-			options = [
-				['echo', 4],
-				['brake', 2]
-			];
-		else if (size <= 0.06)
-			options = [
-				...(intro(16) ? ([['dropswap', 16]] as [TransitionType, number][]) : []),
-				['bassswap', intro(32) ? 32 : 16],
-				['loopout', 8],
-				...(intro(8) ? ([['dropswap', 8]] as [TransitionType, number][]) : [])
-			];
-		else
-			options = [
-				['filter', 8],
-				['loopout', 4],
-				['brake', 4],
-				...(intro(8) ? ([['dropswap', 8]] as [TransitionType, number][]) : [])
-			];
-		const fresh = options.filter(([type]) => type !== this.lastStyle);
-		const pool = fresh.length ? fresh : options;
-		// Mostly the first (the best fit), sometimes another, for variety
-		const seed = [...key].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
-		const choice = pool[seed % 10 < 6 ? 0 : 1 + (seed % Math.max(1, pool.length - 1))] ?? pool[0];
-		this.styles.set(key, choice);
-		return choice;
+	proPlan(from: Deck, to: Deck, auto = false) {
+		const fit = this.compat(from, to);
+		const a = from.analysis;
+		const b = to.analysis;
+		if (!a || !b) return null;
+		const pos = from.position();
+		const now = pos + 0.15;
+		const bar = a.bar;
+		const rate = fit.change != null ? 1 + fit.change : 1;
+		const keys = keyFit(a.key, b.key, rate);
+		const tempoClose =
+			fit.rating !== 'clash' && fit.rating !== 'tricky' && Math.abs(fit.change ?? 1) <= 0.06;
+
+		// Where the new song starts: its cue, or where the user put it
+		const cue = Math.max(
+			to.state.hotCues[0] ?? to.state.cue,
+			Math.min(b.firstBar, to.state.cue + bar * 2)
+		);
+		const placed = to.position();
+		const userPlaced =
+			!to.state.playing &&
+			Math.abs(placed - cue) > 1 &&
+			placed > 0 &&
+			placed < to.state.duration - 20;
+		const from0 = userPlaced ? placed : cue;
+		const drop = b.drops.find((d) => d.start > from0 + b.bar * 2)?.start ?? b.introEnd;
+		const introBars = Math.floor((drop - from0) / b.bar + 1e-6);
+
+		// Where the playing song can be left: from its outro (with Auto DJ), else from now
+		const nextBoundary = (time: number) => {
+			const phrase = phraseCeil(a, time);
+			return auto || phrase - time <= bar * 4 + 0.01 ? phrase : nextDownbeat(from.grid, time, 0);
+		};
+		const earliest = auto ? Math.max(now, a.outroStart) : now;
+		const longest = (limit: number) => [32, 16, 8].find((n) => n <= limit) ?? 0;
+
+		const blend = (drums: boolean) => {
+			const start = nextBoundary(earliest);
+			const room = Math.floor((a.lastBar - start) / bar + 1e-6);
+			let bars = longest(Math.min(introBars, room, drums ? 16 : 32));
+			if (bars < 8) return null;
+			// With a long outro: so the mix ends where the old song does
+			let startAt = start;
+			if (auto) {
+				const late = phraseFloor(a, a.lastBar - bars * bar);
+				if (late > startAt) startAt = late;
+			}
+			const inPoint = userPlaced ? placed : beatRound(to.grid, drop - bars * b.bar);
+			if (inPoint < from0 - 0.05) bars = longest(Math.floor((drop - from0) / b.bar + 1e-6));
+			if (bars < 8) return null;
+			return {
+				type: 'blend' as TransitionType,
+				bars,
+				startAt,
+				inPoint: userPlaced ? placed : beatRound(to.grid, drop - bars * b.bar),
+				fit,
+				drums,
+				swap: 1,
+				why: `${drums ? 'Drum blend' : 'Blend'} over ${bars} bars, the bass swaps on the drop`
+			};
+		};
+
+		let plan = null;
+		if (tempoClose && keys !== 0) plan = blend(false);
+		if (!plan && tempoClose) plan = blend(true);
+		if (!plan) {
+			// Echo out on the last beat of a phrase; the new song on the one
+			const boundary = auto
+				? phraseCeil(a, Math.max(now + a.bar / 4, Math.min(a.outroStart, a.lastBar - bar)))
+				: nextBoundary(now + a.bar / 4);
+			const beat = a.bar / 4;
+			plan = {
+				type: 'echo' as TransitionType,
+				bars: 1,
+				startAt: Math.min(boundary, a.lastBar) - beat,
+				inPoint: userPlaced ? placed : cue,
+				fit,
+				drums: false,
+				swap: 1,
+				why:
+					fit.rating === 'clash' || !tempoClose
+						? 'Echo out: the tempos are too far apart to blend'
+						: 'Echo out on the phrase, the new song in on the one'
+			};
+		}
+		return plan;
 	}
 
 	/**
@@ -1134,9 +1229,30 @@ class Mixer {
 	 * when it starts in the playing song (on its next bar, or phrase if that's close) and
 	 * where the new song starts, so that its drop (kiai) comes when the mix is done
 	 */
-	plan(from: Deck, to: Deck, type = this.transitionType, bars = this.transitionBars) {
+	plan(
+		from: Deck,
+		to: Deck,
+		type = this.transitionType,
+		bars = this.transitionBars,
+		auto = false
+	): {
+		type: TransitionType;
+		bars: number;
+		startAt: number;
+		inPoint: number;
+		fit: ReturnType<Mixer['compat']>;
+		drums?: boolean;
+		swap?: number;
+		why?: string;
+	} {
 		const fit = this.compat(from, to);
-		if (type === 'smart') [type, bars] = this.smartStyle(from, to, fit);
+		if (type === 'smart') {
+			const pro = this.proPlan(from, to, auto);
+			if (pro) return pro;
+			// Not analysed (yet): a blend, or an echo out if the tempos don't go
+			type = fit.rating === 'clash' || fit.rating === 'tricky' ? 'echo' : 'bassswap';
+			bars = type === 'echo' ? 2 : 16;
+		}
 		if (
 			fit.rating === 'clash' &&
 			(type === 'bassswap' || type === 'crossfade' || type === 'filter')
@@ -1185,12 +1301,12 @@ class Mixer {
 	}
 
 	/** Mixes from the playing deck to the other one (see plan) */
-	mix(type = this.transitionType, bars = this.transitionBars) {
+	mix(type = this.transitionType, bars = this.transitionBars, auto = false) {
 		const from = this.leading();
 		if (!from || this.transition) return false;
 		const to = this.other(from.id);
 		if (!to.buffer) return false;
-		const plan = this.plan(from, to, type, bars);
+		const plan = this.plan(from, to, type, bars, auto);
 		const match = to.matchRate(from);
 		if (match && plan.fit.rating !== 'clash') {
 			to.setTempo(match.rate - 1, true);
@@ -1202,9 +1318,11 @@ class Mixer {
 		const meter = section?.meter ?? 4;
 		const pos = from.position();
 		const start = this.ctx.currentTime + Math.max(0.05, (plan.startAt - pos) / from.rate);
+		// An echo out starts on the old song's last beat: the new one comes in on the one after
+		const lead = plan.type === 'echo' && plan.bars === 1 ? beatSeconds : 0;
 		if (!to.state.playing) {
 			to.seek(plan.inPoint);
-			to.play(start);
+			to.play(start + lead);
 		} else if (match) {
 			to.alignTo(from, match.factor === 1);
 		}
@@ -1222,7 +1340,6 @@ class Mixer {
 			volume: Math.max(to.state.volume, 0.9),
 			kill: { low: false, mid: false, high: false }
 		});
-		this.lastStyle = plan.type;
 		this.transition = {
 			from: from.id,
 			to: to.id,
@@ -1230,9 +1347,12 @@ class Mixer {
 			bars: plan.bars,
 			start,
 			end: start + length,
-			beat: beatSeconds
+			beat: beatSeconds,
+			drums: plan.drums,
+			swap: plan.swap
 		};
-		if (this.hype && plan.bars >= 4 && plan.type !== 'cut') {
+		// The riser is an effect for the hand-picked styles, a pro blend doesn't need one
+		if (this.hype && plan.bars >= 4 && !['cut', 'blend', 'echo'].includes(plan.type)) {
 			// Up to the swap (the middle) of a bass swap, else most of the mix
 			const until =
 				plan.type === 'bassswap'
@@ -1353,12 +1473,46 @@ class Mixer {
 				this.setCrossfader(lerp(fromSide, toSide, (p - 0.2) / 0.75));
 				break;
 			}
-			case 'echo':
-				// The old one echoes for a moment, then stops: only its echo rings out
-				from.set({ echo: lerp(0, 0.85, p / 0.3), reverb: this.hype ? lerp(0, 0.4, p / 0.3) : 0 });
-				this.setCrossfader(lerp(fromSide, 0.5, p / 0.3));
-				if (p >= 0.3 && from.state.playing) from.pause();
+			case 'blend': {
+				// The new song's intro under the old one's outro: its highs early, its mids
+				// (none with clashing keys) later, its bass not before the swap. The old one keeps
+				// its bass to the swap; its mids and highs go (and it thins out) in its last
+				// phrase. On the swap (the drop) the basslines change places on the one.
+				const swapAt = t.swap ?? 1;
+				const barPart = beat * 4;
+				const fadeFrom = Math.max(0, swapAt - Math.min(0.5, barPart * 8));
+				const swapped = p >= swapAt - beat * 0.05;
+				to.set({
+					eq: {
+						high: lerp(-18, toEq.high, p / 0.35),
+						mid: t.drums ? (swapped ? toEq.mid : EQ_MIN) : lerp(-12, toEq.mid, p / 0.6),
+						low: swapped ? toEq.low : EQ_MIN
+					}
+				});
+				const fade = (p - fadeFrom) / Math.max(0.0001, swapAt - fadeFrom);
+				from.set({
+					eq: {
+						low: swapped ? EQ_MIN : fromEq.low,
+						mid: lerp(fromEq.mid, -14, fade),
+						high: lerp(fromEq.high, -18, fade)
+					},
+					filter: lerp(was[t.from]?.filter ?? 0, 0.3, (p - (swapAt - barPart * 2)) / (barPart * 2))
+				});
+				this.setCrossfader(swapped ? toSide : lerp(fromSide, 0.5, p / Math.max(0.06, barPart * 2)));
 				break;
+			}
+			case 'echo': {
+				// On the old song's last beat its echo opens; on the one it stops, its echo rings
+				// out over the new song
+				const oneBeat = t.bars === 1 ? beat : 0.3;
+				from.set({
+					echo: lerp(0, 0.85, p / (oneBeat * 0.5)),
+					reverb: lerp(0, 0.35, p / oneBeat)
+				});
+				this.setCrossfader(p < oneBeat ? lerp(fromSide, 0.5, p / oneBeat) : 0.5);
+				if (p >= oneBeat && from.state.playing) from.pause();
+				break;
+			}
 			case 'dropswap': {
 				// The new one builds up under the old one: no bass yet, its low-pass opening.
 				// The old one thins out, then stutters in shorter and shorter rolls; on the drop
@@ -1495,6 +1649,11 @@ class Mixer {
 	 * room for the mix after it, else the bars before its end; on a bar
 	 */
 	private mixOutPoint(deck: Deck, other: Deck) {
+		// Smart: where the pro plan starts (the outro, on a phrase)
+		if (this.transitionType === 'smart') {
+			const pro = this.proPlan(deck, other, true);
+			if (pro) return pro.startAt;
+		}
 		const duration = deck.state.duration;
 		const section = sectionAt(deck.grid, duration);
 		const bar = (section?.beat ?? 0.5) * (section?.meter ?? 4);
@@ -1518,7 +1677,12 @@ class Mixer {
 	}
 
 	/** What Auto DJ does next: the song it mixes into and in how many seconds (for the UI) */
-	autoStatus(): { song: MapSet | null; seconds: number | null; mixing: boolean } | null {
+	autoStatus(): {
+		song: MapSet | null;
+		seconds: number | null;
+		mixing: boolean;
+		how?: string;
+	} | null {
 		if (!this.auto.on) return null;
 		if (this.transition)
 			return { song: this.decks[this.transition.to].state.song, seconds: 0, mixing: true };
@@ -1530,10 +1694,12 @@ class Mixer {
 		const at = this.mixOutPoint(playing, next);
 		const seconds = Math.max(0, (at - playing.position()) / (playing.rate || 1));
 		const waiting = performance.now() - this.userAt < USER_QUIET_MS;
+		const pro = this.transitionType === 'smart' ? this.proPlan(playing, next, true) : null;
 		return {
 			song: next.state.song,
 			seconds: waiting && seconds === 0 ? null : seconds,
-			mixing: false
+			mixing: false,
+			how: pro?.why ?? (this.transitionType === 'smart' ? 'Listening to the songs…' : undefined)
 		};
 	}
 
@@ -1558,12 +1724,17 @@ class Mixer {
 			return;
 		}
 		if (next.state.loading || !next.buffer || next.state.playing) return;
-		if (playing.position() >= this.mixOutPoint(playing, next)) {
+		// Smart waits for the songs to be analysed (a moment after loading), unless time is short
+		const remaining = (playing.state.duration - playing.position()) / (playing.rate || 1);
+		if (this.transitionType === 'smart' && (!playing.analysis || !next.analysis) && remaining > 25)
+			return;
+		// A moment early, so the mix starts right on its phrase
+		if (playing.position() >= this.mixOutPoint(playing, next) - 0.3 * (playing.rate || 1)) {
 			// Not while the user works the decks (syncing, cueing…), unless the song is about
 			// to end: the music doesn't stop
 			const left = (playing.state.duration - playing.position()) / (playing.rate || 1);
 			if (performance.now() - this.userAt < USER_QUIET_MS && left > 20) return;
-			if (this.mix()) {
+			if (this.mix(this.transitionType, this.transitionBars, true)) {
 				if (!userPick) this.auto = { ...this.auto, index: nextIndex };
 				next.pickedByUser = false;
 				this.emit();
