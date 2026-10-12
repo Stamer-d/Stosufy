@@ -259,7 +259,7 @@
 		if (!lightningCanvas || !width || !height) return;
 		const { c, ratio } = prepare(lightningCanvas);
 		c.setTransform(ratio, 0, 0, ratio, 0, 0);
-		if (strikes?.length) drawStrikes(c, strikes, toScreen, width, height, zoom >= 8 ? 1.4 : 1);
+		if (strikes?.length) drawStrikes(c, strikes, toScreen, width, height, zoom >= 8 ? 1.4 : 1, kmPerPixel);
 	}
 	onMount(() => {
 		const timer = setInterval(drawLightning, 100);

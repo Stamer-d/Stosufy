@@ -795,26 +795,30 @@ export function createGameplayRenderer(
 			const textScale = px * 0.9;
 			const height = digit ? digit.image.height * digit.scale * textScale : 18;
 			const rpmText = `${Math.round(Math.max(0, rpm))}`;
+			const box = back ? rpmBox(back) : null;
 			if (back) {
 				const w = back.image.width * back.scale * px;
 				const h = back.image.height * back.scale * px;
-				const left = 320 - 87 - 64;
-				const top = 445 - 56 + slide;
-				image(back, left + w / 2, top + h / 2, px, alpha);
-				// In the middle of the box's free part (its left part says "spins per minute"),
-				// whatever the numbers' size
+				image(back, 320 - 87 - 64 + w / 2, 445 - 56 + slide + h / 2, px, alpha);
+			}
+			if (back && box) {
+				// A filled box: in the middle of its free part (beside its label), whatever the
+				// numbers' size
+				const w = back.image.width * back.scale * px;
+				const h = back.image.height * back.scale * px;
 				drawText(
 					rpmText,
 					skin.score,
 					skin.scoreOverlap,
-					left + w * 0.63,
-					top + h / 2,
+					320 - 87 - 64 + w * box.centre,
+					445 - 56 + slide + h / 2,
 					textScale,
 					alpha,
 					'center',
 					18
 				);
 			} else {
+				// Just a label (or nothing): where osu! puts the number, which skins are made for
 				drawText(
 					rpmText,
 					skin.score,
@@ -828,6 +832,51 @@ export function createGameplayRenderer(
 				);
 			}
 		}
+	}
+
+	/**
+	 * Where the number goes in a skin's spinner-rpm picture: for a filled box (like the
+	 * default one), the middle of its part right of its label (as a part of its width); null
+	 * for a picture that's only a label
+	 */
+	const rpmBoxes = new Map<SkinImage, { centre: number } | null>();
+	function rpmBox(picture: SkinImage) {
+		if (rpmBoxes.has(picture)) return rpmBoxes.get(picture)!;
+		let found: { centre: number } | null = null;
+		try {
+			const { width, height } = picture.image;
+			const c = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })!;
+			c.drawImage(picture.image, 0, 0);
+			const px = c.getImageData(0, 0, width, height).data;
+			let opaque = 0;
+			const greys: number[] = [];
+			for (let i = 0; i < px.length; i += 4) {
+				if (px[i + 3] > 200) {
+					opaque++;
+					if (opaque % 7 === 0) greys.push(px[i] + px[i + 1] + px[i + 2]);
+				}
+			}
+			if (opaque > width * height * 0.6 && greys.length) {
+				// The box's own colour, and the columns with something else on them (the label)
+				greys.sort((a, b) => a - b);
+				const base = greys[greys.length >> 1];
+				let labelEnd = -1;
+				for (let x = 0; x < width * 0.65; x++) {
+					let ink = 0;
+					for (let y = Math.floor(height * 0.15); y < height * 0.85; y++) {
+						const i = (y * width + x) * 4;
+						if (px[i + 3] > 200 && Math.abs(px[i] + px[i + 1] + px[i + 2] - base) > 150) ink++;
+					}
+					if (ink > height * 0.06) labelEnd = x;
+				}
+				const from = labelEnd >= 0 ? labelEnd / width + 0.04 : 0.06;
+				found = { centre: (from + 0.96) / 2 };
+			}
+		} catch {
+			found = null;
+		}
+		rpmBoxes.set(picture, found);
+		return found;
 	}
 
 	function drawPlainSpinner(total: number, alpha: number) {

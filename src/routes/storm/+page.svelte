@@ -31,6 +31,7 @@
 	import { tileBounds, distanceKm } from '#lib/map.ts';
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { thunderOn, toggleThunder, setListener } from '#lib/stores/thunder.ts';
 
 	const UID = '_storm';
 	let saved = $derived($widgetData[UID] ?? {});
@@ -138,6 +139,8 @@
 	}
 
 	// --- Lightning ----------------------------------------------------------------------------
+	// Heard from where you are
+	$effect(() => setListener(home));
 	const NEAR_KM = 15;
 	let nearby = $derived(home ? strikesNear($strikes, home, 50, 15 * 60 * 1000) : null);
 	let warnedAt = 0;
@@ -625,6 +628,23 @@
 				/>
 				{#if shown.lightning}
 					<div class="hidden md:block w-px h-8 bg-white/10"></div>
+					<button
+						class="grid place-items-center size-9 shrink-0 rounded-full cursor-pointer transition {$thunderOn
+							? 'bg-yellow-300 text-black'
+							: 'bg-white/[0.06] text-white/70 hover:text-white'}"
+						title={$thunderOn
+							? 'Lightning sound on: a blip for each strike within 150 km, thunder for those within 40 km, as late as the sound needs to reach you'
+							: 'Hear the lightning'}
+						aria-label={$thunderOn ? 'Turn the lightning sound off' : 'Hear the lightning'}
+						aria-pressed={$thunderOn}
+						onclick={toggleThunder}
+					>
+						<span
+							class="{$thunderOn
+								? 'icon-[mingcute--volume-fill]'
+								: 'icon-[mingcute--volume-off-line]'} size-4"
+						></span>
+					</button>
 					<div class="hidden md:flex items-center gap-2 shrink-0 text-sm">
 						<span
 							class="icon-[mingcute--flash-fill] size-5 {nearby?.count

@@ -10,6 +10,7 @@
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { drawStrikes, compass } from '#lib/storm.ts';
 	import { worldPixel } from '#lib/map.ts';
+	import { thunderOn, toggleThunder, setListener } from '#lib/stores/thunder.ts';
 
 	/** @type {{ uid?: string }} */
 	let { uid = 'lightning' } = $props();
@@ -44,8 +45,10 @@
 		c.arc(width / 2, height / 2, 50 / kmPerPixel, 0, Math.PI * 2);
 		c.stroke();
 		c.setLineDash([]);
-		drawStrikes(c, $strikes, toScreen, width, height);
+		drawStrikes(c, $strikes, toScreen, width, height, 1, kmPerPixel);
 	}
+
+	$effect(() => setListener(place));
 
 	onMount(() => {
 		const stop = useLightning();
@@ -120,6 +123,19 @@
 						{/if}
 					</p>
 				</div>
+				<button
+					class="grid place-items-center size-8 shrink-0 rounded-full backdrop-blur cursor-pointer {$thunderOn
+						? 'bg-yellow-300 text-black'
+						: 'bg-black/60 text-white/70 hover:text-white'}"
+					title={$thunderOn ? 'Lightning sound off' : 'Hear the lightning (and its thunder)'}
+					aria-pressed={$thunderOn}
+					onclick={toggleThunder}
+					><span
+						class="{$thunderOn
+							? 'icon-[mingcute--volume-fill]'
+							: 'icon-[mingcute--volume-off-line]'} size-4"
+					></span></button
+				>
 				<div class="flex flex-col rounded-full bg-black/60 backdrop-blur">
 					<button
 						class="grid place-items-center size-8 cursor-pointer hover:text-primary-300"

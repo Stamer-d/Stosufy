@@ -375,6 +375,11 @@ export function compass(degrees: number) {
 	return names[Math.round((((degrees % 360) + 360) % 360) / 45) % 8];
 }
 
+/** km/s */
+export const SPEED_OF_SOUND = 0.343;
+/** How long a strike's thunder ring shows (s) */
+const THUNDER_RING_SECONDS = 90;
+
 /**
  * Lightning on a map: older strikes fade from white to red, new ones flash as a cross
  * (like on lightning maps)
@@ -385,9 +390,28 @@ export function drawStrikes(
 	toScreen: (lat: number, lon: number) => { x: number; y: number },
 	width: number,
 	height: number,
-	size = 1
+	size = 1,
+	/** With it, each strike's thunder spreads as a ring at the speed of sound */
+	kmPerPixel: number | null = null
 ) {
 	const now = Date.now();
+	if (kmPerPixel) {
+		// Sound travels 343 m/s: the ring is where the thunder is heard right now
+		c.lineWidth = 1.2;
+		for (const strike of list) {
+			const seconds = (now - strike.time) / 1000;
+			if (seconds < 0 || seconds > THUNDER_RING_SECONDS) continue;
+			const radius = (seconds * SPEED_OF_SOUND) / kmPerPixel;
+			if (radius < 1.5) continue;
+			const { x, y } = toScreen(strike.lat, strike.lon);
+			if (x + radius < 0 || y + radius < 0 || x - radius > width || y - radius > height) continue;
+			const fade = 1 - seconds / THUNDER_RING_SECONDS;
+			c.strokeStyle = `rgba(253, 224, 71, ${(0.55 * fade * fade).toFixed(3)})`;
+			c.beginPath();
+			c.arc(x, y, radius, 0, Math.PI * 2);
+			c.stroke();
+		}
+	}
 	for (const strike of list) {
 		const age = (now - strike.time) / 60000;
 		if (age > 30) continue;
