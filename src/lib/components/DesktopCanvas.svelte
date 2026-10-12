@@ -167,7 +167,7 @@
 				onpointercancel={endDrag}
 			>
 				<div class={editing ? 'pointer-events-none' : ''}>
-					<definition.component />
+					<definition.component uid={widget.uid} />
 				</div>
 				{#if editing}
 					<div

@@ -4,7 +4,9 @@
 	import { playlists } from '#lib/stores/playlist.ts';
 
 	let songCount = $derived(formatSongData($mapDataStore).length);
-	let playlistCount = $derived($playlists.filter((playlist) => playlist.id != -1 && playlist.id != -2).length);
+	let playlistCount = $derived(
+		$playlists.filter((playlist) => playlist.id != -1 && playlist.id != -2).length
+	);
 </script>
 
 <Widget size="small" label="Library" icon="icon-[mingcute--music-2-fill]">

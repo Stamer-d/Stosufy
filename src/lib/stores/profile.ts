@@ -18,6 +18,9 @@ export interface OsuProfile {
 	pp: number | null;
 	playCount: number | null;
 	joined: string | null;
+	accuracy: number | null;
+	/** Global rank each day of the last 90 (oldest first) */
+	rankHistory: number[];
 }
 
 const profiles = new Map<number, Promise<OsuProfile>>();
@@ -41,7 +44,9 @@ export function osuProfile(osuId: number): Promise<OsuProfile> {
 				globalRank: user.statistics?.global_rank ?? null,
 				pp: user.statistics?.pp ?? null,
 				playCount: user.statistics?.play_count ?? null,
-				joined: user.join_date ?? null
+				joined: user.join_date ?? null,
+				accuracy: user.statistics?.hit_accuracy ?? null,
+				rankHistory: user.rank_history?.data ?? user.rankHistory?.data ?? []
 			};
 		})();
 		loading.catch(() => profiles.delete(osuId));
@@ -72,14 +77,15 @@ export interface LibraryStats {
 	mappers: [string, number][];
 }
 
-const top = (values: (string | null | undefined)[], count: number) =>
-	Object.entries(
-		values
-			.filter((v): v is string => !!v && v.trim().length > 0)
-			.reduce<Record<string, number>>((all, v) => ({ ...all, [v]: (all[v] ?? 0) + 1 }), {})
-	)
-		.sort((a, b) => b[1] - a[1])
-		.slice(0, count);
+/** The most common values and how often each is there */
+function top(values: (string | null | undefined)[], count: number): [string, number][] {
+	const counts = new Map<string, number>();
+	for (const value of values) {
+		if (!value || !value.trim()) continue;
+		counts.set(value, (counts.get(value) ?? 0) + 1);
+	}
+	return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, count);
+}
 
 /** What the downloaded songs are: how many, how long, the top genres, artists and mappers */
 export function libraryStats(data: Record<string, StoredMapSet>): LibraryStats {

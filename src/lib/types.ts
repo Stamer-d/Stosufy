@@ -181,6 +181,8 @@ export interface Settings {
 	shuffle?: boolean;
 	repeat?: RepeatMode;
 	searchFilters?: SearchFilters;
+	/** What each placed widget keeps (a note's text, the weather's city), by its uid */
+	widgetData?: Record<string, Record<string, any>>;
 	home?: HomeSettings;
 	appearance?: AppearanceSettings;
 	/** Bring every song to the same loudness */

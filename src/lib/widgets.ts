@@ -11,6 +11,13 @@ import LinuxPlayer from './components/widgets/LinuxPlayer.svelte';
 import LinuxVisualizer from './components/widgets/LinuxVisualizer.svelte';
 import MinimalClock from './components/widgets/MinimalClock.svelte';
 import MinimalNowPlaying from './components/widgets/MinimalNowPlaying.svelte';
+import MacLyrics from './components/widgets/MacLyrics.svelte';
+import MacSongInfo from './components/widgets/MacSongInfo.svelte';
+import MacOsuProfile from './components/widgets/MacOsuProfile.svelte';
+import MacFriends from './components/widgets/MacFriends.svelte';
+import MacWeather from './components/widgets/MacWeather.svelte';
+import MacNote from './components/widgets/MacNote.svelte';
+import MacCalendar from './components/widgets/MacCalendar.svelte';
 
 export type WidgetFamily = 'macos' | 'linux' | 'minimal';
 
@@ -53,6 +60,48 @@ export const WIDGETS: Record<
 		description: 'Quick access to four playlists',
 		family: 'macos',
 		component: MacPlaylists
+	},
+	'mac-lyrics': {
+		name: 'Lyrics',
+		description: 'The line being sung now',
+		family: 'macos',
+		component: MacLyrics
+	},
+	'mac-song-info': {
+		name: 'Song info',
+		description: 'BPM with a dot on the beat, length, difficulty and mapper',
+		family: 'macos',
+		component: MacSongInfo
+	},
+	'mac-osu-profile': {
+		name: 'osu! profile',
+		description: 'Your rank, pp and accuracy',
+		family: 'macos',
+		component: MacOsuProfile
+	},
+	'mac-friends': {
+		name: 'Friends',
+		description: 'Who is online and what they listen to',
+		family: 'macos',
+		component: MacFriends
+	},
+	'mac-weather': {
+		name: 'Weather',
+		description: 'The weather in your city',
+		family: 'macos',
+		component: MacWeather
+	},
+	'mac-note': {
+		name: 'Note',
+		description: 'A sticky note to write on',
+		family: 'macos',
+		component: MacNote
+	},
+	'mac-calendar': {
+		name: 'Calendar',
+		description: 'This month, with today marked',
+		family: 'macos',
+		component: MacCalendar
 	},
 	'linux-fetch': {
 		name: 'stosufetch',
