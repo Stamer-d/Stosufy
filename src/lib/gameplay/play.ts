@@ -316,7 +316,25 @@ export async function playNextLive() {
 
 if (typeof window !== 'undefined') {
 	// Done playing: the music gets its speed back
-	playingLive.subscribe((live) => {
+	// A replay with a speed mod (DT, NC, HT) plays the music at that speed too
+	const replaySpeed = derived([gameplayMode, currentSong], ([$mode, $song]) => {
+		if ($mode.mode.kind !== 'replay' || $mode.key !== playKey($song.song)) return null;
+		const mods = $mode.mode.replay.mods;
+		return mods & MOD.Nightcore
+			? 'NC'
+			: mods & MOD.DoubleTime
+				? 'DT'
+				: mods & MOD.HalfTime
+					? 'HT'
+					: 'NM';
+	});
+	// Done playing or watching: the music gets its speed back
+	derived([playingLive, replaySpeed], (values) => values).subscribe(([live, replay]) => {
+		if (replay) {
+			speedBefore ??= currentMod();
+			if (currentMod() !== replay) setPlaybackMod(replay as PlaybackMod);
+			return;
+		}
 		if (live || speedBefore === null) return;
 		setPlaybackMod(speedBefore);
 		speedBefore = null;

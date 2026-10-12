@@ -193,7 +193,7 @@
 		>
 			<div class="p-3 pb-2 flex flex-col gap-3 border-b border-white/5">
 				{#if diffs.length > 1}
-					<div class="flex gap-1.5 overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
+					<div class="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
 						{#each diffs as diff (diff.id)}
 							<button
 								class="shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold cursor-pointer transition {diff.id ===
