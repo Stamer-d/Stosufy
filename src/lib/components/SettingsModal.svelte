@@ -22,6 +22,7 @@
 		defaultOsuSongsFolder
 	} from '#lib/stores/osuImport.ts';
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
+	import { keyStore, sessionKeyNeeded } from '#lib/stores/auth.ts';
 	import VisibilityPicker from './VisibilityPicker.svelte';
 	import KeybindSettings from './KeybindSettings.svelte';
 	import HitsoundSettings from './HitsoundSettings.svelte';
@@ -484,6 +485,25 @@
 							}}
 						>
 							Open
+						</Button>
+					</div>
+					<div class="mt-2 flex items-center justify-between gap-4 p-3 rounded-lg bg-white/[0.04]">
+						<span class="min-w-0">
+							<span class="block font-semibold text-white">osu! session key</span>
+							<span class="block text-xs text-secondary-600">
+								{$keyStore.sessionKey
+									? 'Added: you can download beatmaps.'
+									: 'Not added: needed to download beatmaps from osu!.'}
+							</span>
+						</span>
+						<Button
+							type="normal"
+							on:click={() => {
+								settingsTab.set(null);
+								sessionKeyNeeded.set(true);
+							}}
+						>
+							{$keyStore.sessionKey ? 'Change' : 'Add key'}
 						</Button>
 					</div>
 				</section>

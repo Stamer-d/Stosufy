@@ -41,6 +41,29 @@ async function initializeStores() {
 		});
 }
 
+/** Asks for the osu! session key (downloads need it, and it's optional at the login) */
+export const sessionKeyNeeded = writable(false);
+
+/** The osu! Songs folder picked at the login, imported once logged in */
+const PENDING_OSU_FOLDER = 'stosufy-pending-osu-folder';
+export function setPendingOsuFolder(folder: string | null) {
+	try {
+		if (folder) localStorage.setItem(PENDING_OSU_FOLDER, folder);
+		else localStorage.removeItem(PENDING_OSU_FOLDER);
+	} catch {
+		// Not saved: it can be imported in the settings
+	}
+}
+export function takePendingOsuFolder(): string | null {
+	try {
+		const folder = localStorage.getItem(PENDING_OSU_FOLDER);
+		localStorage.removeItem(PENDING_OSU_FOLDER);
+		return folder;
+	} catch {
+		return null;
+	}
+}
+
 export interface SessionKeyCheck {
 	status: boolean;
 	status_code?: number;

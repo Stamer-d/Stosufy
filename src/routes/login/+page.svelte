@@ -9,8 +9,10 @@
 		exchangeCode,
 		keyStore,
 		osuAuthUrl,
+		setPendingOsuFolder,
 		type SessionKeyCheck
 	} from '#lib/stores/auth.ts';
+	import { defaultOsuSongsFolder, pickOsuSongsFolder } from '#lib/stores/osuImport.ts';
 	import { open } from '@tauri-apps/plugin-shell';
 	import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 	import { goto } from '$app/navigation';
@@ -19,6 +21,38 @@
 		status: false
 	};
 	let showInfo = false;
+	let checking = false;
+	// The session key is optional (only downloads need it); a wrong one is pointed out
+	$: keyEntered = !!$keyStore.sessionKey?.trim();
+	$: keyWrong = keyEntered && !checking && !sessionKeyValid.status && !!sessionKeyValid.status_code;
+
+	// The osu! Songs folder, imported once logged in
+	let osuFolder: string | null = null;
+	let detectedFolder: string | null = null;
+	let useFolder = false;
+	defaultOsuSongsFolder().then((folder) => (detectedFolder = folder));
+	$: setPendingOsuFolder(useFolder ? osuFolder : null);
+
+	async function chooseFolder() {
+		const folder = await pickOsuSongsFolder();
+		if (folder) {
+			osuFolder = folder;
+			useFolder = true;
+		}
+	}
+
+	async function checkKey() {
+		if (!keyEntered) {
+			sessionKeyValid = { status: false };
+			return;
+		}
+		checking = true;
+		sessionKeyValid = await checkSessionKey($keyStore.sessionKey.trim()).catch(() => ({
+			status: false,
+			status_code: 0
+		}));
+		checking = false;
+	}
 
 	onMount(async () => {
 		if ($keyStore.sessionKey) {
@@ -46,7 +80,7 @@
 			Listen to osu! beatmaps and build your own playlists.
 		</p>
 
-		{#if sessionKeyValid.status_code === 429 || sessionKeyValid.status_code === 401}
+		{#if keyEntered && (sessionKeyValid.status_code === 429 || sessionKeyValid.status_code === 401)}
 			<div
 				class="mt-6 w-full flex items-start gap-2 rounded-lg bg-red-500/10 ring-1 ring-red-500/30 px-3 py-2.5 text-sm text-red-300"
 				role="alert"
@@ -60,7 +94,9 @@
 
 		<div class="mt-8 w-full">
 			<div class="flex items-center justify-between mb-2">
-				<label for="session-key" class="text-sm font-semibold">osu! session key</label>
+				<label for="session-key" class="text-sm font-semibold"
+					>osu! session key <span class="font-normal text-secondary-600">· optional</span></label
+				>
 				<button
 					class="text-xs font-semibold text-secondary-600 hover:text-white cursor-pointer"
 					onclick={() => (showInfo = true)}
@@ -72,24 +108,73 @@
 				id="session-key"
 				bind:value={$keyStore.sessionKey}
 				type="password"
-				on:blur={async () => {
-					if ($keyStore?.sessionKey?.startsWith('ey')) {
-						sessionKeyValid = await checkSessionKey($keyStore?.sessionKey);
-					} else {
-						sessionKeyValid.status = false;
-					}
-				}}
+				on:blur={checkKey}
 				placeholder="Paste your session key"
 			></Input>
 			<p class="mt-2 text-xs text-secondary-600">
-				Needed to download beatmaps. It stays on this device.
+				{#if checking}
+					Checking the key…
+				{:else if keyEntered && sessionKeyValid.status}
+					<span class="text-green-400">Key works: you can download beatmaps.</span>
+				{:else}
+					Only needed to download beatmaps; you can add it later when you download one. It stays on
+					this device.
+				{/if}
 			</p>
+		</div>
+
+		<!-- Songs from an osu! installation: they play from there, nothing is copied -->
+		<div class="mt-6 w-full">
+			<p class="text-sm font-semibold mb-2">
+				osu! songs <span class="font-normal text-secondary-600">· optional</span>
+			</p>
+			{#if useFolder && osuFolder}
+				<div
+					class="flex items-center gap-3 rounded-lg bg-white/[0.05] ring-1 ring-white/10 px-3 py-2.5"
+				>
+					<span class="icon-[mingcute--folder-open-line] size-5 shrink-0 text-primary-400"></span>
+					<span class="min-w-0 flex-1">
+						<span class="block text-sm font-semibold">Songs are added after logging in</span>
+						<span class="block text-xs text-secondary-600 truncate" title={osuFolder}
+							>{osuFolder}</span
+						>
+					</span>
+					<button
+						class="text-xs font-semibold text-secondary-600 hover:text-white cursor-pointer"
+						onclick={() => (useFolder = false)}>Remove</button
+					>
+				</div>
+			{:else}
+				<div class="flex gap-2">
+					{#if detectedFolder}
+						<Button
+							class="flex-1 justify-center"
+							on:click={() => {
+								osuFolder = detectedFolder;
+								useFolder = true;
+							}}
+						>
+							<span class="icon-[mingcute--check-line] size-4"></span>
+							Use my osu! songs
+						</Button>
+					{/if}
+					<Button class="flex-1 justify-center" on:click={chooseFolder}>
+						<span class="icon-[mingcute--folder-open-line] size-4"></span>
+						{detectedFolder ? 'Other folder' : 'Pick the osu! Songs folder'}
+					</Button>
+				</div>
+				<p class="mt-2 text-xs text-secondary-600">
+					{detectedFolder
+						? `Found osu! at ${detectedFolder}.`
+						: 'Plays the songs you have in osu! right away, without downloading them.'}
+				</p>
+			{/if}
 		</div>
 
 		<Button
 			class="mt-6 w-full justify-center h-11"
 			type="primary"
-			disabled={!sessionKeyValid.status}
+			disabled={checking || keyWrong}
 			on:click={async () => {
 				await open(osuAuthUrl);
 			}}

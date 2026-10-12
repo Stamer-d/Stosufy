@@ -1,7 +1,8 @@
 <script>
 	import { onDestroy, onMount } from 'svelte';
 	import Button from '#lib/components/Button.svelte';
-	import { verifyAccessToken, keyStore } from '#lib/stores/auth.ts';
+	import { verifyAccessToken, keyStore, takePendingOsuFolder } from '#lib/stores/auth.ts';
+	import { importOsuFolder } from '#lib/stores/osuImport.ts';
 	import { goto } from '$app/navigation';
 	let timer = null;
 	let count = 0;
@@ -14,6 +15,9 @@
 		}
 		if (accessTokenValid.status) {
 			clearInterval(timer);
+			// The osu! folder picked at the login
+			const folder = takePendingOsuFolder();
+			if (folder) importOsuFolder(folder);
 			goto('/home', { replaceState: true });
 		}
 	}

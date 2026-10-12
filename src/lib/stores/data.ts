@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import { keyStore, freshToken } from './auth';
+import { keyStore, freshToken, sessionKeyNeeded } from './auth';
 import { fetch } from '@tauri-apps/plugin-http';
 import JSZip from 'jszip';
 import { findVideo, parseOsuFile } from '../osuFile';
@@ -267,6 +267,11 @@ export async function downloadBeatmap(
 			await updateMapsetData(mapSetData);
 			return await bufferToBase64(cachedAudio);
 		}
+		// Without the osu! session key osu! doesn't hand out downloads: ask for it
+		if (!(get(keyStore).sessionKey || sessionKey)) {
+			sessionKeyNeeded.set(true);
+			throw new Error('Downloads need your osu_session key: add it to download beatmaps.');
+		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 0 } }));
 		// osu! renews the session cookie now and then: the newest one is kept, and a refused
 		// download is tried once more with it
@@ -321,8 +326,8 @@ export async function downloadBeatmap(
 		return audio;
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
-		// The download queue shows its own errors
-		if (!quiet)
+		// The download queue shows its own errors, and a missing key gets asked for
+		if (!quiet && !get(sessionKeyNeeded))
 			showToast(
 				`Download failed: ${error instanceof Error ? error.message : error}`,
 				'icon-[mingcute--warning-line]',

@@ -16,6 +16,7 @@
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
 	import SettingsModal from '#lib/components/SettingsModal.svelte';
+	import SessionKeyModal from '#lib/components/SessionKeyModal.svelte';
 	import OsuProfileImport from '#lib/components/OsuProfileImport.svelte';
 	import FriendsPanel from '#lib/components/FriendsPanel.svelte';
 	import { friendsPanelOpen, goOffline } from '#lib/stores/friends.ts';
@@ -227,6 +228,7 @@
 	{/if}
 	<Toasts />
 	<SettingsModal />
+	<SessionKeyModal />
 	<OsuProfileImport />
 {:else}
 	<div class="h-screen flex flex-col bg-app">
