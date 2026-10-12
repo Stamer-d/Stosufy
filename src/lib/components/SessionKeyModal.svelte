@@ -1,4 +1,5 @@
 <script>
+	import { untrack } from 'svelte';
 	// Asks for the osu! session key: downloading beatmaps needs it (osu! only gives them to
 	// logged in users), everything else works without it
 	import Modal from './Modal.svelte';
@@ -13,23 +14,26 @@
 	let error = $state('');
 	let showSteps = $state(false);
 
-	// The modal closes itself (Esc, outside click): the store follows it
+	// A request to ask for the key opens the modal and is used up right away, so the modal
+	// closes like any other (Esc, outside click, Close)
 	let open = $state(false);
 	$effect(() => {
-		if ($sessionKeyNeeded && !open) {
+		if (!$sessionKeyNeeded) return;
+		untrack(() => {
 			key = $keyStore.sessionKey ?? '';
 			error = '';
 			open = true;
-		}
-	});
-	$effect(() => {
-		if (!open) sessionKeyNeeded.set(false);
+		});
+		sessionKeyNeeded.set(false);
 	});
 
 	async function save() {
 		const value = key.trim();
+		// Empty: the key is removed (downloads ask for it again)
 		if (!value) {
-			error = 'Paste your session key first.';
+			$keyStore.sessionKey = '';
+			open = false;
+			showToast('Session key removed', 'icon-[mingcute--delete-2-line]');
 			return;
 		}
 		checking = true;

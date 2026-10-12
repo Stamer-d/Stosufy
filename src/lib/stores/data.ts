@@ -251,6 +251,8 @@ export async function deleteSong(setId: number | string) {
 }
 
 const downloadWorkers: Record<string, Worker> = {};
+/** The start of the error of a download without the session key (it's asked for instead) */
+const NO_KEY = 'Downloads need your osu_session key';
 
 export async function downloadBeatmap(
 	mapSetData: MapSet,
@@ -270,7 +272,7 @@ export async function downloadBeatmap(
 		// Without the osu! session key osu! doesn't hand out downloads: ask for it
 		if (!(get(keyStore).sessionKey || sessionKey)) {
 			sessionKeyNeeded.set(true);
-			throw new Error('Downloads need your osu_session key: add it to download beatmaps.');
+			throw new Error(`${NO_KEY}: add it to download beatmaps.`);
 		}
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 0 } }));
 		// osu! renews the session cookie now and then: the newest one is kept, and a refused
@@ -327,7 +329,7 @@ export async function downloadBeatmap(
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
 		// The download queue shows its own errors, and a missing key gets asked for
-		if (!quiet && !get(sessionKeyNeeded))
+		if (!quiet && !(error instanceof Error && error.message.startsWith(NO_KEY)))
 			showToast(
 				`Download failed: ${error instanceof Error ? error.message : error}`,
 				'icon-[mingcute--warning-line]',
