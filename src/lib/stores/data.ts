@@ -802,6 +802,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 			title: mapsetData.title || '',
 			artist: mapsetData.artist || '',
 			creator: mapsetData.creator || '',
+			creatorId: mapsetData.user_id ?? mapsetData.creatorId ?? null,
 			covers: mapsetData.covers || {},
 			bpm: mapsetData.bpm || 0,
 			status: mapsetData.status || '',
@@ -820,6 +821,7 @@ async function updateMapsetData(mapsetData: MapSet) {
 			title: mapsetData.title || updatedMapData[setId].title,
 			artist: mapsetData.artist || updatedMapData[setId].artist,
 			creator: mapsetData.creator || updatedMapData[setId].creator,
+			creatorId: mapsetData.user_id ?? mapsetData.creatorId ?? updatedMapData[setId].creatorId,
 			status: mapsetData.status || updatedMapData[setId].status,
 			covers: mapsetData.covers || updatedMapData[setId].covers,
 			bpm: mapsetData.bpm || updatedMapData[setId].bpm,
@@ -1059,6 +1061,7 @@ async function runDetails() {
 			set.language = data.language?.id > 1 ? data.language.name : null;
 			set.tags = data.tags || set.tags || '';
 			set.songSource = data.source || '';
+			set.creatorId = data.user_id ?? set.creatorId;
 		} else if (response.status === 404) set.detailsUnavailable = true;
 		else {
 			await wait(BACKFILL_REQUEST_DELAY);

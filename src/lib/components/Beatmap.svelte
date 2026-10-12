@@ -10,6 +10,7 @@
 	} from '#lib/stores/data.ts';
 	import { beatmapStatus, difficultyColor } from '#lib/beatmapStatus.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
+	import MapperLink from './MapperLink.svelte';
 
 	/** @type {import('#lib/types.ts').MapSet} */
 	export let map;
@@ -113,7 +114,9 @@
 			<h3 class="font-semibold truncate {isPlaying ? 'text-primary-500' : ''}">{map.title}</h3>
 			<p class="text-sm text-secondary-600 truncate">{map.artist}</p>
 			<div class="mt-2 flex items-center gap-2 text-xs text-secondary-600 min-w-0">
-				<span class="truncate">by {map.creator}</span>
+				<span class="truncate"
+					>by <MapperLink name={map.creator} id={map.user_id ?? map.creatorId} /></span
+				>
 				{#if sortedBeatmaps.length}
 					<span
 						class="flex items-center gap-0.5 shrink-0"

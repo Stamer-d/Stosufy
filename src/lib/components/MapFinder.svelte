@@ -41,6 +41,7 @@
 	import { openSettings } from '#lib/stores/settings.ts';
 	import DesktopCanvas from './DesktopCanvas.svelte';
 	import WidgetStore from './WidgetStore.svelte';
+	import MapperLink from './MapperLink.svelte';
 
 	let editingWidgets = $state(false);
 	// The gameplay of the song on the desktop, like osu!'s autoplay
@@ -341,7 +342,11 @@
 					{hero.song.title}
 				</h2>
 				<p class="text-white/80 font-medium truncate">
-					{hero.song.artist}{hero.song.creator ? ` · mapped by ${hero.song.creator}` : ''}
+					{hero.song.artist}{#if hero.song.creator}
+						· mapped by <MapperLink
+							name={hero.song.creator}
+							id={hero.song.user_id ?? hero.song.creatorId}
+						/>{/if}
 				</p>
 				<div class="mt-3 flex items-center gap-4">
 					<PlayButton
@@ -591,7 +596,11 @@
 										: 'text-white'}">{song.title}</span
 								>
 								<span class="block text-sm text-secondary-600 truncate">
-									{song.artist}{song.creator ? ` · mapped by ${song.creator}` : ''}
+									{song.artist}{#if song.creator}
+										· mapped by <MapperLink
+											name={song.creator}
+											id={song.user_id ?? song.creatorId}
+										/>{/if}
 								</span>
 							</span>
 						</button>

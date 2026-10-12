@@ -5,7 +5,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { freshToken } from './auth';
 import * as api from '../api';
 import { trackGroups } from '../tracks';
-import type { Playlist, StoredMapSet } from '../types';
+import type { MapSet, Playlist, StoredMapSet } from '../types';
 
 export interface OsuProfile {
 	id: number;
@@ -21,19 +21,86 @@ export interface OsuProfile {
 	accuracy: number | null;
 	/** Global rank each day of the last 90 (oldest first) */
 	rankHistory: number[];
+	title: string | null;
+	/** The colour of the user's group or the one they chose, like #ff66aa */
+	colour: string | null;
+	supporter: number;
+	countryRank: number | null;
+	highestRank: { rank: number; at: string } | null;
+	rankedScore: number | null;
+	totalScore: number | null;
+	totalHits: number | null;
+	maxCombo: number | null;
+	/** Seconds played */
+	playTime: number | null;
+	replaysWatched: number | null;
+	level: { current: number; progress: number } | null;
+	grades: { ssh: number; ss: number; sh: number; s: number; a: number };
+	followers: number;
+	mappingFollowers: number;
+	medals: number;
+	kudosu: number;
+	badges: { image: string; description: string; awarded: string }[];
+	groups: { name: string; short: string; colour: string | null }[];
+	previousNames: string[];
+	lastVisit: string | null;
+	location: string | null;
+	interests: string | null;
+	occupation: string | null;
+	website: string | null;
+	twitter: string | null;
+	discord: string | null;
+	/** How many beatmap sets are in each list (see BEATMAP_LISTS) */
+	counts: Record<BeatmapList, number> & { firsts: number; best: number };
 }
 
-const profiles = new Map<number, Promise<OsuProfile>>();
+export type BeatmapList =
+	| 'ranked'
+	| 'loved'
+	| 'guest'
+	| 'pending'
+	| 'graveyard'
+	| 'nominated'
+	| 'favourite'
+	| 'most_played';
 
-/** A user's osu! profile (kept for the session) */
-export function osuProfile(osuId: number): Promise<OsuProfile> {
+export const BEATMAP_LISTS: { id: BeatmapList; label: string }[] = [
+	{ id: 'ranked', label: 'Ranked' },
+	{ id: 'loved', label: 'Loved' },
+	{ id: 'guest', label: 'Guest' },
+	{ id: 'pending', label: 'Pending' },
+	{ id: 'graveyard', label: 'Graveyarded' },
+	{ id: 'nominated', label: 'Nominated' },
+	{ id: 'favourite', label: 'Favourites' },
+	{ id: 'most_played', label: 'Most played' }
+];
+
+async function osuApi(path: string) {
+	let response!: Response;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const token = await freshToken(attempt > 0 && response?.status === 401);
+		response = await fetch(`https://osu.ppy.sh/api/v2/${path}`, {
+			headers: { Authorization: `Bearer ${token}`, 'x-api-version': '20240529' }
+		});
+		if (response.ok || (response.status < 500 && response.status !== 401)) break;
+		await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+	}
+	if (!response.ok) throw new Error(`osu! answered with HTTP ${response.status}`);
+	return response.json();
+}
+
+const profiles = new Map<number | string, Promise<OsuProfile>>();
+
+/** A user's osu! profile by id or by name (kept for the session) */
+export function osuProfile(osuId: number | string): Promise<OsuProfile> {
 	if (!profiles.has(osuId)) {
 		const loading = (async () => {
-			const response = await fetch(`https://osu.ppy.sh/api/v2/users/${osuId}/osu?key=id`, {
-				headers: { Authorization: `Bearer ${await freshToken()}` }
-			});
-			if (!response.ok) throw new Error(`osu! answered with HTTP ${response.status}`);
-			const user = await response.json();
+			const byName = typeof osuId === 'string' && !/^\d+$/.test(osuId);
+			const user = await osuApi(
+				`users/${encodeURIComponent(osuId)}/osu?key=${byName ? 'username' : 'id'}`
+			);
+			const stats = user.statistics ?? {};
+			const grades = stats.grade_counts ?? {};
 			return {
 				id: user.id,
 				username: user.username,
@@ -46,13 +113,141 @@ export function osuProfile(osuId: number): Promise<OsuProfile> {
 				playCount: user.statistics?.play_count ?? null,
 				joined: user.join_date ?? null,
 				accuracy: user.statistics?.hit_accuracy ?? null,
-				rankHistory: user.rank_history?.data ?? user.rankHistory?.data ?? []
-			};
+				rankHistory: user.rank_history?.data ?? user.rankHistory?.data ?? [],
+				title: user.title ?? null,
+				colour: user.profile_colour ?? null,
+				supporter: user.is_supporter ? (user.support_level ?? 1) : 0,
+				countryRank: stats.country_rank ?? null,
+				highestRank: user.rank_highest
+					? { rank: user.rank_highest.rank, at: user.rank_highest.updated_at }
+					: null,
+				rankedScore: stats.ranked_score ?? null,
+				totalScore: stats.total_score ?? null,
+				totalHits: stats.total_hits ?? null,
+				maxCombo: stats.maximum_combo ?? null,
+				playTime: stats.play_time ?? null,
+				replaysWatched: stats.replays_watched_by_others ?? null,
+				level: stats.level ?? null,
+				grades: {
+					ssh: grades.ssh ?? 0,
+					ss: grades.ss ?? 0,
+					sh: grades.sh ?? 0,
+					s: grades.s ?? 0,
+					a: grades.a ?? 0
+				},
+				followers: user.follower_count ?? 0,
+				mappingFollowers: user.mapping_follower_count ?? 0,
+				medals: user.user_achievements?.length ?? 0,
+				kudosu: user.kudosu?.total ?? 0,
+				badges: (user.badges ?? []).map((badge: any) => ({
+					image: badge['image@2x_url'] ?? badge.image_url,
+					description: badge.description ?? '',
+					awarded: badge.awarded_at
+				})),
+				groups: (user.groups ?? [])
+					.filter((group: any) => !group.is_probationary)
+					.map((group: any) => ({
+						name: group.name,
+						short: group.short_name,
+						colour: group.colour ?? null
+					})),
+				previousNames: user.previous_usernames ?? [],
+				lastVisit: user.last_visit ?? null,
+				location: user.location || null,
+				interests: user.interests || null,
+				occupation: user.occupation || null,
+				website: user.website || null,
+				twitter: user.twitter || null,
+				discord: user.discord || null,
+				counts: {
+					ranked: user.ranked_beatmapset_count ?? user.ranked_and_approved_beatmapset_count ?? 0,
+					loved: user.loved_beatmapset_count ?? 0,
+					guest: user.guest_beatmapset_count ?? 0,
+					pending: user.pending_beatmapset_count ?? 0,
+					graveyard: user.graveyard_beatmapset_count ?? 0,
+					nominated: user.nominated_beatmapset_count ?? 0,
+					favourite: user.favourite_beatmapset_count ?? 0,
+					most_played: user.beatmap_playcounts_count ?? 0,
+					firsts: user.scores_first_count ?? 0,
+					best: user.scores_best_count ?? 0
+				}
+			} as OsuProfile;
 		})();
 		loading.catch(() => profiles.delete(osuId));
 		profiles.set(osuId, loading);
 	}
 	return profiles.get(osuId)!;
+}
+
+/**
+ * A page of a user's beatmap sets in one of their lists, in the shape of a search result
+ * (most played gives the sets of the beatmaps, with how often they were played)
+ */
+export async function userBeatmapsets(
+	osuId: number,
+	list: BeatmapList,
+	offset = 0,
+	limit = 24
+): Promise<(MapSet & { playcount?: number })[]> {
+	const result = await osuApi(`users/${osuId}/beatmapsets/${list}?limit=${limit}&offset=${offset}`);
+	if (list !== 'most_played') return result;
+	return result.map((entry: any) => ({
+		...entry.beatmapset,
+		beatmaps: entry.beatmap ? [{ ...entry.beatmap }] : [],
+		playcount: entry.count
+	}));
+}
+
+export interface UserScore {
+	id: number;
+	pp: number | null;
+	accuracy: number;
+	rank: string;
+	mods: string[];
+	at: string;
+	/** How much the score counts towards the user's pp (best plays) */
+	weight: number | null;
+	beatmap: { id: number; version: string; stars: number };
+	set: { id: number; title: string; artist: string; creator: string };
+}
+
+/** A page of a user's best, first place or recent plays */
+export async function userScores(
+	osuId: number,
+	kind: 'best' | 'firsts' | 'recent',
+	offset = 0,
+	limit = 10
+): Promise<UserScore[]> {
+	const result = await osuApi(
+		`users/${osuId}/scores/${kind}?mode=osu&limit=${limit}&offset=${offset}`
+	);
+	return result.map((score: any) => ({
+		id: score.id,
+		pp: score.pp ?? null,
+		accuracy: score.accuracy ?? 0,
+		rank: score.rank ?? 'F',
+		mods: (score.mods ?? [])
+			.map((mod: any) => (typeof mod === 'string' ? mod : mod.acronym))
+			.filter((mod: string) => mod && mod !== 'CL'),
+		at: score.ended_at ?? score.created_at,
+		weight: score.weight?.percentage ?? null,
+		beatmap: {
+			id: score.beatmap?.id,
+			version: score.beatmap?.version ?? '',
+			stars: score.beatmap?.difficulty_rating ?? 0
+		},
+		set: {
+			id: score.beatmapset?.id ?? score.beatmap?.beatmapset_id,
+			title: score.beatmapset?.title ?? '',
+			artist: score.beatmapset?.artist ?? '',
+			creator: score.beatmapset?.creator ?? ''
+		}
+	}));
+}
+
+/** A whole beatmap set from osu!, with its difficulties (to download it) */
+export function beatmapset(setId: number | string): Promise<MapSet> {
+	return osuApi(`beatmapsets/${setId}`);
 }
 
 export async function userPlaylists(osuId: number): Promise<Playlist[]> {
