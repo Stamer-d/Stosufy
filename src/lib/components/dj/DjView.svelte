@@ -26,11 +26,15 @@
 	let pro = $derived($userSettings.settings?.djPro ?? false);
 	mixer.emit();
 
-	onMount(() => keybindsPaused.set(true));
+	// The music never stops: what plays goes on in the DJ mode, and back in the player after
+	onMount(() => {
+		keybindsPaused.set(true);
+		mixer.takeFromPlayer();
+	});
 	onDestroy(() => {
 		keybindsPaused.set(false);
-		mixer.stopAll();
 		if ($dj?.recording) saveRecording();
+		mixer.handToPlayer();
 	});
 
 	async function saveRecording() {

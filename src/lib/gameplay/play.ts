@@ -26,15 +26,27 @@ export interface Difficulty {
 }
 
 /** The difficulty the gameplay and hitsounds use: the chosen one, else the song's own */
+/** The hardest osu!standard difficulty of a song: what the gameplay shows unless one is chosen */
+function hardestMapId(song: MapSet): string | null {
+	const maps = (song.beatmaps ?? []).filter(
+		(map: any) => map.mode == null || map.mode === 'osu' || map.mode_int === 0
+	);
+	let hardest = maps[0] ?? song.beatmaps?.[0];
+	for (const map of maps)
+		if ((Number(map.difficulty_rating) || 0) > (Number(hardest?.difficulty_rating) || 0))
+			hardest = map;
+	return hardest?.id != null ? String(hardest.id) : null;
+}
+
 export function chosenMapId(song: MapSet | null | undefined): string | null {
 	if (!song) return null;
 	const chosen = get(userSettings).settings?.gameplayDifficulty?.[String(song.id)];
-	return chosen ?? (song.beatmaps?.[0]?.id != null ? String(song.beatmaps[0].id) : null);
+	return chosen ?? hardestMapId(song);
 }
 
 export function chooseDifficulty(song: MapSet, mapId: string | null) {
 	const all = { ...get(userSettings).settings?.gameplayDifficulty };
-	if (mapId === null || mapId === String(song.beatmaps?.[0]?.id)) delete all[String(song.id)];
+	if (mapId === null || mapId === hardestMapId(song)) delete all[String(song.id)];
 	else all[String(song.id)] = mapId;
 	updateUserSettings({ gameplayDifficulty: all });
 }

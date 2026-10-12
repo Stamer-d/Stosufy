@@ -97,6 +97,8 @@
 			mixer.stopAuto();
 			return;
 		}
+		// The player's queue; a list of the browser only when nothing was played yet
+		if (mixer.autoFromPlayer()) return;
 		let queue = [...songs];
 		if (shuffle) {
 			for (let i = queue.length - 1; i > 0; i--) {

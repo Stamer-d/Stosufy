@@ -40,7 +40,12 @@
 	// after the lyrics (which scroll along) showed up somewhere in the middle.
 	let scroller = $state();
 	const scrolled = new Map();
-	beforeNavigate(({ from }) => {
+	beforeNavigate(({ from, to }) => {
+		// Going somewhere leaves the focus and DJ modes (they'd cover the page)
+		if (to && from?.url.pathname !== to.url.pathname) {
+			focusMode.set(false);
+			djOpen.set(false);
+		}
 		if (from && scroller) scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
 	});
 	afterNavigate(({ from, to, type }) => {

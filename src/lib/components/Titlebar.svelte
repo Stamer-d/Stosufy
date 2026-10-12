@@ -17,6 +17,22 @@
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 
 	const appWindow = getCurrentWindow();
+
+	/** Where a button leads, out of the focus and DJ modes (also to the page that's open) */
+	function go(path) {
+		focusMode.set(false);
+		djOpen.set(false);
+		goto(path);
+	}
+	// The focus and DJ modes are one at a time
+	const toggleDj = () => {
+		focusMode.set(false);
+		djOpen.update((on) => !on);
+	};
+	const toggleFocus = () => {
+		djOpen.set(false);
+		focusMode.update((on) => !on);
+	};
 	let updating = $state(false);
 	let updateModal = $state({
 		show: false,
@@ -117,7 +133,7 @@
 				title="Home"
 				aria-label="Home"
 				class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-300 cursor-pointer transition"
-				onclick={() => goto('/home')}
+				onclick={() => go('/home')}
 			>
 				<span class="icon-[mingcute--home-4-fill] size-[18px]"></span>
 			</button>
@@ -128,7 +144,7 @@
 				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {$djOpen
 					? 'text-primary-500'
 					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => djOpen.update((on) => !on)}
+				onclick={toggleDj}
 			>
 				<span class="icon-[mingcute--disc-line] size-[18px]"></span>
 			</button>
@@ -140,7 +156,7 @@
 					.url.pathname === '/storm'
 					? 'text-primary-500'
 					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => goto('/storm')}
+				onclick={() => go('/storm')}
 			>
 				<span class="icon-[mingcute--thunderstorm-line] size-[18px]"></span>
 			</button>
@@ -151,7 +167,7 @@
 				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {$focusMode
 					? 'text-primary-500'
 					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => focusMode.update((on) => !on)}
+				onclick={toggleFocus}
 			>
 				<span
 					class="{$focusMode
@@ -211,7 +227,7 @@
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--user-3-line]"
-						on:click={() => goto('/profile/me')}
+						on:click={() => go('/profile/me')}
 					>
 						Profile
 					</Button>

@@ -7,7 +7,8 @@ import { get, writable } from 'svelte/store';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { mapDataStore } from '../stores/data';
-import { songQueue } from '../stores/audio';
+import { songQueue, currentSong, upNext, setSongQueue } from '../stores/audio';
+import { sameSong } from '../tracks';
 import { userSettings } from '../stores/user';
 import { gainFor, loudnessOf } from '../stores/loudness';
 import { beatmapContent } from '../hitsounds/player';
@@ -1447,6 +1448,93 @@ class Mixer {
 			this.recorder = null;
 			this.emit();
 		});
+	}
+
+	// --- One queue with the music player ------------------------------------------------------
+
+	/** The player's queue from its song on (the songs queued with "Play next" first) */
+	private playerQueue(): MapSet[] {
+		const q = get(songQueue);
+		const song = get(currentSong).song;
+		const queue = q.queue ?? [];
+		const index = q.currentIndex ?? -1;
+		if (!song) return [...get(upNext), ...queue];
+		const rest = index >= 0 ? [...queue.slice(index + 1), ...queue.slice(0, index)] : queue;
+		return [song, ...get(upNext), ...rest.filter((s) => !sameSong(s, song))];
+	}
+
+	/** Auto DJ through the player's queue (what plays now is its first song) */
+	autoFromPlayer() {
+		const queue = this.playerQueue();
+		if (!queue.length) return false;
+		const lead = this.leading();
+		const index = lead?.state.song ? queue.findIndex((s) => sameSong(s, lead.state.song)) : -1;
+		this.auto = { on: true, queue, index: index >= 0 ? index : -1, source: 'Your queue' };
+		if (!lead) {
+			this.auto.index = 0;
+			const deck = this.decks.A;
+			deck.pickedByUser = false;
+			deck.load(queue[0]).then(() => {
+				if (this.auto.on && this.auto.index === 0) deck.play();
+			});
+		}
+		this.emit();
+		return true;
+	}
+
+	/**
+	 * Opening the DJ mode: the song that plays goes on deck A where it is (the player keeps
+	 * playing until the deck takes over), the queue's next one on deck B, and Auto DJ mixes
+	 * through the queue
+	 */
+	async takeFromPlayer() {
+		const song = get(currentSong).song;
+		if (!song || this.leading()) return;
+		const audio = get(songQueue).audio;
+		const playing = !!audio && !audio.paused;
+		const deck = this.decks.A;
+		deck.pickedByUser = false;
+		await deck.load(song);
+		if (deck.state.error || deck.state.song !== song) return;
+		const now = get(songQueue).audio;
+		deck.seek(now?.currentTime ?? audio?.currentTime ?? 0);
+		if (playing && now && !now.paused) deck.play();
+		this.autoFromPlayer();
+	}
+
+	/**
+	 * Leaving the DJ mode: the song that plays goes back to the player where it is, in the
+	 * queue, and plays on there; the decks stop when it does
+	 */
+	async handToPlayer() {
+		const lead = this.leading();
+		const song = lead?.state.song;
+		if (!lead || !song || !lead.state.playing) return this.stopAll();
+		const position = lead.position();
+		const q = get(songQueue);
+		let queue = q.queue ?? [];
+		let index = queue.findIndex((s) => sameSong(s, song));
+		if (index < 0) {
+			// A song from the DJ's browser: it plays first, then the queue goes on
+			queue = [song, ...queue];
+			index = 0;
+		}
+		this.cancelMix();
+		this.stopAuto();
+		try {
+			// (a little later: the player needs a moment to start)
+			await setSongQueue(
+				index,
+				queue,
+				q.type ?? 'playlist',
+				q.playlistId ?? null,
+				true,
+				position + 0.2
+			);
+		} finally {
+			this.decks.A.pause();
+			this.decks.B.pause();
+		}
 	}
 
 	/** Leaving the DJ mode: everything stops */
