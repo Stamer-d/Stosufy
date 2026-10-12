@@ -4,8 +4,9 @@ import { currentSong } from './audio';
 import { DEFAULT_HOME, userSettings } from './user';
 import type { MapSet } from '../types';
 
-// Picked once per app start, so the random wallpaper doesn't change while browsing
-const randomPick = Math.random();
+// The random wallpaper: a new one with every song change (not while browsing or pausing)
+let randomPick = Math.random();
+let pickedFor: unknown = undefined;
 
 /** The song whose background is used as wallpaper / featured banner */
 export const wallpaper = derived(
@@ -16,6 +17,13 @@ export const wallpaper = derived(
 		downloaded: boolean;
 	} => {
 		const home = { ...DEFAULT_HOME, ...$userSettings.settings?.home };
+		const songKey = $currentSong.song
+			? `${$currentSong.song.id}:${$currentSong.song.track ?? 0}`
+			: null;
+		if (songKey !== pickedFor) {
+			if (pickedFor !== undefined) randomPick = Math.random();
+			pickedFor = songKey;
+		}
 		const downloaded = formatSongData($mapData);
 		const randomSong = downloaded.length
 			? downloaded[Math.floor(randomPick * downloaded.length)]
