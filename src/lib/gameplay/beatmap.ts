@@ -213,15 +213,19 @@ export function parseGameplay(content: string, mods = 0): GameplayBeatmap | null
 			{
 				// The ticks, repeats and end, like osu!'s SliderEventGenerator
 				const sliderPoints: SliderPoint[] = [];
-				const tickDistance = clamp(scoringDistance / tickRate, 0, path.length);
+				// osu! counts at most 100000 px of a slider for its ticks; some maps (aspire) go far
+				// beyond that or have thousands of repeats, so the ticks of a slider are limited
+				const tickLength = Math.min(100000, path.length);
+				const tickDistance = clamp(scoringDistance / tickRate, 0, tickLength);
 				const minFromEnd = (scoringDistance / beat) * 10;
+				let tickBudget = MAX_SLIDER_TICKS;
 				for (let span = 0; span < slides; span++) {
 					const spanStart = time + span * spanDuration;
 					const reversed = span % 2 === 1;
 					const ticks: SliderPoint[] = [];
-					if (tickDistance > 0) {
-						for (let d = tickDistance; d <= path.length; d += tickDistance) {
-							if (d >= path.length - minFromEnd) break;
+					if (tickDistance > 0 && tickBudget > 0) {
+						for (let d = tickDistance; d <= tickLength; d += tickDistance) {
+							if (d >= tickLength - minFromEnd || --tickBudget < 0) break;
 							const progress = d / path.length;
 							const t = spanStart + (reversed ? 1 - progress : progress) * spanDuration;
 							ticks.push({ kind: 'tick', time: t, progress, judgeTime: t });
@@ -317,6 +321,8 @@ export function parseGameplay(content: string, mods = 0): GameplayBeatmap | null
 // --- Stacking, as osu! does it (OsuBeatmapProcessor in ppy/osu) ------------------------
 
 /** Objects closer than this count as on the same spot */
+/** The most ticks one slider gets (all its spans together) */
+const MAX_SLIDER_TICKS = 500;
 const STACK_DISTANCE = 3;
 
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);

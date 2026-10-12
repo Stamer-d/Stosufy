@@ -11,6 +11,29 @@ function bezier(points: Point[]): Point[] {
 	for (let i = 1; i < points.length; i++) length += dist(points[i - 1], points[i]);
 	const steps = Math.max(2, Math.min(200, Math.ceil(length / 4)));
 	const out: Point[] = [];
+	const n = points.length - 1;
+	if (n > 24) {
+		// Curves of many points (some maps have hundreds in one): the Bernstein form, in logs
+		// so the big binomials don't overflow; linear in the points instead of quadratic
+		const logBinomial = [0];
+		for (let i = 1; i <= n; i++) logBinomial.push(logBinomial[i - 1] + Math.log((n - i + 1) / i));
+		out.push(points[0]);
+		for (let s = 1; s < steps; s++) {
+			const t = s / steps;
+			const a = Math.log(t);
+			const b = Math.log(1 - t);
+			let x = 0;
+			let y = 0;
+			for (let i = 0; i <= n; i++) {
+				const w = Math.exp(logBinomial[i] + i * a + (n - i) * b);
+				x += points[i].x * w;
+				y += points[i].y * w;
+			}
+			out.push({ x, y });
+		}
+		out.push(points[n]);
+		return out;
+	}
 	for (let s = 0; s <= steps; s++) {
 		const t = s / steps;
 		let row = points.map((p) => ({ ...p }));
@@ -25,7 +48,7 @@ function bezier(points: Point[]): Point[] {
 	return out;
 }
 
-function perfectCircle([a, b, c]: Point[]): Point[] | null {
+function perfectCircle([a, b, c]: Point[], wanted: number): Point[] | null {
 	const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
 	if (Math.abs(d) < 1e-6) return null; // in a line
 	const sq = (p: Point) => p.x * p.x + p.y * p.y;
@@ -44,7 +67,13 @@ function perfectCircle([a, b, c]: Point[]): Point[] | null {
 	} else {
 		while (end < start) end += 2 * Math.PI;
 	}
-	const steps = Math.max(2, Math.ceil((Math.abs(end - start) * radius) / 4));
+	// Only as much of the arc as the slider is long (nearly straight ones have huge circles)
+	const arc = Math.abs(end - start) * radius;
+	if (wanted > 0 && arc > wanted) end = start + ((end - start) * wanted) / arc;
+	const steps = Math.max(
+		2,
+		Math.min(1000, Math.ceil(Math.min(arc, wanted > 0 ? wanted : arc) / 4))
+	);
 	const out: Point[] = [];
 	for (let s = 0; s <= steps; s++) {
 		const t = start + ((end - start) * s) / steps;
@@ -86,7 +115,7 @@ export class SliderPath {
 	constructor(type: string, controls: Point[], length: number) {
 		let points: Point[];
 		// Three points in a line: osu! makes that a straight line
-		if (type === 'P' && controls.length === 3) points = perfectCircle(controls) ?? controls;
+		if (type === 'P' && controls.length === 3) points = perfectCircle(controls, length) ?? controls;
 		else if (type === 'C') points = catmull(controls);
 		else if (type === 'L') points = controls;
 		else {

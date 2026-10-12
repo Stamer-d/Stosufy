@@ -49,6 +49,8 @@ export interface ObjectState {
 	judgedAt: number | null;
 	/** Slider: whether each tick, repeat and the end were hit (null: not yet) */
 	points: (boolean | null)[];
+	/** Slider: the first of its points not judged yet */
+	nextPoint: number;
 	/** Slider: when the ball was followed */
 	tracking: { start: number; end: number }[];
 	/** Spinner: how far it was spun (radians), over time */
@@ -136,6 +138,7 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 		result: null,
 		judgedAt: null,
 		points: object.slider ? object.slider.points.map(() => null) : [],
+		nextPoint: 0,
 		tracking: [],
 		spins: []
 	});
@@ -262,6 +265,7 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 	}
 
 	function hitHead(index: number, time: number, result: Result) {
+		quietUntil = -Infinity;
 		const object = objects[index];
 		const state = judge.states[index];
 		state.head = result;
@@ -286,34 +290,71 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 		headDone();
 	}
 
-	/** The next thing to judge at or before a time, if any */
+	/**
+	 * The next thing to judge at or before a time, if any: what (see update) and of which
+	 * object. Just numbers, as it runs for every tick of every slider being slid.
+	 */
+	let checkAt = 0;
+	let checkKind = 0;
+	let checkIndex = 0;
+	const MISS_HEAD = 1;
+	const PASS_SPINNER = 2;
+	const POINT = 3;
+	const SLIDER_END = 4;
+	const SPINNER_END = 5;
+	/** Nothing is due before this time (until something changes; -Infinity: unknown) */
+	let quietUntil = -Infinity;
 	function nextCheck(time: number) {
-		let best: { at: number; run: () => void } | null = null;
-		const consider = (at: number, run: () => void) => {
-			if (at <= time && (!best || at < best.at)) best = { at, run };
-		};
+		checkAt = Infinity;
+		checkKind = 0;
+		let soonest = Infinity;
 		// Spinners can't be clicked: they're passed by at their start
 		const head = objects[next];
 		if (head) {
-			if (head.kind === 'spinner') consider(head.time, () => headDone());
-			else
-				consider(head.time + windows[50], () => {
-					hitHead(next, head.time + windows[50], 0);
-				});
+			const at = head.kind === 'spinner' ? head.time : head.time + windows[50];
+			soonest = at;
+			if (at <= time) {
+				checkAt = at;
+				checkKind = head.kind === 'spinner' ? PASS_SPINNER : MISS_HEAD;
+			}
 		}
-		for (const index of active) {
+		for (let i = 0; i < active.length; i++) {
+			const index = active[i];
 			const object = objects[index];
-			const state = judge.states[index];
+			let at: number;
+			let kind: number;
 			if (object.kind === 'slider') {
 				const points = object.slider!.points;
-				const p = state.points.indexOf(null);
-				if (p >= 0) {
-					const point = points[p];
-					consider(point.judgeTime, () => judgePoint(index, p));
-				} else consider(object.endTime, () => finishSlider(index));
-			} else consider(object.endTime, () => finishSpinner(index));
+				const p = judge.states[index].nextPoint;
+				if (p < points.length) {
+					at = points[p].judgeTime;
+					kind = POINT;
+				} else {
+					at = object.endTime;
+					kind = SLIDER_END;
+				}
+			} else {
+				at = object.endTime;
+				kind = SPINNER_END;
+			}
+			if (at < soonest) soonest = at;
+			if (at <= time && at < checkAt) {
+				checkAt = at;
+				checkKind = kind;
+				checkIndex = index;
+			}
 		}
-		return best as { at: number; run: () => void } | null;
+		if (checkKind === 0) quietUntil = soonest;
+		return checkKind !== 0;
+	}
+
+	function runCheck() {
+		quietUntil = -Infinity;
+		if (checkKind === MISS_HEAD) hitHead(next, checkAt, 0);
+		else if (checkKind === PASS_SPINNER) headDone();
+		else if (checkKind === POINT) judgePoint(checkIndex, judge.states[checkIndex].nextPoint);
+		else if (checkKind === SLIDER_END) finishSlider(checkIndex);
+		else if (checkKind === SPINNER_END) finishSpinner(checkIndex);
 	}
 
 	function judgePoint(index: number, p: number) {
@@ -323,6 +364,7 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 		const hit = follows(index, point.judgeTime, last);
 		setTracking(index, hit, point.judgeTime);
 		state.points[p] = hit;
+		state.nextPoint = p + 1;
 		const where = object.slider!.path.at(point.progress);
 		if (hit) {
 			score += point.kind === 'tick' ? 10 : 30;
@@ -369,11 +411,8 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 
 	function update(time: number) {
 		if (started === NOT_STARTED) return;
-		for (;;) {
-			const check = nextCheck(time);
-			if (!check) break;
-			check.run();
-		}
+		if (time < quietUntil) return;
+		while (nextCheck(time)) runCheck();
 	}
 
 	function spin(frame: Frame) {
@@ -455,6 +494,7 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 	}
 
 	function skipBefore(time: number) {
+		quietUntil = -Infinity;
 		while (next < objects.length && objects[next].time + windows[50] < time) next++;
 		// A slider or spinner already going is skipped too
 		active = [];
@@ -477,6 +517,7 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 		lastAngle = null;
 		comboPerfect = comboGood = true;
 		started = NOT_STARTED;
+		quietUntil = -Infinity;
 		snapshot(-Infinity);
 		void time;
 	}

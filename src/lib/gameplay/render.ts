@@ -292,23 +292,70 @@ export function createGameplayRenderer(
 
 	// --- Sliders --------------------------------------------------------------------------
 
+	/** The first of a slider's points after a time (they are in time order) */
+	function firstAfter(points: { time: number }[], time: number) {
+		let low = 0;
+		let high = points.length;
+		while (low < high) {
+			const mid = (low + high) >> 1;
+			if (points[mid].time <= time) low = mid + 1;
+			else high = mid;
+		}
+		return low;
+	}
+
 	// The body like osu!'s legacy sliders (LegacySliderBody): a thin shadow at the edge, the
 	// border, then the track, the combo colour going lighter towards the middle, at 70%. Drawn
 	// once per slider into a picture of its own (again when the playfield's size changes).
 	const bodies = new Map<
 		HitObject,
-		{ picture: HTMLCanvasElement; x: number; y: number; scale: number }
+		{
+			picture: HTMLCanvasElement;
+			x: number;
+			y: number;
+			scale: number;
+			view: string;
+			usedAt: number;
+		}
 	>();
 	let layer: HTMLCanvasElement | null = null;
 	const BODY_STEPS = 24;
+	// Counts the frames, to know which bodies weren't drawn lately
+	let frame = 0;
 
 	function bodyPicture(object: HitObject, colour: Colour) {
 		const scale = transform.scale;
+		// The part of the playfield on screen: sliders far bigger than it (some maps have them)
+		// only get a picture of what can be seen
+		const view = {
+			minX: -transform.x / scale,
+			minY: -transform.y / scale,
+			maxX: (canvas.width - transform.x) / scale,
+			maxY: (canvas.height - transform.y) / scale
+		};
+		const viewKey = `${view.minX},${view.minY},${view.maxX},${view.maxY}`;
 		const cached = bodies.get(object);
-		if (cached && cached.scale === scale) return cached;
-		// Old ones (of sliders long gone) aren't needed any more
-		if (bodies.size > 40) bodies.delete(bodies.keys().next().value!);
-		const points = object.slider!.path.points;
+		if (cached && cached.scale === scale && cached.view === viewKey) {
+			cached.usedAt = frame;
+			return cached;
+		}
+		// Old ones (of sliders long gone) aren't needed any more; ones on screen are kept,
+		// however many there are
+		if (bodies.size > 40) {
+			for (const [old, made] of bodies) {
+				if (bodies.size <= 40) break;
+				if (made.usedAt < frame - 1) bodies.delete(old);
+			}
+		}
+		const allPoints = object.slider!.path.points;
+		// Points closer than a pixel on screen add nothing but time
+		const points = [allPoints[0]];
+		for (let i = 1; i < allPoints.length; i++) {
+			const last = points[points.length - 1];
+			const p = allPoints[i];
+			if (i === allPoints.length - 1 || Math.abs(p.x - last.x) + Math.abs(p.y - last.y) > 1 / scale)
+				points.push(p);
+		}
 		let minX = Infinity;
 		let minY = Infinity;
 		let maxX = -Infinity;
@@ -320,10 +367,12 @@ export function createGameplayRenderer(
 			maxY = Math.max(maxY, p.y);
 		}
 		const pad = radius + 2;
-		const x = minX - pad;
-		const y = minY - pad;
-		const width = Math.min(4096, Math.ceil((maxX - minX + pad * 2) * scale));
-		const height = Math.min(4096, Math.ceil((maxY - minY + pad * 2) * scale));
+		const x = Math.max(minX - pad, view.minX);
+		const y = Math.max(minY - pad, view.minY);
+		const right = Math.min(maxX + pad, view.maxX);
+		const bottom = Math.min(maxY + pad, view.maxY);
+		const width = Math.min(4096, Math.ceil((right - x) * scale));
+		const height = Math.min(4096, Math.ceil((bottom - y) * scale));
 		const picture = cached?.picture ?? document.createElement('canvas');
 		picture.width = Math.max(1, width);
 		picture.height = Math.max(1, height);
@@ -381,7 +430,7 @@ export function createGameplayRenderer(
 		c.drawImage(layer, 0, 0);
 		c.globalAlpha = 1;
 
-		const made = { picture, x, y, scale };
+		const made = { picture, x, y, scale, view: viewKey, usedAt: frame };
 		bodies.set(object, made);
 		return made;
 	}
@@ -484,8 +533,12 @@ export function createGameplayRenderer(
 		const span = time < object.time ? 0 : Math.floor((time - object.time) / slider.spanDuration);
 		if (time < object.endTime && shown > 0) {
 			// The ticks still to come in this span
-			for (const point of slider.points) {
-				if (point.kind !== 'tick' || point.time <= time) continue;
+			// (the points are in time order: from the first one to come to the end of the span)
+			const spanEnd = object.time + (span + 1) * slider.spanDuration;
+			for (let i = firstAfter(slider.points, time); i < slider.points.length; i++) {
+				const point = slider.points[i];
+				if (point.time > spanEnd) break;
+				if (point.kind !== 'tick') continue;
 				if (Math.floor((point.time - object.time) / slider.spanDuration) !== span) continue;
 				const at = slider.path.at(point.progress);
 				let tickAlpha = shown;
@@ -530,16 +583,29 @@ export function createGameplayRenderer(
 				false,
 				'sliderendcircle'
 			);
-		slider.points.forEach((point, i) => {
-			if (point.kind !== 'repeat') return;
+		// Only the turns around now: popping ones (the last few) and the next ones; sliders with
+		// thousands of turns would be slow otherwise
+		const upcoming = firstAfter(slider.points, time);
+		let before: (typeof slider.points)[number] | undefined;
+		for (let i = upcoming; i < slider.points.length; i++) {
+			if (slider.points[i].kind === 'repeat') {
+				before = slider.points[i];
+				break;
+			}
+		}
+		const horizon = Math.max(time, object.time) + slider.spanDuration * 2;
+		const from = Math.max(
+			upcoming - 32,
+			firstAfter(slider.points, time - Math.max(HIT_FADE, MISS_FADE))
+		);
+		for (let i = from; i < slider.points.length; i++) {
+			const point = slider.points[i];
+			if (point.time > horizon) break;
+			if (point.kind !== 'repeat') continue;
 			const at = slider.path.at(point.progress);
-			if (pop(at.x, at.y, point.time, state.points[i] !== false)) return;
+			if (pop(at.x, at.y, point.time, state.points[i] !== false)) continue;
 			// Only the next turn at each end shows
-			const before = slider.points.find((p) => p.kind === 'repeat' && p.time > time);
-			if (before !== point && before?.progress === point.progress) return;
-			// The next turns from where the ball is (before the slider starts: from its start, so
-			// the arrows show as it appears, like in osu!)
-			if (point.time - Math.max(time, object.time) > slider.spanDuration * 2) return;
+			if (before !== point && before?.progress === point.progress) continue;
 			drawCircle(
 				object,
 				at.x,
@@ -566,7 +632,7 @@ export function createGameplayRenderer(
 				ctx.fill();
 				ctx.restore();
 			}
-		});
+		}
 
 		// The head, then the ball while it slides
 		const headMissed = state.head === 0 ? state.headAt : null;
@@ -791,10 +857,23 @@ export function createGameplayRenderer(
 			if (line.from.endTime - followPreempt > time) break;
 			if (line.to.time + FOLLOW_FADE < time) continue;
 			const duration = line.to.time - line.from.endTime;
+			// Only the points that can show now (lines can be very long on some maps)
+			let firstD = FOLLOW_POINT_SPACING * 1.5;
+			let lastD = line.length - FOLLOW_POINT_SPACING;
+			if (duration > 0) {
+				const fractionAt = (t: number) => ((t - line.from.endTime) / duration) * line.length;
+				firstD = Math.max(
+					firstD,
+					firstD +
+						Math.floor((fractionAt(time - FOLLOW_FADE) - firstD) / FOLLOW_POINT_SPACING) *
+							FOLLOW_POINT_SPACING
+				);
+				lastD = Math.min(lastD, fractionAt(time + followPreempt));
+			}
 			for (
-				let d = FOLLOW_POINT_SPACING * 1.5;
-				d < line.length - FOLLOW_POINT_SPACING;
-				d += FOLLOW_POINT_SPACING
+				let d = firstD, count = 0;
+				d < lastD && count < 400;
+				d += FOLLOW_POINT_SPACING, count++
 			) {
 				const fraction = d / line.length;
 				const fadeOut = line.from.endTime + fraction * duration;
@@ -1158,6 +1237,7 @@ export function createGameplayRenderer(
 		const scale = Math.min(width / 640, height / 480);
 		transform = { scale, x: (width - 512 * scale) / 2, y: (height - 384 * scale) / 2 };
 		ctx.setTransform(scale, 0, 0, scale, transform.x, transform.y);
+		frame++;
 
 		drawFollowPoints(time);
 		const { states } = view.judge;
@@ -1191,7 +1271,9 @@ export function createGameplayRenderer(
 			}
 		}
 		const judgements = view.judge.judgements;
-		for (let i = judgements.length - 1; i >= 0; i--) {
+		// From the last one so far back (a finished play has all of them, also the ones to
+		// come), and not more than fit on the screen
+		for (let i = lastAtOrBefore(judgements, time), drawn = 0; i >= 0 && drawn < 120; i--, drawn++) {
 			if (judgements[i].time < time - JUDGEMENT_TIME - 2000) break;
 			drawJudgement(judgements[i], time);
 		}
