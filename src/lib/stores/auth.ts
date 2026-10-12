@@ -5,6 +5,7 @@ import { goto } from '$app/navigation';
 import { user } from './user';
 import { getStosufyUser } from '../api';
 import type { Keys, User } from '../types';
+import { offline, isNetworkError, noteNetworkError, whenOnline } from './network';
 
 export const keyStore = writable<Keys>({
 	access_token: '',
@@ -109,6 +110,8 @@ export async function refreshToken(refreshToken: string) {
 }
 
 let refreshing: Promise<unknown> | null = null;
+/** The last logged in user, to start offline with */
+const LAST_USER = 'stosufy-last-user';
 
 /**
  * The osu! access token, renewed first if it ran out or is about to (timers don't run while
@@ -132,8 +135,15 @@ export async function verifyAccessToken(
 	try {
 		const userData = await getStosufyUser(token);
 		user.set(userData);
+		try {
+			localStorage.setItem(LAST_USER, JSON.stringify(userData));
+		} catch {
+			// Only for starting offline
+		}
 		return { status: true, userData };
-	} catch {
+	} catch (error) {
+		// No connection is no reason to log in again
+		if (isNetworkError(error)) throw error;
 		return { status: false, userData: null };
 	}
 }
@@ -218,16 +228,44 @@ function scheduleTokenRefresh() {
 	}, refreshIn);
 }
 
+/** Starts the app without a connection: with the last user and the songs on this computer */
+function startOffline() {
+	try {
+		const last = localStorage.getItem(LAST_USER);
+		if (last && !get(user)?.id) user.set(JSON.parse(last));
+	} catch {
+		// No saved user: the app still works with the downloaded songs
+	}
+	goto('/home', { replaceState: true });
+	// Logged in properly once the connection is back
+	const stop = whenOnline(() => {
+		stop();
+		startTokenRefresh();
+	});
+}
+
 export async function startTokenRefresh() {
 	await initializeStores();
-	if (get(keyStore).expiry_time < Date.now()) {
-		const refreshed = await refreshToken(get(keyStore).refresh_token);
-		if (refreshed == null) {
-			goto('/login', { replaceState: true });
+	// Never logged in: that needs a connection anyway
+	if (!get(keyStore).refresh_token) {
+		goto('/login', { replaceState: true });
+		return;
+	}
+	if (get(offline)) return startOffline();
+	try {
+		if (get(keyStore).expiry_time < Date.now()) {
+			const refreshed = await refreshToken(get(keyStore).refresh_token);
+			if (refreshed == null) {
+				goto('/login', { replaceState: true });
+				return;
+			}
+		} else if (!(await checkAccessToken())) {
 			return;
 		}
-	} else if (!(await checkAccessToken())) {
-		return;
+	} catch (error) {
+		noteNetworkError(error);
+		if (get(offline) || isNetworkError(error)) return startOffline();
+		throw error;
 	}
 	goto('/home', { replaceState: true });
 	scheduleTokenRefresh();

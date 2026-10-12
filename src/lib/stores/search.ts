@@ -10,6 +10,9 @@ export function matchesQuery(
 		artist?: string;
 		creator?: string;
 		tags?: string;
+		genre?: string | null;
+		language?: string | null;
+		songSource?: string;
 		beatmaps?: { version?: string }[];
 	},
 	query: string
@@ -21,6 +24,9 @@ export function matchesQuery(
 		song.artist,
 		song.creator,
 		song.tags,
+		song.genre,
+		song.language,
+		song.songSource,
 		...(song.beatmaps ?? []).map((map) => map.version)
 	]
 		.join(' ')

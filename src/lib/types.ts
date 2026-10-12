@@ -45,6 +45,10 @@ interface MapSetInfo {
 	bpm?: number;
 	status?: string;
 	tags?: string;
+	/** osu!'s genre and language (names), and where the song is from (an anime, a game…) */
+	genre?: string | null;
+	language?: string | null;
+	songSource?: string;
 	preview_url?: string;
 	created_at?: number | string;
 	songInfo?: PlaylistSongInfo;
@@ -126,6 +130,9 @@ export interface SearchFilters {
 	status: string;
 	/** osu! sort order (the `sort` search parameter), empty for relevance */
 	sort: string;
+	/** Genre and language ids (the `g` and `l` parameters), empty for any */
+	genre?: string;
+	language?: string;
 }
 
 export type HomeSectionId = 'hero' | 'playlists' | 'recent' | 'discover';

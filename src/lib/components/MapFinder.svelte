@@ -1,5 +1,7 @@
 <script>
 	import { sameSong, songKey } from '#lib/tracks.ts';
+	import { GENRES, LANGUAGES } from '#lib/genres.ts';
+	import { offline, noteNetworkError } from '#lib/stores/network.ts';
 	import {
 		songQueue,
 		setSongQueue,
@@ -139,6 +141,15 @@
 		{ value: 'title_asc', label: 'Title (A-Z)', icon: 'icon-[fa6-solid--arrow-down-a-z]' }
 	];
 
+	const GENRE_OPTIONS = [
+		{ value: '', label: 'Any', icon: 'icon-[mingcute--music-2-line]' },
+		...Object.entries(GENRES).map(([value, label]) => ({ value, label }))
+	];
+	const LANGUAGE_OPTIONS = [
+		{ value: '', label: 'Any', icon: 'icon-[mingcute--translate-2-line]' },
+		...Object.entries(LANGUAGES).map(([value, label]) => ({ value, label }))
+	];
+
 	let filters = $derived($userSettings.settings?.searchFilters ?? DEFAULT_SEARCH_FILTERS);
 
 	function setFilter(change) {
@@ -164,6 +175,10 @@
 	);
 	let searching = $state(false);
 	let searchError = $state(null);
+	// Back online after a failed search: tried again
+	$effect(() => {
+		if (!$offline && untrack(() => searchError)) runSearch(untrack(() => search));
+	});
 	let osuMapsSearch = $state(null);
 	let searchTimeout = null;
 	let searchRequestId = 0;
@@ -208,6 +223,7 @@
 			allMaps = result.beatmapsets ?? [];
 			searchError = null;
 		} catch (error) {
+			noteNetworkError(error);
 			if (requestId === searchRequestId) {
 				searchError = error instanceof Error ? error.message : String(error);
 			}
@@ -432,6 +448,18 @@
 				onchange={(status) => setFilter({ status })}
 			/>
 			<Select
+				label="Genre"
+				options={GENRE_OPTIONS}
+				value={filters.genre ?? ''}
+				onchange={(genre) => setFilter({ genre })}
+			/>
+			<Select
+				label="Language"
+				options={LANGUAGE_OPTIONS}
+				value={filters.language ?? ''}
+				onchange={(language) => setFilter({ language })}
+			/>
+			<Select
 				label="Sort"
 				icon="icon-[fa6-solid--arrow-down-short-wide]"
 				options={SORT_OPTIONS}
@@ -441,9 +469,15 @@
 		</div>
 		{#if searchError && !allMaps?.length}
 			<div class="flex flex-col items-center gap-3 mt-16 text-secondary-600">
-				<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
-				<p class="text-xl">Couldn't load beatmaps</p>
-				<p class="text-sm">{searchError}</p>
+				{#if $offline}
+					<span class="icon-[mingcute--wifi-off-line] size-10 text-amber-300"></span>
+					<p class="text-xl">You're offline</p>
+					<p class="text-sm">Beatmaps show up again once you're connected.</p>
+				{:else}
+					<span class="icon-[fa6-solid--triangle-exclamation] size-10 text-red-400"></span>
+					<p class="text-xl">Couldn't load beatmaps</p>
+					<p class="text-sm">{searchError}</p>
+				{/if}
 				<Button type="primary" on:click={() => runSearch(search)}>Try again</Button>
 			</div>
 		{:else if osuMapsSearch && !allMaps?.length}

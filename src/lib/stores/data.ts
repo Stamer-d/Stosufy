@@ -60,6 +60,7 @@ export const downloads = writable<Record<string, DownloadState>>({});
 			removeStoryboards();
 		}
 		setTimeout(backfillImages, BACKFILL_START_DELAY);
+		setTimeout(backfillDetails, BACKFILL_START_DELAY * 1.5);
 	} catch (error) {
 		console.error('Error initializing data store:', error);
 	}
@@ -131,6 +132,8 @@ export async function fetchMaps(
 	if (filters.status) params.set('s', filters.status);
 	if (filters.sort) params.set('sort', filters.sort);
 	if (cursorString) params.set('cursor_string', cursorString);
+	if (filters.genre) params.set('g', filters.genre);
+	if (filters.language) params.set('l', filters.language);
 	try {
 		const url = `https://osu.ppy.sh/api/v2/beatmapsets/search?${params}`;
 		let response!: Response;
@@ -822,8 +825,13 @@ async function updateMapsetData(mapsetData: MapSet) {
 		});
 	}
 
+	// Where the song is from (osu!'s "source"; the stored `source` marks imported songs)
+	if (typeof mapsetData.source === 'string' && mapsetData.source !== 'osu')
+		updatedMapData[setId].songSource ??= mapsetData.source;
 	mapDataStore.set(updatedMapData);
 	await saveMapData();
+	// Its genre, language and tags, soon
+	if (updatedMapData[setId].genre === undefined) setTimeout(backfillDetails, 3000);
 }
 
 export function getImageUrl(imageUrl: string | null | undefined) {
@@ -958,6 +966,76 @@ async function runBackfill() {
 			return;
 		}
 		await wait(BACKFILL_REQUEST_DELAY);
+	}
+}
+
+// --- Genres, languages and tags of downloaded songs ------------------------------------
+
+let detailsRunning = false;
+let detailsAgain = false;
+
+/**
+ * Fills in what osu! knows about downloaded sets but the download doesn't tell: the genre,
+ * the language, the tags and where the song is from. One set every few seconds.
+ */
+export async function backfillDetails() {
+	if (detailsRunning) {
+		detailsAgain = true;
+		return;
+	}
+	detailsRunning = true;
+	try {
+		do {
+			detailsAgain = false;
+			await runDetails();
+		} while (detailsAgain);
+	} finally {
+		detailsRunning = false;
+	}
+}
+
+async function runDetails() {
+	const missing = Object.values(get(mapDataStore))
+		.filter((set) => set.genre === undefined && !set.detailsUnavailable && Number(set.id) > 0)
+		.map((set) => String(set.id));
+	let changed = 0;
+	for (const setId of missing) {
+		if (!navigator.onLine) break;
+		let response: Response;
+		try {
+			response = await fetch(`https://osu.ppy.sh/api/v2/beatmapsets/${setId}`, {
+				headers: { Authorization: `Bearer ${await freshToken()}` }
+			});
+		} catch {
+			break;
+		}
+		if (response.status === 429) {
+			await wait(BACKFILL_RATE_LIMIT_DELAY);
+			continue;
+		}
+		const data = response.ok ? await response.json().catch(() => null) : null;
+		const set = get(mapDataStore)[setId];
+		if (!set) continue;
+		if (data) {
+			set.genre = data.genre?.id > 1 ? data.genre.name : null;
+			set.language = data.language?.id > 1 ? data.language.name : null;
+			set.tags = data.tags || set.tags || '';
+			set.songSource = data.source || '';
+		} else if (response.status === 404) set.detailsUnavailable = true;
+		else {
+			await wait(BACKFILL_REQUEST_DELAY);
+			continue;
+		}
+		// Saved now and then, not after every set
+		if (++changed % 10 === 0) {
+			mapDataStore.update((all) => ({ ...all }));
+			await saveMapData();
+		}
+		await wait(BACKFILL_REQUEST_DELAY);
+	}
+	if (changed % 10) {
+		mapDataStore.update((all) => ({ ...all }));
+		await saveMapData();
 	}
 }
 

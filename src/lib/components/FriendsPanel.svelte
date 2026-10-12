@@ -1,4 +1,6 @@
 <script>
+	import { offline as noConnection } from '#lib/stores/network.ts';
+	import { goto } from '$app/navigation';
 	import Button from './Button.svelte';
 	import VisibilityPicker from './VisibilityPicker.svelte';
 	import { listen } from '#lib/stores/listen.ts';
@@ -42,7 +44,16 @@
 	{@const playback = friend.playback}
 	{@const listening = friend.online && playback?.playing}
 	{@const inRoom = friend.roomCode && friend.roomCode === $listen.code}
-	<li>
+	<li class="relative group/friend">
+		<!-- Their profile -->
+		<button
+			class="absolute top-2 right-2 z-10 size-7 grid place-items-center rounded-full bg-secondary-300/90 text-secondary-700 hover:text-white opacity-0 group-hover/friend:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
+			title="Profile"
+			aria-label="Profile of {friend.username}"
+			onclick={() => goto(`/profile/${friend.osuId}`)}
+		>
+			<span class="icon-[mingcute--user-3-line] size-4"></span>
+		</button>
 		<button
 			class="group w-full flex items-start gap-3 p-2 rounded-md text-start transition {playback &&
 			!inRoom
@@ -151,6 +162,13 @@
 					Allow Stosufy to see your osu! friends to find out who's online and what they listen to.
 				</p>
 				<Button type="primary" on:click={connectFriends}>Connect friends</Button>
+			</div>
+		{:else if $noConnection && $friendActivity.status !== 'ok'}
+			<div class="px-3 py-6 text-center flex flex-col items-center gap-2">
+				<span class="icon-[mingcute--wifi-off-line] size-8 text-secondary-600"></span>
+				<p class="text-sm text-secondary-600">
+					You're offline. Your friends show up again once you're connected.
+				</p>
 			</div>
 		{:else if $friendActivity.status === 'error'}
 			<p class="px-3 py-6 text-sm text-center text-red-400">{$friendActivity.message}</p>

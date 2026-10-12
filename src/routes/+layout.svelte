@@ -3,7 +3,8 @@
 	import Songbar from '#lib/components/Songbar.svelte';
 	import Playlist from '#lib/components/Playlist.svelte';
 	import { onMount } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import { fly, slide } from 'svelte/transition';
+	import { offline } from '#lib/stores/network.ts';
 	import { startBeatEffects } from '#lib/stores/beat.ts';
 	import { joinSession } from '#lib/stores/listen.ts';
 	import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
@@ -152,6 +153,18 @@
 	{/if}
 	<div class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'}">
 		<Titlebar />
+		{#if $offline}
+			<div
+				class="mx-2 mb-2 flex items-center gap-2.5 px-4 h-9 shrink-0 rounded-lg bg-amber-400/10 ring-1 ring-amber-300/20 text-sm text-amber-100"
+				transition:slide={{ duration: 200 }}
+			>
+				<span class="icon-[mingcute--wifi-off-line] size-4 text-amber-300"></span>
+				<span class="font-semibold">You're offline.</span>
+				<span class="text-amber-100/70 truncate"
+					>Your downloaded songs and playlists still play; the rest comes back with the connection.</span
+				>
+			</div>
+		{/if}
 
 		<div class="flex flex-1 min-h-0 px-2 gap-2">
 			<aside class="w-72 shrink-0 rounded-lg {panel} overflow-hidden transition-colors">

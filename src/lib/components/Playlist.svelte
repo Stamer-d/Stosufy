@@ -12,8 +12,10 @@
 		loadAllPlaylistSongs,
 		savedPlaylists,
 		loadSavedPlaylists,
-		toggleSavedPlaylist
+		toggleSavedPlaylist,
+		offlineLibrary
 	} from '#lib/stores/playlist.ts';
+	import { offline, noteNetworkError } from '#lib/stores/network.ts';
 	import { favourites, likedPlaylist, loadFavourites, LIKED_ID } from '#lib/stores/favourites.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -49,7 +51,17 @@
 	});
 
 	async function getPlaylist() {
-		let playlist_list = await getPlaylists($keyStore.access_token);
+		let playlist_list = [];
+		try {
+			playlist_list = await getPlaylists($keyStore.access_token);
+		} catch (error) {
+			// Offline: the playlists as they were the last time
+			noteNetworkError(error);
+			const kept = await offlineLibrary();
+			playlist_list = (kept?.playlists ?? []).filter((p) => Number(p.id) > 0);
+			if (kept?.saved) savedPlaylists.set(kept.saved);
+			if (!kept) console.error('Could not load the playlists:', error);
+		}
 
 		const downloadedSongsPlaylist = {
 			id: -1,
@@ -65,9 +77,11 @@
 		// Liked Songs come right after the downloads (their count once they're loaded)
 		$playlists = [downloadedSongsPlaylist, likedPlaylist($favourites.length), ...playlist_list];
 		loadAllPlaylistSongs();
-		loadFavourites().catch((error) => console.error('Could not load the liked songs:', error));
-		loadSavedPlaylists().catch((error) =>
-			console.error('Could not load the saved playlists:', error)
+		loadFavourites().catch(
+			(error) => !$offline && console.error('Could not load the liked songs:', error)
+		);
+		loadSavedPlaylists().catch(
+			(error) => !$offline && console.error('Could not load the saved playlists:', error)
 		);
 	}
 
@@ -176,12 +190,17 @@
 
 	let lastUserId = null;
 
-	// Load the playlists once a user is logged in or the user changed
+	// Load the playlists once a user is logged in or the user changed; offline (also without
+	// a user known yet) from the copy on this computer, and again once the connection is back
+	let wasOffline = false;
 	$effect(() => {
+		const isOffline = $offline;
 		if ($user?.id && lastUserId !== $user.id) {
 			lastUserId = $user.id;
 			getPlaylist();
-		}
+		} else if (isOffline && !$playlists.length) getPlaylist();
+		else if (wasOffline && !isOffline) getPlaylist();
+		wasOffline = isOffline;
 	});
 </script>
 

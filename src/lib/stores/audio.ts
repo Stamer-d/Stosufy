@@ -5,6 +5,7 @@ import { applyMod, prepareBeats, startBeats } from './mods';
 import { track, untrack, setFade, setGain, rampGain } from './mixer';
 import { measureLoudness, gainFor } from './loudness';
 import { sameSong } from '../tracks';
+import { offline } from './network';
 import { attach, applyEq, eqSettings } from './equalizer';
 import { showToast } from './toast';
 import { librarySong, similarSongs } from './radio';
@@ -93,6 +94,13 @@ function normalize(
 		await saveMapData();
 		rampGain(audio, gainFor(loudness));
 	});
+}
+
+/** A song that isn't downloaded can't play without a connection */
+class OfflineError extends Error {
+	constructor(song: MapSet) {
+		super(`${song.title} isn't downloaded`);
+	}
 }
 
 // Set while the next song is loaded for a crossfade, so it starts silent
@@ -188,6 +196,8 @@ async function getAudio(index: number, queue: MapSet[], type: QueueType, current
 		audio = new Audio(`${song.preview_url}`);
 		track(audio, fadeInNext || smoothIn ? 0 : 1);
 	} else {
+		// Offline only downloaded songs can play
+		if (mapId == null && get(offline)) throw new OfflineError(song);
 		const playedMapId = mapId ?? song.beatmaps[0].id;
 		const file = bytesFromBase64(await downloadBeatmap(song, playedMapId));
 		audio = new Audio(URL.createObjectURL(new Blob([file])));
@@ -256,6 +266,22 @@ export async function setSongQueue(
 	currentSeconds = 0
 ) {
 	if (locked()) return;
+	// Offline: on to the first downloaded song from there
+	if (get(offline) && index !== null && queue[index] && type !== 'preview') {
+		const playable = (i: number) => localMapId(queue[i]) != null;
+		if (!playable(index)) {
+			const next = [...queue.keys()].map((k) => (index + k) % queue.length).find(playable);
+			if (next === undefined) {
+				showToast(
+					"None of these songs are downloaded, and you're offline",
+					'icon-[mingcute--wifi-off-line]'
+				);
+				return;
+			}
+			index = next;
+			currentSeconds = 0;
+		}
+	}
 	switchAway();
 	currentSong.update((cs) => ({ ...cs, isPlaying: false }));
 	const generation = ++loadGeneration;
@@ -266,6 +292,13 @@ export async function setSongQueue(
 			if (generation !== loadGeneration) return discard(audio);
 		} catch (error) {
 			if (generation !== loadGeneration) return;
+			if (error instanceof OfflineError) {
+				showToast(
+					`"${queue[index]?.title}" isn't downloaded, and you're offline`,
+					'icon-[mingcute--wifi-off-line]'
+				);
+				return;
+			}
 			console.error('Could not play', queue[index]?.title, error);
 			showToast(
 				`Couldn't play ${queue[index]?.title ?? 'this song'}`,

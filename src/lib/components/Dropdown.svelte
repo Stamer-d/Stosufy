@@ -39,6 +39,15 @@
 			class="absolute right-0 z-40 w-56 mt-1.5 origin-top-right bg-secondary-300 rounded-lg p-1.5 shadow-xl shadow-black/40 ring-1 ring-white/5 {menuClass}"
 			role="menu"
 			aria-orientation="vertical"
+			tabindex="-1"
+			on:click={(event) => {
+				// Choosing an item closes the menu
+				if (event.target instanceof Element && event.target.closest('button')) {
+					isOpen = false;
+					dispatch('close');
+				}
+			}}
+			on:keydown={() => {}}
 		>
 			<slot name="menu">
 				<div class="py-1 text-white text-sm">No Content provided</div>

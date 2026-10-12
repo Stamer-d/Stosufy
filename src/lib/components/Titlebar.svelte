@@ -197,6 +197,14 @@
 					<Button
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
+						icon="icon-[mingcute--user-3-line]"
+						on:click={() => goto('/profile/me')}
+					>
+						Profile
+					</Button>
+					<Button
+						type="ghost"
+						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--settings-3-line]"
 						on:click={() => openSettings()}
 					>

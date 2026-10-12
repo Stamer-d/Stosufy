@@ -5,6 +5,8 @@ import { get, writable } from 'svelte/store';
 import { keyStore, freshToken } from './auth';
 import { formatSongData, mapDataStore } from './data';
 import * as api from '../api';
+import { load } from '@tauri-apps/plugin-store';
+import { offline, noteNetworkError } from './network';
 import type { MapSet, Playlist, PlaylistId } from '../types';
 
 export const playlists = writable<Playlist[]>([]);
@@ -13,6 +15,47 @@ export const playlistSongsCache = writable<Record<string, { songs: MapSet[] }>>(
 export const playlistLoadingStatus = writable<Record<string, boolean>>({});
 
 const token = () => get(keyStore).access_token;
+
+// --- A copy of the library on this computer, for when there's no connection --------------
+
+type OfflineCopy = {
+	playlists: Playlist[];
+	songs: Record<string, { songs: MapSet[] }>;
+	saved: Playlist[];
+};
+let offlineCopy: Promise<OfflineCopy | null> | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** The library as it was the last time the app was online */
+export function offlineLibrary() {
+	offlineCopy ??= load('offline-library.json')
+		.then((store) => store.get<OfflineCopy>('library'))
+		.then((copy) => copy ?? null)
+		.catch(() => null);
+	return offlineCopy;
+}
+
+/** Keeps the playlists and their songs on this computer (a moment after they change) */
+function keepOffline() {
+	if (saveTimer) clearTimeout(saveTimer);
+	saveTimer = setTimeout(async () => {
+		const songs = { ...get(playlistSongsCache) };
+		delete songs['-1'];
+		const copy: OfflineCopy = {
+			playlists: get(playlists).filter((p) => Number(p.id) > 0 || p.id == -2),
+			songs,
+			saved: get(savedPlaylists)
+		};
+		offlineCopy = Promise.resolve(copy);
+		try {
+			const store = await load('offline-library.json');
+			await store.set('library', copy);
+			await store.save();
+		} catch (error) {
+			console.warn('Could not keep the library for offline use:', error);
+		}
+	}, 3000);
+}
 
 // --- Changes to a playlist: one after another, tried again, and checked with the server ----
 
@@ -368,7 +411,14 @@ export async function getPlaylistSongs(
 		}));
 		return { songs: structuredSongs };
 	} catch (error) {
-		console.error(`Error loading playlist ${playlistId}:`, error);
+		noteNetworkError(error);
+		// Offline: the songs as they were the last time
+		const kept = (await offlineLibrary())?.songs[String(playlistId)];
+		if (kept) {
+			playlistSongsCache.update((cache) => ({ ...cache, [playlistId]: kept }));
+			return kept;
+		}
+		if (!get(offline)) console.error(`Error loading playlist ${playlistId}:`, error);
 		return { songs: [], error: error instanceof Error ? error.message : String(error) };
 	} finally {
 		playlistLoadingStatus.update((status) => ({
@@ -452,4 +502,16 @@ export async function toggleSavedPlaylist(playlist: Playlist) {
 		otherPlaylists.update((all) => ({ ...all, [playlist.id]: playlist }));
 		showToast("Couldn't save that, try again", 'icon-[mingcute--warning-line]');
 	}
+}
+
+if (typeof window !== 'undefined') {
+	// Whatever the library loads online is kept for offline use (offline it isn't replaced)
+	const keep = () => {
+		if (!get(offline)) keepOffline();
+	};
+	setTimeout(() => {
+		playlists.subscribe(keep);
+		playlistSongsCache.subscribe(keep);
+		savedPlaylists.subscribe(keep);
+	});
 }

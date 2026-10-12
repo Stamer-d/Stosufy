@@ -1,4 +1,6 @@
 <script>
+	import { showToast } from '#lib/stores/toast.ts';
+	import { offline } from '#lib/stores/network.ts';
 	import { onDestroy } from 'svelte';
 	import { sameSong, songKey } from '#lib/tracks.ts';
 	import SongCover from '#lib/components/SongCover.svelte';
@@ -40,7 +42,7 @@
 	import PlaylistCover from '#lib/components/PlaylistCover.svelte';
 	import PlayButton from '#lib/components/PlayButton.svelte';
 	import Triangles from '#lib/components/Triangles.svelte';
-	import { colorFromImage, colorFromString } from '#lib/stores/data.ts';
+	import { colorFromImage, colorFromString, mapDataStore } from '#lib/stores/data.ts';
 	import { shuffleQueue } from '#lib/stores/audio.ts';
 	import { user, updateUserSettings } from '#lib/stores/user.ts';
 	import { userSettings } from '#lib/stores/user.ts';
@@ -81,8 +83,34 @@
 	// Sorting (remembered per playlist) and filtering; playing follows what's shown
 	let filterText = '';
 	$: sort = $userSettings.settings?.playlistSort?.[playlistId] ?? 'custom';
+	// Genre and language: from the song, else from the downloaded set (see backfillDetails)
+	const detailsOf = (song) => {
+		const stored = $mapDataStore[song.id];
+		return {
+			...song,
+			genre: song.genre ?? stored?.genre ?? null,
+			language: song.language ?? stored?.language ?? null,
+			tags: song.tags || stored?.tags || '',
+			songSource: song.songSource ?? stored?.songSource ?? ''
+		};
+	};
+	$: detailed = songs.map(detailsOf);
+	let genre = '';
+	let language = '';
+	$: (playlistId, (genre = ''), (language = ''));
+	const counted = (values) =>
+		Object.entries(
+			values.filter(Boolean).reduce((all, v) => ({ ...all, [v]: (all[v] ?? 0) + 1 }), {})
+		).sort((a, b) => b[1] - a[1]);
+	$: genres = counted(detailed.map((song) => song.genre));
+	$: languages = counted(detailed.map((song) => song.language));
 	$: visibleSongs = sortSongs(
-		filterText.trim() ? songs.filter((song) => matchesQuery(song, filterText)) : songs,
+		detailed.filter(
+			(song) =>
+				(!filterText.trim() || matchesQuery(song, filterText)) &&
+				(!genre || song.genre === genre) &&
+				(!language || song.language === language)
+		),
 		sort
 	);
 	// Big playlists render the first rows at once and the rest frame by frame, so opening
@@ -211,6 +239,13 @@
 	}
 
 	async function startDownload(song, mapId) {
+		if ($offline) {
+			showToast(
+				"You're offline: songs download once you're connected",
+				'icon-[mingcute--wifi-off-line]'
+			);
+			return;
+		}
 		try {
 			await downloadBeatmap(song, mapId, $keyStore.sessionKey, $keyStore.access_token);
 
@@ -379,10 +414,16 @@
 								class="inline size-5 rounded-full align-[-4px] mr-1"
 							/>
 						{/if}
-						<span class="font-bold">{playlistData.creator?.username ?? 'Someone'}</span>
+						{#if playlistData.creator?.osuId}
+							<a href="/profile/{playlistData.creator.osuId}" class="font-bold hover:underline"
+								>{playlistData.creator.username ?? 'Someone'}</a
+							>
+						{:else}
+							<span class="font-bold">Someone</span>
+						{/if}
 						<span class="text-white/70"> · </span>
 					{:else if !isDownloadedPlaylist && $user?.username}
-						<span class="font-bold">{$user.username}</span>
+						<a href="/profile/me" class="font-bold hover:underline">{$user.username}</a>
 						<span class="text-white/70"> · </span>
 					{/if}
 					{#if playlistData.public && playlistData.saves}
@@ -514,6 +555,18 @@
 						class="w-48 h-9 pl-9 pr-3 rounded-full bg-white/[0.06] hover:bg-white/10 focus:bg-white/10 text-sm text-white placeholder:text-secondary-600 outline-none ring-1 ring-transparent focus:ring-white/20 transition [&::-webkit-search-cancel-button]:hidden"
 					/>
 				</div>
+				{#if languages.length > 1}
+					<Select
+						label="Language"
+						icon="icon-[mingcute--translate-2-line]"
+						options={[
+							{ value: '', label: 'Any' },
+							...languages.map(([name, n]) => ({ value: name, label: `${name} (${n})` }))
+						]}
+						value={language}
+						onchange={(value) => (language = value)}
+					/>
+				{/if}
 				<Select
 					label="Sort"
 					icon="icon-[mingcute--sort-descending-line]"
@@ -526,6 +579,23 @@
 	</div>
 
 	<div class="px-6 pb-10">
+		{#if genres.length > 1}
+			<!-- The genres in the playlist, to listen to one of them -->
+			<div class="flex flex-wrap gap-1.5 mb-4">
+				{#each [{ name: '', n: detailed.length }, ...genres.map( ([name, n]) => ({ name, n }) )] as chip (chip.name)}
+					<button
+						class="h-8 px-3.5 rounded-full text-sm font-semibold cursor-pointer transition {genre ===
+						chip.name
+							? 'bg-white text-black'
+							: 'bg-white/[0.06] text-white/75 hover:bg-white/10 hover:text-white'}"
+						on:click={() => (genre = genre === chip.name ? '' : chip.name)}
+					>
+						{chip.name || 'All'}
+						<span class="ml-1 opacity-50 font-normal">{chip.n}</span>
+					</button>
+				{/each}
+			</div>
+		{/if}
 		<div
 			class="grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] items-center gap-4 px-4 h-9 mb-2 border-b border-white/10 text-sm text-secondary-600"
 		>

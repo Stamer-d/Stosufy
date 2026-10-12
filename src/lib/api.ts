@@ -349,6 +349,16 @@ export async function getPlaylist(token: string, id: number): Promise<Playlist> 
 	return toPlaylist(data.getStosufyPlaylist);
 }
 
+/** The public playlists of a user (by osu! id) */
+export async function getUserPlaylists(token: string, osuId: number): Promise<Playlist[]> {
+	const data = await graphql<any>(
+		token,
+		`query ($osuId: Int!) { getStosufyUserPlaylists(osuId: $osuId) { ${PLAYLIST_FIELDS} } }`,
+		{ osuId }
+	);
+	return data.getStosufyUserPlaylists.map(toPlaylist);
+}
+
 /** Public playlists of others the user saved to their library */
 export async function getSavedPlaylists(token: string): Promise<Playlist[]> {
 	const data = await graphql<any>(token, `{ getSavedStosufyPlaylists { ${PLAYLIST_FIELDS} } }`);
