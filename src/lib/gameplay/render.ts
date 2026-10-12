@@ -537,7 +537,9 @@ export function createGameplayRenderer(
 			// Only the next turn at each end shows
 			const before = slider.points.find((p) => p.kind === 'repeat' && p.time > time);
 			if (before !== point && before?.progress === point.progress) return;
-			if (point.time - time > slider.spanDuration * 2) return;
+			// The next turns from where the ball is (before the slider starts: from its start, so
+			// the arrows show as it appears, like in osu!)
+			if (point.time - Math.max(time, object.time) > slider.spanDuration * 2) return;
 			drawCircle(
 				object,
 				at.x,
