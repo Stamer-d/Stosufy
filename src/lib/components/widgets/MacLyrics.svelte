@@ -1,6 +1,7 @@
 <script>
 	// The line being sung now and the next one
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import Widget from './MacWidget.svelte';
 	import { songQueue, currentSong } from '#lib/stores/audio.ts';
 	import { lyrics, lyricsWanted, lyricsOffset, lineAt, shownLyrics } from '#lib/stores/lyrics.ts';
@@ -27,7 +28,12 @@
 </script>
 
 <Widget size="medium" label="Lyrics" icon="icon-[mingcute--mic-fill]">
-	<div class="flex-1 flex flex-col justify-center min-h-0" aria-live="polite">
+	<button
+		class="flex-1 flex flex-col justify-center min-h-0 text-start cursor-pointer"
+		aria-live="polite"
+		title="Open the lyrics"
+		onclick={() => goto('/lyrics')}
+	>
 		{#if !$currentSong.song}
 			<p class="text-sm text-white/60">Play a song to see its lyrics.</p>
 		{:else if lines}
@@ -46,5 +52,5 @@
 		{:else}
 			<p class="text-sm text-white/60">No lyrics for this song.</p>
 		{/if}
-	</div>
+	</button>
 </Widget>

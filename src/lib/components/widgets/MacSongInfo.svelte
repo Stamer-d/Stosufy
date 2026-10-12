@@ -1,7 +1,9 @@
 <script>
 	// What the playing song is: its BPM (with a dot on the beat), length, difficulty,
 	// mapper, genre and language
+	import { open } from '@tauri-apps/plugin-shell';
 	import Widget from './MacWidget.svelte';
+	import MapperLink from '../MapperLink.svelte';
 	import { currentSong, songQueue } from '#lib/stores/audio.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { chosenMapId } from '#lib/gameplay/play.ts';
@@ -40,13 +42,7 @@
 	let stars = $derived(
 		map?.difficulty_rating ? `${Number(map.difficulty_rating).toFixed(2)}★` : null
 	);
-	let facts = $derived(
-		[
-			stored?.creator || song?.creator ? `mapped by ${stored?.creator || song?.creator}` : null,
-			stored?.genre ?? null,
-			stored?.language ?? null
-		].filter(Boolean)
-	);
+	let facts = $derived([stored?.genre ?? null, stored?.language ?? null].filter(Boolean));
 </script>
 
 <Widget size="medium" label="Song info" icon="icon-[mingcute--information-fill]">
@@ -67,9 +63,24 @@
 			</div>
 		</div>
 		<div class="mt-auto min-w-0">
-			<p class="truncate font-semibold">{song.title}</p>
+			<button
+				class="block max-w-full truncate font-semibold cursor-pointer hover:underline"
+				title="Open the beatmap on osu!"
+				onclick={() =>
+					open(`https://osu.ppy.sh/beatmapsets/${song.id}${mapId ? `#osu/${mapId}` : ''}`)}
+				>{song.title}</button
+			>
 			<p class="truncate text-xs text-white/60">
-				{[map?.version, ...facts].filter(Boolean).join(' · ')}
+				{#if stored?.creator || song?.creator}mapped by <MapperLink
+						name={stored?.creator || song?.creator}
+						id={stored?.creatorId ?? song?.user_id}
+						class="text-white/80"
+					/>{[map?.version, ...facts].filter(Boolean).length ? ' · ' : ''}{/if}{[
+					map?.version,
+					...facts
+				]
+					.filter(Boolean)
+					.join(' · ')}
 			</p>
 		</div>
 	{:else}

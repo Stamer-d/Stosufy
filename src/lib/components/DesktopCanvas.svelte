@@ -12,6 +12,11 @@
 	let height = $state(0);
 	let sizes = $state({});
 	let dragging = $state(null);
+	/** A widget being made bigger or smaller (its corner dragged) */
+	let resizing = $state(null);
+	const MIN_SCALE = 0.6;
+	const MAX_SCALE = 2;
+	const scaleOf = (widget) => (resizing?.uid === widget.uid ? resizing.scale : (widget.scale ?? 1));
 
 	let widgets = $derived($userSettings.settings?.home?.widgets ?? DEFAULT_WIDGETS);
 
@@ -91,7 +96,8 @@
 	}
 
 	function startDrag(event, widget) {
-		if (!editing || event.button !== 0 || event.target.closest('[data-remove]')) return;
+		if (!editing || event.button !== 0 || event.target.closest('[data-remove], [data-resize]'))
+			return;
 		event.currentTarget.setPointerCapture(event.pointerId);
 		const { left, top } = position(widget);
 		dragging = {
@@ -136,6 +142,41 @@
 		});
 	}
 
+	function startResize(event, widget) {
+		event.stopPropagation();
+		event.currentTarget.setPointerCapture(event.pointerId);
+		const size = sizes[widget.uid] ?? { w: 160, h: 160 };
+		resizing = {
+			uid: widget.uid,
+			scale: widget.scale ?? 1,
+			start: widget.scale ?? 1,
+			startX: event.clientX,
+			startY: event.clientY,
+			// Its size at scale 1
+			w: size.w / (widget.scale ?? 1),
+			h: size.h / (widget.scale ?? 1)
+		};
+	}
+
+	function resize(event) {
+		if (!resizing) return;
+		// The corner follows the pointer: the scale that makes it as wide/tall as dragged to
+		const grow =
+			(event.clientX - resizing.startX + event.clientY - resizing.startY) /
+			(resizing.w + resizing.h);
+		const scale = resizing.start + grow;
+		resizing.scale = Math.round(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)) * 20) / 20;
+	}
+
+	function endResize() {
+		if (!resizing) return;
+		const { uid, scale } = resizing;
+		resizing = null;
+		updateHomeSettings({
+			widgets: widgets.map((widget) => (widget.uid === uid ? { ...widget, scale } : widget))
+		});
+	}
+
 	function remove(uid) {
 		updateHomeSettings({ widgets: widgets.filter((widget) => widget.uid !== uid) });
 	}
@@ -166,7 +207,7 @@
 				onpointerup={endDrag}
 				onpointercancel={endDrag}
 			>
-				<div class={editing ? 'pointer-events-none' : ''}>
+				<div class={editing ? 'pointer-events-none' : ''} style="zoom: {scaleOf(widget)}">
 					<definition.component uid={widget.uid} />
 				</div>
 				{#if editing}
@@ -182,6 +223,29 @@
 					>
 						<span class="icon-[mingcute--minimize-line] size-3.5"></span>
 					</button>
+					<!-- Drag the corner to make it bigger or smaller -->
+					<button
+						data-resize
+						aria-label="Resize {definition.name}"
+						title="Drag to resize · double-click for the normal size"
+						class="absolute -bottom-2.5 -right-2.5 size-6 grid place-items-center rounded-full bg-white text-black shadow-lg cursor-nwse-resize hover:scale-110 transition touch-none"
+						onpointerdown={(e) => startResize(e, widget)}
+						onpointermove={resize}
+						onpointerup={endResize}
+						onpointercancel={endResize}
+						ondblclick={() =>
+							updateHomeSettings({
+								widgets: widgets.map((w) => (w.uid === widget.uid ? { ...w, scale: 1 } : w))
+							})}
+					>
+						<span class="icon-[mingcute--arrows-down-line] size-3.5 -rotate-45"></span>
+					</button>
+					{#if resizing?.uid === widget.uid}
+						<span
+							class="absolute -bottom-9 right-0 px-2 py-0.5 rounded-full bg-black/70 text-xs font-semibold tabular-nums pointer-events-none"
+							>{Math.round(resizing.scale * 100)}%</span
+						>
+					{/if}
 				{/if}
 			</div>
 		{/if}

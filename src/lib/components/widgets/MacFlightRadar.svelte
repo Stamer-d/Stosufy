@@ -195,8 +195,9 @@
 
 	function pick(event) {
 		const rect = canvas.getBoundingClientRect();
-		const x = event.clientX - rect.left;
-		const y = event.clientY - rect.top;
+		// In the widget's own pixels (it can be shown bigger or smaller)
+		const x = ((event.clientX - rect.left) * width) / rect.width;
+		const y = ((event.clientY - rect.top) * height) / rect.height;
 		let best = null;
 		let bestDistance = 16;
 		for (const plane of planes.values()) {

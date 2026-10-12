@@ -645,7 +645,7 @@
 				{/if}
 			{/if}
 			<!-- The widgets make way when you play yourself (unless they're being edited) -->
-			{#if !gameplayOn || !$currentSong.song || editingWidgets || (widgetsInGameplay && !$playingLive)}
+			{#if !$focusMode && (!gameplayOn || !$currentSong.song || editingWidgets || (widgetsInGameplay && !$playingLive))}
 				<DesktopCanvas editing={editingWidgets} />
 			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->

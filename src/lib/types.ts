@@ -156,6 +156,8 @@ export interface PlacedWidget {
 	/** Position of the top left corner as a fraction of the desktop (0 to 1) */
 	x: number;
 	y: number;
+	/** How big it is (1: its normal size) */
+	scale?: number;
 }
 
 export interface AppearanceSettings {
