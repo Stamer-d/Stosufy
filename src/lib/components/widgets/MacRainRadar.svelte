@@ -4,7 +4,7 @@
 	import { strikes, useLightning } from '#lib/stores/lightning.ts';
 	import { drawStrikes } from '#lib/storm.ts';
 	import { worldPixel } from '#lib/map.ts';
-	import { fetch } from '@tauri-apps/plugin-http';
+	import { fastFetch as fetch } from '#lib/fastFetch.ts';
 	import { goto } from '$app/navigation';
 	import Widget from './MacWidget.svelte';
 	import WidgetMap from './WidgetMap.svelte';
@@ -84,14 +84,18 @@
 		};
 	});
 
-	// All frames are layers, only one seen: switching is instant, the tiles are loaded
+	// The frame shown and the next few are layers (only one seen): the loop plays on without
+	// waiting, and only a few frames' tiles load at a time
 	let layers = $derived(
-		frames.map((frame, i) => ({
-			key: frame.path,
-			url: (z, x, y) => `${host}${frame.path}/256/${z}/${x}/${y}/2/1_1.png`,
-			opacity: i === shown ? 0.8 : 0,
-			clean: true
-		}))
+		frames
+			.map((frame, i) => ({ frame, i, ahead: (i - shown + frames.length) % frames.length }))
+			.filter(({ ahead }) => ahead <= 3)
+			.map(({ frame, i }) => ({
+				key: frame.path,
+				url: (z, x, y) => `${host}${frame.path}/256/${z}/${x}/${y}/2/1_1.png`,
+				opacity: i === shown ? 0.8 : 0,
+				clean: true
+			}))
 	);
 	const ago = (time) => {
 		const minutes = Math.round((Date.now() / 1000 - time) / 60);

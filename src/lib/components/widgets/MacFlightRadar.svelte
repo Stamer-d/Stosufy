@@ -2,7 +2,7 @@
 	// A flight radar: the planes around you live (ADS-B from airplanes.live, adsb.lol as a
 	// fallback), moving smoothly between updates, coloured by height. Click one for its flight.
 	import { onMount } from 'svelte';
-	import { fetch } from '@tauri-apps/plugin-http';
+	import { fastFetch as fetch } from '#lib/fastFetch.ts';
 	import Widget from './MacWidget.svelte';
 	import WidgetMap from './WidgetMap.svelte';
 	import PlacePicker from './PlacePicker.svelte';

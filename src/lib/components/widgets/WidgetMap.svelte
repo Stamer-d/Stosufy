@@ -34,7 +34,6 @@
 				draggable="false"
 				class="absolute size-64 max-w-none select-none"
 				style="left: {tile.left}px; top: {tile.top}px; opacity: {layer.opacity ?? 1}"
-				onerror={(e) => /** @type {HTMLElement} */ (e.currentTarget).classList.add('invisible')}
 			/>
 		{/each}
 	{/each}

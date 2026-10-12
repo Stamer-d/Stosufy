@@ -4,7 +4,7 @@
 	// next 24 hours as maps (risk, CAPE, lifted index, shear, gusts). Any place clicked gets
 	// its full analysis: outlook, sounding, hodograph and warnings.
 	import { onMount, untrack } from 'svelte';
-	import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+	import { fastFetch as tauriFetch } from '#lib/fastFetch.ts';
 	import StormMap from '#lib/components/storm/StormMap.svelte';
 	import Hodograph from '#lib/components/storm/Hodograph.svelte';
 	import SkewT from '#lib/components/storm/SkewT.svelte';
@@ -31,6 +31,7 @@
 	import { tileBounds, distanceKm } from '#lib/map.ts';
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { layerReady } from '#lib/radarClean.ts';
 	import { thunderOn, toggleThunder, setListener, setView } from '#lib/stores/thunder.ts';
 
 	const UID = '_storm';
@@ -123,19 +124,24 @@
 		const b = tileBounds(x, y, z);
 		return `https://view.eumetsat.int/geoserver/wms?service=WMS&version=1.1.1&request=GetMap&layers=msg_fes:ir108&styles=&format=image/png&transparent=true&srs=EPSG:3857&width=256&height=256&bbox=${b.minX},${b.minY},${b.maxX},${b.maxY}`;
 	};
-	// Every radar frame is a layer, only one seen: switching is instant, nothing reloads
+	// The radar frame shown and the next few (loading, unseen): the loop plays on without
+	// waiting, and only a few frames' tiles load at a time (RainViewer limits how many)
+	const PRELOAD = 3;
 	let layers = $derived([
 		...(mode === 'live' && shown.satellite
 			? [{ key: 'satellite', url: satelliteUrl, opacity: 0.55, maxZoom: 9 }]
 			: []),
 		...(mode === 'live' && shown.radar
-			? frames.map((f, i) => ({
-					key: f.path,
-					url: (z, x, y) => `${host}${f.path}/256/${z}/${x}/${y}/2/1_1.png`,
-					opacity: i === frame ? 0.9 : 0,
-					maxZoom: 7,
-					clean: true
-				}))
+			? frames
+					.map((f, i) => ({ f, i, ahead: (i - frame + frames.length) % frames.length }))
+					.filter(({ ahead }) => ahead <= PRELOAD)
+					.map(({ f, i }) => ({
+						key: f.path,
+						url: (z, x, y) => `${host}${f.path}/256/${z}/${x}/${y}/2/1_1.png`,
+						opacity: i === frame ? 0.9 : 0,
+						maxZoom: 7,
+						clean: true
+					}))
 			: [])
 	]);
 
@@ -391,11 +397,16 @@
 			5 * 60 * 1000
 		);
 		let wait = 0;
+		let waitLoad = 0;
 		const step = setInterval(() => {
 			if (!playing || frames.length < 2) return;
 			if (frame === frames.length - 1 && wait++ < 4) return;
+			const next = (frame + 1) % frames.length;
+			// The next frame's tiles first (a few seconds at most)
+			if (!layerReady(frames[next].path) && waitLoad++ < 12) return;
 			wait = 0;
-			frame = (frame + 1) % frames.length;
+			waitLoad = 0;
+			frame = next;
 		}, 450);
 		return () => {
 			stopLightning();

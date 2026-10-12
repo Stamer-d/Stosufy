@@ -332,7 +332,6 @@
 				class="absolute max-w-none pointer-events-none"
 				style="left: {tile.left}px; top: {tile.top}px; width: {tile.size}px; height: {tile.size}px; opacity: {layer.opacity ??
 					1}"
-				onerror={(e) => /** @type {HTMLElement} */ (e.currentTarget).classList.add('invisible')}
 			/>
 		{/each}
 	{/each}

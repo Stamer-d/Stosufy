@@ -1,7 +1,7 @@
 <script>
 	// The weather warnings of the German weather service (DWD) where you are, via Bright Sky
 	import { onMount } from 'svelte';
-	import { fetch } from '@tauri-apps/plugin-http';
+	import { fastFetch as fetch } from '#lib/fastFetch.ts';
 	import { goto } from '$app/navigation';
 	import Widget from './MacWidget.svelte';
 	import PlacePicker from './PlacePicker.svelte';
