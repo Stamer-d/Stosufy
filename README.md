@@ -104,9 +104,3 @@ still doesn't work, please [open an issue](https://github.com/Stamer-d/Stosufy/i
 
 No. Stosufy is a fan project and isn't made or endorsed by ppy. All songs and beatmaps
 belong to their artists and mappers.
-
----
-
-<p align="center">
-Made with 💜 by <a href="https://github.com/Stamer-d">Stamer</a> · <a href="https://www.youtube.com/@Stosufy">Stosufy on YouTube</a> (fan channel)
-</p>
