@@ -2,11 +2,11 @@
 	/**
 	 * A widget on the wallpaper, in the style of iOS / macOS widgets: fixed sizes,
 	 * strongly rounded, frosted material.
-	 * @type {{ size?: 'small' | 'medium' | 'auto', label?: string, icon?: string, class?: string, children: import('svelte').Snippet }}
+	 * @type {{ size?: 'small' | 'medium' | 'large' | 'auto', label?: string, icon?: string, class?: string, children: import('svelte').Snippet }}
 	 */
 	let { size = 'auto', label = '', icon = '', class: className = '', children } = $props();
 
-	const SIZES = { small: 'size-40', medium: 'w-[21rem] h-40', auto: '' };
+	const SIZES = { small: 'size-40', medium: 'w-[21rem] h-40', large: 'size-[21rem]', auto: '' };
 </script>
 
 <div

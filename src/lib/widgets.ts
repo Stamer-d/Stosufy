@@ -18,6 +18,10 @@ import MacFriends from './components/widgets/MacFriends.svelte';
 import MacWeather from './components/widgets/MacWeather.svelte';
 import MacNote from './components/widgets/MacNote.svelte';
 import MacCalendar from './components/widgets/MacCalendar.svelte';
+import MacRainRadar from './components/widgets/MacRainRadar.svelte';
+import MacStormPotential from './components/widgets/MacStormPotential.svelte';
+import MacWarnings from './components/widgets/MacWarnings.svelte';
+import MacFlightRadar from './components/widgets/MacFlightRadar.svelte';
 
 export type WidgetFamily = 'macos' | 'linux' | 'minimal';
 
@@ -102,6 +106,30 @@ export const WIDGETS: Record<
 		description: 'This month, with today marked',
 		family: 'macos',
 		component: MacCalendar
+	},
+	'mac-rain-radar': {
+		name: 'Rain radar',
+		description: 'The radar of the last two hours around you, as a loop',
+		family: 'macos',
+		component: MacRainRadar
+	},
+	'mac-storm-potential': {
+		name: 'Storm potential',
+		description: 'CAPE, lifted index, wind shear and gusts for the next 24 hours',
+		family: 'macos',
+		component: MacStormPotential
+	},
+	'mac-warnings': {
+		name: 'Weather warnings',
+		description: 'Warnings of the German weather service (DWD) where you are',
+		family: 'macos',
+		component: MacWarnings
+	},
+	'mac-flight-radar': {
+		name: 'Flight radar',
+		description: 'The planes around you, live; click one for its flight',
+		family: 'macos',
+		component: MacFlightRadar
 	},
 	'linux-fetch': {
 		name: 'stosufetch',

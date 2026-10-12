@@ -38,6 +38,18 @@
 				},
 				{
 					"url": "https://raw.githubusercontent.com/ppy/osu-resources/*"
+				},
+				{
+					"url": "https://api.rainviewer.com/*"
+				},
+				{
+					"url": "https://api.brightsky.dev/*"
+				},
+				{
+					"url": "https://api.airplanes.live/*"
+				},
+				{
+					"url": "https://api.adsb.lol/*"
 				}
 			],
 			"deny": [
