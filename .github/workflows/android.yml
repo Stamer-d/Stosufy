@@ -3,6 +3,9 @@ permissions:
   contents: write
 on:
   workflow_dispatch:
+  # Test builds of the work branch
+  push:
+    branches: ['claude/inspiring-lamport-g69unm']
 
 # Builds the Android app (an APK for phones with 64-bit and 32-bit ARM) and attaches it to
 # the release of the same version (made by release.yml), or keeps it as a build artifact.
