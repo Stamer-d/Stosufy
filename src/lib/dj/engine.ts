@@ -1686,7 +1686,16 @@ class Mixer {
 	 * playing until the deck takes over), the queue's next one on deck B, and Auto DJ mixes
 	 * through the queue
 	 */
+	/** Counts the openings and closings of the DJ mode: a slow one that's outdated stops */
+	private session = 0;
+	/** Leaving the DJ mode, until the player plays on */
+	private handover: Promise<void> | null = null;
+
 	async takeFromPlayer() {
+		const session = ++this.session;
+		// Left and opened again quickly: first the song back in the player
+		await this.handover;
+		if (session !== this.session) return;
 		const song = get(currentSong).song;
 		if (!song || this.leading()) return;
 		const audio = get(songQueue).audio;
@@ -1694,6 +1703,8 @@ class Mixer {
 		const deck = this.decks.A;
 		deck.pickedByUser = false;
 		await deck.load(song);
+		// Left again while it loaded: the player keeps playing, the deck stays quiet
+		if (session !== this.session || !get(djOpen)) return;
 		if (deck.state.error || deck.state.song !== song) return;
 		const now = get(songQueue).audio;
 		deck.seek(now?.currentTime ?? audio?.currentTime ?? 0);
@@ -1712,7 +1723,16 @@ class Mixer {
 	 * Leaving the DJ mode: the song that plays goes back to the player where it is, in the
 	 * queue, and plays on there; the decks stop when it does
 	 */
-	async handToPlayer() {
+	handToPlayer() {
+		this.session++;
+		const handover = this.giveBack().finally(() => {
+			if (this.handover === handover) this.handover = null;
+		});
+		this.handover = handover;
+		return handover;
+	}
+
+	private async giveBack() {
 		const lead = this.leading();
 		const song = lead?.state.song;
 		if (!lead || !song || !lead.state.playing) return this.stopAll();

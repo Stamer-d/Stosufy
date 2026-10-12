@@ -184,12 +184,13 @@
 
 	<!-- The automatic mix -->
 	<div class="flex flex-col gap-2 pt-2 border-t border-white/10">
-		<div class="flex flex-wrap gap-1">
+		<!-- In a grid as wide as the mixer above (w-0 min-w-full: the buttons don't widen it) -->
+		<div class="grid grid-cols-3 gap-1 w-0 min-w-full">
 			{#each TRANSITIONS as transition (transition.id)}
 				<button
 					title={transition.description}
 					aria-pressed={mix.transitionType === transition.id}
-					class="h-7 px-2 rounded-md text-[11px] font-bold cursor-pointer ring-1 transition {mix.transitionType ===
+					class="h-7 px-1.5 truncate rounded-md text-[11px] font-bold cursor-pointer ring-1 transition {mix.transitionType ===
 					transition.id
 						? 'bg-white text-black ring-white'
 						: 'bg-white/[0.06] ring-white/10 text-white/70 hover:text-white'}"
@@ -198,7 +199,7 @@
 				>
 			{/each}
 		</div>
-		<div class="flex items-center gap-1">
+		<div class="flex items-center gap-1 w-0 min-w-full">
 			<span class="text-[10px] font-bold text-white/40 mr-1">BARS</span>
 			{#each BARS as bars (bars)}
 				<button
