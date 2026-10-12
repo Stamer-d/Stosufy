@@ -24,9 +24,11 @@ export async function checkMobileUpdate() {
 		if (!response.ok) return;
 		const release = await response.json();
 		const version = String(release.tag_name ?? '').replace(/^Stosufy-v|^v/, '');
-		const apk = release.assets?.find((asset: { name: string }) => asset.name.endsWith('.apk'));
-		if (apk && newer(version, current))
-			mobileUpdate.set({ version, url: apk.browser_download_url });
+		// The APK on Android, the IPA (for AltStore or Sideloadly) on an iPhone
+		const ending = /iphone|ipad|ipod/i.test(navigator.userAgent) ? '.ipa' : '.apk';
+		const file = release.assets?.find((asset: { name: string }) => asset.name.endsWith(ending));
+		if (file && newer(version, current))
+			mobileUpdate.set({ version, url: file.browser_download_url });
 	} catch {
 		// Offline or GitHub unreachable: next start
 	}
