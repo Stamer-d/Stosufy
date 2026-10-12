@@ -491,7 +491,15 @@ export function createJudge(beatmap: GameplayBeatmap, mods = beatmap.mods): Judg
 const AUTO_SPIN = MAX_SPIN * 0.999;
 
 /** Where autoplay's cursor is: on each object at its time, eased in between */
-export function autoplayCursor(objects: HitObject[], time: number) {
+/**
+ * Where autoplay's cursor is; before the first object it waits where it was (`rest`, e.g. where
+ * the last song's cursor ended) and moves over in the last second
+ */
+export function autoplayCursor(
+	objects: HitObject[],
+	time: number,
+	rest: { x: number; y: number } = { x: 256, y: 192 }
+) {
 	const position = (object: HitObject, t: number) => {
 		if (object.kind === 'slider') return sliderBall(object, t);
 		if (object.kind === 'spinner') {
@@ -511,7 +519,7 @@ export function autoplayCursor(objects: HitObject[], time: number) {
 	const current = objects[index];
 	if (current && time <= current.endTime) return position(current, time);
 	const following = objects[index + 1];
-	const from = current ? position(current, current.endTime) : { x: 256, y: 192 };
+	const from = current ? position(current, current.endTime) : rest;
 	if (!following) return from;
 	const to = position(following, following.time);
 	const start = current ? current.endTime : following.time - 1000;
@@ -604,7 +612,8 @@ export function snapshotAt(judge: Judge, time: number) {
 /** The cursor of a play at a time (between two inputs) */
 export function cursorAt(frames: Frame[], time: number) {
 	const i = lastAtOrBefore(frames, time);
-	if (i < 0) return frames[0] ?? null;
+	// Before the first input: there, without keys
+	if (i < 0) return frames[0] ? { ...frames[0], time, keys: 0 } : null;
 	const a = frames[i];
 	const b = frames[i + 1];
 	if (!b || b.time === a.time) return a;

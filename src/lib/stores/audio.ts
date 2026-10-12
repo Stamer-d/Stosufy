@@ -6,6 +6,7 @@ import { track, untrack, setFade, setGain, rampGain } from './mixer';
 import { measureLoudness, gainFor } from './loudness';
 import { sameSong } from '../tracks';
 import { offline } from './network';
+import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
 import { attach, applyEq, eqSettings } from './equalizer';
 import { showToast } from './toast';
 import { librarySong, similarSongs } from './radio';
@@ -199,10 +200,17 @@ async function getAudio(index: number, queue: MapSet[], type: QueueType, current
 		// Offline only downloaded songs can play
 		if (mapId == null && get(offline)) throw new OfflineError(song);
 		const playedMapId = mapId ?? song.beatmaps[0].id;
-		const file = bytesFromBase64(await downloadBeatmap(song, playedMapId));
-		audio = new Audio(URL.createObjectURL(new Blob([file])));
+		// Downloaded: straight from the file (no detour through the download, which also
+		// saved the whole library each time)
+		const localFile =
+			mapId != null ? get(mapDataStore)[song.id]?.beatmaps?.[mapId]?.audioFile : null;
+		const file = localFile
+			? await readFile(localFile, { baseDir: BaseDirectory.Home }).catch(() => null)
+			: null;
+		const bytes = file ?? bytesFromBase64(await downloadBeatmap(song, playedMapId));
+		audio = new Audio(URL.createObjectURL(new Blob([bytes])));
 		track(audio, fadeInNext || smoothIn ? 0 : 1);
-		normalize(audio, song, playedMapId, file);
+		normalize(audio, song, playedMapId, bytes);
 	}
 	if (smoothIn && !fadeInNext) fadeInWhenPlaying(audio);
 	applyMod(audio);

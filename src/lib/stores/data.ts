@@ -103,9 +103,47 @@ export function handleImageError(event: Event) {
 	image.style.opacity = '0.7';
 }
 
-export async function saveMapData() {
-	await writeTextFile(mapDataFile, JSON.stringify(get(mapDataStore)), {
-		baseDir: BaseDirectory.Home
+// The song data of a big library is many megabytes: changes made close together (playing a
+// song, looking up its timing, a cover) are saved once, a moment later
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let saveWaiters: (() => void)[] = [];
+let saving: Promise<void> = Promise.resolve();
+
+async function writeMapData() {
+	saveTimer = null;
+	const waiters = saveWaiters;
+	saveWaiters = [];
+	saving = saving.then(() =>
+		writeTextFile(mapDataFile, JSON.stringify(get(mapDataStore)), {
+			baseDir: BaseDirectory.Home
+		}).catch((error) => console.error('Could not save the song data:', error))
+	);
+	await saving;
+	waiters.forEach((resolve) => resolve());
+}
+
+export function saveMapData(): Promise<void> {
+	return new Promise((resolve) => {
+		saveWaiters.push(resolve);
+		if (saveTimer) clearTimeout(saveTimer);
+		saveTimer = setTimeout(writeMapData, 400);
+	});
+}
+
+/** Saves now what's waiting to be saved (when the app closes) */
+export async function flushMapData() {
+	if (!saveTimer) return saving;
+	clearTimeout(saveTimer);
+	await writeMapData();
+}
+
+if (typeof window !== 'undefined') {
+	// Nothing waiting is lost when the app closes
+	window.addEventListener('beforeunload', () => {
+		if (saveTimer) {
+			clearTimeout(saveTimer);
+			writeMapData();
+		}
 	});
 }
 

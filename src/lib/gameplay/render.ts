@@ -39,6 +39,10 @@ const FOLLOW_POINT_SPACING = 32;
 const css = ([r, g, b]: Colour, alpha = 1) => `rgba(${r}, ${g}, ${b}, ${alpha})`;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
+/** Where the cursor was last drawn (playfield), so the next song's cursor goes on from there */
+let lastCursor: { x: number; y: number } | null = null;
+export const lastCursorPosition = () => lastCursor;
+
 export interface PlayView {
 	judge: Judge;
 	/** Shown at the top: "Autoplay", who's replay it is, … */
@@ -48,7 +52,7 @@ export interface PlayView {
 	/** The song is over: show the results now */
 	finished?: boolean;
 	/** Where the cursor is (else from the play's inputs) */
-	cursor?: ((time: number) => { x: number; y: number }) | null;
+	cursor?: ((time: number) => { x: number; y: number } | null) | null;
 }
 
 export interface GameplayRenderer {
@@ -709,19 +713,29 @@ export function createGameplayRenderer(
 				);
 		}
 
-		// The spins per minute, at the bottom
+		// The spins per minute, at the bottom: placed like osu!'s legacy spinner (in its
+		// 640×480 window space, which is the playfield moved by 64, 56)
 		if (time >= object.time - fadeIn && time <= object.endTime + HIT_FADE) {
-			image(element('spinner-rpm'), cx - 87 * px * 0.9, 384 + 8, px, alpha);
+			const slide = (1 - clamp01((time - (object.time - fadeIn)) / fadeIn)) ** 2 * 50;
+			const back = element('spinner-rpm');
+			if (back) {
+				const w = back.image.width * back.scale * px;
+				const h = back.image.height * back.scale * px;
+				image(back, 320 - 87 - 64 + w / 2, 445 - 56 + slide + h / 2, px, alpha);
+			}
+			const digit = skin.score['0'];
+			const textScale = px * 0.9;
+			const height = digit ? digit.image.height * digit.scale * textScale : 18;
 			drawText(
 				`${Math.round(Math.max(0, rpm))}`,
 				skin.score,
 				skin.scoreOverlap,
-				cx + 80 * px,
-				384 + 10,
-				px * 0.9 * 0.6,
+				320 + 80 - 64,
+				448 - 56 + slide + height / 2,
+				textScale,
 				alpha,
 				'right',
-				14
+				18
 			);
 		}
 	}
@@ -859,14 +873,15 @@ export function createGameplayRenderer(
 
 	function drawCursor(time: number, view: PlayView) {
 		const frames = view.judge.frames;
-		if (!frames.length) return;
 		const where = (t: number) => {
 			const input = cursorAt(frames, t);
-			if (!input || !view.cursor) return input;
-			return { ...input, ...view.cursor(t) };
+			const placed = view.cursor?.(t) ?? null;
+			if (!input) return placed ? { keys: 0, ...placed } : null;
+			return placed ? { ...input, ...placed } : input;
 		};
 		const at = where(time);
 		if (!at || at.y < -100) return;
+		lastCursor = { x: at.x, y: at.y };
 		// The trail: where it was a moment ago
 		for (let i = 8; i >= 1; i--) {
 			const p = where(time - i * 12);
@@ -1001,6 +1016,39 @@ export function createGameplayRenderer(
 		});
 	}
 
+	/** The part of an image that isn't transparent (in its own pixels), found once */
+	const boxes = new Map<SkinImage, { x: number; y: number; width: number; height: number }>();
+	function visibleBox(source: SkinImage) {
+		let box = boxes.get(source);
+		if (!box) {
+			const { width, height } = source.image;
+			box = { x: 0, y: 0, width, height };
+			try {
+				const c = new OffscreenCanvas(width, height).getContext('2d')!;
+				c.drawImage(source.image, 0, 0);
+				const data = c.getImageData(0, 0, width, height).data;
+				let left = width;
+				let top = height;
+				let right = -1;
+				let bottom = -1;
+				for (let py = 0; py < height; py++)
+					for (let px = 0; px < width; px++)
+						if (data[(py * width + px) * 4 + 3] > 8) {
+							if (px < left) left = px;
+							if (px > right) right = px;
+							if (py < top) top = py;
+							if (py > bottom) bottom = py;
+						}
+				if (right >= left && bottom >= top)
+					box = { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+			} catch {
+				// The whole image then
+			}
+			boxes.set(source, box);
+		}
+		return box;
+	}
+
 	function drawResults(time: number, view: PlayView, width: number, height: number) {
 		const lastObject = objects[objects.length - 1];
 		if (!view.results || !lastObject) return;
@@ -1010,8 +1058,8 @@ export function createGameplayRenderer(
 		const unit = height / 768;
 		const snapshot = snapshotAt(view.judge, time);
 		const rank = grade(snapshot, view.judge.mods);
-		const w = 420 * unit;
-		const h = 300 * unit;
+		const w = 560 * unit;
+		const h = 340 * unit;
 		const x = width / 2 - w / 2;
 		const y = height / 2 - h / 2;
 		ctx.save();
@@ -1022,33 +1070,66 @@ export function createGameplayRenderer(
 		ctx.fill();
 		ctx.restore();
 		const rankImage = element(`ranking-${rank}` as ElementName);
+		const rankX = x + w - 125 * unit;
 		if (rankImage) {
-			const s = (150 * unit) / (rankImage.image.height * rankImage.scale);
-			image(rankImage, x + w - 95 * unit, y + h / 2, s, alpha);
+			// Skins pad their grades differently: only the visible part counts, made this tall
+			const box = visibleBox(rankImage);
+			const size = (230 * unit) / box.height;
+			ctx.save();
+			ctx.globalAlpha = alpha;
+			ctx.drawImage(
+				rankImage.image,
+				box.x,
+				box.y,
+				box.width,
+				box.height,
+				rankX - (box.width * size) / 2,
+				y + h / 2 - (box.height * size) / 2,
+				box.width * size,
+				box.height * size
+			);
+			ctx.restore();
 		} else {
 			ctx.save();
 			ctx.globalAlpha = alpha;
-			ctx.font = `900 ${Math.round(120 * unit)}px sans-serif`;
+			ctx.font = `900 ${Math.round(170 * unit)}px sans-serif`;
 			ctx.fillStyle = rank.startsWith('X') || rank.startsWith('S') ? 'rgb(255, 220, 90)' : 'white';
 			ctx.textAlign = 'center';
 			ctx.textBaseline = 'middle';
-			ctx.fillText(rank.replace('X', 'SS').replace('H', ''), x + w - 95 * unit, y + h / 2);
+			ctx.fillText(rank.replace('X', 'SS').replace('H', ''), rankX, y + h / 2);
 			ctx.restore();
 		}
 		ctx.save();
 		ctx.globalAlpha = alpha;
 		ctx.fillStyle = 'white';
 		ctx.textBaseline = 'top';
-		ctx.font = `800 ${Math.round(34 * unit)}px sans-serif`;
-		ctx.fillText(snapshot.score.toLocaleString('en-US'), x + 28 * unit, y + 26 * unit);
-		ctx.font = `600 ${Math.round(16 * unit)}px sans-serif`;
+		ctx.restore();
+		// The score in the skin's font, big
+		const digit = skin.score['0'];
+		const scoreHeight = 52 * unit;
+		drawText(
+			String(Math.round(snapshot.score)).padStart(8, '0'),
+			skin.score,
+			skin.scoreOverlap,
+			x + 28 * unit,
+			y + 30 * unit + scoreHeight / 2,
+			digit ? scoreHeight / (digit.image.height * digit.scale) : 1,
+			alpha,
+			'left',
+			scoreHeight
+		);
+		ctx.save();
+		ctx.globalAlpha = alpha;
+		ctx.fillStyle = 'white';
+		ctx.textBaseline = 'top';
+		ctx.font = `600 ${Math.round(19 * unit)}px sans-serif`;
 		const lines = [
 			`Accuracy  ${(snapshot.accuracy * 100).toFixed(2)}%`,
 			`Max combo  ${snapshot.maxCombo}x`,
 			`300  ${snapshot.counts[300]}    100  ${snapshot.counts[100]}`,
 			`50  ${snapshot.counts[50]}    Miss  ${snapshot.counts[0]}`
 		];
-		lines.forEach((line, i) => ctx.fillText(line, x + 28 * unit, y + (86 + i * 30) * unit));
+		lines.forEach((line, i) => ctx.fillText(line, x + 28 * unit, y + (110 + i * 36) * unit));
 		ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
 		ctx.font = `500 ${Math.round(13 * unit)}px sans-serif`;
 		ctx.fillText(view.label, x + 28 * unit, y + h - 36 * unit);

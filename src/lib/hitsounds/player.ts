@@ -2,6 +2,7 @@
 // samples are scheduled with Web Audio slightly ahead of the music's position. Samples come
 // from the beatmap (its own hitsounds), the chosen osu! skin, or the built-in ones.
 
+import { heardTime, outputDelay } from '../stores/equalizer';
 import { get, writable } from 'svelte/store';
 import {
 	readDir,
@@ -464,7 +465,7 @@ async function load() {
 // --- Playing ------------------------------------------------------------------------
 
 /** How far ahead samples are scheduled; more while the window is hidden (timers slow down) */
-const LOOKAHEAD = 0.12;
+const LOOKAHEAD = 0.2;
 const LOOKAHEAD_HIDDEN = 1.5;
 
 let next = 0;
@@ -519,9 +520,13 @@ function indexAt(time: number) {
 	return low;
 }
 
+/**
+ * Plays samples `delay` seconds from now as heard: started earlier by the output delay of the
+ * sound card, so they're heard together with the song (whose time already counts it)
+ */
 function schedule(buffers: (AudioBuffer | null | undefined)[], volume: number, delay: number) {
 	const ctx = audioContext();
-	const at = ctx.currentTime + Math.max(0, delay);
+	const at = ctx.currentTime + Math.max(0, delay - outputDelay(ctx));
 	for (const buffer of buffers) {
 		if (!buffer) continue;
 		const source = ctx.createBufferSource();
@@ -558,7 +563,7 @@ export function playSoundNow(sound: PlaySound, judge: Judge) {
 	const ctx = audioContext();
 	if (ctx.state === 'suspended') ctx.resume();
 	const { offset } = settings();
-	const time = audio.currentTime * 1000 - offset;
+	const time = heardTime(audio) - offset;
 	const { buffers, volume } = soundBuffers(sound);
 	schedule(buffers, volume, (sound.at - time) / (audio.playbackRate || 1) / 1000);
 }
@@ -655,7 +660,7 @@ function tick() {
 
 	const rate = audio.playbackRate || 1;
 	// The song's position, with the offset: positive offsets play the hitsounds later
-	const time = audio.currentTime * 1000 - offset;
+	const time = heardTime(audio) - offset;
 	const play = currentPlay();
 	// Jumped (seek, new song, repeat) or another play: start over from here
 	if (

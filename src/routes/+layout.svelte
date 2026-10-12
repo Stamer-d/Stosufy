@@ -11,6 +11,7 @@
 	import { page } from '$app/state';
 	import { beforeNavigate, afterNavigate } from '$app/navigation';
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
+	import { flushMapData } from '#lib/stores/data.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
@@ -113,7 +114,9 @@
 			.catch(() => {});
 		// Friends see you go offline right away instead of after a few minutes
 		getCurrentWindow()
-			.onCloseRequested(() => goOffline())
+			.onCloseRequested(async () => {
+				await Promise.all([goOffline(), flushMapData()]);
+			})
 			.catch(() => {});
 		await startTokenRefresh();
 		updateShowUI();

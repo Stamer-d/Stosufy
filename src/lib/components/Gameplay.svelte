@@ -6,13 +6,14 @@
 	import { get } from 'svelte/store';
 	import { currentSong, songQueue, setPlaybackLock } from '#lib/stores/audio.ts';
 	import { userSettings } from '#lib/stores/user.ts';
+	import { heardTime } from '#lib/stores/equalizer.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { keybindsPaused } from '#lib/stores/keybinds.ts';
 	import { beatmapContent, playSoundNow } from '#lib/hitsounds/player.ts';
 	import { skinFolder, skinsChanged, completeDefaultSkin, BUILTIN } from '#lib/hitsounds/skins.ts';
 	import { parseGameplay, MOD } from '#lib/gameplay/beatmap.ts';
 	import { loadGameplaySkin, forgetGameplaySkins, withFallback } from '#lib/gameplay/skin.ts';
-	import { createGameplayRenderer } from '#lib/gameplay/render.ts';
+	import { createGameplayRenderer, lastCursorPosition } from '#lib/gameplay/render.ts';
 	import {
 		autoplayFor,
 		autoplayCursor,
@@ -112,14 +113,21 @@
 				judge = auto.judge;
 				label = 'Autoplay';
 			}
+			const restAt = lastCursorPosition() ?? undefined;
 			renderer = createGameplayRenderer(target, beatmap, withFallback(own, fallback));
 			view = {
 				judge,
 				label,
 				results: shown.kind !== 'auto',
 				finished: false,
-				// Autoplay's cursor between its inputs
-				cursor: shown.kind === 'auto' ? (time) => autoplayCursor(beatmap.objects, time) : null
+				// Autoplay's cursor between its inputs; it goes on from where the last song's
+				// cursor was. Playing yourself, it's where the mouse is until the first input.
+				cursor:
+					shown.kind === 'auto'
+						? (time) => autoplayCursor(beatmap.objects, time, restAt)
+						: shown.kind === 'live'
+							? () => (view?.judge.frames.length ? null : pointer)
+							: null
 			};
 			activePlay.set({ key: playing, judge, kind: shown.kind });
 		})();
@@ -138,7 +146,8 @@
 	function songTime() {
 		const audio = $songQueue.audio;
 		if (!audio) return 0;
-		const raw = audio.currentTime * 1000;
+		// As it's heard (with the equalizer's delay): the circles match what you hear
+		const raw = heardTime(audio);
 		const now = performance.now();
 		if (audio.paused || raw !== lastRaw) {
 			lastRaw = raw;

@@ -113,18 +113,32 @@
 		),
 		sort
 	);
-	// Big playlists render the first rows at once and the rest frame by frame, so opening
-	// them doesn't freeze the app
-	const FIRST_ROWS = 60;
-	const ROWS_PER_FRAME = 30;
-	let shownRows = FIRST_ROWS;
-	let rowsFrame = null;
-	$: (playlistId, (shownRows = FIRST_ROWS));
-	$: if (shownRows < visibleSongs.length && typeof window !== 'undefined') {
-		cancelAnimationFrame(rowsFrame);
-		rowsFrame = requestAnimationFrame(() => (shownRows += ROWS_PER_FRAME));
+	// Only the rows on screen (and a few around them) exist: big libraries (thousands of
+	// songs) stay smooth, also when the playing song changes. Every row is ROW pixels tall.
+	const ROW = 56;
+	const AROUND = 12;
+	let listEl = null;
+	let scrollEl = null;
+	let firstRow = 0;
+	let rowCount = 40;
+	function updateRows() {
+		if (!listEl || !scrollEl) return;
+		const top = listEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top;
+		firstRow = Math.max(0, Math.floor(-top / ROW) - AROUND);
+		rowCount = Math.ceil(scrollEl.clientHeight / ROW) + AROUND * 2;
 	}
-	onDestroy(() => cancelAnimationFrame(rowsFrame));
+	$: if (listEl && !scrollEl) {
+		scrollEl = listEl.closest('[data-scroll-container]');
+		scrollEl?.addEventListener('scroll', updateRows, { passive: true });
+		window.addEventListener('resize', updateRows);
+		updateRows();
+	}
+	onDestroy(() => {
+		scrollEl?.removeEventListener('scroll', updateRows);
+		if (typeof window !== 'undefined') window.removeEventListener('resize', updateRows);
+	});
+	$: (visibleSongs, playlistId, listEl && requestAnimationFrame(updateRows));
+	$: shownSongs = visibleSongs.slice(firstRow, firstRow + rowCount);
 
 	// Dragging songs reorders the playlist; only in its own order, unfiltered, if it's yours
 	$: canReorder =
@@ -257,7 +271,25 @@
 		}
 	}
 
+	const dateFormat = new Intl.DateTimeFormat('de-DE', {
+		day: 'numeric',
+		month: 'long',
+		year: 'numeric'
+	});
+	const dateStrings = new Map();
+	/** "2 weeks ago" and the like, worked out once per date (big playlists have thousands) */
 	function getDateString(timestamp) {
+		if (!timestamp) return '';
+		const key = String(timestamp);
+		let text = dateStrings.get(key);
+		if (text === undefined) {
+			text = dateString(timestamp);
+			dateStrings.set(key, text);
+		}
+		return text;
+	}
+
+	function dateString(timestamp) {
 		const date =
 			timestamp.toString().length > 10 ? new Date(timestamp) : new Date(timestamp * 1000);
 
@@ -281,11 +313,7 @@
 		if (diffDays < 7) return plural(diffDays, 'day');
 		if (diffDays < 30) return plural(Math.floor(diffDays / 7), 'week');
 
-		return date.toLocaleDateString('de-DE', {
-			day: 'numeric',
-			month: 'long',
-			year: 'numeric'
-		});
+		return dateFormat.format(date);
 	}
 
 	async function removeSong(songId) {
@@ -607,8 +635,15 @@
 		</div>
 
 		{#if songs?.length}
-			{#key playlistId}
-				{#each visibleSongs.slice(0, shownRows) as song, index (songKey(song))}
+			<div
+				bind:this={listEl}
+				style="padding-top: {firstRow * ROW}px; padding-bottom: {Math.max(
+					0,
+					visibleSongs.length - firstRow - shownSongs.length
+				) * ROW}px"
+			>
+				{#each shownSongs as song, i (songKey(song))}
+					{@const index = firstRow + i}
 					{@const downloaded = isSongDownloaded(song.id)}
 					{@const current = isCurrent(song)}
 					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}
@@ -785,7 +820,7 @@
 						</svelte:fragment>
 					</ContextMenu>
 				{/each}
-			{/key}
+			</div>
 		{/if}
 
 		{#if songs?.length && !visibleSongs.length}

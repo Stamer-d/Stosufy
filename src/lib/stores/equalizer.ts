@@ -92,3 +92,20 @@ export function applyEq() {
 	const boost = on ? Math.max(0, ...gains) : 0;
 	preamp.gain.setTargetAtTime(10 ** (-(boost * 0.6) / 20), now, 0.05);
 }
+
+/** The output delay of an audio context (s): what's scheduled now is heard this much later */
+export function outputDelay(ctx: BaseAudioContext | null | undefined) {
+	if (!ctx || !(ctx instanceof AudioContext)) return 0;
+	const total = (ctx.baseLatency || 0) + (ctx.outputLatency || 0);
+	// Nonsense values (some drivers) aren't trusted
+	return total > 0 && total < 0.5 ? total : 0;
+}
+
+/**
+ * Where a song is as it's heard now (ms). The audio element's time already counts its own
+ * output delay; once it plays through the equalizer, the graph's delay comes on top.
+ */
+export function heardTime(audio: HTMLMediaElement) {
+	const routed = sources.has(audio) ? outputDelay(context) : 0;
+	return (audio.currentTime - routed) * 1000;
+}
