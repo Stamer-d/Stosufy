@@ -52,9 +52,28 @@ jobs:
           npx tauri icon src-tauri/icons/icon.png
           ls src-tauri/gen/apple
 
-      - name: Build the app (unsigned)
+      # The Rust part, built here: Xcode's own step for it needs a running `tauri ios build`,
+      # which can't run without signing
+      - name: Build the Rust library
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: '14.0'
         run: |
           npm run build
+          cd src-tauri
+          cargo build --release --target aarch64-apple-ios --lib --features tauri/custom-protocol
+          LIB=target/aarch64-apple-ios/release/libstosufy_tauri_lib.a
+          ls -la $LIB
+          for dir in gen/apple/Externals/arm64/release gen/apple/Externals/arm64/Release; do
+            mkdir -p $dir
+            cp $LIB $dir/libapp.a
+          done
+          cd gen/apple
+          perl -0pi -e 's/shellScript = "[^\n]*xcode-script[^\n]*";/shellScript = "true";/' *.xcodeproj/project.pbxproj
+          grep -c xcode-script *.xcodeproj/project.pbxproj || echo "Xcode's Rust step replaced"
+          grep -rn "libapp\|Externals" *.xcodeproj/project.pbxproj | head -20
+
+      - name: Build the app (unsigned)
+        run: |
           cd src-tauri/gen/apple
           PROJECT=$(ls -d *.xcodeproj | head -1)
           SCHEME=$(basename "$PROJECT" .xcodeproj)_iOS
