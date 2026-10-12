@@ -57,6 +57,8 @@ export interface PlayView {
 
 export interface GameplayRenderer {
 	draw(time: number, view: PlayView): void;
+	/** Only the cursor, where it is (while the next song's play is being made) */
+	drawIdle(at: { x: number; y: number }): void;
 	/** A point on the canvas (CSS pixels) in the playfield's coordinates */
 	toPlayfield(x: number, y: number): { x: number; y: number };
 }
@@ -1198,6 +1200,27 @@ export function createGameplayRenderer(
 		drawResults(time, view, width, height);
 	}
 
+	function drawIdle(at: { x: number; y: number }) {
+		const width = Math.round(canvas.clientWidth * devicePixelRatio);
+		const height = Math.round(canvas.clientHeight * devicePixelRatio);
+		if (canvas.width !== width || canvas.height !== height) {
+			canvas.width = width;
+			canvas.height = height;
+		}
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		ctx.clearRect(0, 0, width, height);
+		if (!width || !height) return;
+		const scale = Math.min(width / 640, height / 480);
+		transform = { scale, x: (width - 512 * scale) / 2, y: (height - 384 * scale) / 2 };
+		ctx.setTransform(scale, 0, 0, scale, transform.x, transform.y);
+		if (!image(element('cursor'), at.x, at.y, PLAYFIELD_PIXEL, 1)) {
+			ctx.fillStyle = 'rgb(255, 230, 120)';
+			ctx.beginPath();
+			ctx.arc(at.x, at.y, 16, 0, Math.PI * 2);
+			ctx.fill();
+		}
+	}
+
 	function toPlayfield(x: number, y: number) {
 		return {
 			x: (x * devicePixelRatio - transform.x) / transform.scale,
@@ -1205,5 +1228,5 @@ export function createGameplayRenderer(
 		};
 	}
 
-	return { draw, toPlayfield };
+	return { draw, drawIdle, toPlayfield };
 }

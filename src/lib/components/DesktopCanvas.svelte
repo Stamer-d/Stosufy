@@ -17,12 +17,77 @@
 
 	// Positions are fractions of the free space, so widgets keep their place when the
 	// window is resized and never end up outside of it
-	function position(widget) {
+	function wanted(widget) {
 		const size = sizes[widget.uid] ?? { w: 0, h: 0 };
 		const freeX = Math.max(width - size.w - 2 * PADDING, 0);
 		const freeY = Math.max(height - size.h - 2 * PADDING, 0);
 		if (dragging?.uid === widget.uid) return { left: dragging.left, top: dragging.top };
 		return { left: PADDING + widget.x * freeX, top: PADDING + widget.y * freeY };
+	}
+
+	// --- Widgets never lie on each other --------------------------------------------------
+	const GAP = 12;
+	const overlaps = (a, b) =>
+		a.left < b.left + b.w + GAP &&
+		b.left < a.left + a.w + GAP &&
+		a.top < b.top + b.h + GAP &&
+		b.top < a.top + a.h + GAP;
+
+	/** The wanted place if it's free, else the nearest free one next to the other widgets */
+	function resolve(rect, placed) {
+		if (!placed.some((other) => overlaps(rect, other))) return rect;
+		const maxLeft = Math.max(PADDING, width - rect.w - PADDING);
+		const maxTop = Math.max(PADDING, height - rect.h - PADDING);
+		// Candidates: the wanted place lined up with the others' edges (beside, above, below)
+		const xs = [rect.left, PADDING, maxLeft];
+		const ys = [rect.top, PADDING, maxTop];
+		for (const other of placed) {
+			xs.push(other.left + other.w + GAP, other.left - rect.w - GAP, other.left);
+			ys.push(other.top + other.h + GAP, other.top - rect.h - GAP, other.top);
+		}
+		let best = null;
+		let bestDistance = Infinity;
+		for (const x of xs) {
+			if (x < PADDING || x > maxLeft) continue;
+			for (const y of ys) {
+				if (y < PADDING || y > maxTop) continue;
+				const candidate = { ...rect, left: x, top: y };
+				if (placed.some((other) => overlaps(candidate, other))) continue;
+				const distance = (x - rect.left) ** 2 + (y - rect.top) ** 2;
+				if (distance < bestDistance) {
+					bestDistance = distance;
+					best = candidate;
+				}
+			}
+		}
+		// No room anywhere: where it was wanted
+		return best ?? rect;
+	}
+
+	/** Where each widget is shown: in order, each in the nearest free place (the one being
+	 * dragged last, so it moves around the others instead of pushing them) */
+	let layout = $derived.by(() => {
+		const order = dragging
+			? [
+					...widgets.filter((widget) => widget.uid !== dragging.uid),
+					...widgets.filter((widget) => widget.uid === dragging.uid)
+				]
+			: widgets;
+		const placed = [];
+		const result = {};
+		for (const widget of order) {
+			const size = sizes[widget.uid];
+			const rect = { ...wanted(widget), w: size?.w ?? 0, h: size?.h ?? 0 };
+			// Not measured yet: it takes no room
+			const spot = rect.w && rect.h ? resolve(rect, placed) : rect;
+			if (rect.w && rect.h) placed.push(spot);
+			result[widget.uid] = { left: spot.left, top: spot.top };
+		}
+		return result;
+	});
+
+	function position(widget) {
+		return layout[widget.uid] ?? wanted(widget);
 	}
 
 	function startDrag(event, widget) {
@@ -60,8 +125,10 @@
 		const size = sizes[dragging.uid];
 		const freeX = Math.max(width - size.w - 2 * PADDING, 1);
 		const freeY = Math.max(height - size.h - 2 * PADDING, 1);
-		const x = (dragging.left - PADDING) / freeX;
-		const y = (dragging.top - PADDING) / freeY;
+		// Where it's shown (moved beside the others if it was dropped on one)
+		const shown = layout[dragging.uid] ?? dragging;
+		const x = (shown.left - PADDING) / freeX;
+		const y = (shown.top - PADDING) / freeY;
 		const uid = dragging.uid;
 		dragging = null;
 		updateHomeSettings({

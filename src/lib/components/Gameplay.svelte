@@ -34,6 +34,8 @@
 
 	let canvas = $state();
 	let renderer = null;
+	/** The last play's renderer, for the cursor while the next one is made */
+	let idle = null;
 	let view = null;
 	let message = $state('');
 
@@ -60,6 +62,8 @@
 		const difficulty = mapId;
 		void $skinsChanged;
 		if (view && get(activePlay)?.judge === view.judge) activePlay.set(null);
+		// Until the next play is made, the last one's renderer keeps showing the cursor
+		if (renderer) idle = renderer;
 		renderer = null;
 		view = null;
 		message = '';
@@ -115,6 +119,7 @@
 			}
 			const restAt = lastCursorPosition() ?? undefined;
 			renderer = createGameplayRenderer(target, beatmap, withFallback(own, fallback));
+			idle = null;
 			view = {
 				judge,
 				label,
@@ -275,7 +280,11 @@
 			// Whatever happens in a frame, the next one still comes
 			frame = requestAnimationFrame(loop);
 			const audio = $songQueue.audio;
-			if (!renderer || !view || !audio) return;
+			if (!renderer || !view || !audio) {
+				const at = lastCursorPosition();
+				if (idle && at && !message) idle.drawIdle(at);
+				return;
+			}
 			try {
 				const time = songTime();
 				if (live) {
