@@ -7,9 +7,6 @@ on:
   workflow_run:
     workflows: [Release]
     types: [completed]
-  # Test builds of the work branch
-  push:
-    branches: ['claude/inspiring-lamport-g69unm']
 
 # Builds the iPhone app as an unsigned IPA and attaches it to the release of the same version
 # (or keeps it as a build artifact). Without a paid Apple developer account it can't be
