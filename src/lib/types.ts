@@ -180,6 +180,8 @@ export interface Settings {
 	normalize?: boolean;
 	/** Seconds the end of a song and the start of the next overlap; 0 turns crossfade off */
 	crossfade?: number;
+	/** The equalizer: on, the ten bands' gains (dB) and the preset they came from */
+	equalizer?: { on: boolean; gains: number[]; preset: string | null };
 	/** Speed mod applied to the playback, like in osu! */
 	mod?: PlaybackMod;
 	/** Play the beatmap's hitsounds with the music */

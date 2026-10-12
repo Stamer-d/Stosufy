@@ -5,7 +5,7 @@
 	import Titlebar from './Titlebar.svelte';
 	import Gameplay from './Gameplay.svelte';
 	import { currentSong } from '#lib/stores/audio.ts';
-	import { setGameplayMode, chosenMapId } from '#lib/gameplay/play.ts';
+	import { setGameplayMode, chosenMapId, playNextLive } from '#lib/gameplay/play.ts';
 
 	let song = $derived($currentSong.song);
 </script>
@@ -24,11 +24,22 @@
 	<div class="relative z-10">
 		<Titlebar />
 	</div>
-	<button
-		class="absolute bottom-5 right-5 z-10 flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/40 backdrop-blur-2xl ring-1 ring-white/10 text-white/70 hover:text-white cursor-pointer transition"
-		onclick={() => setGameplayMode(song, { kind: 'auto' })}
-	>
-		<span class="icon-[mingcute--close-line] size-[18px]"></span>
-		Stop playing (Esc)
-	</button>
+	<div class="absolute bottom-5 right-5 z-10 flex items-center gap-2">
+		<button
+			class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/40 backdrop-blur-2xl ring-1 ring-white/10 text-white/70 hover:text-white cursor-pointer transition"
+			onpointerdown={(e) => e.stopPropagation()}
+			onclick={() => playNextLive()}
+		>
+			<span class="icon-[mingcute--skip-forward-fill] size-[18px]"></span>
+			Next song
+		</button>
+		<button
+			class="flex items-center gap-2 px-4 h-10 rounded-full text-sm font-semibold bg-black/40 backdrop-blur-2xl ring-1 ring-white/10 text-white/70 hover:text-white cursor-pointer transition"
+			onpointerdown={(e) => e.stopPropagation()}
+			onclick={() => setGameplayMode(song, { kind: 'auto' })}
+		>
+			<span class="icon-[mingcute--close-line] size-[18px]"></span>
+			Stop playing (Esc)
+		</button>
+	</div>
 </div>

@@ -8,7 +8,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { keyStore } from '../stores/auth';
 import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
-import { currentSong, setPlaybackMod } from '../stores/audio';
+import { currentSong, setPlaybackMod, skipForward, withoutPlaybackLock } from '../stores/audio';
 import { currentMod } from '../stores/mods';
 import { MOD } from './beatmap';
 import type { PlaybackMod } from '../types';
@@ -236,10 +236,14 @@ export function modNames(mods: number) {
 	return result;
 }
 
+/** Set while going on to the next song to play it too (the playing view stays open) */
+const carryingOn = writable<PlayModName[] | null>(null);
+
 /** The user is playing the song themselves (the gameplay then fills the window) */
 export const playingLive = derived(
-	[gameplayMode, currentSong, userSettings],
-	([$mode, $song]) => $mode.mode.kind === 'live' && $mode.key === playKey($song.song)
+	[gameplayMode, currentSong, carryingOn],
+	([$mode, $song, $carrying]) =>
+		!!$carrying || ($mode.mode.kind === 'live' && $mode.key === playKey($song.song))
 );
 
 // --- Playing it yourself with mods --------------------------------------------------------
@@ -293,6 +297,21 @@ export function startPlaying(song: MapSet, selected: PlayModName[]) {
 				: 'NM';
 	setPlaybackMod(speed);
 	setGameplayMode(song, { kind: 'live', mods: playModBits(selected) });
+}
+
+/** On to the next song of the queue, playing it too with the same mods */
+export async function playNextLive() {
+	if (get(carryingOn)) return;
+	const before = get(currentSong).song;
+	const mods = (get(userSettings).settings?.gameplayMods ?? []) as PlayModName[];
+	carryingOn.set(mods);
+	try {
+		await withoutPlaybackLock(() => skipForward());
+		const song = get(currentSong).song;
+		if (song && song !== before) startPlaying(song, mods);
+	} finally {
+		carryingOn.set(null);
+	}
 }
 
 if (typeof window !== 'undefined') {

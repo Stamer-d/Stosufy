@@ -25,6 +25,7 @@
 	import VisibilityPicker from './VisibilityPicker.svelte';
 	import KeybindSettings from './KeybindSettings.svelte';
 	import HitsoundSettings from './HitsoundSettings.svelte';
+	import EqualizerSettings from './EqualizerSettings.svelte';
 
 	let osuFolder = $state(null);
 	defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
@@ -408,6 +409,10 @@
 							on:change={(e) => updateUserSettings({ crossfade: e.detail })}
 						/>
 					</div>
+				</section>
+				<section>
+					{@render heading('Equalizer')}
+					<EqualizerSettings />
 				</section>
 				<section>
 					{@render heading('Hitsounds')}

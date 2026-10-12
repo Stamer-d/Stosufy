@@ -5,6 +5,7 @@ import { applyMod, prepareBeats, startBeats } from './mods';
 import { track, untrack, setFade, setGain, rampGain } from './mixer';
 import { measureLoudness, gainFor } from './loudness';
 import { sameSong } from '../tracks';
+import { attach, applyEq, eqSettings } from './equalizer';
 import { showToast } from './toast';
 import { librarySong, similarSongs } from './radio';
 import { setRPCActivity } from './discord';
@@ -96,6 +97,62 @@ function normalize(
 
 // Set while the next song is loaded for a crossfade, so it starts silent
 let fadeInNext = false;
+// Set while the user switches songs: the old one fades out quickly, the new one fades in
+let smoothIn = false;
+const SWITCH_OUT_MS = 350;
+const SWITCH_IN_MS = 600;
+/** Songs fading out after a switch; they stop by themselves */
+const releasing = new Set<HTMLAudioElement>();
+
+/** Fades a song out quickly and stops it (instead of cutting it off) */
+function release(audio: HTMLAudioElement) {
+	if (releasing.has(audio)) return;
+	if (audio.paused) {
+		audio.pause();
+		untrack(audio);
+		return;
+	}
+	releasing.add(audio);
+	const from = audio.volume;
+	const start = performance.now();
+	const timer = setInterval(() => {
+		const progress = Math.min(1, (performance.now() - start) / SWITCH_OUT_MS);
+		// Straight on the element's volume: the levels may be changed for it no more
+		audio.volume = from * (1 - progress) ** 2;
+		if (progress < 1) return;
+		clearInterval(timer);
+		audio.pause();
+		untrack(audio);
+		releasing.delete(audio);
+	}, 30);
+}
+
+/** Fades a song in once it plays */
+function fadeInWhenPlaying(audio: HTMLAudioElement) {
+	audio.addEventListener(
+		'playing',
+		() => {
+			const start = performance.now();
+			const timer = setInterval(() => {
+				const progress = Math.min(1, (performance.now() - start) / SWITCH_IN_MS);
+				setFade(audio, Math.sin((progress * Math.PI) / 2));
+				if (progress === 1) clearInterval(timer);
+			}, 30);
+		},
+		{ once: true }
+	);
+}
+
+/** Before the user's next song loads: the playing one fades out */
+function switchAway() {
+	const current = get(songQueue);
+	finishCrossfade();
+	if (current?.audio && !current.audio.paused) {
+		smoothIn = true;
+		release(current.audio);
+	} else current?.audio?.pause();
+	setRPCActivity(null);
+}
 
 /**
  * The difficulty whose song is saved locally, if the set is downloaded: songs from the
@@ -129,14 +186,15 @@ async function getAudio(index: number, queue: MapSet[], type: QueueType, current
 	const mapId = localMapId(song);
 	if (type == 'preview' && !song.queued && mapId == null) {
 		audio = new Audio(`${song.preview_url}`);
-		track(audio, fadeInNext ? 0 : 1);
+		track(audio, fadeInNext || smoothIn ? 0 : 1);
 	} else {
 		const playedMapId = mapId ?? song.beatmaps[0].id;
 		const file = bytesFromBase64(await downloadBeatmap(song, playedMapId));
 		audio = new Audio(URL.createObjectURL(new Blob([file])));
-		track(audio, fadeInNext ? 0 : 1);
+		track(audio, fadeInNext || smoothIn ? 0 : 1);
 		normalize(audio, song, playedMapId, file);
 	}
+	if (smoothIn && !fadeInNext) fadeInWhenPlaying(audio);
 	applyMod(audio);
 	audio.addEventListener('ended', () => {
 		// Ignore songs that were replaced in the meantime
@@ -198,12 +256,13 @@ export async function setSongQueue(
 	currentSeconds = 0
 ) {
 	if (locked()) return;
-	stopPlayback();
+	switchAway();
+	currentSong.update((cs) => ({ ...cs, isPlaying: false }));
 	const generation = ++loadGeneration;
 	let audio: HTMLAudioElement;
 	if (index !== null) {
 		try {
-			audio = await getAudio(index, queue, type, currentSeconds);
+			audio = await getAudio(index, queue, type, currentSeconds).finally(() => (smoothIn = false));
 			if (generation !== loadGeneration) return discard(audio);
 		} catch (error) {
 			if (generation !== loadGeneration) return;
@@ -330,11 +389,13 @@ export function togglePlayback() {
 }
 /** Loads and plays the song at `index` of `queue`, skipping songs that can't be loaded */
 async function playAt(index: number, queue: MapSet[], direction: 1 | -1 = 1) {
-	stopPlayback(true);
+	// A crossfade fades the old song itself
+	if (fadeInNext) stopPlayback(true);
+	else switchAway();
 	const generation = ++loadGeneration;
 	let audio: HTMLAudioElement;
 	try {
-		audio = await getAudio(index, queue, get(songQueue).type);
+		audio = await getAudio(index, queue, get(songQueue).type).finally(() => (smoothIn = false));
 		if (generation !== loadGeneration) return discard(audio);
 	} catch {
 		if (generation !== loadGeneration) return;
@@ -573,10 +634,26 @@ if (typeof window !== 'undefined') {
 		if (audio) known.add(audio);
 		for (const other of known) {
 			if (other === audio || other === fadingOut) continue;
-			other.pause();
-			untrack(other);
+			release(other);
 			known.delete(other);
 		}
+	});
+
+	// The equalizer: songs go through it once it's on (and stay, flat it changes nothing)
+	let eqKey = '';
+	const routeSong = () => {
+		if (eqSettings().on) attach(get(songQueue).audio);
+	};
+	// After the modules are loaded (user.ts and this one import each other)
+	setTimeout(() => {
+		songQueue.subscribe(routeSong);
+		userSettings.subscribe(({ settings }) => {
+			const key = JSON.stringify(settings?.equalizer ?? null);
+			if (key === eqKey) return;
+			eqKey = key;
+			applyEq();
+			routeSong();
+		});
 	});
 
 	startBeats(() => ({

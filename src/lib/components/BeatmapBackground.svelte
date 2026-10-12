@@ -64,6 +64,23 @@
 			: null
 	);
 
+	// The images shown, the newest on top; the older ones go once the newest has faded in
+	let layers = $state([]);
+	let layerId = 0;
+	let cleanup;
+	$effect(() => {
+		const next = url;
+		if (next === (layers.at(-1)?.url ?? null)) return;
+		if (!next) {
+			layers = [];
+			return;
+		}
+		const id = ++layerId;
+		layers = [...layers, { id, url: next }];
+		clearTimeout(cleanup);
+		cleanup = setTimeout(() => (layers = layers.filter((layer) => layer.id >= id)), 800);
+	});
+
 	$effect(() => {
 		const id = setId;
 		const map = mapId;
@@ -82,20 +99,19 @@
 </script>
 
 <div
-	class="overflow-hidden {className || 'relative'}"
+	class="overflow-hidden transition-[background-color] duration-700 {className || 'relative'}"
 	style="background-color: {colorFromString(title || String(setId ?? ''))}"
 >
 	<div class="absolute inset-0 {pulsing ? 'beat-bump' : ''}">
-		{#key url}
-			{#if url}
-				<img
-					src={url}
-					alt=""
-					class="absolute inset-0 size-full object-cover {imageClass}"
-					transition:fade={{ duration: 400 }}
-				/>
-			{/if}
-		{/key}
+		<!-- The new image fades in over the old one, which goes once it's covered -->
+		{#each layers as layer (layer.id)}
+			<img
+				src={layer.url}
+				alt=""
+				class="absolute inset-0 size-full object-cover {imageClass}"
+				in:fade={{ duration: 700 }}
+			/>
+		{/each}
 		{#if video}
 			<BeatmapVideo {setId} class={imageClass} />
 		{/if}

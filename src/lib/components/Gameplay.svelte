@@ -191,6 +191,11 @@
 			stop();
 			return;
 		}
+		if (event.code === 'Space' && event.type === 'keydown') {
+			event.preventDefault();
+			skip();
+			return;
+		}
 		const [first, second] = keys();
 		const bit =
 			event.code === first ? KEY.K1 | KEY.M1 : event.code === second ? KEY.K2 | KEY.M2 : 0;
@@ -204,6 +209,40 @@
 
 	function stop() {
 		setGameplayMode(song, { kind: 'auto' });
+	}
+
+	// --- Skipping the intro, breaks and the end, like osu!'s skip button -------------------
+
+	/** Where a skip now jumps to (ms), or null when there's nothing to skip */
+	let skipTo = $state(null);
+	const SKIP_LEAD = 2000;
+
+	function skipTarget(time) {
+		const objects = view?.judge.beatmap.objects;
+		const audio = $songQueue.audio;
+		if (!objects?.length || !audio) return null;
+		const preempt = view.judge.beatmap.preempt;
+		// The next object and where the gap before it starts
+		let index = objects.findIndex((o) => o.time > time);
+		if (index === -1) {
+			// After the last object: on to the results
+			const end = Math.max(...objects.map((o) => o.endTime));
+			const duration = audio.duration * 1000;
+			return time > end + 1000 && duration - time > 4000 ? duration - 50 : null;
+		}
+		const gapStart = index === 0 ? 0 : objects[index - 1].endTime + 300;
+		if (time < gapStart) return null;
+		const target = objects[index].time - preempt - 900;
+		return target - time > SKIP_LEAD ? target : null;
+	}
+
+	function skip() {
+		const audio = $songQueue.audio;
+		if (skipTo === null || !audio) return;
+		// Not a jump to start over from: the judge goes on
+		lastTime = skipTo;
+		audio.currentTime = skipTo / 1000;
+		skipTo = null;
 	}
 
 	$effect(() => {
@@ -238,6 +277,10 @@
 					if (!audio.paused) view.judge.update(time);
 				}
 				lastTime = time;
+				if (live) {
+					const target = audio.paused ? null : skipTarget(time);
+					if (target !== skipTo) skipTo = target;
+				} else if (skipTo !== null) skipTo = null;
 				view.finished = audio.ended;
 				renderer.draw(time, view);
 			} catch (error) {
@@ -261,6 +304,17 @@
 
 <div class="{live ? 'cursor-none' : 'pointer-events-none'} {className}">
 	<canvas bind:this={canvas} class="absolute inset-0 size-full"></canvas>
+	{#if live && skipTo !== null}
+		<button
+			class="absolute bottom-24 right-6 z-10 flex items-center gap-2 h-12 px-6 rounded-xl bg-white/90 text-black text-lg font-black tracking-wide shadow-2xl cursor-pointer hover:bg-white transition pointer-events-auto"
+			onpointerdown={(e) => e.stopPropagation()}
+			onclick={skip}
+		>
+			Skip
+			<span class="icon-[mingcute--arrows-right-line] size-6"></span>
+			<kbd class="ml-1 px-1.5 rounded bg-black/10 text-xs font-sans font-semibold">Space</kbd>
+		</button>
+	{/if}
 	{#if message}
 		<p class="absolute bottom-16 left-1/2 -translate-x-1/2 text-sm text-white/70 drop-shadow">
 			{message}
