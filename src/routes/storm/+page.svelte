@@ -7,7 +7,19 @@
 	import StormMap from '#lib/components/storm/StormMap.svelte';
 	import PlacePicker from '#lib/components/widgets/PlacePicker.svelte';
 	import { widgetData, placeOf, detectedPlace, setWidgetData } from '#lib/stores/widgetData.ts';
-	import { stormOutlook, stormGrid, levelOf, LEVELS, capeColour } from '#lib/storm.ts';
+	import {
+		stormOutlook,
+		stormGrid,
+		stormProfile,
+		levelOf,
+		LEVELS,
+		capeColour,
+		compass
+	} from '#lib/storm.ts';
+	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
+	import { showToast } from '#lib/stores/toast.ts';
+	import Hodograph from '#lib/components/storm/Hodograph.svelte';
+	import SkewT from '#lib/components/storm/SkewT.svelte';
 	import { tileBounds } from '#lib/map.ts';
 
 	const UID = '_storm';
@@ -32,7 +44,14 @@
 	}
 
 	// --- Layers --------------------------------------------------------------------------
-	let shown = $derived({ radar: true, warnings: true, cape: false, ...saved.layers });
+	let shown = $derived({
+		radar: true,
+		warnings: true,
+		cape: false,
+		lightning: true,
+		satellite: false,
+		...saved.layers
+	});
 	const toggle = (key) => setWidgetData(UID, { layers: { ...shown, [key]: !shown[key] } });
 
 	// The rain radar of the last two hours (RainViewer), as a loop
@@ -59,7 +78,15 @@
 		return `https://maps.dwd.de/geoserver/dwd/wms?service=WMS&version=1.1.1&request=GetMap&layers=dwd:Warnungen_Gemeinden&styles=&format=image/png&transparent=true&srs=EPSG:3857&width=256&height=256&bbox=${b.minX},${b.minY},${b.maxX},${b.maxY}`;
 	};
 
+	// Meteosat's infrared picture (cloud tops: the coldest, highest ones are storms), from
+	// EUMETSAT's open map server
+	const satelliteUrl = (z, x, y) => {
+		const b = tileBounds(x, y, z);
+		return `https://view.eumetsat.int/geoserver/wms?service=WMS&version=1.1.1&request=GetMap&layers=msg_fes:ir108&styles=&format=image/png&transparent=true&srs=EPSG:3857&width=256&height=256&bbox=${b.minX},${b.minY},${b.maxX},${b.maxY}`;
+	};
+
 	let layers = $derived([
+		...(shown.satellite ? [{ key: 'satellite', url: satelliteUrl, opacity: 0.6, maxZoom: 9 }] : []),
 		...(shown.warnings ? [{ key: 'warnings', url: warningsUrl, opacity: 0.55, maxZoom: 11 }] : []),
 		...(shown.radar
 			? frames.map((f, i) => ({
@@ -130,6 +157,10 @@
 	let outlook = $state(null);
 	let alerts = $state(null);
 	let probeError = $state('');
+	/** The air above the place: at the hour of the most energy, or now */
+	let profile = $state(null);
+	let profileAt = $state('peak');
+	let diagram = $state('hodograph');
 	// Counts the places looked at: answers for an earlier one are dropped
 	let probeId = 0;
 	async function pick(place) {
@@ -138,8 +169,13 @@
 		alerts = null;
 		probeError = '';
 		const id = ++probeId;
+		profile = null;
 		stormOutlook(place.lat, place.lon)
-			.then((result) => id === probeId && (outlook = result))
+			.then((result) => {
+				if (id !== probeId) return;
+				outlook = result;
+				loadProfile(id);
+			})
 			.catch(() => id === probeId && (probeError = "Couldn't load the forecast"));
 		tauriFetch(`https://api.brightsky.dev/alerts?lat=${place.lat}&lon=${place.lon}`)
 			.then((response) => (response.ok ? response.json() : { alerts: [] }))
@@ -147,7 +183,33 @@
 			.catch(() => id === probeId && (alerts = []));
 	}
 
+	function loadProfile(id = probeId) {
+		if (!probe) return;
+		const time = profileAt === 'peak' && outlook ? outlook.peak.time : Date.now();
+		stormProfile(probe.lat, probe.lon, time)
+			.then((result) => id === probeId && (profile = result))
+			.catch(() => id === probeId && (profile = null));
+	}
+
+	// --- Lightning ------------------------------------------------------------------------
+	// Strikes around your place, and a warning when one comes close
+	const NEAR_KM = 15;
+	let nearby = $derived(home ? strikesNear($strikes, home, 50, 15 * 60 * 1000) : null);
+	let warnedAt = 0;
+	$effect(() => {
+		const nearest = nearby?.nearest;
+		if (!nearest || nearest.km > NEAR_KM || Date.now() - nearest.time > 60000) return;
+		if (Date.now() - warnedAt < 5 * 60 * 1000) return;
+		warnedAt = Date.now();
+		showToast(
+			`Lightning ${Math.round(nearest.km)} km ${compass(nearest.bearing)} of you`,
+			'icon-[mingcute--flash-fill]',
+			8000
+		);
+	});
+
 	onMount(() => {
+		const stopLightning = useLightning();
 		loadRadar();
 		const refresh = setInterval(loadRadar, 5 * 60 * 1000);
 		let wait = 0;
@@ -158,6 +220,7 @@
 			frame = (frame + 1) % frames.length;
 		}, 500);
 		return () => {
+			stopLightning();
 			clearInterval(refresh);
 			clearInterval(step);
 			clearTimeout(gridTimer);
@@ -186,7 +249,9 @@
 	const LAYERS = [
 		{ key: 'radar', label: 'Radar', icon: 'icon-[mingcute--rainstorm-line]' },
 		{ key: 'warnings', label: 'DWD warnings', icon: 'icon-[mingcute--warning-line]' },
-		{ key: 'cape', label: 'Storm energy (CAPE)', icon: 'icon-[mingcute--flash-line]' }
+		{ key: 'cape', label: 'Storm energy (CAPE)', icon: 'icon-[mingcute--fire-line]' },
+		{ key: 'lightning', label: 'Lightning', icon: 'icon-[mingcute--flash-line]' },
+		{ key: 'satellite', label: 'Satellite (IR)', icon: 'icon-[mingcute--earth-line]' }
 	];
 	const CAPE_LEGEND = [100, 500, 1000, 2000, 3000];
 	const css = ([r, g, b, _a]) => `rgb(${r} ${g} ${b})`;
@@ -202,6 +267,7 @@
 			zoom={view.zoom}
 			{layers}
 			{cape}
+			strikes={shown.lightning ? $strikes : null}
 			markers={[
 				...(home ? [{ lat: home.lat, lon: home.lon, kind: 'home' }] : []),
 				...(probe ? [{ lat: probe.lat, lon: probe.lon, kind: 'probe' }] : [])
@@ -243,7 +309,7 @@
 
 	<!-- Zoom -->
 	<div
-		class="absolute top-4 right-[22rem] flex flex-col rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10"
+		class="absolute top-4 right-[26rem] flex flex-col rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10"
 	>
 		<button
 			class="grid place-items-center size-9 cursor-pointer hover:text-primary-300"
@@ -269,7 +335,41 @@
 	</div>
 
 	<!-- Time: the radar's past, the forecast hour of the CAPE map -->
-	<div class="absolute bottom-4 left-4 right-[22rem] flex flex-col gap-2 pointer-events-none">
+	<div class="absolute bottom-4 left-4 right-[26rem] flex flex-col gap-2 pointer-events-none">
+		{#if shown.lightning}
+			<div
+				class="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10 pointer-events-auto text-sm"
+			>
+				<span
+					class="icon-[mingcute--flash-fill] size-4 shrink-0 {$lightningStatus === 'live'
+						? 'text-yellow-300'
+						: 'text-white/40'}"
+				></span>
+				<span class="font-semibold shrink-0">
+					{$lightningStatus === 'live'
+						? 'Lightning live'
+						: $lightningStatus === 'connecting'
+							? 'Connecting…'
+							: 'Lightning offline, retrying'}
+				</span>
+				{#if nearby && home}
+					<span class="text-white/70 truncate">
+						{nearby.count}
+						{nearby.count === 1 ? 'strike' : 'strikes'} within 50 km of {home.name} (15 min){#if nearby.nearest}
+							· nearest <strong class="text-white"
+								>{Math.round(nearby.nearest.km)} km {compass(nearby.nearest.bearing)}</strong
+							>, {Math.max(0, Math.round((Date.now() - nearby.nearest.time) / 60000))} min ago{/if}
+					</span>
+				{/if}
+				<span class="ms-auto hidden xl:flex items-center gap-2 text-[10px] text-white/60 shrink-0">
+					{#each [['#ffffff', '<1'], ['#fde047', '5'], ['#fb923c', '10'], ['#ef4444', '20'], ['#7f1d1d', '30 min']] as [colour, label] (label)}
+						<span class="flex items-center gap-1"
+							><span class="size-2 rounded-full" style="background: {colour}"></span>{label}</span
+						>
+					{/each}
+				</span>
+			</div>
+		{/if}
 		{#if shown.cape && grid}
 			<div
 				class="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10 pointer-events-auto"
@@ -335,7 +435,7 @@
 
 	<!-- The place looked at -->
 	<aside
-		class="absolute top-4 right-4 bottom-4 w-[20rem] flex flex-col gap-3 p-4 rounded-2xl bg-black/65 backdrop-blur-xl ring-1 ring-white/10 overflow-y-auto"
+		class="absolute top-4 right-4 bottom-4 w-[24rem] flex flex-col gap-3 p-4 rounded-2xl bg-black/65 backdrop-blur-xl ring-1 ring-white/10 overflow-y-auto"
 	>
 		{#if changingPlace}
 			<div>
@@ -431,6 +531,85 @@
 					<p class="mt-2 text-sm text-white/60">{probeError || 'Loading the forecast…'}</p>
 				{/if}
 			</div>
+			{#if outlook}
+				<div>
+					<div class="flex items-center gap-2 mb-2">
+						<p class="flex-1 text-xs font-bold uppercase tracking-wide text-white/50">
+							Sounding {profile ? `· ${clock(profile.time)}` : ''}
+						</p>
+						<div class="flex p-0.5 rounded-lg bg-white/5 text-[11px] font-semibold">
+							{#each [['peak', 'Peak'], ['now', 'Now']] as [value, label] (value)}
+								<button
+									class="px-2 h-6 rounded-md cursor-pointer {profileAt === value
+										? 'bg-white/15'
+										: 'text-white/55 hover:text-white'}"
+									onclick={() => {
+										profileAt = value;
+										profile = null;
+										loadProfile();
+									}}>{label}</button
+								>
+							{/each}
+						</div>
+					</div>
+					{#if profile}
+						<div class="flex flex-wrap gap-1.5 mb-2">
+							{#if profile.stp >= 1}
+								<span
+									class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-fuchsia-500 text-black"
+									>Tornado possible</span
+								>
+							{/if}
+							{#if profile.scp >= 1}
+								<span
+									class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-500 text-black"
+									>Supercells</span
+								>
+							{/if}
+							{#if profile.hail}
+								<span
+									class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-sky-300 text-black"
+									>Large hail</span
+								>
+							{/if}
+							{#if profile.cin < -100}
+								<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/10"
+									>Capped (CIN {Math.round(profile.cin)})</span
+								>
+							{/if}
+						</div>
+						<div class="grid grid-cols-4 gap-1.5">
+							{#each [['SRH 1', Math.round(profile.srh1), 'm²/s²', 'Storm relative helicity 0–1 km: low level spin (over 100: tornadoes)'], ['SRH 3', Math.round(profile.srh3), 'm²/s²', 'Storm relative helicity 0–3 km: rotating updrafts (over 150: supercells)'], ['STP', profile.stp.toFixed(1), '', 'Significant tornado parameter (over 1: strong tornadoes possible)'], ['SCP', profile.scp.toFixed(1), '', 'Supercell composite (over 1: supercells)'], ['Shear 1', Math.round(profile.shear1), 'm/s', 'Bulk shear 0–1 km'], ['Shear 6', Math.round(profile.shear6), 'm/s', 'Bulk shear 0–6 km (over 20: supercells)'], ['LCL', Math.round(profile.lcl), 'm', 'Cloud base above ground (under 1000 m: tornadoes likelier)'], ['CIN', Math.round(profile.cin), 'J/kg', 'Inhibition: the lid on the storms'], ['0 °C', Math.round(profile.freezing), 'm', 'Freezing level (low: hail reaches the ground)'], ['Motion', `${Math.round(profile.motion.speed * 3.6)}`, `km/h ${compass(profile.motion.towards)}`, 'Where a right-moving supercell goes (Bunkers)']] as [label, value, unit, hint] (label)}
+								<div class="p-1.5 rounded-lg bg-white/5" title={hint}>
+									<p class="text-[9px] font-bold uppercase text-white/50">{label}</p>
+									<p class="text-sm font-extrabold tabular-nums leading-tight truncate">
+										{value}<span class="text-[9px] font-semibold text-white/50"> {unit}</span>
+									</p>
+								</div>
+							{/each}
+						</div>
+						<div class="mt-2 flex p-0.5 rounded-lg bg-white/5 text-[11px] font-semibold w-fit">
+							{#each [['hodograph', 'Hodograph'], ['skewt', 'Skew-T']] as [value, label] (value)}
+								<button
+									class="px-2.5 h-6 rounded-md cursor-pointer {diagram === value
+										? 'bg-white/15'
+										: 'text-white/55 hover:text-white'}"
+									onclick={() => (diagram = value)}>{label}</button
+								>
+							{/each}
+						</div>
+						<div class="mt-2 grid place-items-center">
+							{#if diagram === 'hodograph'}
+								<Hodograph {profile} size={330} />
+							{:else}
+								<SkewT {profile} width={340} height={330} />
+							{/if}
+						</div>
+					{:else}
+						<p class="text-sm text-white/60">Loading the sounding…</p>
+					{/if}
+				</div>
+			{/if}
 			<div>
 				<p class="text-xs font-bold uppercase tracking-wide text-white/50 mb-2">
 					DWD warnings here

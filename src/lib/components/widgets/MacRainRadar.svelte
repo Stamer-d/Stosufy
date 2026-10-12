@@ -1,6 +1,9 @@
 <script>
 	// The rain radar around you, the last two hours as a loop (RainViewer), on a dark map
 	import { onMount } from 'svelte';
+	import { strikes, useLightning } from '#lib/stores/lightning.ts';
+	import { drawStrikes } from '#lib/storm.ts';
+	import { worldPixel } from '#lib/map.ts';
 	import { fetch } from '@tauri-apps/plugin-http';
 	import { goto } from '$app/navigation';
 	import Widget from './MacWidget.svelte';
@@ -37,7 +40,32 @@
 		}
 	}
 
+	// Lightning over the radar
+	let canvas = $state();
+	function drawLightning() {
+		if (!canvas || !place) return;
+		const ratio = devicePixelRatio || 1;
+		if (canvas.width !== width * ratio) canvas.width = width * ratio;
+		if (canvas.height !== height * ratio) canvas.height = height * ratio;
+		const c = canvas.getContext('2d');
+		c.setTransform(ratio, 0, 0, ratio, 0, 0);
+		c.clearRect(0, 0, width, height);
+		const centre = worldPixel(place.lat, place.lon, zoom);
+		drawStrikes(
+			c,
+			$strikes,
+			(lat, lon) => {
+				const p = worldPixel(lat, lon, zoom);
+				return { x: p.x - centre.x + width / 2, y: p.y - centre.y + height / 2 };
+			},
+			width,
+			height
+		);
+	}
+
 	onMount(() => {
+		const stopLightning = useLightning();
+		const lightningTimer = setInterval(drawLightning, 150);
 		load();
 		const refresh = setInterval(load, 5 * 60 * 1000);
 		// The loop: a frame every half second, a pause on the newest
@@ -49,6 +77,8 @@
 			shown = (shown + 1) % frames.length;
 		}, 500);
 		return () => {
+			stopLightning();
+			clearInterval(lightningTimer);
 			clearInterval(refresh);
 			clearInterval(step);
 		};
@@ -82,6 +112,7 @@
 	{:else}
 		<div class="absolute inset-0" bind:clientWidth={width} bind:clientHeight={height}>
 			<WidgetMap lat={place.lat} lon={place.lon} {zoom} {width} {height} {layers}>
+				<canvas bind:this={canvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 				<span
 					class="absolute size-3 -ml-1.5 -mt-1.5 rounded-full bg-white ring-4 ring-primary-400/60 left-1/2 top-1/2"
 				></span>

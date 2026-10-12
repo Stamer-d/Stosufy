@@ -22,6 +22,7 @@ import MacRainRadar from './components/widgets/MacRainRadar.svelte';
 import MacStormPotential from './components/widgets/MacStormPotential.svelte';
 import MacWarnings from './components/widgets/MacWarnings.svelte';
 import MacFlightRadar from './components/widgets/MacFlightRadar.svelte';
+import MacLightning from './components/widgets/MacLightning.svelte';
 
 export type WidgetFamily = 'macos' | 'linux' | 'minimal';
 
@@ -112,6 +113,12 @@ export const WIDGETS: Record<
 		description: 'The radar of the last two hours around you, as a loop',
 		family: 'macos',
 		component: MacRainRadar
+	},
+	'mac-lightning': {
+		name: 'Lightning',
+		description: 'Live strikes around you, how many and how close',
+		family: 'macos',
+		component: MacLightning
 	},
 	'mac-storm-potential': {
 		name: 'Storm potential',

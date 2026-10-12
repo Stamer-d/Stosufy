@@ -20,7 +20,6 @@ export const strikes = writable<Strike[]>([]);
 export const lightningStatus = writable<'off' | 'connecting' | 'live' | 'error'>('off');
 
 let users = 0;
-let socket: WebSocket | null = null;
 let server = 0;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let pending: Strike[] = [];
@@ -61,37 +60,78 @@ function add(strike: Strike) {
 	}, 250);
 }
 
-function connect() {
+/** Handles one message of the network */
+function receive(text: string) {
+	try {
+		const data = JSON.parse(unpack(text));
+		if (typeof data.lat === 'number' && typeof data.lon === 'number')
+			add({
+				time: Math.round((data.time ?? Date.now() * 1e6) / 1e6),
+				lat: data.lat,
+				lon: data.lon
+			});
+	} catch {
+		// Not a strike
+	}
+}
+
+/** The connection: from the app's backend (it sends the Origin the servers want), or
+ * the browser's WebSocket where that isn't there */
+interface Connection {
+	close: () => void;
+}
+let socket: Connection | null = null;
+let attempt = 0;
+
+function lost(id: number) {
+	if (id !== attempt) return;
+	socket = null;
+	if (!users) return;
+	// The next server, a bit later
+	lightningStatus.set('error');
+	server++;
+	retry = setTimeout(connect, 3000);
+}
+
+async function connect() {
 	if (!users || socket) return;
+	const id = ++attempt;
 	lightningStatus.set('connecting');
-	const ws = new WebSocket(SERVERS[server % SERVERS.length]);
-	socket = ws;
-	ws.onopen = () => {
-		ws.send('{"a":111}');
-		lightningStatus.set('live');
-	};
-	ws.onmessage = (event) => {
-		try {
-			const data = JSON.parse(unpack(String(event.data)));
-			if (typeof data.lat === 'number' && typeof data.lon === 'number')
-				add({
-					time: Math.round((data.time ?? Date.now() * 1e6) / 1e6),
-					lat: data.lat,
-					lon: data.lon
-				});
-		} catch {
-			// Not a strike
+	const url = SERVERS[server % SERVERS.length];
+	try {
+		const { default: TauriSocket } = await import('@tauri-apps/plugin-websocket');
+		const ws = await TauriSocket.connect(url, {
+			headers: { Origin: 'https://map.blitzortung.org' }
+		});
+		if (id !== attempt || !users) {
+			ws.disconnect().catch(() => {});
+			return;
 		}
-	};
-	ws.onclose = () => {
-		if (socket === ws) socket = null;
-		if (!users) return;
-		// The next server, a bit later
-		lightningStatus.set('error');
-		server++;
-		retry = setTimeout(connect, 3000);
-	};
-	ws.onerror = () => ws.close();
+		socket = { close: () => ws.disconnect().catch(() => {}) };
+		ws.addListener((message) => {
+			if (message.type === 'Text') receive(message.data as string);
+			else if (message.type === 'Close') lost(id);
+		});
+		await ws.send('{"a":111}');
+		lightningStatus.set('live');
+		return;
+	} catch {
+		// No backend connection: the browser's WebSocket
+	}
+	if (id !== attempt || !users) return;
+	try {
+		const ws = new WebSocket(url);
+		socket = { close: () => ws.close() };
+		ws.onopen = () => {
+			ws.send('{"a":111}');
+			lightningStatus.set('live');
+		};
+		ws.onmessage = (event) => receive(String(event.data));
+		ws.onclose = () => lost(id);
+		ws.onerror = () => ws.close();
+	} catch {
+		lost(id);
+	}
 }
 
 /** Keeps the connection while something shows lightning; returns the stop */
@@ -102,6 +142,7 @@ export function useLightning() {
 		users--;
 		if (users) return;
 		clearTimeout(retry);
+		attempt++;
 		socket?.close();
 		socket = null;
 		lightningStatus.set('off');

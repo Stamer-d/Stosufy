@@ -61,6 +61,7 @@
 				}
 			]
 		},
+		"websocket:default",
 		"store:default",
 		"shell:default",
 		"deep-link:default",
