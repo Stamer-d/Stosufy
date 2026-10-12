@@ -82,7 +82,7 @@
 		</button>
 	{:else if shortcut.length}
 		<kbd
-			class="max-md:hidden absolute right-3 px-1.5 rounded text-[10px] font-semibold text-secondary-600 ring-1 ring-white/10 pointer-events-none"
+			class="absolute right-3 px-1.5 rounded text-[10px] font-semibold text-secondary-600 ring-1 ring-white/10 pointer-events-none"
 			>{shortcut.join(' ')}</kbd
 		>
 	{/if}

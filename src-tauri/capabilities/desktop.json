@@ -2,17 +2,5 @@
 	"identifier": "desktop-capability",
 	"platforms": ["macOS", "windows", "linux"],
 	"windows": ["main"],
-	"permissions": [
-		"global-shortcut:default",
-		"updater:default",
-		"window-state:default",
-		"drpc:default",
-		"drpc:allow-is-running",
-		"drpc:allow-set-activity",
-		"drpc:allow-spawn-thread",
-		"drpc:allow-clear-activity",
-		"global-shortcut:allow-is-registered",
-		"global-shortcut:allow-register",
-		"global-shortcut:allow-unregister"
-	]
+	"permissions": ["global-shortcut:default", "updater:default", "window-state:default"]
 }

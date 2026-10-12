@@ -13,13 +13,7 @@
 		"deep-link": {
 			"desktop": {
 				"schemes": ["stosufynew"]
-			},
-			"mobile": [
-				{
-					"scheme": ["stosufynew"],
-					"appLink": false
-				}
-			]
+			}
 		},
 		"updater": {
 			"windows": {
@@ -46,14 +40,16 @@
 			"csp": null,
 			"assetProtocol": {
 				"enable": true,
-				"scope": ["$HOME/**", "$APPLOCALDATA/**"]
+				"scope": ["$HOME/**"]
 			}
 		}
 	},
+
 	"bundle": {
 		"createUpdaterArtifacts": true,
 		"active": true,
 		"targets": "all",
+
 		"icon": [
 			"icons/32x32.png",
 			"icons/128x128.png",

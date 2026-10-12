@@ -1,4 +1,3 @@
-import { stosufyDir } from '../platform';
 // Skins for the hitsounds: the osu! default sounds (downloaded once from ppy/osu-resources),
 // skins imported from .osk files (only their hitsounds are kept, in Stosufy's own folder)
 // and the skins of an osu! installation.
@@ -36,7 +35,7 @@ export const skinTask = writable<{ state: 'idle' | 'working' | 'error'; message?
 });
 
 export async function stosufySkinsDir() {
-	return path.join(await stosufyDir(), 'Skins');
+	return path.join(await path.homeDir(), 'Stosufy', 'Skins');
 }
 
 /** The osu! Skins folder: chosen in the settings, else the default osu! one */

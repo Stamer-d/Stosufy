@@ -2,7 +2,6 @@
 	import { sameSong, songKey } from '#lib/tracks.ts';
 	import { GENRES, LANGUAGES } from '#lib/genres.ts';
 	import { offline, noteNetworkError } from '#lib/stores/network.ts';
-	import { isMobile } from '#lib/platform.ts';
 	import {
 		songQueue,
 		setSongQueue,
@@ -97,12 +96,7 @@
 	import { wallpaper } from '#lib/stores/home.ts';
 	import { DEFAULT_HOME } from '#lib/stores/user.ts';
 
-	let homeSettings = $derived({
-		...DEFAULT_HOME,
-		...$userSettings.settings?.home,
-		// The widget desktop needs a big screen: a phone gets the classic home
-		...(isMobile ? { layout: 'classic' } : {})
-	});
+	let homeSettings = $derived({ ...DEFAULT_HOME, ...$userSettings.settings?.home });
 
 	let hero = $derived($wallpaper);
 	let heroPlaying = $derived(sameSong($currentSong.song, hero.song) && $currentSong.isPlaying);

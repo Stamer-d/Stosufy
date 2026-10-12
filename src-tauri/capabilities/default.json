@@ -4,6 +4,14 @@
 	"description": "Capability for the main window",
 	"windows": ["main"],
 	"permissions": [
+		"drpc:default",
+		"drpc:allow-is-running",
+		"drpc:allow-set-activity",
+		"drpc:allow-spawn-thread",
+		"drpc:allow-clear-activity",
+		"global-shortcut:allow-is-registered",
+		"global-shortcut:allow-register",
+		"global-shortcut:allow-unregister",
 		"core:default",
 		"opener:default",
 		"http:default",
@@ -45,35 +53,19 @@
 		"dialog:allow-open",
 		{
 			"identifier": "fs:allow-home-read",
-			"allow": [
-				{
-					"path": "$HOME/**"
-				}
-			]
+			"allow": [{ "path": "$HOME/**" }]
 		},
 		{
 			"identifier": "fs:allow-home-write",
-			"allow": [
-				{
-					"path": "$HOME/Stosufy/**"
-				}
-			]
+			"allow": [{ "path": "$HOME/Stosufy/**" }]
 		},
 		{
 			"identifier": "fs:allow-temp-read",
-			"allow": [
-				{
-					"path": "$TEMP/**"
-				}
-			]
+			"allow": [{ "path": "$TEMP/**" }]
 		},
 		{
 			"identifier": "fs:allow-temp-write",
-			"allow": [
-				{
-					"path": "$TEMP/**"
-				}
-			]
+			"allow": [{ "path": "$TEMP/**" }]
 		},
 		"core:window:default",
 		"core:window:allow-start-dragging",
@@ -81,23 +73,9 @@
 		"core:window:allow-toggle-maximize",
 		"core:window:allow-close",
 		"core:window:allow-destroy",
+		"updater:default",
 		"process:default",
 		"process:allow-restart",
-		{
-			"identifier": "fs:allow-applocaldata-read-recursive",
-			"allow": [
-				{
-					"path": "$APPLOCALDATA/**"
-				}
-			]
-		},
-		{
-			"identifier": "fs:allow-applocaldata-write-recursive",
-			"allow": [
-				{
-					"path": "$APPLOCALDATA/**"
-				}
-			]
-		}
+		"window-state:default"
 	]
 }

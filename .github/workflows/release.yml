@@ -48,7 +48,7 @@ jobs:
         with:
           tagName: Stosufy-v__VERSION__
           releaseName: 'Stosufy v__VERSION__'
-          releaseBody: 'Download the latest version of Stosufy: the .exe for Windows, the .apk for Android phones (it is added a few minutes after the Windows build)'
+          releaseBody: 'Download the latest version of Stosufy, currently only available for Windows'
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true

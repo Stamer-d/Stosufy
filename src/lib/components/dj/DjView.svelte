@@ -1,5 +1,4 @@
 <script>
-	import { stosufyDir } from '#lib/platform.ts';
 	// The DJ mode: two decks, a mixer and the songs, filling the window
 	import { onMount, onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -38,7 +37,7 @@
 		const blob = await mixer.stopRecording();
 		if (!blob || !blob.size) return;
 		try {
-			const dir = await path.join(await stosufyDir(), 'Mixes');
+			const dir = await path.join(await path.homeDir(), 'Stosufy', 'Mixes');
 			await mkdir(dir, { recursive: true });
 			const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
 			const extension = blob.type.includes('ogg') ? 'ogg' : 'webm';
