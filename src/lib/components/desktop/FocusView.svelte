@@ -8,11 +8,13 @@
 	import FocusLyrics from '../FocusLyrics.svelte';
 	import { userSettings, updateAppearance, updateUserSettings } from '#lib/stores/user.ts';
 	import Gameplay from '../Gameplay.svelte';
+	import { playingLive } from '#lib/gameplay/play.ts';
 	import ModSelect from '../ModSelect.svelte';
 	import HitsoundMenu from '../HitsoundMenu.svelte';
 	import GameplayControls from '../GameplayControls.svelte';
 
 	let gameplayOn = $derived($userSettings.settings?.gameplay ?? false);
+	let widgetsInGameplay = $derived($userSettings.settings?.widgetsInGameplay ?? true);
 	let showLyrics = $derived($userSettings.settings?.appearance?.focusLyrics ?? true);
 
 	// Prefer the song that is playing, so the wallpaper follows the music
@@ -44,8 +46,8 @@
 		<Titlebar />
 	</div>
 
-	<!-- Your widgets, as on the home screen (they make way for the gameplay) -->
-	{#if !gameplayOn || !$currentSong.song}
+	<!-- Your widgets, as on the home screen (they make way when you play yourself) -->
+	{#if !gameplayOn || !$currentSong.song || (widgetsInGameplay && !$playingLive)}
 		<div class="absolute inset-x-0 top-12 bottom-20">
 			<DesktopCanvas />
 		</div>

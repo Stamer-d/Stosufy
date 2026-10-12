@@ -22,6 +22,8 @@
 	let { up = false } = $props();
 
 	let open = $state(false);
+	// Widgets stay on the desktop during autoplay and replays (never while playing yourself)
+	let widgetsShown = $derived($userSettings.settings?.widgetsInGameplay ?? true);
 	let root = $state(null);
 	let song = $derived($currentSong.song);
 	let mapId = $derived(song && ($userSettings.settings?.gameplayDifficulty, chosenMapId(song)));
@@ -373,6 +375,28 @@
 					{/if}
 				{/if}
 			</div>
+			<button
+				class="flex items-center gap-3 px-4 h-11 shrink-0 border-t border-white/5 text-sm text-white/80 hover:bg-white/5 cursor-pointer transition"
+				role="switch"
+				aria-checked={widgetsShown}
+				onclick={() => updateUserSettings({ widgetsInGameplay: !widgetsShown })}
+			>
+				<span class="icon-[mingcute--layout-4-line] size-4 shrink-0"></span>
+				<span class="flex-1 text-start"
+					>Show widgets <span class="text-white/45">(not while you play)</span></span
+				>
+				<span
+					class="relative w-9 h-5 rounded-full transition {widgetsShown
+						? 'bg-primary-400'
+						: 'bg-white/15'}"
+				>
+					<span
+						class="absolute top-0.5 size-4 rounded-full bg-white transition-all {widgetsShown
+							? 'left-[18px]'
+							: 'left-0.5'}"
+					></span>
+				</span>
+			</button>
 		</div>
 	{/if}
 </div>

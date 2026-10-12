@@ -1,3 +1,8 @@
+<script module>
+	// The last play made, kept when the view goes away (see the cache below)
+	let lastPlay = null;
+</script>
+
 <script>
 	// The gameplay of the song that plays, with the hitsound skin: autoplay, a replay of a
 	// top score, or the user playing it (mouse or tablet to aim, two keys or the mouse
@@ -53,6 +58,28 @@
 		forgetGameplaySkins();
 	});
 
+	/** Starts drawing a play (made for this view now, or the last one shown) */
+	function show(target, play, playing, shown) {
+		const { beatmap, judge, label, restAt } = play;
+		renderer = createGameplayRenderer(target, beatmap, play.skin);
+		idle = null;
+		view = {
+			judge,
+			label,
+			results: shown.kind !== 'auto',
+			finished: false,
+			// Autoplay's cursor between its inputs; it goes on from where the last song's
+			// cursor was. Playing yourself, it's where the mouse is until the first input.
+			cursor:
+				shown.kind === 'auto'
+					? (time) => autoplayCursor(beatmap.objects, time, restAt)
+					: shown.kind === 'live'
+						? () => (view?.judge.frames.length ? null : pointer)
+						: null
+		};
+		activePlay.set({ key: playing, judge, kind: shown.kind });
+	}
+
 	$effect(() => {
 		const current = song;
 		const target = canvas;
@@ -80,6 +107,22 @@
 		}
 		let cancelled = false;
 		completeDefaultSkin();
+		// The same play as the last time this was shown (back on the home screen, out of the
+		// focus mode): shown right away, without loading it again
+		const cacheKey = `${playing}|${skin}|${shown.kind}|${$skinsChanged}`;
+		const cached =
+			shown.kind !== 'live' &&
+			lastPlay &&
+			lastPlay.key === cacheKey &&
+			(shown.kind === 'auto' || lastPlay.mode === shown)
+				? lastPlay
+				: null;
+		if (cached) {
+			show(target, cached, playing, shown);
+			return () => {
+				if (view && get(activePlay)?.judge === view.judge) activePlay.set(null);
+			};
+		}
 		(async () => {
 			const content = await beatmapContent(current, difficulty).catch(() => null);
 			if (cancelled) return;
@@ -117,24 +160,17 @@
 				judge = auto.judge;
 				label = 'Autoplay';
 			}
-			const restAt = lastCursorPosition() ?? undefined;
-			renderer = createGameplayRenderer(target, beatmap, withFallback(own, fallback));
-			idle = null;
-			view = {
+			const play = {
+				key: cacheKey,
+				mode: shown,
+				beatmap,
 				judge,
 				label,
-				results: shown.kind !== 'auto',
-				finished: false,
-				// Autoplay's cursor between its inputs; it goes on from where the last song's
-				// cursor was. Playing yourself, it's where the mouse is until the first input.
-				cursor:
-					shown.kind === 'auto'
-						? (time) => autoplayCursor(beatmap.objects, time, restAt)
-						: shown.kind === 'live'
-							? () => (view?.judge.frames.length ? null : pointer)
-							: null
+				skin: withFallback(own, fallback),
+				restAt: lastCursorPosition() ?? undefined
 			};
-			activePlay.set({ key: playing, judge, kind: shown.kind });
+			if (shown.kind !== 'live') lastPlay = play;
+			show(target, play, playing, shown);
 		})();
 		return () => {
 			cancelled = true;

@@ -46,6 +46,7 @@
 	let editingWidgets = $state(false);
 	// The gameplay of the song on the desktop, like osu!'s autoplay
 	let gameplayOn = $derived($userSettings.settings?.gameplay ?? false);
+	let widgetsInGameplay = $derived($userSettings.settings?.widgetsInGameplay ?? true);
 	const toggleGameplay = () => updateUserSettings({ gameplay: !gameplayOn });
 	let widgetStoreOpen = $state(false);
 
@@ -643,8 +644,8 @@
 					<Gameplay class="absolute inset-0" />
 				{/if}
 			{/if}
-			<!-- The widgets make way for the gameplay (unless they're being edited) -->
-			{#if !gameplayOn || !$currentSong.song || editingWidgets}
+			<!-- The widgets make way when you play yourself (unless they're being edited) -->
+			{#if !gameplayOn || !$currentSong.song || editingWidgets || (widgetsInGameplay && !$playingLive)}
 				<DesktopCanvas editing={editingWidgets} />
 			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->

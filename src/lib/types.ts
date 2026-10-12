@@ -183,6 +183,8 @@ export interface Settings {
 	searchFilters?: SearchFilters;
 	/** What each placed widget keeps (a note's text, the weather's city), by its uid */
 	widgetData?: Record<string, Record<string, any>>;
+	/** Show the widgets during autoplay and replays (never while playing yourself) */
+	widgetsInGameplay?: boolean;
 	home?: HomeSettings;
 	appearance?: AppearanceSettings;
 	/** Bring every song to the same loudness */
