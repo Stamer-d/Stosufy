@@ -34,6 +34,13 @@ let input: GainNode | null = null;
 let filters: BiquadFilterNode[] = [];
 let preamp: GainNode | null = null;
 const sources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
+/** Each routed song's own fade (crossfades and switches), on the audio thread */
+const fades = new WeakMap<HTMLMediaElement, GainNode>();
+
+/** A routed song's fade gain, or null if it plays straight (then fades step its volume) */
+export function fadeNode(audio: HTMLMediaElement | null | undefined) {
+	return (audio && fades.get(audio)) || null;
+}
 
 /** The audio context the songs play through (shared with the visualizer) */
 export function playbackContext() {
@@ -69,13 +76,22 @@ export async function attach(audio: HTMLMediaElement | null | undefined) {
 		if (ctx.state !== 'running') return null;
 		if (sources.has(audio)) return sources.get(audio)!;
 		const source = ctx.createMediaElementSource(audio);
-		source.connect(input!);
+		const fade = ctx.createGain();
+		fade.gain.value = initialFade(audio);
+		source.connect(fade).connect(input!);
+		fades.set(audio, fade);
 		sources.set(audio, source);
 		return source;
 	} catch (error) {
 		console.error('Could not route the song through the equalizer:', error);
 		return null;
 	}
+}
+
+/** Where a song's fade is when it gets routed (set by the mixer) */
+let initialFade: (audio: HTMLMediaElement) => number = () => 1;
+export function onRoute(get: (audio: HTMLMediaElement) => number) {
+	initialFade = get;
 }
 
 export function eqSettings(): EqSettings {

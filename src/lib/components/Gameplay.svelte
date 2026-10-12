@@ -32,7 +32,9 @@
 		chosenMapId,
 		playKey,
 		setGameplayMode,
-		modNames
+		modNames,
+		standardPicks,
+		difficultyChosen
 	} from '#lib/gameplay/play.ts';
 
 	let { class: className = '' } = $props();
@@ -45,7 +47,9 @@
 	let message = $state('');
 
 	let song = $derived($currentSong.song);
-	let mapId = $derived(song && ($userSettings.settings?.gameplayDifficulty, chosenMapId(song)));
+	let mapId = $derived(
+		song && ($userSettings.settings?.gameplayDifficulty, $standardPicks, chosenMapId(song))
+	);
 	let key = $derived(song ? `${song.id}:${mapId}` : null);
 	let skinSetting = $derived($userSettings.settings?.hitsoundSkin ?? null);
 	/** @type {import('#lib/gameplay/play.ts').GameplayMode} */
@@ -57,6 +61,19 @@
 		$skinsChanged;
 		forgetGameplaySkins();
 	});
+
+	/** The hardest difficulty of a song that is osu!standard (from its .osu files) */
+	async function hardestStandard(current, skip) {
+		const maps = [...(current.beatmaps ?? [])]
+			.filter((map) => String(map.id) !== String(skip))
+			.sort((a, b) => (Number(b.difficulty_rating) || 0) - (Number(a.difficulty_rating) || 0));
+		for (const map of maps) {
+			const content = await beatmapContent(current, String(map.id)).catch(() => null);
+			if (content && /^Mode\s*:\s*0\s*$/m.test(content)) return String(map.id);
+			if (content && !/^Mode\s*:/m.test(content)) return String(map.id);
+		}
+		return null;
+	}
 
 	/** Starts drawing a play (made for this view now, or the last one shown) */
 	function show(target, play, playing, shown) {
@@ -134,6 +151,15 @@
 				shown.kind === 'replay' ? shown.replay.mods : shown.kind === 'live' ? shown.mods : 0;
 			const beatmap = auto ? auto.beatmap : content ? parseGameplay(content, mods) : null;
 			if (!beatmap) {
+				// The hardest difficulty isn't osu!standard (taiko, mania…): the hardest that is
+				if (content && !difficultyChosen(current) && !$standardPicks[String(current.id)]) {
+					const found = await hardestStandard(current, difficulty);
+					if (cancelled) return;
+					if (found) {
+						standardPicks.update((picks) => ({ ...picks, [String(current.id)]: found }));
+						return;
+					}
+				}
 				message = content ? 'Gameplay is only for osu!standard maps' : "Couldn't load the beatmap";
 				return;
 			}

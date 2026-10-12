@@ -7,6 +7,7 @@
 	import {
 		gameplayMode,
 		chosenMapId,
+		standardPicks,
 		chooseDifficulty,
 		difficulties,
 		leaderboard,
@@ -26,7 +27,9 @@
 	let widgetsShown = $derived($userSettings.settings?.widgetsInGameplay ?? true);
 	let root = $state(null);
 	let song = $derived($currentSong.song);
-	let mapId = $derived(song && ($userSettings.settings?.gameplayDifficulty, chosenMapId(song)));
+	let mapId = $derived(
+		song && ($userSettings.settings?.gameplayDifficulty, $standardPicks, chosenMapId(song))
+	);
 	let key = $derived(song ? `${song.id}:${mapId}` : null);
 	/** @type {import('#lib/gameplay/play.ts').GameplayMode} */
 	const AUTO = { kind: 'auto' };

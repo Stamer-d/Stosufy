@@ -3,6 +3,7 @@
 
 import { get } from 'svelte/store';
 import { userSettings, updateUserSettings } from './user';
+import { fadeNode, onRoute } from './equalizer';
 
 interface Levels {
 	/** Loudness normalization of the song */
@@ -26,7 +27,72 @@ function volumeSetting() {
 function apply(audio: HTMLAudioElement) {
 	const { gain, fade } = levels.get(audio) ?? { gain: 1, fade: 1 };
 	const normalize = get(userSettings).settings?.normalize ?? true;
-	audio.volume = Math.min(1, Math.max(0, volumeSetting() * (normalize ? gain : 1) * fade));
+	// Routed songs fade on the audio thread (smooth even while the app is busy), the
+	// element's volume is only the user's volume and the normalization
+	const node = fadeNode(audio);
+	const level = volumeSetting() * (normalize ? gain : 1);
+	if (node) {
+		audio.volume = Math.min(1, Math.max(0, level));
+		if (!fading.has(audio)) node.gain.setTargetAtTime(fade, node.context.currentTime, 0.01);
+	} else audio.volume = Math.min(1, Math.max(0, level * fade));
+}
+
+// A song routed in the middle of a fade starts where the fade is
+onRoute((audio) => levels.get(audio as HTMLAudioElement)?.fade ?? 1);
+
+/** Songs whose fade is scheduled on the audio thread right now */
+const fading = new Set<HTMLAudioElement>();
+
+/**
+ * Fades a song from one level to another along a curve (0–1 → 0–1) over a time: on the
+ * audio thread when the song is routed, else in small steps of its volume. Resolves when done.
+ */
+export function fadeTo(
+	audio: HTMLAudioElement,
+	to: number,
+	ms: number,
+	curve: (t: number) => number = (t) => t
+): Promise<void> {
+	const from = levels.get(audio)?.fade ?? 1;
+	const node = fadeNode(audio);
+	return new Promise((resolve) => {
+		if (node) {
+			const ctx = node.context;
+			const steps = 64;
+			const values = new Float32Array(steps);
+			for (let i = 0; i < steps; i++) values[i] = from + (to - from) * curve(i / (steps - 1));
+			fading.add(audio);
+			node.gain.cancelScheduledValues(ctx.currentTime);
+			node.gain.setValueAtTime(from, ctx.currentTime);
+			node.gain.setValueCurveAtTime(values, ctx.currentTime + 0.005, Math.max(0.02, ms / 1000));
+			levels.set(audio, { gain: 1, ...levels.get(audio), fade: to });
+			setTimeout(() => {
+				fading.delete(audio);
+				resolve();
+			}, ms + 20);
+			return;
+		}
+		const start = performance.now();
+		const timer = setInterval(() => {
+			const progress = Math.min(1, (performance.now() - start) / ms);
+			update(audio, { fade: from + (to - from) * curve(progress) });
+			if (progress < 1) return;
+			clearInterval(timer);
+			resolve();
+		}, 30);
+	});
+}
+
+/** Stops a scheduled fade where it is (a crossfade cut short) */
+export function holdFade(audio: HTMLAudioElement | null | undefined, fade: number) {
+	if (!audio) return;
+	const node = fadeNode(audio);
+	fading.delete(audio);
+	if (node) {
+		node.gain.cancelScheduledValues(node.context.currentTime);
+		node.gain.setValueAtTime(fade, node.context.currentTime);
+	}
+	update(audio, { fade });
 }
 
 /** Applies changed settings (e.g. normalization turned off) to the playing songs */

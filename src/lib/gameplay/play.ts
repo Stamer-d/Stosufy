@@ -28,9 +28,12 @@ export interface Difficulty {
 /** The difficulty the gameplay and hitsounds use: the chosen one, else the song's own */
 /** The hardest osu!standard difficulty of a song: what the gameplay shows unless one is chosen */
 function hardestMapId(song: MapSet): string | null {
-	const maps = (song.beatmaps ?? []).filter(
-		(map: any) => map.mode == null || map.mode === 'osu' || map.mode_int === 0
-	);
+	// Known osu!standard ones first; maps that don't say their mode only if none do
+	const all = song.beatmaps ?? [];
+	const standard = all.filter((map: any) => map.mode === 'osu' || map.mode_int === 0);
+	const maps = standard.length
+		? standard
+		: all.filter((map: any) => map.mode == null && map.mode_int == null);
 	let hardest = maps[0] ?? song.beatmaps?.[0];
 	for (const map of maps)
 		if ((Number(map.difficulty_rating) || 0) > (Number(hardest?.difficulty_rating) || 0))
@@ -38,10 +41,21 @@ function hardestMapId(song: MapSet): string | null {
 	return hardest?.id != null ? String(hardest.id) : null;
 }
 
+/**
+ * Songs whose hardest difficulty turned out not to be osu!standard (taiko, mania…): the
+ * hardest one that is (found by the gameplay when it loads the song)
+ */
+export const standardPicks = writable<Record<string, string>>({});
+
 export function chosenMapId(song: MapSet | null | undefined): string | null {
 	if (!song) return null;
 	const chosen = get(userSettings).settings?.gameplayDifficulty?.[String(song.id)];
-	return chosen ?? hardestMapId(song);
+	return chosen ?? get(standardPicks)[String(song.id)] ?? hardestMapId(song);
+}
+
+/** Whether the user chose a difficulty for the song */
+export function difficultyChosen(song: MapSet) {
+	return get(userSettings).settings?.gameplayDifficulty?.[String(song.id)] != null;
 }
 
 export function chooseDifficulty(song: MapSet, mapId: string | null) {

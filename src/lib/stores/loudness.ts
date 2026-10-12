@@ -50,21 +50,29 @@ export async function loudnessOf(decoded: AudioBuffer): Promise<number | null> {
 		source.start();
 		const weighted = await context.startRendering();
 
-		// Mean square of overlapping 400 ms blocks, summed over the channels
+		// Mean square of overlapping 400 ms blocks, summed over the channels. The squares are
+		// added up once (running sums), and the work pauses now and then so the app stays smooth
 		const blockLength = Math.round(BLOCK_SECONDS * weighted.sampleRate);
 		const hop = Math.round(blockLength * (1 - BLOCK_OVERLAP));
-		const channels = Array.from({ length: weighted.numberOfChannels }, (_, i) =>
-			weighted.getChannelData(i)
-		);
-		const blocks: number[] = [];
-		for (let start = 0; start + blockLength <= weighted.length; start += hop) {
-			let energy = 0;
-			for (const data of channels) {
+		const hops = Math.floor(weighted.length / hop);
+		// The energy of each hop-long piece, all channels together
+		const pieces = new Float64Array(hops);
+		for (let c = 0; c < weighted.numberOfChannels; c++) {
+			const data = weighted.getChannelData(c);
+			for (let h = 0; h < hops; h++) {
 				let sum = 0;
-				for (let i = start; i < start + blockLength; i++) sum += data[i] * data[i];
-				energy += sum / blockLength;
+				const end = (h + 1) * hop;
+				for (let i = h * hop; i < end; i++) sum += data[i] * data[i];
+				pieces[h] += sum;
+				if (h % 400 === 399) await new Promise((resolve) => setTimeout(resolve, 0));
 			}
-			blocks.push(energy);
+		}
+		const perBlock = Math.round(blockLength / hop);
+		const blocks: number[] = [];
+		for (let h = 0; h + perBlock <= hops; h++) {
+			let energy = 0;
+			for (let k = 0; k < perBlock; k++) energy += pieces[h + k];
+			blocks.push(energy / blockLength);
 		}
 		const loudness = (energy: number) => -0.691 + 10 * Math.log10(energy);
 		const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;

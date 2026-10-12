@@ -112,10 +112,12 @@
 				in:fade={{ duration: 700 }}
 			/>
 		{/each}
-		{#if video}
-			<BeatmapVideo {setId} class={imageClass} />
-		{/if}
 	</div>
+	<!-- Outside the beat's scaling: videos under a moving transform were drawn in the wrong
+	     place by the webview's video overlays -->
+	{#if video}
+		<BeatmapVideo {setId} class={imageClass} />
+	{/if}
 	{#if pulsing}
 		<!-- Lights up on the beat in kiai time -->
 		<div

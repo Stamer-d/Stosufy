@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { downloadBeatmap, mapDataStore, saveMapData } from './data';
 import { updateCurrentQueue, updateUserSettings, userSettings } from './user';
 import { applyMod, prepareBeats, startBeats } from './mods';
-import { track, untrack, setFade, setGain, rampGain } from './mixer';
+import { track, untrack, setFade, setGain, rampGain, fadeTo, refresh } from './mixer';
 import { measureLoudness, gainFor } from './loudness';
 import { sameSong } from '../tracks';
 import { offline } from './network';
@@ -79,19 +79,17 @@ function normalize(
 		return;
 	}
 	measurements = measurements.then(async () => {
+		// Not while the song starts (its gameplay and the switch are loading then)
+		await new Promise((resolve) => setTimeout(resolve, 4000));
 		const loudness = await measureLoudness(file);
 		if (loudness == null) return;
-		mapDataStore.update((data) => {
-			const set = data[setId];
-			if (!set) return data;
-			const beatmaps = Object.fromEntries(
-				Object.entries(set.beatmaps).map(([id, map]) => [
-					id,
-					map.audioFile === audioFile ? { ...map, loudness } : map
-				])
-			);
-			return { ...data, [setId]: { ...set, beatmaps } };
-		});
+		// Kept in the stored set without updating the whole library (that redraws a lot);
+		// it's only needed the next time the song plays
+		const set = get(mapDataStore)[setId];
+		if (set) {
+			for (const map of Object.values(set.beatmaps))
+				if (map.audioFile === audioFile) map.loudness = loudness;
+		}
 		await saveMapData();
 		rampGain(audio, gainFor(loudness));
 	});
@@ -122,32 +120,18 @@ function release(audio: HTMLAudioElement) {
 		return;
 	}
 	releasing.add(audio);
-	const from = audio.volume;
-	const start = performance.now();
-	const timer = setInterval(() => {
-		const progress = Math.min(1, (performance.now() - start) / SWITCH_OUT_MS);
-		// Straight on the element's volume: the levels may be changed for it no more
-		audio.volume = from * (1 - progress) ** 2;
-		if (progress < 1) return;
-		clearInterval(timer);
+	fadeTo(audio, 0, SWITCH_OUT_MS, (t) => 1 - (1 - t) ** 2).then(() => {
 		audio.pause();
 		untrack(audio);
 		releasing.delete(audio);
-	}, 30);
+	});
 }
 
 /** Fades a song in once it plays */
 function fadeInWhenPlaying(audio: HTMLAudioElement) {
 	audio.addEventListener(
 		'playing',
-		() => {
-			const start = performance.now();
-			const timer = setInterval(() => {
-				const progress = Math.min(1, (performance.now() - start) / SWITCH_IN_MS);
-				setFade(audio, Math.sin((progress * Math.PI) / 2));
-				if (progress === 1) clearInterval(timer);
-			}, 30);
-		},
+		() => fadeTo(audio, 1, SWITCH_IN_MS, (t) => Math.sin((t * Math.PI) / 2)),
 		{ once: true }
 	);
 }
@@ -611,11 +595,11 @@ export function setPlaybackMod(mod: PlaybackMod) {
 // --- Crossfade --------------------------------------------------------------------------
 
 let fadingOut: HTMLAudioElement | null = null;
-let fadeTimer: ReturnType<typeof setInterval> | null = null;
+/** Counts the crossfades: one that's ended early doesn't stop the song after it */
+let crossfadeId = 0;
 
 function finishCrossfade() {
-	if (fadeTimer) clearInterval(fadeTimer);
-	fadeTimer = null;
+	crossfadeId++;
 	if (fadingOut) {
 		fadingOut.pause();
 		untrack(fadingOut);
@@ -638,13 +622,14 @@ async function startCrossfade(audio: HTMLAudioElement, seconds: number) {
 		fadingOut = null;
 		return;
 	}
-	const start = performance.now();
-	fadeTimer = setInterval(() => {
-		const progress = Math.min(1, (performance.now() - start) / (seconds * 1000));
-		setFade(audio, Math.cos((progress * Math.PI) / 2));
-		setFade(next, Math.sin((progress * Math.PI) / 2));
-		if (progress === 1) finishCrossfade();
-	}, 50);
+	const id = ++crossfadeId;
+	const ms = seconds * 1000;
+	// On the audio thread (smooth even while the next song's gameplay loads)
+	fadeTo(audio, 0, ms, (t) => 1 - Math.cos((t * Math.PI) / 2));
+	if (next) fadeTo(next, 1, ms, (t) => Math.sin((t * Math.PI) / 2));
+	setTimeout(() => {
+		if (id === crossfadeId) finishCrossfade();
+	}, ms + 30);
 }
 
 if (typeof window !== 'undefined') {
@@ -682,8 +667,10 @@ if (typeof window !== 'undefined') {
 
 	// The equalizer: songs go through it once it's on (and stay, flat it changes nothing)
 	let eqKey = '';
+	// Every song plays through the audio graph (its fades run on the audio thread there; with
+	// the equalizer off the graph changes nothing)
 	const routeSong = () => {
-		if (eqSettings().on) attach(get(songQueue).audio);
+		attach(get(songQueue).audio).then((source) => source && refresh());
 	};
 	// After the modules are loaded (user.ts and this one import each other)
 	setTimeout(() => {
