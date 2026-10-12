@@ -1,0 +1,93 @@
+name: iOS
+permissions:
+  contents: write
+on:
+  workflow_dispatch:
+  # After each release (release.yml), its IPA
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  # Test builds of the work branch
+  push:
+    branches: ['claude/inspiring-lamport-g69unm']
+
+# Builds the iPhone app as an unsigned IPA and attaches it to the release of the same version
+# (or keeps it as a build artifact). Without a paid Apple developer account it can't be
+# signed here: it's installed with AltStore or Sideloadly, which sign it with your Apple ID.
+jobs:
+  ios:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: tauri-ios
+
+      - name: Install the tools
+        run: |
+          brew install xcodegen || true
+          npm ci
+
+      - name: Create .env file
+        run: echo "VITE_CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" >> .env
+
+      - name: Create the Xcode project
+        run: |
+          npx tauri ios init --ci
+          npx tauri icon src-tauri/icons/icon.png
+          ls src-tauri/gen/apple
+
+      - name: Build the app (unsigned)
+        run: |
+          npm run build
+          cd src-tauri/gen/apple
+          PROJECT=$(ls -d *.xcodeproj | head -1)
+          SCHEME=$(basename "$PROJECT" .xcodeproj)_iOS
+          echo "Project $PROJECT, scheme $SCHEME"
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            -arch arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package the IPA
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          APP=$(find src-tauri/gen/apple/build/Build/Products -name '*.app' -type d | head -1)
+          echo "App: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qr "Stosufy-$VERSION.ipa" Payload
+          echo "IPA=Stosufy-$VERSION.ipa" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Keep the IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.IPA }}
+          path: ${{ env.IPA }}
+
+      - name: Attach it to the release
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "Stosufy-v$VERSION" > /dev/null 2>&1; then
+            gh release upload "Stosufy-v$VERSION" "$IPA" --clobber
+          else
+            echo "::notice::No release Stosufy-v$VERSION yet: the IPA is in the build artifacts"
+          fi
