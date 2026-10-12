@@ -193,7 +193,11 @@
 						class="h-8 px-3 rounded-full text-xs font-black cursor-pointer ring-1 transition {$dj.recording
 							? 'bg-red-500 ring-red-300 text-white'
 							: 'bg-white/[0.06] ring-white/10 text-white/80 hover:text-white'}"
-						onclick={() => ($dj.recording ? saveRecording() : mixer.startRecording())}
+						onclick={() => {
+							if ($dj.recording) saveRecording();
+							else if (!mixer.startRecording())
+								showToast("Recording mixes isn't possible here", 'icon-[mingcute--warning-line]');
+						}}
 					>
 						<span
 							class="inline-block size-2 rounded-full bg-current mr-1 {$dj.recording

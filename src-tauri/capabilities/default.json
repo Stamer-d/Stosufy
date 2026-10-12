@@ -93,7 +93,12 @@
 		"dialog:allow-open",
 		{
 			"identifier": "fs:allow-home-read",
-			"allow": [{ "path": "$HOME/**" }]
+			"allow": [{ "path": "$HOME/**" }],
+			"deny": [
+				{ "path": "$HOME/.ssh/**" },
+				{ "path": "$HOME/.gnupg/**" },
+				{ "path": "$HOME/.aws/**" }
+			]
 		},
 		{
 			"identifier": "fs:allow-home-write",

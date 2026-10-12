@@ -15,6 +15,9 @@
 				"schemes": ["stosufynew"]
 			}
 		},
+		"fs": {
+			"requireLiteralLeadingDot": false
+		},
 		"updater": {
 			"windows": {
 				"installerType": "nsis"
@@ -40,7 +43,11 @@
 			"csp": null,
 			"assetProtocol": {
 				"enable": true,
-				"scope": ["$HOME/**"]
+				"scope": {
+					"allow": ["$HOME/**"],
+					"deny": ["$HOME/.ssh/**", "$HOME/.gnupg/**", "$HOME/.aws/**"],
+					"requireLiteralLeadingDot": false
+				}
 			}
 		}
 	},

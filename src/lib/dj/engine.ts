@@ -188,7 +188,8 @@ async function readAudio(path: string): Promise<ArrayBuffer> {
 let context: AudioContext | null = null;
 function audioContext() {
 	context ??= new AudioContext({ latencyHint: 'interactive' });
-	if (context.state === 'suspended') context.resume();
+	// Suspended, or interrupted (Safari's WebKit, e.g. after the Mac slept): on again
+	if (context.state !== 'running' && context.state !== 'closed') context.resume().catch(() => {});
 	return context;
 }
 
@@ -979,7 +980,8 @@ class Mixer {
 	private bus!: GainNode;
 	private recordGain!: GainNode;
 	readonly analyser: AnalyserNode;
-	private stream: MediaStreamAudioDestinationNode;
+	/** What recordings take (null where the web view can't record) */
+	private stream: MediaStreamAudioDestinationNode | null = null;
 	private recorder: MediaRecorder | null = null;
 	private chunks: Blob[] = [];
 	private recordStart = 0;
@@ -1016,7 +1018,6 @@ class Mixer {
 		limiter.release.value = 0.15;
 		this.analyser = ctx.createAnalyser();
 		this.analyser.fftSize = 1024;
-		this.stream = ctx.createMediaStreamDestination();
 		bus.connect(this.master).connect(limiter);
 		limiter.connect(ctx.destination);
 		// The meter and recordings: the mix itself, not the app's (small) volume
@@ -1029,7 +1030,16 @@ class Mixer {
 		recordLimiter.release.value = 0.15;
 		bus.connect(this.recordGain).connect(recordLimiter);
 		recordLimiter.connect(this.analyser);
-		recordLimiter.connect(this.stream);
+		// Not in every web view: the DJ mode works without, only recording doesn't
+		try {
+			if (typeof MediaRecorder !== 'undefined') {
+				this.stream = ctx.createMediaStreamDestination();
+				recordLimiter.connect(this.stream);
+			}
+		} catch (error) {
+			console.warn("Recording mixes isn't possible here:", error);
+			this.stream = null;
+		}
 		const reverb = impulse(ctx);
 		const changed = () => this.emit();
 		this.decks = {
@@ -2401,20 +2411,34 @@ class Mixer {
 
 	// --- Recording ---------------------------------------------------------------------------
 
+	/** Whether mixes can be recorded here */
+	get canRecord() {
+		return !!this.stream;
+	}
+
+	/** Starts recording the mix; false where that isn't possible */
 	startRecording() {
-		if (this.recorder) return;
+		if (this.recorder) return true;
+		if (!this.stream) return false;
 		const type = [
 			'audio/webm;codecs=opus',
 			'audio/ogg;codecs=opus',
 			'audio/webm',
 			'audio/mp4'
 		].find((t) => MediaRecorder.isTypeSupported(t));
-		this.chunks = [];
-		this.recorder = new MediaRecorder(this.stream.stream, type ? { mimeType: type } : undefined);
-		this.recorder.ondataavailable = (event) => event.data.size && this.chunks.push(event.data);
-		this.recorder.start(1000);
+		try {
+			this.chunks = [];
+			this.recorder = new MediaRecorder(this.stream.stream, type ? { mimeType: type } : undefined);
+			this.recorder.ondataavailable = (event) => event.data.size && this.chunks.push(event.data);
+			this.recorder.start(1000);
+		} catch (error) {
+			console.error('Could not start recording the mix:', error);
+			this.recorder = null;
+			return false;
+		}
 		this.recordStart = this.ctx.currentTime;
 		this.emit();
+		return true;
 	}
 
 	/** Stops recording; the mix as a file */

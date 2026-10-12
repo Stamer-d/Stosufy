@@ -3,7 +3,7 @@
 
 import { get } from 'svelte/store';
 import { userSettings, updateUserSettings } from './user';
-import { fadeNode, onRoute } from './equalizer';
+import { fadeNode, volumeNode, onRoute } from './equalizer';
 
 interface Levels {
 	/** Loudness normalization of the song */
@@ -24,21 +24,32 @@ function volumeSetting() {
 	return settings?.muted ? 0 : (settings?.volume ?? DEFAULT_VOLUME);
 }
 
-function apply(audio: HTMLAudioElement) {
-	const { gain, fade } = levels.get(audio) ?? { gain: 1, fade: 1 };
+/** The user's volume × the song's normalization (0–1) */
+function levelOf(audio: HTMLAudioElement) {
+	const gain = levels.get(audio)?.gain ?? 1;
 	const normalize = get(userSettings).settings?.normalize ?? true;
-	// Routed songs fade on the audio thread (smooth even while the app is busy), the
-	// element's volume is only the user's volume and the normalization
+	return Math.min(1, Math.max(0, volumeSetting() * (normalize ? gain : 1)));
+}
+
+function apply(audio: HTMLAudioElement) {
+	const fade = levels.get(audio)?.fade ?? 1;
+	// Routed songs fade on the audio thread (smooth even while the app is busy) and get the
+	// user's volume and the normalization there too (WebKit ignores the element's volume then)
 	const node = fadeNode(audio);
-	const level = volumeSetting() * (normalize ? gain : 1);
-	if (node) {
-		audio.volume = Math.min(1, Math.max(0, level));
+	const volume = volumeNode(audio);
+	const level = levelOf(audio);
+	if (node && volume) {
+		audio.volume = 1;
+		volume.gain.setTargetAtTime(level, volume.context.currentTime, 0.01);
 		if (!fading.has(audio)) node.gain.setTargetAtTime(fade, node.context.currentTime, 0.01);
-	} else audio.volume = Math.min(1, Math.max(0, level * fade));
+	} else audio.volume = Math.min(1, level * fade);
 }
 
 // A song routed in the middle of a fade starts where the fade is
-onRoute((audio) => levels.get(audio as HTMLAudioElement)?.fade ?? 1);
+onRoute((audio) => ({
+	volume: levelOf(audio as HTMLAudioElement),
+	fade: levels.get(audio as HTMLAudioElement)?.fade ?? 1
+}));
 
 /** Songs whose fade is scheduled on the audio thread right now */
 const fading = new Set<HTMLAudioElement>();

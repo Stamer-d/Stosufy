@@ -36,10 +36,20 @@ let preamp: GainNode | null = null;
 const sources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
 /** Each routed song's own fade (crossfades and switches), on the audio thread */
 const fades = new WeakMap<HTMLMediaElement, GainNode>();
+/**
+ * Each routed song's volume (the user's volume × its normalization). WebKit (macOS, Linux)
+ * ignores an element's own volume once it plays through the graph, so it's applied here.
+ */
+const volumes = new WeakMap<HTMLMediaElement, GainNode>();
 
 /** A routed song's fade gain, or null if it plays straight (then fades step its volume) */
 export function fadeNode(audio: HTMLMediaElement | null | undefined) {
 	return (audio && fades.get(audio)) || null;
+}
+
+/** A routed song's volume gain, or null if it plays straight (then its own volume counts) */
+export function volumeNode(audio: HTMLMediaElement | null | undefined) {
+	return (audio && volumes.get(audio)) || null;
 }
 
 /** The audio context the songs play through (shared with the visualizer) */
@@ -76,9 +86,15 @@ export async function attach(audio: HTMLMediaElement | null | undefined) {
 		if (ctx.state !== 'running') return null;
 		if (sources.has(audio)) return sources.get(audio)!;
 		const source = ctx.createMediaElementSource(audio);
+		// The volume moves from the element into the graph
+		const start = routedLevels(audio);
+		const volume = ctx.createGain();
+		volume.gain.value = start.volume;
+		audio.volume = 1;
 		const fade = ctx.createGain();
-		fade.gain.value = initialFade(audio);
-		source.connect(fade).connect(input!);
+		fade.gain.value = start.fade;
+		source.connect(volume).connect(fade).connect(input!);
+		volumes.set(audio, volume);
 		fades.set(audio, fade);
 		sources.set(audio, source);
 		return source;
@@ -88,10 +104,13 @@ export async function attach(audio: HTMLMediaElement | null | undefined) {
 	}
 }
 
-/** Where a song's fade is when it gets routed (set by the mixer) */
-let initialFade: (audio: HTMLMediaElement) => number = () => 1;
-export function onRoute(get: (audio: HTMLMediaElement) => number) {
-	initialFade = get;
+/** A song's volume and where its fade is when it gets routed (set by the mixer) */
+let routedLevels: (audio: HTMLMediaElement) => { volume: number; fade: number } = (audio) => ({
+	volume: audio.volume,
+	fade: 1
+});
+export function onRoute(get: (audio: HTMLMediaElement) => { volume: number; fade: number }) {
+	routedLevels = get;
 }
 
 export function eqSettings(): EqSettings {
