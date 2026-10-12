@@ -25,6 +25,8 @@ export interface SongAnalysis {
 	outroStart: number;
 	/** How loud the song's peaks are (0–1, like the bars' energy) */
 	peakLevel: number;
+	/** The loudest bar's level (RMS of the audio): the bars' energies times this are levels */
+	loudest: number;
 	/** The end of the last bar that's still heard */
 	lastBar: number;
 	/** The first downbeat that's heard */
@@ -64,6 +66,14 @@ export function kickIn(a: SongAnalysis, from: number) {
 	)?.start;
 	const at = Math.min(peak, loud ?? Infinity);
 	return Number.isFinite(at) ? at : a.introEnd;
+}
+
+/** How loud a stretch of a song is (RMS of the audio, the same scale for every song) */
+export function levelBetween(a: SongAnalysis, from: number, to: number) {
+	const inside = a.bars.filter((b) => b.start >= from - 0.01 && b.start < to - 0.01);
+	if (!inside.length) return null;
+	const power = inside.reduce((sum, b) => sum + b.energy * b.energy, 0) / inside.length;
+	return Math.sqrt(power) * a.loudest;
 }
 
 const yieldNow = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -301,6 +311,7 @@ export async function analyzeSong(
 		bars,
 		drops,
 		peakLevel: 1,
+		loudest,
 		introEnd: 0,
 		outroStart: 0,
 		lastBar,

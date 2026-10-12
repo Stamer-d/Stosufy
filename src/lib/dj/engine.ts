@@ -33,6 +33,7 @@ import {
 	phraseFloor,
 	phraseRound,
 	kickIn,
+	levelBetween,
 	PHRASE_BARS,
 	type SongAnalysis
 } from './analysis';
@@ -206,7 +207,8 @@ export class Deck {
 	grid: Grid = [];
 	peaks: Peaks | null = null;
 	/** Loudness normalization */
-	private normalize = 1;
+	/** The loudness normalization's factor for this song */
+	normalize = 1;
 	/** The song's structure and key (see analysis.ts), once worked out */
 	analysis: SongAnalysis | null = null;
 
@@ -928,6 +930,11 @@ export interface TransitionState {
 	swap?: number;
 	/** Echo out: the new song comes in on the one after the old one's last beat */
 	onOne?: boolean;
+	/** Pro blend with filters: the new one opens up (low-pass), the old one thins out */
+	filter?: boolean;
+	/** Pro blend: the new song's level while it comes in (below 1: it's louder than the old
+	 * one was; it rides up to its own level after the mix) */
+	ride?: number;
 }
 
 export interface AutoDjState {
@@ -1276,23 +1283,37 @@ class Mixer {
 			// The new song so it gets going right on the swap, if its intro is long enough
 			const lead = body - bars * b.bar;
 			const inPoint = userPlaced ? placed : lead >= from0 - 0.05 ? beatRound(to.grid, lead) : from0;
-			const how = drums
-				? keys === 0
-					? 'the keys clash: only its drums'
-					: 'its highs first'
-				: 'its intro';
+			// The filter blend: the new song comes in muffled (low-pass) and opens up into the
+			// swap while the old one thins out (high-pass). For a new song without an intro (it
+			// would be too much as it is), and, every other time, into a drop: it builds up to
+			// it. With keys that clash the EQ blend with only its drums is cleaner
+			const swapB = inPoint + bars * b.bar;
+			const intoPeak = b.drops.some((d) => Math.abs(d.start - swapB) < b.bar * 0.6);
+			const songs = Number(from.state.song?.id ?? 0) + Number(to.state.song?.id ?? 0);
+			const filter = keys !== 0 && (introBars < 8 || (intoPeak && songs % 2 === 0));
+			const how = filter
+				? intoPeak
+					? 'it opens up into its drop'
+					: 'it opens up'
+				: drums
+					? keys === 0
+						? 'the keys clash: only its drums'
+						: 'its highs first'
+					: 'its intro';
 			return {
 				type: 'blend' as TransitionType,
 				bars,
 				startAt,
 				inPoint,
 				fit,
-				drums,
+				drums: drums && !filter,
+				filter,
+				intoPeak,
 				swap: 1,
 				onOne: false,
 				rampTo,
 				why:
-					`Blend${where} over ${bars} bars (${how}), the basslines swap on the one` +
+					`${filter ? 'Filter blend' : 'Blend'}${where} over ${bars} bars (${how}), the basslines swap on the one` +
 					(meet ? ` · the tempos meet at ${Math.round(shared)} BPM` : '')
 			};
 		};
@@ -1312,6 +1333,8 @@ class Mixer {
 					swap: 1,
 					onOne: false,
 					rampTo: null,
+					filter: false,
+					intoPeak: false,
 					why: 'Quick blend: the song is nearly over'
 				};
 		}
@@ -1337,6 +1360,8 @@ class Mixer {
 				swap: 1,
 				onOne: true,
 				rampTo: null as number | null,
+				filter: false,
+				intoPeak: false,
 				why: slam
 					? 'Echo out after the drop, straight into the next drop'
 					: !canBlend
@@ -1368,6 +1393,8 @@ class Mixer {
 		swap?: number;
 		onOne?: boolean;
 		rampTo?: number | null;
+		filter?: boolean;
+		intoPeak?: boolean;
 		why?: string;
 	} {
 		const fit = this.compat(from, to);
@@ -1459,6 +1486,24 @@ class Mixer {
 		} else if (match && sync) {
 			to.alignTo(from, match.factor === 1);
 		}
+		// The new song as loud as the old one was: one much louder (a quiet outro, a loud verse)
+		// comes in at the old one's level and rides up to its own after the mix
+		let ride = 1;
+		if (plan.type === 'blend' && from.analysis && to.analysis) {
+			const a = from.analysis;
+			const b = to.analysis;
+			const swapIn = plan.startAt + plan.bars * a.bar;
+			const before = Math.max(
+				levelBetween(a, plan.startAt - 4 * a.bar, plan.startAt) ?? 0,
+				levelBetween(a, swapIn - 4 * a.bar, swapIn) ?? 0
+			);
+			const swapB = plan.inPoint + plan.bars * b.bar;
+			const next = levelBetween(b, swapB, swapB + 4 * b.bar);
+			if (before > 0 && next) {
+				const ratio = (next * to.normalize) / (before * from.normalize);
+				if (ratio > 1.12) ride = Math.max(0.5, 1 / ratio);
+			}
+		}
 		// A blend goes on a bar after the swap: the old song fades out under the new one's one
 		const after = plan.type === 'blend' ? 1 : 0;
 		const length = plan.type === 'cut' ? beatSeconds : (plan.bars + after) * meter * beatSeconds;
@@ -1489,9 +1534,17 @@ class Mixer {
 			beat: beatSeconds,
 			drums: plan.drums,
 			swap: after ? plan.bars / (plan.bars + after) : plan.swap,
-			onOne: plan.onOne
+			onOne: plan.onOne,
+			ride,
+			filter: plan.filter
 		};
 		// The riser is an effect for the hand-picked styles, a pro blend doesn't need one
+		// A filter blend into a drop builds up with a riser over its last bars
+		if (this.hype && plan.type === 'blend' && plan.filter && plan.intoPeak && plan.bars >= 8)
+			this.riser(
+				start + (plan.bars - 4) * meter * beatSeconds,
+				start + plan.bars * meter * beatSeconds
+			);
 		if (this.hype && plan.bars >= 4 && !['cut', 'blend', 'echo'].includes(plan.type)) {
 			// Up to the swap (the middle) of a bass swap, else most of the mix
 			const until =
@@ -1617,39 +1670,87 @@ class Mixer {
 				// The new song's intro under the old one's outro: its highs early, its mids
 				// (none with clashing keys) later, its bass not before the swap. The old one keeps
 				// its bass to the swap; its mids and highs go (and it thins out) in its last
-				// phrase. On the swap (the drop) the basslines change places on the one.
+				// phrase. On the swap the basslines change places on the one, the old song's last
+				// beat rings on as an echo (the song itself cut) and fades over the next bar.
+				// The levels so the two together are never louder than one: the new song comes
+				// in lower, the old one goes down as it comes up, and a new song louder than the
+				// old one was comes in at the old one's level (see mix: ride)
 				const swapAt = t.swap ?? 1;
-				const full = was[t.to]?.volume ?? 1;
+				const ride = t.ride ?? 1;
+				const full = (was[t.to]?.volume ?? 1) * ride;
+				const fromVolume = was[t.from]?.volume ?? 1;
 				const barPart = beat * 4;
 				const fadeFrom = Math.max(0, swapAt - Math.min(0.5, barPart * 8));
 				const swapped = p >= swapAt - beat * 0.05;
+				const after = (p - swapAt) / beat;
+				if (t.filter) {
+					// Filter blend: the new song opens from muffled to full by the swap (slowly
+					// at first, faster towards it), the old one thins out over the last half
+					const open = clamp(p / swapAt);
+					to.set({
+						volume: swapped
+							? lerp(full * 0.85, full, after / 2)
+							: lerp(full * 0.75, full * 0.9, open),
+						filter: swapped ? 0 : -0.8 * (1 - open * open),
+						eq: { ...toEq, low: swapped ? lerp(-12, toEq.low, after * 2) : EQ_MIN }
+					});
+					const thin = clamp((p - swapAt * 0.5) / (swapAt * 0.5));
+					from.set({
+						volume: lerp(fromVolume, fromVolume * 0.9, thin),
+						filter: lerp(was[t.from]?.filter ?? 0, 0.5, thin * thin * thin),
+						eq: { ...fromEq, low: swapped ? EQ_MIN : fromEq.low },
+						echo:
+							p >= swapAt - beat
+								? lerp(0, 0.45, (p - (swapAt - beat)) / (beat * 0.5))
+								: (was[t.from]?.echo ?? 0)
+					});
+					if (swapped && !t.stage) {
+						t.stage = 1;
+						from.setDry(0);
+					}
+					this.setCrossfader(
+						swapped
+							? lerp(0.5, toSide, (p - swapAt) / Math.max(0.0001, 1 - swapAt))
+							: lerp(fromSide, 0.5, p / Math.max(0.06, barPart * 2))
+					);
+					break;
+				}
 				to.set({
-					// A little lower until the swap: two songs at once add up
-					volume: swapped ? full : lerp(full * 0.8, full * 0.9, p / swapAt),
+					volume: swapped
+						? lerp(full * 0.9, full, after / 2)
+						: lerp(full * 0.65, full * 0.9, p / swapAt),
 					eq: {
 						high: lerp(-18, toEq.high, p / 0.35),
-						mid: t.drums ? (swapped ? toEq.mid : EQ_MIN) : lerp(-12, toEq.mid, p / 0.6),
-						low: swapped ? toEq.low : EQ_MIN
+						mid: t.drums
+							? swapped
+								? lerp(-12, toEq.mid, after)
+								: EQ_MIN
+							: lerp(-12, toEq.mid, p / 0.6),
+						// The bass on the one (in half a beat: no click)
+						low: swapped ? lerp(-12, toEq.low, after * 2) : EQ_MIN
 					}
 				});
 				const fade = (p - fadeFrom) / Math.max(0.0001, swapAt - fadeFrom);
-				// The old song's last beat before the swap goes into its echo: its last word rings
-				// on over the new song's one while it fades out over the bar after the swap
 				const throwAt = swapAt - beat;
 				from.set({
+					// Only a little down before the swap (the new song has no bass yet: the two
+					// together stay as loud as one); it goes on the swap itself
+					volume: lerp(fromVolume, fromVolume * 0.9, (p - 0.5) / Math.max(0.0001, swapAt - 0.5)),
 					eq: {
 						low: swapped ? EQ_MIN : fromEq.low,
-						// Not all the way down: its last word still carries into the echo
-						mid: lerp(fromEq.mid, -9, fade),
-						high: lerp(fromEq.high, -12, fade)
+						mid: lerp(fromEq.mid, -4, fade),
+						high: lerp(fromEq.high, -6, fade)
 					},
-					filter: swapped
-						? lerp(0.3, 0.6, (p - swapAt) / Math.max(0.0001, 1 - swapAt))
-						: lerp(was[t.from]?.filter ?? 0, 0.3, (p - (swapAt - barPart * 2)) / (barPart * 2)),
-					echo: p >= throwAt ? lerp(0, 0.7, (p - throwAt) / (beat * 0.5)) : (was[t.from]?.echo ?? 0)
+					filter: lerp(was[t.from]?.filter ?? 0, 0.15, (p - (swapAt - barPart)) / barPart),
+					echo:
+						p >= throwAt ? lerp(0, 0.45, (p - throwAt) / (beat * 0.5)) : (was[t.from]?.echo ?? 0)
 				});
-				// The new song up over its first bars; after the swap the old one (and its echo)
-				// fades over a bar
+				// On the one the old song itself goes: only its echo rings on
+				if (swapped && !t.stage) {
+					t.stage = 1;
+					from.setDry(0);
+				}
+				// The new song up over its first bars; after the swap the old one's echo fades
 				this.setCrossfader(
 					swapped
 						? lerp(0.5, toSide, (p - swapAt) / Math.max(0.0001, 1 - swapAt))
@@ -1752,11 +1853,24 @@ class Mixer {
 		};
 		if (echo) setTimeout(done, t.onOne ? 300 : 3000);
 		else done();
+		const level = this.before[t.to]?.volume ?? to.state.volume;
+		const ride = t.ride ?? 1;
 		to.set({
 			eq: this.before[t.to]?.eq ?? { low: 0, mid: 0, high: 0 },
 			filter: 0,
-			volume: this.before[t.to]?.volume ?? to.state.volume
+			volume: level * ride
 		});
+		// Came in lower: up to its own level over 16 bars, slowly (nobody hears it rise)
+		if (ride < 0.99) {
+			const now = this.ctx.currentTime;
+			this.levelGlide = {
+				deck: to,
+				from: level * ride,
+				to: level,
+				start: now,
+				end: now + t.beat * 64
+			};
+		}
 		// The new song leads now
 		to.unsync();
 		const tempo = to.state.tempo;
@@ -1771,6 +1885,24 @@ class Mixer {
 			};
 		}
 		this.emit();
+	}
+
+	/** A deck's level riding up after a mix (it came in lower) */
+	private levelGlide: { deck: Deck; from: number; to: number; start: number; end: number } | null =
+		null;
+	private stepLevelGlide() {
+		const g = this.levelGlide!;
+		// Another mix with it: that one sets its level
+		if (
+			this.transition &&
+			(this.transition.to === g.deck.id || this.transition.from === g.deck.id)
+		) {
+			this.levelGlide = null;
+			return;
+		}
+		const p = Math.min(1, (this.ctx.currentTime - g.start) / (g.end - g.start || 1));
+		g.deck.set({ volume: g.from + (g.to - g.from) * p * p * (3 - 2 * p) });
+		if (p >= 1) this.levelGlide = null;
 	}
 
 	/** A deck's tempo moving slowly to another one (before a mix: the tempos meet) */
@@ -1991,6 +2123,7 @@ class Mixer {
 		if (this.transition) this.stepTransition();
 		if (this.glideState) this.stepGlide();
 		if (this.rampState) this.stepRamp();
+		if (this.levelGlide) this.stepLevelGlide();
 		this.autoStep();
 		if (this.recorder) this.emit();
 	}
