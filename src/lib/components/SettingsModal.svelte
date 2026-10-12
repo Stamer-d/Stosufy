@@ -1,5 +1,6 @@
 <script>
 	import Modal from './Modal.svelte';
+	import { isMobile } from '#lib/platform.ts';
 	import Button from './Button.svelte';
 	import Range from './Range.svelte';
 	import { refresh as refreshVolume } from '#lib/stores/mixer.ts';
@@ -135,13 +136,16 @@
 	width="720px"
 	bind:open={() => $settingsTab !== null, (value) => !value && settingsTab.set(null)}
 >
-	<div class="flex gap-6 min-h-[26rem]">
-		<nav class="w-40 shrink-0 flex flex-col gap-1" aria-label="Settings categories">
-			{#each TABS as tab (tab.id)}
+	<div class="flex gap-6 min-h-[26rem] max-md:flex-col max-md:gap-4">
+		<nav
+			class="w-40 shrink-0 flex flex-col gap-1 max-md:w-auto max-md:flex-row max-md:overflow-x-auto max-md:-mx-1 max-md:px-1 max-md:[scrollbar-width:none]"
+			aria-label="Settings categories"
+		>
+			{#each TABS.filter((tab) => !isMobile || tab.id !== 'shortcuts') as tab (tab.id)}
 				{@const active = $settingsTab === tab.id}
 				<button
 					aria-current={active ? 'page' : undefined}
-					class="flex items-center gap-3 h-10 px-3 rounded-lg text-sm font-semibold text-start cursor-pointer transition {active
+					class="flex items-center gap-3 h-10 px-3 rounded-lg text-sm font-semibold text-start cursor-pointer transition max-md:shrink-0 {active
 						? 'bg-white/10 text-white'
 						: 'text-secondary-600 hover:text-white hover:bg-white/[0.05]'}"
 					onclick={() => settingsTab.set(tab.id)}
@@ -153,7 +157,8 @@
 		</nav>
 		<div class="flex-1 min-w-0 flex flex-col gap-6 py-1">
 			{#if $settingsTab === 'home'}
-				<section>
+				<!-- A phone always has the classic home -->
+				<section class:hidden={isMobile}>
 					{@render heading('Home layout')}
 					<div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Home layout">
 						{#each LAYOUTS as option (option.value)}
@@ -428,7 +433,8 @@
 					)}
 				</section>
 			{:else if $settingsTab === 'library'}
-				<section>
+				<!-- There's no osu! to import from on a phone -->
+				<section class:hidden={isMobile}>
 					{@render heading('osu!')}
 					<div class="flex items-center justify-between gap-4 p-3 rounded-lg bg-white/[0.04]">
 						<span class="min-w-0">

@@ -1,4 +1,5 @@
 <script>
+	import { isMobile } from '#lib/platform.ts';
 	// What the gameplay view shows: the difficulty, autoplay, playing it yourself or a
 	// replay of one of the top 50 scores
 	import { fly } from 'svelte/transition';
@@ -97,7 +98,8 @@
 	});
 	const TABS = [
 		{ id: 'watch', label: 'Watch', icon: 'icon-[mingcute--magic-2-line]' },
-		{ id: 'play', label: 'Play', icon: 'icon-[mingcute--cursor-3-line]' },
+		// Playing needs a mouse and keys: not on a phone
+		...(isMobile ? [] : [{ id: 'play', label: 'Play', icon: 'icon-[mingcute--cursor-3-line]' }]),
 		{ id: 'replays', label: 'Replays', icon: 'icon-[mingcute--trophy-line]' }
 	];
 
@@ -211,7 +213,7 @@
 						{/each}
 					</div>
 				{/if}
-				<div class="grid grid-cols-3 gap-1 p-1 rounded-xl bg-black/25">
+				<div class="grid {isMobile ? 'grid-cols-2' : 'grid-cols-3'} gap-1 p-1 rounded-xl bg-black/25">
 					{#each TABS as t (t.id)}
 						<button
 							class="flex items-center justify-center gap-1.5 h-8 rounded-lg text-sm font-semibold cursor-pointer transition {tab ===

@@ -194,16 +194,6 @@
 		class="fixed inset-0 z-[60] bg-secondary-100 mobile-safe flex flex-col"
 		transition:fly={{ y: 40, duration: 200 }}
 	>
-		<div class="flex items-center justify-between px-4 h-14 shrink-0">
-			<h2 class="text-lg font-bold">Queue</h2>
-			<button
-				class="size-10 grid place-items-center rounded-full active:bg-white/10"
-				aria-label="Close the queue"
-				onclick={() => queuePanelOpen.set(false)}
-			>
-				<span class="icon-[mingcute--close-line] size-6"></span>
-			</button>
-		</div>
 		<div class="flex-1 min-h-0 overflow-y-auto"><QueuePanel /></div>
 	</div>
 {/if}

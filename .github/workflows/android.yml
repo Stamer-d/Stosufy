@@ -17,8 +17,6 @@ on:
 jobs:
   android:
     runs-on: ubuntu-latest
-    env:
-      NDK_VERSION: 27.2.12479018
     steps:
       - uses: actions/checkout@v4
 
@@ -28,11 +26,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install the NDK and build tools
-        run: sdkmanager "ndk;${NDK_VERSION}" "platforms;android-34" "build-tools;34.0.0"
+      # The runner has the Android SDK and NDK already
+      - name: Find the Android NDK
+        run: |
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
+          echo "BUILD_TOOLS=$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)" >> $GITHUB_ENV
+          ls $ANDROID_HOME/build-tools $ANDROID_HOME/ndk
 
       - name: Setup node
         uses: actions/setup-node@v4
@@ -58,15 +57,11 @@ jobs:
         run: echo "VITE_CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" >> .env
 
       - name: Create the Android project
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
         run: |
           npx tauri android init --ci
           npx tauri icon src-tauri/icons/icon.png
 
       - name: Build the APK
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
         run: npx tauri android build --apk --target aarch64 --target armv7
 
       - name: Sign the APK
@@ -88,7 +83,6 @@ jobs:
               -keypass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 \
               -validity 10000 -dname "CN=Stosufy"
           fi
-          BUILD_TOOLS=$ANDROID_HOME/build-tools/34.0.0
           $BUILD_TOOLS/zipalign -f 4 "$UNSIGNED" aligned.apk
           $BUILD_TOOLS/apksigner sign --ks release.keystore --ks-pass "pass:$KEYSTORE_PASSWORD" \
             --ks-key-alias "$KEY_ALIAS" --out "Stosufy-$VERSION.apk" aligned.apk
