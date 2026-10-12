@@ -3,6 +3,10 @@ permissions:
   contents: write
 on:
   workflow_dispatch:
+  # After each release (release.yml), its APK
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   # Test builds of the work branch
   push:
     branches: ['claude/inspiring-lamport-g69unm']
@@ -16,6 +20,7 @@ on:
 # the old one removed first).
 jobs:
   android:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

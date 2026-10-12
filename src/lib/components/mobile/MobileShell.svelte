@@ -19,12 +19,19 @@
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 	import { openSettings } from '#lib/stores/settings.ts';
 	import { offline } from '#lib/stores/network.ts';
-	import { user } from '#lib/stores/user.ts';
+	import { onMount } from 'svelte';
+	import { open } from '@tauri-apps/plugin-shell';
+	import { mobileUpdate, checkMobileUpdate } from '#lib/stores/mobileUpdate.ts';
 
 	/** @type {{ children: import('svelte').Snippet, scroller?: HTMLElement }} */
 	let { children, scroller = $bindable() } = $props();
 
 	let playerOpen = $state(false);
+
+	// A newer version (an APK on GitHub)
+	onMount(() => {
+		checkMobileUpdate();
+	});
 
 	const TABS = [
 		{
@@ -103,6 +110,18 @@
 			<span class="icon-[mingcute--wifi-off-line] size-4 shrink-0 text-amber-300"></span>
 			You're offline: your downloaded songs still play.
 		</div>
+	{/if}
+
+	{#if $mobileUpdate}
+		<button
+			class="mx-3 mb-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-500/15 text-xs text-start"
+			onclick={() => open($mobileUpdate.url)}
+		>
+			<span class="icon-[mingcute--download-2-line] size-4 shrink-0 text-primary-300"></span>
+			<span class="flex-1"
+				>Stosufy {$mobileUpdate.version} is out. <b>Tap to download</b>, then install it.</span
+			>
+		</button>
 	{/if}
 
 	<main
