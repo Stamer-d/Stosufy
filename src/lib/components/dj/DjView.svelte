@@ -60,6 +60,13 @@
 	function keydown(event) {
 		const target = event.target;
 		if (target instanceof HTMLElement && target.closest('input, textarea, select')) return;
+		// Space on a focused button (just clicked, like SYNC) is that button's, not a mix
+		if (
+			target instanceof HTMLElement &&
+			target.closest('button') &&
+			(event.key === ' ' || event.key === 'Enter')
+		)
+			return;
 		if (event.ctrlKey || event.metaKey || event.altKey) return;
 		const key = event.key.toLowerCase();
 		const { A, B } = mixer.decks;
@@ -92,10 +99,24 @@
 		if (key === 'l') mixer.decks.B.cueUp();
 	}
 
+	// What Auto DJ does next, shown so a mix never comes as a surprise
+	let auto = $state(null);
+	onMount(() => {
+		const timer = setInterval(() => (auto = mixer.autoStatus()), 500);
+		return () => clearInterval(timer);
+	});
+
 	const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 </script>
 
-<svelte:window onkeydown={keydown} onkeyup={keyup} />
+<svelte:window
+	onkeydown={(e) => {
+		mixer.noteUser();
+		keydown(e);
+	}}
+	onkeyup={keyup}
+	onpointerdown={() => mixer.noteUser()}
+/>
 
 <div
 	class="fixed inset-0 z-40 flex flex-col bg-[#0d0d11] text-white"
@@ -115,6 +136,32 @@
 					Q/P play, A/L cue, 1–4/7–0 hot cues, Z/M sync, Space mix, ←→ crossfader
 				</span>
 				<div class="ml-auto flex items-center gap-2">
+					{#if auto}
+						<div
+							class="flex items-center gap-2 h-8 pl-3 pr-1 rounded-full text-xs ring-1 {auto.mixing ||
+							(auto.seconds != null && auto.seconds < 15)
+								? 'bg-amber-400/15 ring-amber-300/40 text-amber-100'
+								: 'bg-white/[0.06] ring-white/10 text-white/75'}"
+						>
+							<span class="font-black tracking-wide">AUTO DJ</span>
+							<span class="max-w-56 truncate">
+								{#if auto.mixing}
+									Mixing into {auto.song?.title ?? 'the next song'}…
+								{:else if !auto.song}
+									Loading the next song…
+								{:else if auto.seconds == null}
+									Next: {auto.song.title} · waiting for you
+								{:else}
+									Mixes into {auto.song.title} in {clock(auto.seconds)}
+								{/if}
+							</span>
+							<button
+								class="h-6 px-2.5 rounded-full bg-white/10 hover:bg-white/20 font-bold cursor-pointer"
+								title="Mix by hand: Auto DJ stops mixing on its own"
+								onclick={() => mixer.stopAuto()}>Off</button
+							>
+						</div>
+					{/if}
 					<div
 						class="flex p-1 rounded-full bg-white/[0.06] ring-1 ring-white/10"
 						role="group"

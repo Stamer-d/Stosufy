@@ -8,6 +8,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { mapDataStore } from '../stores/data';
 import { songQueue, currentSong, upNext, setSongQueue } from '../stores/audio';
+import { gainOf } from '../stores/mixer';
 import { sameSong } from '../tracks';
 import { userSettings } from '../stores/user';
 import { gainFor, loudnessOf } from '../stores/loudness';
@@ -28,6 +29,9 @@ import { computePeaks, type Peaks } from './peaks';
 import type { MapSet } from '../types';
 
 export type DeckId = 'A' | 'B';
+
+/** The master level the DJ mode starts with */
+const DEFAULT_MASTER = 0.85;
 
 export const EQ_MIN = -26;
 export const EQ_MAX = 6;
@@ -279,10 +283,18 @@ export class Deck {
 			let lufs = map.loudness ?? measured.get(map.audioFile) ?? null;
 			if (lufs == null) {
 				lufs = await loudnessOf(buffer).catch(() => null);
-				if (lufs != null) measured.set(map.audioFile, lufs);
+				if (lufs != null) {
+					measured.set(map.audioFile, lufs);
+					// Kept with the song: the player then plays it just as loud
+					const set = get(mapDataStore)[song.id];
+					for (const m of Object.values(set?.beatmaps ?? {}))
+						if (m.audioFile === map.audioFile) m.loudness = lufs;
+				}
 				if (id !== this.loadId) return;
 			}
-			this.normalize = lufs != null ? gainFor(lufs) : 1;
+			// Like the player: only with the loudness normalization on (it's a setting)
+			const normalizing = get(userSettings).settings?.normalize ?? true;
+			this.normalize = normalizing && lufs != null ? gainFor(lufs) : 1;
 			const main = mainSection(this.grid, buffer.duration);
 			// The cue starts on the first beat (most songs start with a little silence)
 			const first = this.grid[0];
@@ -646,6 +658,18 @@ export class Deck {
 		this.emit();
 	}
 
+	/**
+	 * Starts at another level (the player's, when the deck takes its song over) and glides
+	 * to its own normalization over a few seconds, so taking over makes no jump
+	 */
+	startAtLevel(gain: number) {
+		const now = this.ctx.currentTime;
+		const trim = dbToGain(this.state.gain);
+		this.input.gain.cancelScheduledValues(now);
+		this.input.gain.setValueAtTime(gain * trim, now);
+		this.input.gain.setTargetAtTime(this.normalize * trim, now + 1, 1.2);
+	}
+
 	/** Small tempo pushes by the sync lock to stay on the beat */
 	private autoBend = 0;
 
@@ -857,7 +881,7 @@ class Mixer {
 	private chunks: Blob[] = [];
 	private recordStart = 0;
 	crossfader = 0.5;
-	masterLevel = 0.85;
+	masterLevel = DEFAULT_MASTER;
 	transition: TransitionState | null = null;
 	transitionType: TransitionType = 'smart';
 	transitionBars = 16;
@@ -962,7 +986,12 @@ class Mixer {
 		const settings = get(userSettings).settings;
 		const app = settings?.muted ? 0 : (settings?.volume ?? 0.05);
 		// The app's volume is small numbers (0.05 is normal): the same loudness as the player
-		this.master.gain.setTargetAtTime(this.masterLevel * app, this.ctx.currentTime, 0.02);
+		// The master's default (0.85, room for two songs at once) is as loud as the player
+		this.master.gain.setTargetAtTime(
+			(this.masterLevel / DEFAULT_MASTER) * app,
+			this.ctx.currentTime,
+			0.02
+		);
 		this.recordGain?.gain.setTargetAtTime(this.masterLevel, this.ctx.currentTime, 0.02);
 	}
 
@@ -1341,6 +1370,33 @@ class Mixer {
 	}
 
 	private autoBusy = false;
+	/** When the user last touched the DJ controls */
+	private userAt = 0;
+
+	/** The user did something on the decks: Auto DJ waits a moment with its mix */
+	noteUser() {
+		this.userAt = performance.now();
+	}
+
+	/** What Auto DJ does next: the song it mixes into and in how many seconds (for the UI) */
+	autoStatus(): { song: MapSet | null; seconds: number | null; mixing: boolean } | null {
+		if (!this.auto.on) return null;
+		if (this.transition)
+			return { song: this.decks[this.transition.to].state.song, seconds: 0, mixing: true };
+		const playing = this.leading();
+		if (!playing) return { song: null, seconds: null, mixing: false };
+		const next = this.other(playing.id);
+		if (!next.buffer || next.state.loading)
+			return { song: next.state.song, seconds: null, mixing: false };
+		const at = this.mixOutPoint(playing, next);
+		const seconds = Math.max(0, (at - playing.position()) / (playing.rate || 1));
+		const waiting = performance.now() - this.userAt < USER_QUIET_MS;
+		return {
+			song: next.state.song,
+			seconds: waiting && seconds === 0 ? null : seconds,
+			mixing: false
+		};
+	}
 
 	private async autoStep() {
 		if (!this.auto.on || this.autoBusy || this.transition) return;
@@ -1364,6 +1420,10 @@ class Mixer {
 		}
 		if (next.state.loading || !next.buffer || next.state.playing) return;
 		if (playing.position() >= this.mixOutPoint(playing, next)) {
+			// Not while the user works the decks (syncing, cueing…), unless the song is about
+			// to end: the music doesn't stop
+			const left = (playing.state.duration - playing.position()) / (playing.rate || 1);
+			if (performance.now() - this.userAt < USER_QUIET_MS && left > 20) return;
 			if (this.mix()) {
 				if (!userPick) this.auto = { ...this.auto, index: nextIndex };
 				next.pickedByUser = false;
@@ -1503,6 +1563,8 @@ class Mixer {
 		this.cancelMix();
 		this.setCrossfader(0);
 		if (deck.state.volume < 0.5) deck.set({ volume: 1 });
+		// As loud as the player was: songs it hadn't measured yet played without normalization
+		deck.startAtLevel(gainOf(now ?? audio));
 		if (playing && now && !now.paused) deck.play();
 		this.autoFromPlayer();
 	}
@@ -1565,3 +1627,6 @@ export function djMixer() {
 
 /** Whether the DJ mode is open */
 export const djOpen = writable(false);
+
+/** How long Auto DJ waits with a mix after the user touched the decks */
+const USER_QUIET_MS = 10000;

@@ -95,6 +95,12 @@ export function holdFade(audio: HTMLAudioElement | null | undefined, fade: numbe
 	update(audio, { fade });
 }
 
+/** How much a song is turned up or down by the loudness normalization now */
+export function gainOf(audio: HTMLAudioElement | null | undefined) {
+	if (!audio || !(get(userSettings).settings?.normalize ?? true)) return 1;
+	return levels.get(audio)?.gain ?? 1;
+}
+
 /** Applies changed settings (e.g. normalization turned off) to the playing songs */
 export function refresh() {
 	active.forEach(apply);
