@@ -61,7 +61,6 @@ jobs:
           echo "Project $PROJECT, scheme $SCHEME"
           xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            -arch arm64 ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 
       - name: Package the IPA
@@ -75,6 +74,41 @@ jobs:
           echo "IPA=Stosufy-$VERSION.ipa" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
+      # An AltStore source: added once in AltStore, it shows new versions to update to
+      - name: Make the AltStore source
+        run: |
+          SIZE=$(stat -f%z "$IPA")
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          cat > altstore-source.json <<JSON
+          {
+            "name": "Stosufy",
+            "identifier": "de.stamer.stosufy.source",
+            "website": "https://github.com/Stamer-d/Stosufy",
+            "apps": [
+              {
+                "name": "Stosufy",
+                "bundleIdentifier": "com.Stosufy.app",
+                "developerName": "Stamer",
+                "subtitle": "The music player for osu! players",
+                "localizedDescription": "Every song from osu!'s beatmaps, with playlists, lyrics and the gameplay.",
+                "iconURL": "https://raw.githubusercontent.com/Stamer-d/Stosufy/main/src-tauri/icons/icon.png",
+                "tintColor": "8b5cf6",
+                "versions": [
+                  {
+                    "version": "$VERSION",
+                    "date": "$DATE",
+                    "downloadURL": "https://github.com/Stamer-d/Stosufy/releases/download/Stosufy-v$VERSION/$IPA",
+                    "size": $SIZE,
+                    "minOSVersion": "14.0"
+                  }
+                ]
+              }
+            ],
+            "news": []
+          }
+          JSON
+          python3 -m json.tool altstore-source.json > /dev/null
+
       - name: Keep the IPA
         uses: actions/upload-artifact@v4
         with:
@@ -87,7 +121,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "Stosufy-v$VERSION" > /dev/null 2>&1; then
-            gh release upload "Stosufy-v$VERSION" "$IPA" --clobber
+            gh release upload "Stosufy-v$VERSION" "$IPA" altstore-source.json --clobber
           else
             echo "::notice::No release Stosufy-v$VERSION yet: the IPA is in the build artifacts"
           fi
