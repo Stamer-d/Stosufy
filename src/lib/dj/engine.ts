@@ -31,6 +31,7 @@ import {
 	keyFit,
 	phraseCeil,
 	phraseFloor,
+	phraseRound,
 	PHRASE_BARS,
 	type SongAnalysis
 } from './analysis';
@@ -1126,6 +1127,30 @@ class Mixer {
 	}
 
 	/**
+	 * Where Auto DJ leaves a song: from its outro to its end, or, in a longer song (most of
+	 * them past 2:30, all past 4:00), in the breakdown after one of its drops (once it has
+	 * played a good while and some of it is still to come) up to where its next drop starts.
+	 * Picked from the song's structure, so it stays put while the song plays.
+	 */
+	private exitWindow(deck: Deck, a: SongAnalysis, now: number) {
+		const outro = { from: a.outroStart, until: a.lastBar, mid: false };
+		const length = a.lastBar - a.firstBar;
+		const id = Number(deck.state.song?.id ?? 0);
+		const pick = Math.imul(id || 1, 2654435761) >>> 0;
+		if (length < 150 || (length < 240 && pick % 3 === 0)) return outro;
+		const played = a.firstBar + Math.max(60, length * 0.4);
+		for (let i = 0; i < a.drops.length - 1; i++) {
+			const from = phraseRound(a, a.drops[i].end);
+			const until = phraseRound(a, a.drops[i + 1].start);
+			if (from < played || a.lastBar - from < 40 || until - from < a.bar * 4) continue;
+			// Still time to mix in it
+			if (now > until - a.bar * 2) continue;
+			return { from, until, mid: true };
+		}
+		return outro;
+	}
+
+	/**
 	 * How a pro DJ mixes two songs, from what's in them (see analysis.ts):
 	 * - Tempos close and keys that go together: an EQ blend. The new song's intro plays under
 	 *   the old one's outro, both on their phrases, and the basslines swap on the new song's
@@ -1133,8 +1158,10 @@ class Mixer {
 	 * - Tempos close but keys that clash: the same with only the new song's drums until the drop.
 	 * - Tempos far apart, no intro to blend over, or no outro left: an echo out on the last beat
 	 *   of a phrase and the new song in on the one.
-	 * With Auto DJ it starts where the playing song's outro starts (its last peak is over);
-	 * mixed by hand, on the next phrase (or bar).
+	 * With Auto DJ it leaves where the playing song's outro starts (its last peak is over), or,
+	 * in a longer song, in the breakdown after one of its drops, so the new song's drop comes
+	 * where the old one's next drop would have (see exitWindow); mixed by hand, on the next
+	 * phrase (or bar).
 	 */
 	proPlan(from: Deck, to: Deck, auto = false) {
 		const fit = this.compat(from, to);
@@ -1169,18 +1196,22 @@ class Mixer {
 			const phrase = phraseCeil(a, time);
 			return auto || phrase - time <= bar * 4 + 0.01 ? phrase : nextDownbeat(from.grid, time, 0);
 		};
-		const earliest = auto ? Math.max(now, a.outroStart) : now;
+		const exit = auto ? this.exitWindow(from, a, now) : null;
+		const earliest = exit ? Math.max(now, exit.from) : now;
+		const until = exit?.until ?? a.lastBar;
+		const where = exit?.mid ? ' in the breakdown' : '';
 		const longest = (limit: number) => [32, 16, 8].find((n) => n <= limit) ?? 0;
 
 		const blend = (drums: boolean) => {
 			const start = nextBoundary(earliest);
-			const room = Math.floor((a.lastBar - start) / bar + 1e-6);
+			const room = Math.floor((until - start) / bar + 1e-6);
 			let bars = longest(Math.min(introBars, room, drums ? 16 : 32));
 			if (bars < 8) return null;
-			// With a long outro: so the mix ends where the old song does
+			// With a long outro (or breakdown): so the mix ends where the old song does (or the
+			// new song's drop takes the place of the old one's next drop)
 			let startAt = start;
 			if (auto) {
-				const late = phraseFloor(a, a.lastBar - bars * bar);
+				const late = phraseFloor(a, until - bars * bar);
 				if (late > startAt) startAt = late;
 			}
 			const inPoint = userPlaced ? placed : beatRound(to.grid, drop - bars * b.bar);
@@ -1194,7 +1225,7 @@ class Mixer {
 				fit,
 				drums,
 				swap: 1,
-				why: `${drums ? 'Drum blend' : 'Blend'} over ${bars} bars, the bass swaps on the drop`
+				why: `${drums ? 'Drum blend' : 'Blend'}${where} over ${bars} bars, the bass swaps on the drop`
 			};
 		};
 
@@ -1202,21 +1233,24 @@ class Mixer {
 		if (tempoClose && keys !== 0) plan = blend(false);
 		if (!plan && tempoClose) plan = blend(true);
 		if (!plan) {
-			// Echo out on the last beat of a phrase; the new song on the one
-			const boundary = auto
-				? phraseCeil(a, Math.max(now + a.bar / 4, Math.min(a.outroStart, a.lastBar - bar)))
+			// Echo out on the last beat of a phrase; the new song on the one. Mid-song, after the
+			// old song's drop: straight into the new song's drop, the energy stays up
+			const boundary = exit
+				? phraseCeil(a, Math.max(now + a.bar / 4, Math.min(earliest, until - bar)))
 				: nextBoundary(now + a.bar / 4);
 			const beat = a.bar / 4;
+			const slam = !!exit?.mid && !userPlaced && b.drops.some((d) => d.start >= from0);
 			plan = {
 				type: 'echo' as TransitionType,
 				bars: 1,
 				startAt: Math.min(boundary, a.lastBar) - beat,
-				inPoint: userPlaced ? placed : cue,
+				inPoint: userPlaced ? placed : slam ? beatRound(to.grid, drop) : cue,
 				fit,
 				drums: false,
 				swap: 1,
-				why:
-					fit.rating === 'clash' || !tempoClose
+				why: slam
+					? 'Echo out after the drop, straight into the next drop'
+					: fit.rating === 'clash' || !tempoClose
 						? 'Echo out: the tempos are too far apart to blend'
 						: 'Echo out on the phrase, the new song in on the one'
 			};
