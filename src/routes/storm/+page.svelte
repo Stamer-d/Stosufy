@@ -33,6 +33,10 @@
 	import { showToast } from '#lib/stores/toast.ts';
 	import { layerReady } from '#lib/radarClean.ts';
 	import { thunderOn, toggleThunder, setListener, setView } from '#lib/stores/thunder.ts';
+	import { goto } from '$app/navigation';
+	import FlightPanel from '#lib/components/flights/FlightPanel.svelte';
+	import { planes, followed, setFlightArea, useFlights } from '#lib/stores/flights.ts';
+	import { kmBetween } from '#lib/flights.ts';
 
 	const UID = '_storm';
 	let saved = $derived($widgetData[UID] ?? {});
@@ -76,6 +80,7 @@
 		lightning: true,
 		warnings: true,
 		satellite: false,
+		flights: false,
 		rings: true,
 		...saved.layers
 	});
@@ -90,6 +95,7 @@
 		{ key: 'lightning', label: 'Lightning', icon: 'icon-[mingcute--flash-line]' },
 		{ key: 'warnings', label: 'Warnings', icon: 'icon-[mingcute--warning-line]' },
 		{ key: 'satellite', label: 'Satellite', icon: 'icon-[mingcute--earth-2-line]' },
+		{ key: 'flights', label: 'Flights', icon: 'icon-[mingcute--airplane-line]' },
 		{ key: 'rings', label: 'Range rings', icon: 'icon-[mingcute--radar-line]' }
 	];
 	const FIELD_ICONS = {
@@ -292,6 +298,23 @@
 		return { coords, text: `${Math.round(km)} km ${compass(bearing)} of ${home.name}` };
 	});
 
+	// --- Flights over the weather (how they fly around the storms) -------------------------
+	let flightsOn = $derived(mode === 'live' && !!shown.flights);
+	$effect(() => {
+		if (!flightsOn) return;
+		const stop = useFlights();
+		return () => {
+			stop();
+			followed.set(null);
+		};
+	});
+	$effect(() => {
+		if (!flightsOn || !bounds || !view) return;
+		const nm = (kmBetween(view, { lat: bounds.north, lon: bounds.west }) / 1.852) * 1.05;
+		setFlightArea({ lat: view.lat, lon: view.lon, radiusNm: nm });
+	});
+	let flight = $derived(flightsOn ? ($planes.find((p) => p.hex === $followed) ?? null) : null);
+
 	// --- A place looked at --------------------------------------------------------------------
 	let probe = $state(null);
 	let probeName = $state('');
@@ -454,8 +477,19 @@
 			{home}
 			{probe}
 			rings={shown.rings ? [25, 50, 100] : []}
+			planes={flightsOn ? $planes : null}
+			selectedPlane={$followed}
+			planeColour="#f8fafc"
+			trailMinutes={10}
+			onplane={(plane) => {
+				followed.set(plane.hex);
+				panelOpen = true;
+			}}
 			onmove={moveTo}
-			onpick={(place, areas) => pick(place, areas)}
+			onpick={(place, areas) => {
+				followed.set(null);
+				pick(place, areas);
+			}}
 			onhover={(place) => (hover = place)}
 			onbounds={(b) => (bounds = b)}
 		/>
@@ -463,7 +497,7 @@
 
 	<!-- Top: place, search and the two modes -->
 	<div
-		class="absolute top-3 left-3 flex items-center gap-2 {panelOpen
+		class="absolute top-3 left-3 flex items-center gap-2 {panelOpen || flight
 			? 'right-[24.5rem]'
 			: 'right-3'}"
 	>
@@ -527,7 +561,7 @@
 				>
 			{/each}
 		</div>
-		{#if !panelOpen}
+		{#if !panelOpen && !flight}
 			<button
 				class="ms-auto flex items-center gap-2 h-11 px-4 rounded-2xl text-sm font-semibold cursor-pointer {glass}"
 				onclick={() => (panelOpen = true)}
@@ -598,7 +632,7 @@
 
 	<!-- Zoom -->
 	<div
-		class="absolute bottom-24 flex flex-col rounded-2xl {glass} {panelOpen
+		class="absolute bottom-24 flex flex-col rounded-2xl {glass} {panelOpen || flight
 			? 'right-[24.5rem]'
 			: 'right-3'}"
 	>
@@ -627,7 +661,7 @@
 
 	<!-- Bottom: time -->
 	<div
-		class="absolute bottom-3 left-3 flex flex-col gap-2 pointer-events-none {panelOpen
+		class="absolute bottom-3 left-3 flex flex-col gap-2 pointer-events-none {panelOpen || flight
 			? 'right-[24.5rem]'
 			: 'right-3'}"
 	>
@@ -757,8 +791,16 @@
 		{/if}
 	</div>
 
-	<!-- Right: the analysis of the place looked at -->
-	{#if panelOpen}
+	<!-- Right: the plane picked, or the analysis of the place looked at -->
+	{#if flight}
+		<aside class="absolute top-3 right-3 bottom-3 w-[23rem] overflow-y-auto rounded-2xl {glass}">
+			<FlightPanel
+				plane={flight}
+				onclose={() => followed.set(null)}
+				onopen={() => goto(`/flights?hex=${flight.hex}`)}
+			/>
+		</aside>
+	{:else if panelOpen}
 		<aside
 			class="absolute top-3 right-3 bottom-3 w-[23rem] flex flex-col rounded-2xl overflow-hidden {glass}"
 		>

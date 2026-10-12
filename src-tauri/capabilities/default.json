@@ -59,6 +59,12 @@
 				},
 				{
 					"url": "https://maps.dwd.de/*"
+				},
+				{
+					"url": "https://api.adsbdb.com/*"
+				},
+				{
+					"url": "https://api.planespotters.net/*"
 				}
 			],
 			"deny": [

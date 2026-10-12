@@ -161,6 +161,18 @@
 				<span class="icon-[mingcute--thunderstorm-line] size-[18px]"></span>
 			</button>
 			<button
+				title="Flight radar"
+				aria-label="Flight radar"
+				aria-pressed={page.url.pathname === '/flights'}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
+					.url.pathname === '/flights'
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={() => go('/flights')}
+			>
+				<span class="icon-[mingcute--airplane-line] size-[18px]"></span>
+			</button>
+			<button
 				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-label={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-pressed={$focusMode}

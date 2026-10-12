@@ -2,11 +2,12 @@
 	// The big map of the storm center: drag to move, scroll to zoom, click to look at a place.
 	// Tile layers (radar, satellite) can have a lower top zoom than the map: their tiles are
 	// then shown bigger. Forecast fields are drawn from a grid of points, the DWD warnings
-	// as areas, lightning as it strikes.
+	// as areas, lightning as it strikes, planes where they fly (moving on between updates).
 	import { onMount } from 'svelte';
 	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
 	import { drawStrikes, SEVERITY_COLOURS } from '#lib/storm.ts';
 	import { radarSrc } from '#lib/radarClean.ts';
+	import { planeNow, drawPlane, drawTrail, altitudeColour } from '#lib/flights.ts';
 
 	/**
 	 * @type {{
@@ -18,6 +19,11 @@
 	 *   home?: { lat: number, lon: number } | null,
 	 *   probe?: { lat: number, lon: number } | null,
 	 *   rings?: number[],
+	 *   planes?: import('#lib/flights.ts').Plane[] | null,
+	 *   selectedPlane?: string | null,
+	 *   planeColour?: string | null,
+	 *   trailMinutes?: number,
+	 *   onplane?: (plane: import('#lib/flights.ts').Plane) => void,
 	 *   onmove?: (view: { lat: number, lon: number, zoom: number }) => void,
 	 *   onpick?: (place: { lat: number, lon: number }, warnings: import('#lib/storm.ts').WarningArea[]) => void,
 	 *   onhover?: (place: { lat: number, lon: number } | null) => void,
@@ -35,6 +41,11 @@
 		home = null,
 		probe = null,
 		rings = [],
+		planes = null,
+		selectedPlane = null,
+		planeColour = null,
+		trailMinutes = 0,
+		onplane = () => {},
 		onmove = () => {},
 		onpick = () => {},
 		onhover = () => {},
@@ -46,6 +57,7 @@
 	let fieldCanvas = $state();
 	let areaCanvas = $state();
 	let lightningCanvas = $state();
+	let planeCanvas = $state();
 
 	let centre = $derived(worldPixel(lat, lon, zoom));
 
@@ -124,7 +136,9 @@
 			const rect = event.currentTarget.getBoundingClientRect();
 			const x = event.clientX - rect.left;
 			const y = event.clientY - rect.top;
-			onpick(toPlace(x, y), warningsAt(x, y));
+			const plane = planeAt(x, y);
+			if (plane) onplane(plane);
+			else onpick(toPlace(x, y), warningsAt(x, y));
 		}
 		drag = null;
 	}
@@ -289,9 +303,86 @@
 		};
 		drawStrikes(c, strikes, screen, width, height, zoom >= 8 ? 1.4 : 1, kmPerPixel);
 	}
+	// --- Planes, every frame (they fly on between updates) ------------------------------------
+	function drawPlanes() {
+		if (!planeCanvas || !width || !height) return;
+		const { c, ratio } = prepare(planeCanvas);
+		c.setTransform(ratio, 0, 0, ratio, 0, 0);
+		if (!planes?.length) return;
+		const now = Date.now();
+		const scale = zoom >= 9 ? 1.15 : zoom <= 5 ? 0.8 : 1;
+		let picked = null;
+		if (trailMinutes)
+			for (const plane of planes) {
+				if (plane.hex === selectedPlane) continue;
+				const at = toScreen(plane.lat, plane.lon);
+				if (at.x < -300 || at.y < -300 || at.x > width + 300 || at.y > height + 300) continue;
+				drawTrail(c, plane, toScreen, {
+					alpha: 0.55,
+					width: 1.4,
+					since: now - trailMinutes * 60000,
+					now: planeNow(plane, now)
+				});
+			}
+		for (const plane of planes) {
+			const place = planeNow(plane, now);
+			const { x, y } = toScreen(place.lat, place.lon);
+			if (plane.hex === selectedPlane) {
+				picked = { plane, place, x, y };
+				continue;
+			}
+			if (x < -12 || y < -12 || x > width + 12 || y > height + 12) continue;
+			drawPlane(c, x, y, plane.track, planeColour ?? altitudeColour(plane.alt, plane.ground), {
+				scale,
+				category: plane.category
+			});
+		}
+		if (picked) {
+			const { plane, place, x, y } = picked;
+			drawTrail(c, plane, toScreen, { width: 3, now: place });
+			c.beginPath();
+			c.arc(x, y, 15 * scale, 0, Math.PI * 2);
+			c.fillStyle = 'rgba(239, 68, 68, 0.22)';
+			c.fill();
+			drawPlane(c, x, y, plane.track, '#ef4444', {
+				scale: scale * 1.35,
+				category: plane.category,
+				outline: '#ffffff'
+			});
+			if (plane.callsign) {
+				c.font = '600 11px system-ui, sans-serif';
+				const w = c.measureText(plane.callsign).width + 10;
+				c.fillStyle = 'rgba(0, 0, 0, 0.75)';
+				c.beginPath();
+				c.roundRect(x + 16, y - 9, w, 18, 5);
+				c.fill();
+				c.fillStyle = '#ffffff';
+				c.fillText(plane.callsign, x + 21, y + 4);
+			}
+		}
+	}
+	/** The plane under a point of the map (the nearest within a finger's width) */
+	function planeAt(x, y) {
+		if (!planes?.length) return null;
+		const now = Date.now();
+		let best = null;
+		let bestDistance = 16;
+		for (const plane of planes) {
+			const place = planeNow(plane, now);
+			const p = toScreen(place.lat, place.lon);
+			const distance = Math.hypot(p.x - x, p.y - y);
+			if (distance < bestDistance) {
+				bestDistance = distance;
+				best = plane;
+			}
+		}
+		return best;
+	}
+
 	onMount(() => {
 		let frame = requestAnimationFrame(function loop() {
 			drawLightning();
+			drawPlanes();
 			frame = requestAnimationFrame(loop);
 		});
 		return () => cancelAnimationFrame(frame);
@@ -349,6 +440,7 @@
 	{/each}
 	<canvas bind:this={lightningCanvas} class="absolute inset-0 size-full pointer-events-none"
 	></canvas>
+	<canvas bind:this={planeCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	{#if homeAt}
 		<svg class="absolute inset-0 size-full pointer-events-none overflow-visible">
 			{#each rings as km (km)}
