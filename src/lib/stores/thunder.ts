@@ -1,5 +1,5 @@
-// Lightning you can hear, like on live lightning maps: a short blip for each new strike
-// around you (from its side), and for strikes close by the thunder itself, as late as the
+// Lightning you can hear, like on live lightning maps: a crackle for each new strike on the
+// map (from its side of it), and for strikes close to you the thunder itself, as late as the
 // sound takes to get to you (3 s per km), the closer the louder and the sharper.
 
 import { get, writable } from 'svelte/store';
@@ -11,21 +11,30 @@ import { SPEED_OF_SOUND } from '../storm';
 /** Whether lightning is heard */
 export const thunderOn = writable(false);
 
-/** Strikes this far away get a blip; this near, thunder */
-const BLIP_KM = 150;
+/** Without a map: strikes this far from you crackle; this near, thunder too */
+const CRACKLE_KM = 150;
 const THUNDER_KM = 40;
+/** At most this many crackles a second (a big storm has dozens of strikes a second) */
+const CRACKLES_PER_SECOND = 10;
 
 let ctx: AudioContext | null = null;
 let out: GainNode | null = null;
 let listener: { lat: number; lon: number } | null = null;
-let lastStrike = Date.now();
-let blipsThisSecond = 0;
-let blipSecond = 0;
+let view: { north: number; south: number; west: number; east: number } | null = null;
+/** The last strike handled (the ones after it in the list are new) */
+let lastHeard: Strike | null = null;
+let cracklesThisSecond = 0;
+let crackleSecond = 0;
 let thundering = 0;
 
 /** Where you are, for the distances (and so the delays) */
 export function setListener(place: { lat: number; lon: number } | null) {
 	listener = place;
+}
+
+/** The part of the world shown on the map: its strikes crackle (null: no map) */
+export function setView(bounds: typeof view) {
+	view = bounds;
 }
 
 function audio() {
@@ -38,7 +47,7 @@ function audio() {
 	// As loud as the app (its volume is small numbers, 0.05 is normal)
 	const settings = get(userSettings).settings;
 	const volume = settings?.muted ? 0 : (settings?.volume ?? 0.05);
-	out!.gain.value = Math.min(1.5, volume * 14);
+	out!.gain.value = volume ? Math.min(1.5, Math.max(0.3, volume * 14)) : 0;
 	return ctx;
 }
 
@@ -60,23 +69,51 @@ function noise(context: AudioContext, seconds: number, brown: boolean) {
 	return buffer;
 }
 
-/** A short blip for a strike, from its direction */
-function blip(bearing: number, km: number) {
+// A few crackles made once (each strike plays one of them, a bit faster or slower)
+let crackles: AudioBuffer[] = [];
+
+/** The crackle of a strike: a snap, then a burst of tiny irregular clicks that dies away */
+function makeCrackle(context: AudioContext) {
+	const rate = context.sampleRate;
+	const length = 0.16 + Math.random() * 0.2;
+	const buffer = context.createBuffer(1, Math.ceil(rate * length), rate);
+	const data = buffer.getChannelData(0);
+	let at = 0;
+	let first = true;
+	while (at < data.length) {
+		const decay = Math.exp(-at / (rate * length * 0.3));
+		const level = (first ? 1 : 0.25 + Math.random() * 0.75) * decay;
+		const clickLength = Math.floor(rate * (first ? 0.004 : 0.0003 + Math.random() * 0.0016));
+		for (let i = 0; i < clickLength && at + i < data.length; i++)
+			data[at + i] += level * (Math.random() * 2 - 1) * (1 - i / clickLength);
+		first = false;
+		// Uneven gaps: mostly short, now and then longer
+		at += Math.floor(rate * (0.0015 + Math.random() ** 2.5 * 0.035));
+	}
+	return buffer;
+}
+
+/** A crackle for a strike, from its side (-1 left to 1 right) */
+function crackle(side: number, level = 1) {
 	const context = audio();
+	if (crackles.length < 8) crackles.push(makeCrackle(context));
 	const now = context.currentTime;
-	const osc = context.createOscillator();
-	osc.type = 'triangle';
-	osc.frequency.setValueAtTime(2200, now);
-	osc.frequency.exponentialRampToValueAtTime(700, now + 0.05);
+	const source = context.createBufferSource();
+	source.buffer = crackles[Math.floor(Math.random() * crackles.length)];
+	source.playbackRate.value = 0.8 + Math.random() * 0.45;
+	const high = context.createBiquadFilter();
+	high.type = 'highpass';
+	high.frequency.value = 700;
+	const presence = context.createBiquadFilter();
+	presence.type = 'peaking';
+	presence.frequency.value = 3200;
+	presence.gain.value = 6;
 	const gain = context.createGain();
-	const level = 0.05 + 0.1 * (1 - km / BLIP_KM);
-	gain.gain.setValueAtTime(level, now);
-	gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+	gain.gain.value = 0.55 * level;
 	const pan = context.createStereoPanner();
-	pan.pan.value = Math.sin((bearing * Math.PI) / 180) * 0.8;
-	osc.connect(gain).connect(pan).connect(out!);
-	osc.start(now);
-	osc.stop(now + 0.08);
+	pan.pan.value = Math.max(-1, Math.min(1, side)) * 0.85;
+	source.connect(high).connect(presence).connect(gain).connect(pan).connect(out!);
+	source.start(now);
 }
 
 /** Thunder from a strike some km away, in some seconds */
@@ -141,24 +178,41 @@ function bearingTo(from: { lat: number; lon: number }, to: { lat: number; lon: n
 }
 
 function hear(list: Strike[]) {
-	const fresh = list.filter((s) => s.time > lastStrike);
-	if (fresh.length) lastStrike = Math.max(...fresh.map((s) => s.time));
-	if (!get(thunderOn) || !listener) return;
+	// New strikes are added at the end (in the order they come, not always by time)
+	const from = lastHeard ? list.lastIndexOf(lastHeard) + 1 : list.length;
+	const fresh = from > 0 ? list.slice(from) : list.filter((s) => s.time > Date.now() - 20000);
+	lastHeard = list.at(-1) ?? lastHeard;
+	if (!get(thunderOn) || !fresh.length) return;
 	const now = Date.now();
 	for (const strike of fresh) {
-		const km = distanceKm(listener, strike);
-		if (km > BLIP_KM) continue;
-		const bearing = bearingTo(listener, strike);
-		const second = Math.floor(now / 1000);
-		if (second !== blipSecond) {
-			blipSecond = second;
-			blipsThisSecond = 0;
+		// Strikes long ago (sent late) make no sound
+		if (now - strike.time > 20000) continue;
+		const km = listener ? distanceKm(listener, strike) : Infinity;
+		let side: number | null = null;
+		if (view) {
+			const inside =
+				strike.lat <= view.north &&
+				strike.lat >= view.south &&
+				strike.lon >= view.west &&
+				strike.lon <= view.east;
+			if (inside) side = ((strike.lon - view.west) / (view.east - view.west)) * 2 - 1;
+		} else if (km <= CRACKLE_KM) side = Math.sin((bearingTo(listener!, strike) * Math.PI) / 180);
+		if (side !== null) {
+			const second = Math.floor(now / 1000);
+			if (second !== crackleSecond) {
+				crackleSecond = second;
+				cracklesThisSecond = 0;
+			}
+			if (cracklesThisSecond++ < CRACKLES_PER_SECOND) {
+				// A bit after each other, not all on the same moment
+				const spread = Math.random() * 250;
+				setTimeout(() => crackle(side!, 0.6 + Math.random() * 0.4), spread);
+			}
 		}
-		if (blipsThisSecond++ < 8) blip(bearing, km);
 		if (km <= THUNDER_KM) {
 			// The sound left the strike when it happened: what's left of its way to you
 			const delay = km / SPEED_OF_SOUND - (now - strike.time) / 1000;
-			if (delay > -2) thunder(km, bearing, delay);
+			if (delay > -2) thunder(km, bearingTo(listener!, strike), delay);
 		}
 	}
 }
@@ -172,6 +226,6 @@ export function toggleThunder() {
 	if (on) {
 		audio();
 		// A taste of it, so it's clear it's on
-		blip(90, 20);
+		crackle(0);
 	}
 }

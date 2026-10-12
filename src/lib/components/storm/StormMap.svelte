@@ -163,7 +163,7 @@
 	$effect(() => {
 		if (!fieldCanvas || !width || !height) return;
 		// Drawn small and shown smoothly scaled up
-		const step = 6;
+		const step = 3;
 		const { c } = prepare(fieldCanvas, step);
 		const rows = field?.rows;
 		if (!rows?.length || !rows[0]?.length) return;
@@ -254,16 +254,47 @@
 		return hit.map(({ area }) => area);
 	}
 
-	// --- Lightning, a few times a second (new strikes flash, old ones fade) -------------------
+	// --- Lightning, every frame (so it moves with the map; new strikes flash, old ones fade) ---
+	// Where each strike is on the world at zoom 0, worked out once per strike
+	const projected = new WeakMap();
+	function worldOf(strike) {
+		let p = projected.get(strike);
+		if (!p) {
+			p = worldPixel(strike.lat, strike.lon, 0);
+			projected.set(strike, p);
+		}
+		return p;
+	}
+	let drawn = '';
+	let drawnAt = 0;
 	function drawLightning() {
 		if (!lightningCanvas || !width || !height) return;
+		const now = performance.now();
+		// Again when the map moved or the strikes changed, else a few times a second (the
+		// flashes and sound rings move, the colours age)
+		const key = `${centre.x},${centre.y},${zoom},${width},${height},${strikes?.length ?? 0},${strikes?.at(-1)?.time ?? 0}`;
+		const animating = strikes?.length && Date.now() - (strikes.at(-1)?.time ?? 0) < 60000;
+		if (key === drawn && now - drawnAt < (animating ? 33 : 500)) return;
+		drawn = key;
+		drawnAt = now;
 		const { c, ratio } = prepare(lightningCanvas);
 		c.setTransform(ratio, 0, 0, ratio, 0, 0);
-		if (strikes?.length) drawStrikes(c, strikes, toScreen, width, height, zoom >= 8 ? 1.4 : 1, kmPerPixel);
+		if (!strikes?.length) return;
+		const k = 2 ** zoom;
+		const left = centre.x - width / 2;
+		const top = centre.y - height / 2;
+		const screen = (_lat, _lon, strike) => {
+			const p = worldOf(strike);
+			return { x: p.x * k - left, y: p.y * k - top };
+		};
+		drawStrikes(c, strikes, screen, width, height, zoom >= 8 ? 1.4 : 1, kmPerPixel);
 	}
 	onMount(() => {
-		const timer = setInterval(drawLightning, 100);
-		return () => clearInterval(timer);
+		let frame = requestAnimationFrame(function loop() {
+			drawLightning();
+			frame = requestAnimationFrame(loop);
+		});
+		return () => cancelAnimationFrame(frame);
 	});
 
 	let homeAt = $derived(home && width ? toScreen(home.lat, home.lon) : null);

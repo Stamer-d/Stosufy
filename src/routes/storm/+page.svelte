@@ -3,7 +3,7 @@
 	// radar, lightning, DWD warnings, satellite), Forecast the ingredients for storms over the
 	// next 24 hours as maps (risk, CAPE, lifted index, shear, gusts). Any place clicked gets
 	// its full analysis: outlook, sounding, hodograph and warnings.
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 	import StormMap from '#lib/components/storm/StormMap.svelte';
 	import Hodograph from '#lib/components/storm/Hodograph.svelte';
@@ -31,7 +31,7 @@
 	import { tileBounds, distanceKm } from '#lib/map.ts';
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { showToast } from '#lib/stores/toast.ts';
-	import { thunderOn, toggleThunder, setListener } from '#lib/stores/thunder.ts';
+	import { thunderOn, toggleThunder, setListener, setView } from '#lib/stores/thunder.ts';
 
 	const UID = '_storm';
 	let saved = $derived($widgetData[UID] ?? {});
@@ -40,13 +40,27 @@
 
 	// --- The view --------------------------------------------------------------------------
 	let view = $state(null);
+	// Moved by the user (or from a saved view): finding where you are later doesn't move it
+	let viewSettled = false;
+	let viewFromHome = false;
 	$effect(() => {
-		// Lands where you are (or where the map was left)
-		if (view || (!saved.view && !home)) return;
-		view = saved.view ?? { lat: home.lat, lon: home.lon, zoom: 7 };
+		// Lands where you are (or where the map was left); until that's known, over Germany
+		const place = home;
+		const kept = saved.view;
+		untrack(() => {
+			if (viewSettled) return;
+			if (kept) {
+				view = kept;
+				viewSettled = true;
+			} else if (place && !viewFromHome) {
+				view = { lat: place.lat, lon: place.lon, zoom: 7 };
+				viewFromHome = true;
+			} else if (!view) view = { lat: 51.1, lon: 10.4, zoom: 6 };
+		});
 	});
 	let saveTimer;
 	function moveTo(next) {
+		viewSettled = true;
 		view = next;
 		clearTimeout(saveTimer);
 		saveTimer = setTimeout(() => setWidgetData(UID, { view: next }), 800);
@@ -141,6 +155,8 @@
 	// --- Lightning ----------------------------------------------------------------------------
 	// Heard from where you are
 	$effect(() => setListener(home));
+	// Strikes on the map crackle
+	$effect(() => setView(mode === 'live' && shown.lightning ? bounds : null));
 	const NEAR_KM = 15;
 	let nearby = $derived(home ? strikesNear($strikes, home, 50, 15 * 60 * 1000) : null);
 	let warnedAt = 0;
@@ -161,6 +177,9 @@
 	let grid = $state(null);
 	let gridKey = '';
 	let gridLoading = $state(false);
+	let gridError = $state('');
+	// Areas loaded before (for 20 minutes): moving back and forth doesn't load them again
+	const gridCache = new Map();
 	let hour = $state(0);
 	let gridTimer;
 	$effect(() => {
@@ -180,6 +199,12 @@
 			const key = JSON.stringify(area);
 			if (key === gridKey) return;
 			gridKey = key;
+			const cached = gridCache.get(key);
+			if (cached && Date.now() - cached.at < 20 * 60 * 1000) {
+				grid = cached.grid;
+				gridError = '';
+				return;
+			}
 			gridLoading = true;
 			try {
 				const columns = 12;
@@ -187,10 +212,14 @@
 				const points = await stormGrid(area.north, area.south, area.west, area.east, columns, rows);
 				if (key !== gridKey) return;
 				grid = { columns, rows, points };
-			} catch {
+				gridError = '';
+				gridCache.set(key, { at: Date.now(), grid });
+			} catch (error) {
+				if (key !== gridKey) return;
 				gridKey = '';
+				gridError = `Couldn't load the forecast${error?.message ? `: ${error.message}` : ''}`;
 			} finally {
-				gridLoading = false;
+				if (key === gridKey || !gridKey) gridLoading = false;
 			}
 		}, 600);
 	});
@@ -287,7 +316,11 @@
 				outlook = result;
 				loadProfile(id);
 			})
-			.catch(() => id === probeId && (probeError = "Couldn't load the forecast"));
+			.catch(
+				(error) =>
+					id === probeId &&
+					(probeError = `Couldn't load the forecast${error?.message ? `: ${error.message}` : ''}`)
+			);
 		tauriFetch(`https://api.brightsky.dev/alerts?lat=${place.lat}&lon=${place.lon}`)
 			.then((response) => (response.ok ? response.json() : { alerts: [] }))
 			.then((data) => id === probeId && (alerts = data.alerts ?? []))
@@ -366,6 +399,7 @@
 		}, 450);
 		return () => {
 			stopLightning();
+			setView(null);
 			clearInterval(refresh);
 			clearInterval(step);
 			clearTimeout(gridTimer);
@@ -592,6 +626,14 @@
 				{#if readout.text}<span class="ms-2 font-semibold">{readout.text}</span>{/if}
 			</div>
 		{/if}
+		{#if mode === 'forecast' && gridError}
+			<div
+				class="self-start flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-rose-200 {glass}"
+			>
+				<span class="icon-[mingcute--warning-line] size-4 shrink-0 text-rose-400"></span>
+				{gridError}
+			</div>
+		{/if}
 		{#if mode === 'live'}
 			<div class="flex items-center gap-3 h-14 px-3 rounded-2xl pointer-events-auto {glass}">
 				<button
@@ -633,7 +675,7 @@
 							? 'bg-yellow-300 text-black'
 							: 'bg-white/[0.06] text-white/70 hover:text-white'}"
 						title={$thunderOn
-							? 'Lightning sound on: a blip for each strike within 150 km, thunder for those within 40 km, as late as the sound needs to reach you'
+							? 'Lightning sound on: a crackle for each new strike on the map, thunder for those within 40 km of you, as late as the sound needs to reach you'
 							: 'Hear the lightning'}
 						aria-label={$thunderOn ? 'Turn the lightning sound off' : 'Hear the lightning'}
 						aria-pressed={$thunderOn}
@@ -720,7 +762,12 @@
 						</span>
 					{:else}
 						<span class="grid place-items-center size-11 shrink-0 rounded-xl bg-white/5">
-							<span class="icon-[mingcute--loading-line] size-5 animate-spin text-white/40"></span>
+							{#if probeError}
+								<span class="icon-[mingcute--warning-line] size-5 text-rose-400"></span>
+							{:else}
+								<span class="icon-[mingcute--loading-line] size-5 animate-spin text-white/40"
+								></span>
+							{/if}
 						</span>
 					{/if}
 					<div class="min-w-0 flex-1">

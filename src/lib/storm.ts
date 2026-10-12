@@ -108,10 +108,19 @@ function outlookOf(hours: StormHour[]): StormOutlook {
 	};
 }
 
+/** Open-Meteo's answer, or an error with its reason (e.g. too many requests today) */
+async function openMeteo(url: string) {
+	const response = await fetch(url);
+	const data = await response.json().catch(() => null);
+	if (!response.ok || !data || data.error)
+		throw new Error(data?.reason ?? `Open-Meteo answered ${response.status}`);
+	return data;
+}
+
 /** The next 24 hours at a place */
 export async function stormOutlook(lat: number, lon: number): Promise<StormOutlook> {
 	const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${HOURLY}&wind_speed_unit=ms&timezone=auto&forecast_days=2`;
-	const data = await (await fetch(url)).json();
+	const data = await openMeteo(url);
 	return outlookOf(hoursOf(data).slice(0, 24));
 }
 
@@ -136,7 +145,7 @@ export async function stormGrid(
 	const url =
 		`https://api.open-meteo.com/v1/forecast?latitude=${points.map((p) => p.lat).join(',')}` +
 		`&longitude=${points.map((p) => p.lon).join(',')}&hourly=${HOURLY}&wind_speed_unit=ms&timezone=GMT&forecast_days=2`;
-	const data = await (await fetch(url)).json();
+	const data = await openMeteo(url);
 	const list = Array.isArray(data) ? data : [data];
 	return points.map((point, i) => ({
 		...point,
@@ -269,7 +278,7 @@ export async function stormProfile(
 		...levelVars
 	].join(',');
 	const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&wind_speed_unit=ms&timezone=GMT&forecast_days=3`;
-	const data = await (await fetch(url)).json();
+	const data = await openMeteo(url);
 	const h = data.hourly;
 	const elevation = data.elevation ?? 0;
 	const times: number[] = h.time.map((t: string) => new Date(t + 'Z').getTime());
@@ -387,7 +396,11 @@ const THUNDER_RING_SECONDS = 90;
 export function drawStrikes(
 	c: CanvasRenderingContext2D,
 	list: { time: number; lat: number; lon: number }[],
-	toScreen: (lat: number, lon: number) => { x: number; y: number },
+	toScreen: (
+		lat: number,
+		lon: number,
+		strike: { time: number; lat: number; lon: number }
+	) => { x: number; y: number },
 	width: number,
 	height: number,
 	size = 1,
@@ -403,7 +416,7 @@ export function drawStrikes(
 			if (seconds < 0 || seconds > THUNDER_RING_SECONDS) continue;
 			const radius = (seconds * SPEED_OF_SOUND) / kmPerPixel;
 			if (radius < 1.5) continue;
-			const { x, y } = toScreen(strike.lat, strike.lon);
+			const { x, y } = toScreen(strike.lat, strike.lon, strike);
 			if (x + radius < 0 || y + radius < 0 || x - radius > width || y - radius > height) continue;
 			const fade = 1 - seconds / THUNDER_RING_SECONDS;
 			c.strokeStyle = `rgba(253, 224, 71, ${(0.55 * fade * fade).toFixed(3)})`;
@@ -415,7 +428,7 @@ export function drawStrikes(
 	for (const strike of list) {
 		const age = (now - strike.time) / 60000;
 		if (age > 30) continue;
-		const { x, y } = toScreen(strike.lat, strike.lon);
+		const { x, y } = toScreen(strike.lat, strike.lon, strike);
 		if (x < -10 || y < -10 || x > width + 10 || y > height + 10) continue;
 		const colour =
 			age < 1
@@ -428,17 +441,21 @@ export function drawStrikes(
 							? '#ef4444'
 							: '#7f1d1d';
 		if (age < 0.25) {
-			// Just now: a bright cross with a glow
-			const grow = 1 + (0.25 - age) * 8;
+			// Just now (15 s): a small white cross, a flash that shrinks into it; only the very
+			// newest glow, so a busy storm stays readable
+			const flash = Math.max(0, 1 - age / 0.05);
+			const arm = (3.5 + 4 * flash) * size;
 			c.strokeStyle = '#ffffff';
-			c.lineWidth = 2 * size;
-			c.shadowColor = '#fde047';
-			c.shadowBlur = 12;
+			c.lineWidth = 1.4 * size;
+			if (flash > 0) {
+				c.shadowColor = '#fde047';
+				c.shadowBlur = 10 * flash;
+			}
 			c.beginPath();
-			c.moveTo(x - 6 * size * grow, y);
-			c.lineTo(x + 6 * size * grow, y);
-			c.moveTo(x, y - 6 * size * grow);
-			c.lineTo(x, y + 6 * size * grow);
+			c.moveTo(x - arm, y);
+			c.lineTo(x + arm, y);
+			c.moveTo(x, y - arm);
+			c.lineTo(x, y + arm);
 			c.stroke();
 			c.shadowBlur = 0;
 		} else {

@@ -26,11 +26,13 @@ async function heavyShare(url: string): Promise<number> {
 }
 
 function shareOf(url: string) {
-	if (!strength.has(url))
+	if (!strength.has(url)) {
+		if (strength.size > 6000) strength.delete(strength.keys().next().value!);
 		strength.set(
 			url,
 			heavyShare(url).catch(() => 0)
 		);
+	}
 	return strength.get(url)!;
 }
 
@@ -64,7 +66,7 @@ export function cleanRadarTile(tile: (x: number, y: number) => string, x: number
 				.catch(() => url)
 		);
 		// Old frames go
-		if (cleaned.size > 600) {
+		if (cleaned.size > 3000) {
 			const first = cleaned.keys().next().value!;
 			cleaned.delete(first);
 			strength.delete(first);
@@ -76,17 +78,19 @@ export function cleanRadarTile(tile: (x: number, y: number) => string, x: number
 type Layer = { url: (z: number, x: number, y: number) => string; clean?: boolean };
 type Tile = { x: number; y: number; z: number };
 
-/** An action for a tile's img: its address, once checked for radar errors if the layer wants */
+/**
+ * An action for a tile's img: its address right away; for a layer that wants it, checked for
+ * radar errors meanwhile and hidden if it is one
+ */
 export function radarSrc(img: HTMLImageElement, params: { layer: Layer; tile: Tile }) {
 	let current = '';
 	const set = ({ layer, tile }: { layer: Layer; tile: Tile }) => {
 		const key = layer.url(tile.z, tile.x, tile.y);
 		if (key === current) return;
 		current = key;
-		if (!layer.clean) {
-			img.src = key;
-			return;
-		}
+		img.classList.remove('invisible');
+		img.src = key;
+		if (!layer.clean) return;
 		const count = 2 ** tile.z;
 		cleanRadarTile(
 			(x, y) =>
@@ -94,7 +98,7 @@ export function radarSrc(img: HTMLImageElement, params: { layer: Layer; tile: Ti
 			tile.x,
 			tile.y
 		).then((src) => {
-			if (current === key) img.src = src;
+			if (current === key && src !== key) img.src = src;
 		});
 	};
 	set(params);
