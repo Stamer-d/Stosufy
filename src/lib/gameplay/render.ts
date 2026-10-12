@@ -791,25 +791,42 @@ export function createGameplayRenderer(
 		if (time >= object.time - fadeIn && time <= object.endTime + HIT_FADE) {
 			const slide = (1 - clamp01((time - (object.time - fadeIn)) / fadeIn)) ** 2 * 50;
 			const back = element('spinner-rpm');
-			if (back) {
-				const w = back.image.width * back.scale * px;
-				const h = back.image.height * back.scale * px;
-				image(back, 320 - 87 - 64 + w / 2, 445 - 56 + slide + h / 2, px, alpha);
-			}
 			const digit = skin.score['0'];
 			const textScale = px * 0.9;
 			const height = digit ? digit.image.height * digit.scale * textScale : 18;
-			drawText(
-				`${Math.round(Math.max(0, rpm))}`,
-				skin.score,
-				skin.scoreOverlap,
-				320 + 80 - 64,
-				448 - 56 + slide + height / 2,
-				textScale,
-				alpha,
-				'right',
-				18
-			);
+			const rpmText = `${Math.round(Math.max(0, rpm))}`;
+			if (back) {
+				const w = back.image.width * back.scale * px;
+				const h = back.image.height * back.scale * px;
+				const left = 320 - 87 - 64;
+				const top = 445 - 56 + slide;
+				image(back, left + w / 2, top + h / 2, px, alpha);
+				// In the middle of the box's free part (its left part says "spins per minute"),
+				// whatever the numbers' size
+				drawText(
+					rpmText,
+					skin.score,
+					skin.scoreOverlap,
+					left + w * 0.63,
+					top + h / 2,
+					textScale,
+					alpha,
+					'center',
+					18
+				);
+			} else {
+				drawText(
+					rpmText,
+					skin.score,
+					skin.scoreOverlap,
+					320 + 80 - 64,
+					448 - 56 + slide + height / 2,
+					textScale,
+					alpha,
+					'right',
+					18
+				);
+			}
 		}
 	}
 
