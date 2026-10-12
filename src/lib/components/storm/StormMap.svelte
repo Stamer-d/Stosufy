@@ -6,11 +6,12 @@
 	import { onMount } from 'svelte';
 	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
 	import { drawStrikes, SEVERITY_COLOURS } from '#lib/storm.ts';
+	import { radarSrc } from '#lib/radarClean.ts';
 
 	/**
 	 * @type {{
 	 *   lat: number, lon: number, zoom: number,
-	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number, maxZoom?: number }[],
+	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number, maxZoom?: number, clean?: boolean }[],
 	 *   field?: { rows: { lat: number, lon: number, value: number }[][], colour: (v: number) => number[] } | null,
 	 *   warnings?: import('#lib/storm.ts').WarningArea[] | null,
 	 *   strikes?: { time: number, lat: number, lon: number }[] | null,
@@ -294,7 +295,7 @@
 	{#each layerTiles as { layer, tiles: list } (layer.key)}
 		{#each list as tile (tile.key)}
 			<img
-				src={layer.url(tile.z, tile.x, tile.y)}
+				use:radarSrc={{ layer, tile }}
 				alt=""
 				draggable="false"
 				class="absolute max-w-none pointer-events-none"

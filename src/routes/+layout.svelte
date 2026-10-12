@@ -42,7 +42,7 @@
 	const scrolled = new Map();
 	beforeNavigate(({ from, to }) => {
 		// Going somewhere leaves the focus and DJ modes (they'd cover the page)
-		if (to && from?.url.pathname !== to.url.pathname) {
+		if (to?.url && from?.url.pathname !== to.url.pathname) {
 			focusMode.set(false);
 			djOpen.set(false);
 		}

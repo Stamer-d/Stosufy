@@ -118,7 +118,8 @@
 					key: f.path,
 					url: (z, x, y) => `${host}${f.path}/256/${z}/${x}/${y}/2/1_1.png`,
 					opacity: i === frame ? 0.9 : 0,
-					maxZoom: 7
+					maxZoom: 7,
+					clean: true
 				}))
 			: [])
 	]);

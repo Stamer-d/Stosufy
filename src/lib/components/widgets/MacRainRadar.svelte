@@ -89,7 +89,8 @@
 		frames.map((frame, i) => ({
 			key: frame.path,
 			url: (z, x, y) => `${host}${frame.path}/256/${z}/${x}/${y}/2/1_1.png`,
-			opacity: i === shown ? 0.8 : 0
+			opacity: i === shown ? 0.8 : 0,
+			clean: true
 		}))
 	);
 	const ago = (time) => {

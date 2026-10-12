@@ -43,6 +43,9 @@
 					"url": "https://api.rainviewer.com/*"
 				},
 				{
+					"url": "https://tilecache.rainviewer.com/*"
+				},
+				{
 					"url": "https://api.brightsky.dev/*"
 				},
 				{

@@ -2,11 +2,12 @@
 	// A dark map around a place, from map tiles, with more tile layers on top (the rain
 	// radar) and whatever the widget draws over it
 	import { tilesAround, baseTile, labelTile } from '#lib/map.ts';
+	import { radarSrc } from '#lib/radarClean.ts';
 
 	/**
 	 * @type {{
 	 *   lat: number, lon: number, zoom: number, width: number, height: number,
-	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number }[],
+	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number, clean?: boolean }[],
 	 *   children?: import('svelte').Snippet
 	 * }}
 	 */
@@ -28,7 +29,7 @@
 	{#each layers as layer (layer.key)}
 		{#each tiles as tile (tile.key + '/' + tile.z)}
 			<img
-				src={layer.url(tile.z, tile.x, tile.y)}
+				use:radarSrc={{ layer, tile }}
 				alt=""
 				draggable="false"
 				class="absolute size-64 max-w-none select-none"
