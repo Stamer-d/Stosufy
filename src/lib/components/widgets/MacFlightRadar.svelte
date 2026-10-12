@@ -6,13 +6,13 @@
 	import Widget from './MacWidget.svelte';
 	import WidgetMap from './WidgetMap.svelte';
 	import PlacePicker from './PlacePicker.svelte';
-	import { widgetData, placeOf, setWidgetData } from '#lib/stores/widgetData.ts';
+	import { widgetData, placeOf, detectedPlace, setWidgetData } from '#lib/stores/widgetData.ts';
 	import { worldPixel, distanceKm } from '#lib/map.ts';
 
 	/** @type {{ uid?: string }} */
 	let { uid = 'flight-radar' } = $props();
 
-	let place = $derived(placeOf($widgetData, uid));
+	let place = $derived(placeOf($widgetData, uid) ?? $detectedPlace);
 	let zoom = $derived($widgetData[uid]?.zoom ?? 9);
 	let asking = $state(false);
 	let width = $state(336);
@@ -252,7 +252,9 @@
 </script>
 
 <Widget size="large">
-	{#if !place || asking}
+	{#if !place && !asking}
+		<p class="mt-auto text-sm text-white/60">Finding where you are…</p>
+	{:else if asking}
 		<p
 			class="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-primary-500 mb-2"
 		>

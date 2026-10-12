@@ -5,14 +5,14 @@
 	import { onMount } from 'svelte';
 	import Widget from './MacWidget.svelte';
 	import PlacePicker from './PlacePicker.svelte';
-	import { widgetData, placeOf } from '#lib/stores/widgetData.ts';
+	import { widgetData, placeOf, detectedPlace } from '#lib/stores/widgetData.ts';
 	import { goto } from '$app/navigation';
 	import { LEVELS, stormOutlook } from '#lib/storm.ts';
 
 	/** @type {{ uid?: string }} */
 	let { uid = 'storm' } = $props();
 
-	let place = $derived(placeOf($widgetData, uid));
+	let place = $derived(placeOf($widgetData, uid) ?? $detectedPlace);
 	let asking = $state(false);
 	let storm = $state(null);
 	let error = $state('');
@@ -50,7 +50,9 @@
 </script>
 
 <Widget size="medium">
-	{#if !place || asking}
+	{#if !place && !asking}
+		<p class="mt-auto text-sm text-white/60">Finding where you are…</p>
+	{:else if asking}
 		<p
 			class="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-primary-500 mb-2"
 		>

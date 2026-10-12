@@ -3,6 +3,12 @@
 
 export const TILE = 256;
 
+// The dark map (Esri's dark grey canvas, no account or key needed) and its names on top
+export const baseTile = (z: number, x: number, y: number) =>
+	`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`;
+export const labelTile = (z: number, x: number, y: number) =>
+	`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/${z}/${y}/${x}`;
+
 /** A place in pixels of the whole world at a zoom level */
 export function worldPixel(lat: number, lon: number, zoom: number) {
 	const size = TILE * 2 ** zoom;

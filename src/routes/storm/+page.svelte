@@ -6,18 +6,20 @@
 	import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 	import StormMap from '#lib/components/storm/StormMap.svelte';
 	import PlacePicker from '#lib/components/widgets/PlacePicker.svelte';
-	import { widgetData, placeOf, setWidgetData } from '#lib/stores/widgetData.ts';
+	import { widgetData, placeOf, detectedPlace, setWidgetData } from '#lib/stores/widgetData.ts';
 	import { stormOutlook, stormGrid, levelOf, LEVELS, capeColour } from '#lib/storm.ts';
 	import { tileBounds } from '#lib/map.ts';
 
 	const UID = '_storm';
-	let home = $derived(placeOf($widgetData, UID));
+	let home = $derived(placeOf($widgetData, UID) ?? $detectedPlace);
+	let changingPlace = $state(false);
 	let saved = $derived($widgetData[UID] ?? {});
 
 	// Where the map looks (kept for next time)
 	let view = $state(null);
 	$effect(() => {
-		if (view) return;
+		// Lands where you are (or where the map was left)
+		if (view || (!saved.view && !home)) return;
 		view =
 			saved.view ??
 			(home ? { lat: home.lat, lon: home.lon, zoom: 7 } : { lat: 51, lon: 10.3, zoom: 6 });
@@ -335,22 +337,39 @@
 	<aside
 		class="absolute top-4 right-4 bottom-4 w-[20rem] flex flex-col gap-3 p-4 rounded-2xl bg-black/65 backdrop-blur-xl ring-1 ring-white/10 overflow-y-auto"
 	>
-		{#if !home}
+		{#if changingPlace}
 			<div>
-				<p class="font-bold">Where are you?</p>
-				<p class="text-sm text-white/60 mb-2">
-					Your city is marked on the map and looked at first.
-				</p>
-				<PlacePicker uid={UID} label="Set my city" />
+				<p class="text-sm text-white/60 mb-2">Your city, marked on the map:</p>
+				<PlacePicker
+					uid={UID}
+					label="Set my city"
+					ondone={() => {
+						changingPlace = false;
+						probe = null;
+						// To the new city
+						setWidgetData(UID, { view: null });
+						view = null;
+					}}
+				/>
 			</div>
 		{/if}
 		{#if probe}
 			<div>
-				<p class="text-xs font-bold uppercase tracking-wide text-white/50">
-					{home && Math.abs(probe.lat - home.lat) < 0.01 && Math.abs(probe.lon - home.lon) < 0.01
-						? home.name
-						: `${probe.lat.toFixed(2)}°, ${probe.lon.toFixed(2)}°`} · next 24 h
-				</p>
+				<div class="flex items-center gap-2">
+					<p
+						class="flex-1 min-w-0 truncate text-xs font-bold uppercase tracking-wide text-white/50"
+					>
+						{home && Math.abs(probe.lat - home.lat) < 0.01 && Math.abs(probe.lon - home.lon) < 0.01
+							? home.name
+							: `${probe.lat.toFixed(2)}°, ${probe.lon.toFixed(2)}°`} · next 24 h
+					</p>
+					{#if home && !changingPlace}
+						<button
+							class="shrink-0 text-[11px] font-semibold text-white/50 hover:text-white cursor-pointer"
+							onclick={() => (changingPlace = true)}>Change city</button
+						>
+					{/if}
+				</div>
 				{#if outlook && probeLevel}
 					<div class="mt-2 flex items-center gap-3">
 						<span

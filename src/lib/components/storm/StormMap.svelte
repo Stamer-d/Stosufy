@@ -2,7 +2,7 @@
 	// The big map of the storm center: drag to move, scroll to zoom, click to look at a place.
 	// Tile layers (radar, warnings) can have a lower top zoom than the map: their tiles are
 	// then shown bigger. The CAPE map is drawn from a grid of forecast points.
-	import { worldPixel, fromWorldPixel, TILE } from '#lib/map.ts';
+	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
 	import { capeColour } from '#lib/storm.ts';
 
 	/**
@@ -180,7 +180,7 @@
 >
 	{#each baseTiles as tile (tile.key)}
 		<img
-			src="https://basemaps.cartocdn.com/dark_nolabels/{tile.z}/{tile.x}/{tile.y}.png"
+			src={baseTile(tile.z, tile.x, tile.y)}
 			alt=""
 			draggable="false"
 			class="absolute max-w-none pointer-events-none"
@@ -208,7 +208,7 @@
 	<!-- City names above the weather -->
 	{#each baseTiles as tile (tile.key)}
 		<img
-			src="https://basemaps.cartocdn.com/dark_only_labels/{tile.z}/{tile.x}/{tile.y}.png"
+			src={labelTile(tile.z, tile.x, tile.y)}
 			alt=""
 			draggable="false"
 			class="absolute max-w-none pointer-events-none"
@@ -231,6 +231,6 @@
 		{/if}
 	{/each}
 	<p class="absolute bottom-1 right-2 text-[10px] text-white/40 pointer-events-none">
-		© OpenStreetMap · CARTO · RainViewer · DWD · Open-Meteo
+		© Esri, HERE, Garmin, OpenStreetMap · RainViewer · DWD · Open-Meteo
 	</p>
 </div>

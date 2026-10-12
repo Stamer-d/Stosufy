@@ -1,7 +1,7 @@
 <script>
 	// A dark map around a place, from map tiles, with more tile layers on top (the rain
 	// radar) and whatever the widget draws over it
-	import { tilesAround } from '#lib/map.ts';
+	import { tilesAround, baseTile, labelTile } from '#lib/map.ts';
 
 	/**
 	 * @type {{
@@ -13,13 +13,12 @@
 	let { lat, lon, zoom, width, height, layers = [], children } = $props();
 
 	let tiles = $derived(tilesAround(lat, lon, zoom, width, height));
-	const base = (z, x, y) => `https://basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
 </script>
 
 <div class="absolute inset-0 overflow-hidden bg-[#0e1116]">
 	{#each tiles as tile (tile.key + '/' + tile.z)}
 		<img
-			src={base(tile.z, tile.x, tile.y)}
+			src={baseTile(tile.z, tile.x, tile.y)}
 			alt=""
 			draggable="false"
 			class="absolute size-64 max-w-none select-none"
@@ -38,8 +37,18 @@
 			/>
 		{/each}
 	{/each}
+	{#each tiles as tile (tile.key + '/' + tile.z)}
+		<img
+			src={labelTile(tile.z, tile.x, tile.y)}
+			alt=""
+			draggable="false"
+			class="absolute size-64 max-w-none select-none pointer-events-none"
+			style="left: {tile.left}px; top: {tile.top}px"
+			onerror={(e) => /** @type {HTMLElement} */ (e.currentTarget).classList.add('invisible')}
+		/>
+	{/each}
 	{@render children?.()}
 	<p class="absolute bottom-1 right-2 text-[9px] text-white/35 pointer-events-none">
-		© OpenStreetMap · CARTO
+		© Esri, HERE, Garmin, OpenStreetMap
 	</p>
 </div>

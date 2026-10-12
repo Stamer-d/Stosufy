@@ -50,6 +50,9 @@
 				},
 				{
 					"url": "https://api.adsb.lol/*"
+				},
+				{
+					"url": "https://get.geojs.io/*"
 				}
 			],
 			"deny": [

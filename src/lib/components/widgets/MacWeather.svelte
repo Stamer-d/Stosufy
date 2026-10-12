@@ -2,13 +2,13 @@
 	// The weather where you are (Open-Meteo, no account needed): now and today's high and low
 	import { onMount } from 'svelte';
 	import Widget from './MacWidget.svelte';
-	import { widgetData, placeOf } from '#lib/stores/widgetData.ts';
+	import { widgetData, placeOf, detectedPlace } from '#lib/stores/widgetData.ts';
 	import PlacePicker from './PlacePicker.svelte';
 
 	/** @type {{ uid?: string }} */
 	let { uid = 'weather' } = $props();
 
-	let place = $derived(placeOf($widgetData, uid));
+	let place = $derived(placeOf($widgetData, uid) ?? $detectedPlace);
 	let weather = $state(null);
 	let error = $state('');
 	let asking = $state(false);
@@ -55,7 +55,9 @@
 </script>
 
 <Widget size="small" label="Weather" icon="icon-[mingcute--sun-fill]">
-	{#if !place || asking}
+	{#if !place && !asking}
+		<p class="mt-auto text-sm text-white/60">Finding where you are…</p>
+	{:else if asking}
 		<PlacePicker {uid} label="Show weather" ondone={() => (asking = false)} />
 	{:else if weather}
 		{@const [, icon, word] = kind(weather.code)}

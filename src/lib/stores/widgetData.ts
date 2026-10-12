@@ -1,7 +1,8 @@
 // What a placed widget keeps (a note's text, the weather's city): in the settings, by the
 // widget's uid, so it follows the user to other computers like the layout does
 
-import { derived, get } from 'svelte/store';
+import { derived, get, readable } from 'svelte/store';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { userSettings, updateUserSettings } from './user';
 
 export const widgetData = derived(
@@ -21,6 +22,30 @@ export interface Place {
 	/** Two letters, like DE */
 	country?: string;
 }
+
+/** Where the computer is, roughly (by its internet address), until a city is chosen */
+const FALLBACK: Place = { name: 'Germany', lat: 51.16, lon: 10.45, country: 'DE' };
+export const detectedPlace = readable<Place | null>(null, (set) => {
+	let stopped = false;
+	tauriFetch('https://get.geojs.io/v1/ip/geo.json')
+		.then((response) => response.json())
+		.then((data) => {
+			const lat = Number(data.latitude);
+			const lon = Number(data.longitude);
+			if (!isFinite(lat) || !isFinite(lon)) throw new Error('No place');
+			if (!stopped)
+				set({
+					name: data.city || data.region || data.country || 'You',
+					lat,
+					lon,
+					country: data.country_code
+				});
+		})
+		.catch(() => !stopped && set(FALLBACK));
+	return () => {
+		stopped = true;
+	};
+});
 
 /** The place a widget shows (the last one chosen in any widget, until it gets its own) */
 export function placeOf(data: Record<string, Record<string, any>>, uid: string): Place | null {
