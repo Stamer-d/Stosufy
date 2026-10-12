@@ -1,6 +1,8 @@
 // Loudness normalization: measures how loud a song is (integrated loudness after ITU-R
 // BS.1770, the LUFS measure streaming services use) and turns it into a volume factor.
 
+import { decodeAudio } from '../audioDecode';
+
 /** Loudness every song is brought to, like Spotify's "normal" setting */
 const TARGET_LUFS = -14;
 const MIN_GAIN = 0.25;
@@ -19,7 +21,7 @@ export function gainFor(loudness: number) {
 /** Integrated loudness of an audio file in LUFS, or null if it can't be decoded */
 export async function measureLoudness(file: Uint8Array): Promise<number | null> {
 	try {
-		const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(file.slice().buffer);
+		const decoded = await decodeAudio(new OfflineAudioContext(1, 1, 44100), file.slice().buffer);
 		return await loudnessOf(decoded);
 	} catch (error) {
 		console.warn('Could not measure the loudness', error);

@@ -19,6 +19,7 @@ import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
 import { parseHitsounds, type HitSample, type HitsoundEvent } from './chart';
 import { builtinSample } from './builtin';
+import { decodeAudio } from '../audioDecode';
 import {
 	skinFolder,
 	hasDefaultSkin,
@@ -145,12 +146,10 @@ function decode(file: string) {
 			readFile(file)
 				.then(async (data) => {
 					if (data.byteLength < 100) return null;
-					return audioContext()
-						.decodeAudioData(data.buffer.slice(0) as ArrayBuffer)
-						.catch((error) => {
-							console.warn('Could not decode the sample', file, error);
-							return undefined;
-						});
+					return decodeAudio(audioContext(), data.buffer.slice(0) as ArrayBuffer).catch((error) => {
+						console.warn('Could not decode the sample', file, error);
+						return undefined;
+					});
 				})
 				.catch(() => undefined)
 		);

@@ -37,6 +37,7 @@
 		"@tauri-apps/plugin-updater": "^2.13.2",
 		"@tauri-apps/plugin-websocket": "^2.5.0",
 		"@tauri-apps/plugin-window-state": "^2.5.0",
+		"@wasm-audio-decoders/ogg-vorbis": "^0.1.20",
 		"jszip": "^3.10.2",
 		"tailwindcss": "^4.3.3",
 		"tauri-plugin-drpc": "^1.0.3",

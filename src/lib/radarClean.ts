@@ -7,11 +7,13 @@
 // The tiles are looked at as the map loads them (no second download): each loaded radar tile
 // gets its share of heavy rain, and tiles next to an error tile are checked again.
 
+import { offscreenCanvas } from './canvas';
+
 /** How much of a tile shows heavy rain (0–1), from its colours (RainViewer's scheme 2) */
 function heavyShare(img: HTMLImageElement): number | null {
 	try {
 		const size = 64;
-		const c = new OffscreenCanvas(size, size).getContext('2d', { willReadFrequently: true })!;
+		const c = offscreenCanvas(size, size).getContext('2d', { willReadFrequently: true })!;
 		c.drawImage(img, 0, 0, size, size);
 		const px = c.getImageData(0, 0, size, size).data;
 		let heavy = 0;

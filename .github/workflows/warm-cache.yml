@@ -14,9 +14,32 @@ on:
 
 jobs:
   warm-cache:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+            cache: windows
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            cache: macos-arm
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            cache: macos-intel
+          - platform: ubuntu-22.04
+            args: ''
+            cache: linux
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Linux libraries
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - name: setup node
         uses: actions/setup-node@v4
@@ -26,16 +49,18 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          shared-key: tauri-release
+          shared-key: tauri-release-${{ matrix.cache }}
 
       - name: Install frontend dependencies
         run: npm ci
 
       # Same build command tauri-action runs, so the cached artifacts match; skips bundling and signing
       - name: Build
-        run: npx tauri build --no-bundle
+        run: npx tauri build --no-bundle ${{ matrix.args }}

@@ -28,6 +28,9 @@ export function currentMod(): PlaybackMod {
 export function applyMod(audio: HTMLAudioElement, mod = currentMod()) {
 	const { rate, preservesPitch } = MODS[mod];
 	audio.preservesPitch = preservesPitch;
+	// (Older WebKit, macOS and Linux, only knows its own name for it)
+	(audio as HTMLAudioElement & { webkitPreservesPitch?: boolean }).webkitPreservesPitch =
+		preservesPitch;
 	audio.defaultPlaybackRate = rate;
 	audio.playbackRate = rate;
 }

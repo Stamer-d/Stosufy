@@ -36,14 +36,75 @@ const SAVE_BATCH = 50;
 const DETAILS_BATCH = 50;
 const DETAILS_DELAY = 1_000;
 
-/** The Songs folder of a default osu! stable installation, if there is one */
+/**
+ * The Songs folder of an osu! stable installation, if there is one where it usually is:
+ * Windows' own, or on macOS and Linux one running in Wine (osu-winello, Lutris, Bottles,
+ * Whisky, Wineskin and plain Wine prefixes)
+ */
 export async function defaultOsuSongsFolder(): Promise<string | null> {
+	const candidates: string[][] = [];
 	try {
-		const folder = await path.join(await path.localDataDir(), 'osu!', 'Songs');
-		return (await exists(folder)) ? folder : null;
+		candidates.push([await path.localDataDir(), 'osu!', 'Songs']);
 	} catch {
-		return null;
+		// no local data folder
 	}
+	try {
+		const home = await path.homeDir();
+		const user = home.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+		const wine = (prefix: string[]) => [
+			[...prefix, 'drive_c', 'osu!', 'Songs'],
+			[...prefix, 'drive_c', 'users', user, 'AppData', 'Local', 'osu!', 'Songs'],
+			[...prefix, 'drive_c', 'users', 'crossover', 'AppData', 'Local', 'osu!', 'Songs'],
+			[...prefix, 'drive_c', 'Program Files', 'osu!', 'Songs']
+		];
+		candidates.push(
+			// osu-winello and the osu-wine scripts
+			[home, '.local', 'share', 'osu-wine', 'osu!', 'Songs'],
+			[home, '.local', 'share', 'osu-wine', 'OSU', 'Songs'],
+			[home, '.local', 'share', 'osu-wine', 'osu-stable', 'Songs'],
+			[home, '.local', 'share', 'osu-stable', 'Songs'],
+			[home, 'osu!', 'Songs'],
+			[home, 'Games', 'osu!', 'Songs'],
+			...wine([home, '.wine']),
+			...wine([home, 'Games', 'osu', 'prefix']),
+			...wine([home, '.local', 'share', 'bottles', 'bottles', 'osu']),
+			...wine([home, 'Library', 'Application Support', 'osu-wine']),
+			[home, 'Applications', 'osu!.app', 'Contents', 'Resources', 'drive_c', 'osu!', 'Songs'],
+			[
+				home,
+				'Applications',
+				'osu!.app',
+				'Contents',
+				'SharedSupport',
+				'prefix',
+				'drive_c',
+				'osu!',
+				'Songs'
+			]
+		);
+		// Whisky bottles have generated names: each one is looked into
+		const bottles = await path.join(
+			home,
+			'Library',
+			'Containers',
+			'com.isaacmarovitz.Whisky',
+			'Bottles'
+		);
+		if (await exists(bottles).catch(() => false))
+			for (const bottle of await readDir(bottles).catch(() => []))
+				if (bottle.isDirectory) candidates.push(...wine([bottles, bottle.name]));
+	} catch {
+		// no home folder
+	}
+	for (const parts of candidates) {
+		try {
+			const folder = await path.join(...parts);
+			if (await exists(folder)) return folder;
+		} catch {
+			// not this one
+		}
+	}
+	return null;
 }
 
 /** Lets the user pick the osu! Songs folder; access to it is remembered across restarts */

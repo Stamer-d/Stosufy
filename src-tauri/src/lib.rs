@@ -21,10 +21,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_prevent_default::debug())
         .setup(|app| {
+            // The login link (stosufynew://) opens the app. On Linux this needs the desktop's
+            // tools (xdg-utils): without them the app still starts, just without the link
             #[cfg(any(windows, target_os = "linux"))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                app.deep_link().register_all()?;
+                if let Err(error) = app.deep_link().register_all() {
+                    eprintln!("Could not register the login link: {error}");
+                }
             }
             Ok(())
         })

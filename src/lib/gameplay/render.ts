@@ -18,6 +18,7 @@ import {
 	type ObjectState,
 	type Snapshot
 } from './judge';
+import { offscreenCanvas } from '../canvas';
 
 type Colour = [number, number, number];
 type CircleKind = 'hitcircle' | 'sliderstartcircle' | 'sliderendcircle';
@@ -453,7 +454,7 @@ export function createGameplayRenderer(
 		let made = additives.get(source);
 		if (!made) {
 			const { width, height } = source.image;
-			const c = new OffscreenCanvas(width, height).getContext('2d')!;
+			const c = offscreenCanvas(width, height).getContext('2d')!;
 			c.drawImage(source.image, 0, 0);
 			const data = c.getImageData(0, 0, width, height);
 			const px = data.data;
@@ -845,7 +846,7 @@ export function createGameplayRenderer(
 		let found: { centre: number } | null = null;
 		try {
 			const { width, height } = picture.image;
-			const c = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })!;
+			const c = offscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })!;
 			c.drawImage(picture.image, 0, 0);
 			const px = c.getImageData(0, 0, width, height).data;
 			let opaque = 0;
@@ -1176,7 +1177,7 @@ export function createGameplayRenderer(
 			const { width, height } = source.image;
 			box = { x: 0, y: 0, width, height };
 			try {
-				const c = new OffscreenCanvas(width, height).getContext('2d')!;
+				const c = offscreenCanvas(width, height).getContext('2d')!;
 				c.drawImage(source.image, 0, 0);
 				const data = c.getImageData(0, 0, width, height).data;
 				let left = width;

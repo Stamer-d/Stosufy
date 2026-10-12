@@ -7,6 +7,7 @@ import { measureLoudness, gainFor } from './loudness';
 import { sameSong } from '../tracks';
 import { offline } from './network';
 import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
+import { playableBytes } from '../audioDecode';
 import { attach, applyEq, eqSettings } from './equalizer';
 import { showToast } from './toast';
 import { librarySong, similarSongs } from './radio';
@@ -192,7 +193,8 @@ async function getAudio(index: number, queue: MapSet[], type: QueueType, current
 			? await readFile(localFile, { baseDir: BaseDirectory.Home }).catch(() => null)
 			: null;
 		const bytes = file ?? bytesFromBase64(await downloadBeatmap(song, playedMapId));
-		audio = new Audio(URL.createObjectURL(new Blob([bytes])));
+		// (Ogg as WAV where the web view can't play it: Safari's WebKit on macOS)
+		audio = new Audio(URL.createObjectURL(new Blob([await playableBytes(bytes)])));
 		track(audio, fadeInNext || smoothIn ? 0 : 1);
 		normalize(audio, song, playedMapId, bytes);
 	}

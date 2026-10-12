@@ -26,6 +26,7 @@ import {
 	type Grid
 } from './grid';
 import { computePeaks, type Peaks } from './peaks';
+import { decodeAudio } from '../audioDecode';
 import {
 	analyzeSong,
 	keyFit,
@@ -325,7 +326,7 @@ export class Deck {
 				? stored.beatmaps[mapId]
 				: Object.values(stored?.beatmaps ?? {}).find((m) => m.audioFile);
 			if (!map?.audioFile) throw new Error('Download the song to mix it');
-			const buffer = await this.ctx.decodeAudioData(await readAudio(map.audioFile));
+			const buffer = await decodeAudio(this.ctx, await readAudio(map.audioFile));
 			if (id !== this.loadId) return;
 			let timing = map.timing;
 			let kiai = map.kiai;
@@ -2402,9 +2403,12 @@ class Mixer {
 
 	startRecording() {
 		if (this.recorder) return;
-		const type = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'].find((t) =>
-			MediaRecorder.isTypeSupported(t)
-		);
+		const type = [
+			'audio/webm;codecs=opus',
+			'audio/ogg;codecs=opus',
+			'audio/webm',
+			'audio/mp4'
+		].find((t) => MediaRecorder.isTypeSupported(t));
 		this.chunks = [];
 		this.recorder = new MediaRecorder(this.stream.stream, type ? { mimeType: type } : undefined);
 		this.recorder.ondataavailable = (event) => event.data.size && this.chunks.push(event.data);

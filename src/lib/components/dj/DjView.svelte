@@ -44,7 +44,11 @@
 			const dir = await path.join(await path.homeDir(), 'Stosufy', 'Mixes');
 			await mkdir(dir, { recursive: true });
 			const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
-			const extension = blob.type.includes('ogg') ? 'ogg' : 'webm';
+			const extension = blob.type.includes('ogg')
+				? 'ogg'
+				: blob.type.includes('mp4')
+					? 'm4a'
+					: 'webm';
 			const file = await path.join(dir, `Mix ${stamp}.${extension}`);
 			await writeFile(file, new Uint8Array(await blob.arrayBuffer()));
 			showToast(`Saved your mix to ${file}`, 'icon-[mingcute--record-mail-line]');

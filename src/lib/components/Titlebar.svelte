@@ -17,6 +17,8 @@
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 
 	const appWindow = getCurrentWindow();
+	// macOS has its own window buttons (top left, over the bar): room for them, no others
+	const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
 
 	/** Where a button leads, out of the focus and DJ modes (also to the page that's open) */
 	function go(path) {
@@ -115,7 +117,7 @@
 <svelte:window onmouseup={handleHistoryInput} onkeydown={handleHistoryInput} />
 
 <header class="h-12 shrink-0 flex items-center" data-tauri-drag-region>
-	<div class="flex items-center gap-1 pl-3" data-tauri-drag-region>
+	<div class="flex items-center gap-1 {isMac ? 'pl-20' : 'pl-3'}" data-tauri-drag-region>
 		<img src="/NoLetterLogo.png" alt="" class="beat-logo size-6 mr-2 pointer-events-none" />
 		{#if $user?.username}
 			{#each historyButtons as nav (nav.label)}
@@ -196,7 +198,7 @@
 		{/if}
 	</div>
 
-	<div class="flex items-center h-full">
+	<div class="flex items-center h-full {isMac ? 'pr-3' : ''}">
 		{#if $user?.username}
 			<ListenTogether />
 			<button
@@ -275,27 +277,29 @@
 			</Dropdown>
 		{/if}
 
-		<button
-			aria-label="Minimize"
-			class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-secondary-300 transition"
-			onclick={() => appWindow.minimize()}
-		>
-			<span class="icon-[mingcute--minimize-line] size-4"></span>
-		</button>
-		<button
-			aria-label="Maximize"
-			class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-secondary-300 transition"
-			onclick={() => appWindow.toggleMaximize()}
-		>
-			<span class="icon-[mingcute--square-line] size-3.5"></span>
-		</button>
-		<button
-			aria-label="Close"
-			class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-red-600 transition"
-			onclick={() => appWindow.close()}
-		>
-			<span class="icon-[mingcute--close-line] size-4"></span>
-		</button>
+		{#if !isMac}
+			<button
+				aria-label="Minimize"
+				class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-secondary-300 transition"
+				onclick={() => appWindow.minimize()}
+			>
+				<span class="icon-[mingcute--minimize-line] size-4"></span>
+			</button>
+			<button
+				aria-label="Maximize"
+				class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-secondary-300 transition"
+				onclick={() => appWindow.toggleMaximize()}
+			>
+				<span class="icon-[mingcute--square-line] size-3.5"></span>
+			</button>
+			<button
+				aria-label="Close"
+				class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-red-600 transition"
+				onclick={() => appWindow.close()}
+			>
+				<span class="icon-[mingcute--close-line] size-4"></span>
+			</button>
+		{/if}
 	</div>
 </header>
 

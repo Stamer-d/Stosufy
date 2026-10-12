@@ -8,10 +8,70 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
-    runs-on: windows-latest
+  # One release (a draft) that every platform's build uploads to; published once they're done
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Version
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+
+      - name: Create the release
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `Stosufy-v${process.env.VERSION}`,
+              name: `Stosufy v${process.env.VERSION}`,
+              target_commitish: context.sha,
+              body: [
+                'Download the latest version of Stosufy:',
+                '',
+                '- **Windows**: the `.exe` installer (or the `.msi`)',
+                '- **macOS**: the `.dmg`, `aarch64` for Apple Silicon (M1 and newer), `x64` for Intel Macs. The app is not notarized by Apple: on the first start right-click it and choose Open, or run `xattr -cr /Applications/Stosufy.app` once',
+                '- **Linux**: the `.AppImage` (any distribution, updates itself), the `.deb` (Ubuntu, Debian, Mint) or the `.rpm` (Fedora, openSUSE)'
+              ].join('\n'),
+              draft: true,
+              prerelease: false
+            });
+            return data.id;
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+            cache: windows
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            cache: macos-arm
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            cache: macos-intel
+          - platform: ubuntu-22.04
+            args: ''
+            cache: linux
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux libraries
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+            gstreamer1.0-libav
 
       - name: setup node
         uses: actions/setup-node@v4
@@ -21,14 +81,15 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      # Restores the compiled Rust dependencies. Caches saved on tag runs are not visible
-      # to later tags, so the cache is filled by warm-cache.yml on main instead.
+      # Restores the compiled Rust dependencies (filled by warm-cache.yml on main)
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          shared-key: tauri-release
+          shared-key: tauri-release-${{ matrix.cache }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install frontend dependencies
@@ -46,9 +107,25 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
-          tagName: Stosufy-v__VERSION__
-          releaseName: 'Stosufy v__VERSION__'
-          releaseBody: 'Download the latest version of Stosufy, currently only available for Windows'
-          releaseDraft: false
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: ${{ matrix.args }}
           updaterJsonPreferNsis: true
+
+  # Out once the builds are done (a platform that failed doesn't hold the others back)
+  publish-release:
+    needs: [create-release, build]
+    if: ${{ !cancelled() && needs.create-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false
+            });

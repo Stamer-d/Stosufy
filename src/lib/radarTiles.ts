@@ -4,6 +4,7 @@
 // rings in heavy-rain colours around a radar) are left out.
 
 import { fastFetch } from './fastFetch';
+import { offscreenCanvas } from './canvas';
 
 export interface RadarTile {
 	/** The picture, or null: not there, or a radar error */
@@ -43,7 +44,7 @@ function inTurn<T>(task: () => Promise<T>, urgent: boolean): Promise<T> {
 /** How much of a picture shows heavy rain (RainViewer's colour scheme 2: orange to red) */
 function heavyShare(bitmap: ImageBitmap) {
 	const size = 64;
-	const c = new OffscreenCanvas(size, size).getContext('2d', { willReadFrequently: true })!;
+	const c = offscreenCanvas(size, size).getContext('2d', { willReadFrequently: true })!;
 	c.drawImage(bitmap, 0, 0, size, size);
 	const px = c.getImageData(0, 0, size, size).data;
 	let heavy = 0;

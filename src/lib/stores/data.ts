@@ -22,6 +22,7 @@ import { songQueue, updateSongQueue } from './audio';
 import { addSong } from '../api';
 import { showToast } from './toast';
 import type { Beatmap, DownloadState, MapSet, SearchFilters, StoredMapSet } from '../types';
+import { offscreenCanvas } from '../canvas';
 
 let homeDir = '';
 let mapSetsDir = '';
@@ -918,7 +919,7 @@ export function colorFromImage(url: string): Promise<string | null> {
 					const response = await fetch(url);
 					if (!response.ok) return null;
 					const bitmap = await createImageBitmap(await response.blob());
-					const canvas = new OffscreenCanvas(16, 16);
+					const canvas = offscreenCanvas(16, 16);
 					const context = canvas.getContext('2d');
 					context.drawImage(bitmap, 0, 0, 16, 16);
 					const pixels = context.getImageData(0, 0, 16, 16).data;
@@ -1143,7 +1144,7 @@ function smallImageUrl(imagePath: string) {
 					const bitmap = await createImageBitmap(new Blob([data]));
 					const size = 160;
 					const scale = size / Math.min(bitmap.width, bitmap.height);
-					const canvas = new OffscreenCanvas(size, size);
+					const canvas = offscreenCanvas(size, size);
 					const w = bitmap.width * scale;
 					const h = bitmap.height * scale;
 					canvas.getContext('2d')!.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
