@@ -394,7 +394,15 @@ export function drawStrikes(
 		const { x, y } = toScreen(strike.lat, strike.lon);
 		if (x < -10 || y < -10 || x > width + 10 || y > height + 10) continue;
 		const colour =
-			age < 1 ? '#ffffff' : age < 5 ? '#fde047' : age < 10 ? '#fb923c' : age < 20 ? '#ef4444' : '#7f1d1d';
+			age < 1
+				? '#ffffff'
+				: age < 5
+					? '#fde047'
+					: age < 10
+						? '#fb923c'
+						: age < 20
+							? '#ef4444'
+							: '#7f1d1d';
 		if (age < 0.25) {
 			// Just now: a bright cross with a glow
 			const grow = 1 + (0.25 - age) * 8;
@@ -416,4 +424,181 @@ export function drawStrikes(
 			c.fill();
 		}
 	}
+}
+
+// --- Map fields of the forecast (colour scales like on convection maps) ---------------------
+
+type Rgba = [number, number, number, number];
+
+function scale(stops: [number, Rgba][], value: number): Rgba {
+	if (value <= stops[0][0]) return stops[0][1];
+	for (let i = 1; i < stops.length; i++) {
+		const [at, colour] = stops[i];
+		if (value <= at) {
+			const [from, previous] = stops[i - 1];
+			const t = (value - from) / (at - from);
+			return previous.map((v, k) => v + (colour[k] - v) * t) as Rgba;
+		}
+	}
+	return stops[stops.length - 1][1];
+}
+
+export interface Field {
+	id: string;
+	label: string;
+	unit: string;
+	/** What it shows, in a few words */
+	hint: string;
+	/** Its value at a forecast hour of a point */
+	value: (hour: StormHour) => number;
+	colour: (value: number) => Rgba;
+	/** Values for the legend */
+	legend: number[];
+}
+
+export const FIELDS: Field[] = [
+	{
+		id: 'risk',
+		label: 'Storm risk',
+		unit: '',
+		hint: 'Energy, instability and shear together, from quiet to high',
+		value: (h) => levelOf(h.cape, h.li, h.shear, h.thunder),
+		colour: (v) =>
+			v < 0.5
+				? [0, 0, 0, 0]
+				: (([r, g, b]) => [r, g, b, 0.3 + v * 0.1])(
+						LEVELS[Math.min(4, Math.round(v))].colour
+							.slice(1)
+							.match(/../g)!
+							.map((x) => parseInt(x, 16))
+					),
+		legend: [1, 2, 3, 4]
+	},
+	{
+		id: 'cape',
+		label: 'CAPE',
+		unit: 'J/kg',
+		hint: 'Energy for storms: from 500 storms can grow, from 2000 they can be violent',
+		value: (h) => h.cape,
+		colour: capeColour,
+		legend: [100, 500, 1000, 2000, 3000]
+	},
+	{
+		id: 'li',
+		label: 'Lifted index',
+		unit: '',
+		hint: 'How unstable the air is: below 0 storms can form, below −4 strong ones',
+		value: (h) => h.li,
+		colour: (v) =>
+			scale(
+				[
+					[-8, [217, 70, 239, 0.7]],
+					[-6, [244, 63, 94, 0.65]],
+					[-4, [251, 146, 60, 0.6]],
+					[-2, [250, 204, 21, 0.5]],
+					[0, [74, 222, 128, 0.25]],
+					[1, [0, 0, 0, 0]]
+				],
+				v
+			),
+		legend: [0, -2, -4, -6, -8]
+	},
+	{
+		id: 'shear',
+		label: 'Deep shear',
+		unit: 'm/s',
+		hint: 'Wind shear 0–6 km: it organises storms; from 20 supercells',
+		value: (h) => h.shear,
+		colour: (v) =>
+			scale(
+				[
+					[8, [0, 0, 0, 0]],
+					[12, [56, 189, 248, 0.35]],
+					[16, [74, 222, 128, 0.45]],
+					[20, [250, 204, 21, 0.55]],
+					[25, [251, 146, 60, 0.6]],
+					[30, [244, 63, 94, 0.65]],
+					[40, [217, 70, 239, 0.7]]
+				],
+				v
+			),
+		legend: [12, 16, 20, 25, 30]
+	},
+	{
+		id: 'gust',
+		label: 'Gusts',
+		unit: 'km/h',
+		hint: 'The strongest gusts expected',
+		value: (h) => h.gust * 3.6,
+		colour: (v) =>
+			scale(
+				[
+					[40, [0, 0, 0, 0]],
+					[55, [250, 204, 21, 0.45]],
+					[75, [251, 146, 60, 0.55]],
+					[100, [244, 63, 94, 0.65]],
+					[130, [217, 70, 239, 0.7]]
+				],
+				v
+			),
+		legend: [55, 75, 100, 130]
+	}
+];
+
+// --- DWD warnings as areas ---------------------------------------------------------------------
+
+export interface WarningArea {
+	event: string;
+	headline: string;
+	description: string;
+	severity: 'minor' | 'moderate' | 'severe' | 'extreme';
+	onset: string | null;
+	expires: string | null;
+	/** Rings of [lon, lat] */
+	rings: [number, number][][];
+}
+
+export const SEVERITY_COLOURS: Record<WarningArea['severity'], string> = {
+	minor: '#facc15',
+	moderate: '#fb923c',
+	severe: '#ef4444',
+	extreme: '#c026d3'
+};
+
+/** The DWD's current warnings for Germany as areas (merged municipalities) */
+export async function warningAreas(
+	fetcher: (url: string) => Promise<Response>
+): Promise<WarningArea[]> {
+	const url =
+		'https://maps.dwd.de/geoserver/dwd/ows?service=WFS&version=1.0.0&request=GetFeature' +
+		'&typeName=dwd:Warnungen_Gemeinden_vereinigt&outputFormat=application/json&srsName=EPSG:4326';
+	const response = await fetcher(url);
+	if (!response.ok) throw new Error(`DWD answered with HTTP ${response.status}`);
+	const data = await response.json();
+	const order = ['minor', 'moderate', 'severe', 'extreme'];
+	return (data.features ?? [])
+		.map((feature: any) => {
+			const p = feature.properties ?? {};
+			const severity = String(p.SEVERITY ?? 'Minor').toLowerCase();
+			const geometry = feature.geometry ?? {};
+			const polygons =
+				geometry.type === 'MultiPolygon'
+					? geometry.coordinates
+					: geometry.type === 'Polygon'
+						? [geometry.coordinates]
+						: [];
+			return {
+				event: p.EVENT ?? '',
+				headline: p.HEADLINE ?? p.EVENT ?? '',
+				description: p.DESCRIPTION ?? '',
+				severity: order.includes(severity) ? severity : 'minor',
+				onset: p.ONSET ?? null,
+				expires: p.EXPIRES ?? null,
+				rings: polygons.flat()
+			};
+		})
+		.filter((area: WarningArea) => area.rings.length)
+		.sort(
+			(a: WarningArea, b: WarningArea) => order.indexOf(a.severity) - order.indexOf(b.severity)
+		);
 }

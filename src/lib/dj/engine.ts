@@ -1498,6 +1498,11 @@ class Mixer {
 		if (deck.state.error || deck.state.song !== song) return;
 		const now = get(songQueue).audio;
 		deck.seek(now?.currentTime ?? audio?.currentTime ?? 0);
+		// Heard right away: the crossfader on deck A and its channel up (a mix could have
+		// left them on B)
+		this.cancelMix();
+		this.setCrossfader(0);
+		if (deck.state.volume < 0.5) deck.set({ volume: 1 });
 		if (playing && now && !now.paused) deck.play();
 		this.autoFromPlayer();
 	}

@@ -21,6 +21,8 @@ export interface Place {
 	lon: number;
 	/** Two letters, like DE */
 	country?: string;
+	/** State and country, for telling places of the same name apart */
+	region?: string;
 }
 
 /** Where the computer is, roughly (by its internet address), until a city is chosen */
@@ -68,4 +70,28 @@ export async function findPlace(name: string): Promise<Place | null> {
 	return found
 		? { name: found.name, lat: found.latitude, lon: found.longitude, country: found.country_code }
 		: null;
+}
+
+/** Back to where the computer is: the chosen city is forgotten (for one widget, or all) */
+export function clearPlace(uid?: string) {
+	const all = { ...(get(userSettings).settings?.widgetData ?? {}) };
+	for (const key of Object.keys(all)) {
+		if (uid && key !== uid && key !== '_place') continue;
+		if (all[key]?.place) all[key] = { ...all[key], place: null };
+	}
+	updateUserSettings({ widgetData: all });
+}
+
+/** Cities by name, for a search box */
+export async function searchPlaces(name: string): Promise<Place[]> {
+	const response = await fetch(
+		`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=6`
+	);
+	return ((await response.json()).results ?? []).map((found: any) => ({
+		name: found.name,
+		lat: found.latitude,
+		lon: found.longitude,
+		country: found.country_code,
+		region: [found.admin1, found.country].filter(Boolean).join(', ')
+	}));
 }

@@ -1,60 +1,90 @@
 <script>
-	// The storm center: a big map with the rain radar, the DWD warnings and where the air
-	// has energy for storms (CAPE), and for any place clicked its storm outlook for the
-	// next 24 hours and its warnings
+	// The storm center, like the tools storm chasers use: Live shows what happens now (rain
+	// radar, lightning, DWD warnings, satellite), Forecast the ingredients for storms over the
+	// next 24 hours as maps (risk, CAPE, lifted index, shear, gusts). Any place clicked gets
+	// its full analysis: outlook, sounding, hodograph and warnings.
 	import { onMount } from 'svelte';
 	import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 	import StormMap from '#lib/components/storm/StormMap.svelte';
-	import PlacePicker from '#lib/components/widgets/PlacePicker.svelte';
-	import { widgetData, placeOf, detectedPlace, setWidgetData } from '#lib/stores/widgetData.ts';
+	import Hodograph from '#lib/components/storm/Hodograph.svelte';
+	import SkewT from '#lib/components/storm/SkewT.svelte';
+	import {
+		widgetData,
+		placeOf,
+		detectedPlace,
+		setWidgetData,
+		setPlace,
+		clearPlace,
+		searchPlaces
+	} from '#lib/stores/widgetData.ts';
 	import {
 		stormOutlook,
 		stormGrid,
 		stormProfile,
 		levelOf,
 		LEVELS,
-		capeColour,
+		FIELDS,
+		SEVERITY_COLOURS,
+		warningAreas,
 		compass
 	} from '#lib/storm.ts';
+	import { tileBounds, distanceKm } from '#lib/map.ts';
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { showToast } from '#lib/stores/toast.ts';
-	import Hodograph from '#lib/components/storm/Hodograph.svelte';
-	import SkewT from '#lib/components/storm/SkewT.svelte';
-	import { tileBounds } from '#lib/map.ts';
 
 	const UID = '_storm';
-	let home = $derived(placeOf($widgetData, UID) ?? $detectedPlace);
-	let changingPlace = $state(false);
 	let saved = $derived($widgetData[UID] ?? {});
+	let home = $derived(placeOf($widgetData, UID) ?? $detectedPlace);
+	let chosenPlace = $derived(!!placeOf($widgetData, UID));
 
-	// Where the map looks (kept for next time)
+	// --- The view --------------------------------------------------------------------------
 	let view = $state(null);
 	$effect(() => {
 		// Lands where you are (or where the map was left)
 		if (view || (!saved.view && !home)) return;
-		view =
-			saved.view ??
-			(home ? { lat: home.lat, lon: home.lon, zoom: 7 } : { lat: 51, lon: 10.3, zoom: 6 });
+		view = saved.view ?? { lat: home.lat, lon: home.lon, zoom: 7 };
 	});
 	let saveTimer;
 	function moveTo(next) {
 		view = next;
 		clearTimeout(saveTimer);
-		saveTimer = setTimeout(() => setWidgetData(UID, { view: next }), 1000);
+		saveTimer = setTimeout(() => setWidgetData(UID, { view: next }), 800);
 	}
+	const flyTo = (place, zoom = Math.max(view?.zoom ?? 7, 7)) =>
+		moveTo({ lat: place.lat, lon: place.lon, zoom });
 
-	// --- Layers --------------------------------------------------------------------------
+	// --- Mode and layers --------------------------------------------------------------------
+	let mode = $derived(saved.mode ?? 'live');
 	let shown = $derived({
 		radar: true,
-		warnings: true,
-		cape: false,
 		lightning: true,
+		warnings: true,
 		satellite: false,
+		rings: true,
 		...saved.layers
 	});
+	let fieldId = $derived(saved.field ?? 'risk');
+	let field = $derived(FIELDS.find((f) => f.id === fieldId) ?? FIELDS[0]);
+	const setMode = (value) => setWidgetData(UID, { mode: value });
 	const toggle = (key) => setWidgetData(UID, { layers: { ...shown, [key]: !shown[key] } });
+	const setField = (id) => setWidgetData(UID, { field: id });
 
-	// The rain radar of the last two hours (RainViewer), as a loop
+	const LIVE_LAYERS = [
+		{ key: 'radar', label: 'Radar', icon: 'icon-[mingcute--rainstorm-line]' },
+		{ key: 'lightning', label: 'Lightning', icon: 'icon-[mingcute--flash-line]' },
+		{ key: 'warnings', label: 'Warnings', icon: 'icon-[mingcute--warning-line]' },
+		{ key: 'satellite', label: 'Satellite', icon: 'icon-[mingcute--earth-2-line]' },
+		{ key: 'rings', label: 'Range rings', icon: 'icon-[mingcute--radar-line]' }
+	];
+	const FIELD_ICONS = {
+		risk: 'icon-[mingcute--thunderstorm-line]',
+		cape: 'icon-[mingcute--fire-line]',
+		li: 'icon-[mingcute--arrow-up-circle-line]',
+		shear: 'icon-[mingcute--wind-line]',
+		gust: 'icon-[mingcute--tornado-line]'
+	};
+
+	// --- Rain radar (RainViewer): the last two hours as a loop --------------------------------
 	let frames = $state([]);
 	let host = $state('');
 	let frame = $state(0);
@@ -65,40 +95,64 @@
 				await tauriFetch('https://api.rainviewer.com/public/weather-maps.json')
 			).json();
 			host = data.host;
-			frames = [...(data.radar?.past ?? []), ...(data.radar?.nowcast ?? [])];
-			frame = Math.max(0, (data.radar?.past?.length ?? 1) - 1);
+			const list = [...(data.radar?.past ?? []), ...(data.radar?.nowcast ?? [])];
+			const wasLast = frame >= frames.length - 1;
+			frames = list;
+			if (wasLast || frame >= list.length) frame = Math.max(0, (data.radar?.past?.length ?? 1) - 1);
 		} catch {
 			frames = [];
 		}
 	}
-
-	// The warnings of the DWD for the municipalities, as a map (their WMS server)
-	const warningsUrl = (z, x, y) => {
-		const b = tileBounds(x, y, z);
-		return `https://maps.dwd.de/geoserver/dwd/wms?service=WMS&version=1.1.1&request=GetMap&layers=dwd:Warnungen_Gemeinden&styles=&format=image/png&transparent=true&srs=EPSG:3857&width=256&height=256&bbox=${b.minX},${b.minY},${b.maxX},${b.maxY}`;
-	};
-
-	// Meteosat's infrared picture (cloud tops: the coldest, highest ones are storms), from
-	// EUMETSAT's open map server
+	// Meteosat's infrared picture: the coldest (whitest) cloud tops are the storms
 	const satelliteUrl = (z, x, y) => {
 		const b = tileBounds(x, y, z);
 		return `https://view.eumetsat.int/geoserver/wms?service=WMS&version=1.1.1&request=GetMap&layers=msg_fes:ir108&styles=&format=image/png&transparent=true&srs=EPSG:3857&width=256&height=256&bbox=${b.minX},${b.minY},${b.maxX},${b.maxY}`;
 	};
-
+	// Every radar frame is a layer, only one seen: switching is instant, nothing reloads
 	let layers = $derived([
-		...(shown.satellite ? [{ key: 'satellite', url: satelliteUrl, opacity: 0.6, maxZoom: 9 }] : []),
-		...(shown.warnings ? [{ key: 'warnings', url: warningsUrl, opacity: 0.55, maxZoom: 11 }] : []),
-		...(shown.radar
+		...(mode === 'live' && shown.satellite
+			? [{ key: 'satellite', url: satelliteUrl, opacity: 0.55, maxZoom: 9 }]
+			: []),
+		...(mode === 'live' && shown.radar
 			? frames.map((f, i) => ({
 					key: f.path,
 					url: (z, x, y) => `${host}${f.path}/256/${z}/${x}/${y}/2/1_1.png`,
-					opacity: i === frame ? 0.85 : 0,
+					opacity: i === frame ? 0.9 : 0,
 					maxZoom: 7
 				}))
 			: [])
 	]);
 
-	// Where the air has energy for storms: a grid of forecasts over the map
+	// --- DWD warnings as areas ----------------------------------------------------------------
+	let warnings = $state(null);
+	let warningsError = $state(false);
+	async function loadWarnings() {
+		try {
+			warnings = await warningAreas(tauriFetch);
+			warningsError = false;
+		} catch (error) {
+			console.warn('Could not load the DWD warnings', error);
+			warningsError = true;
+		}
+	}
+
+	// --- Lightning ----------------------------------------------------------------------------
+	const NEAR_KM = 15;
+	let nearby = $derived(home ? strikesNear($strikes, home, 50, 15 * 60 * 1000) : null);
+	let warnedAt = 0;
+	$effect(() => {
+		const nearest = nearby?.nearest;
+		if (!nearest || nearest.km > NEAR_KM || Date.now() - nearest.time > 60000) return;
+		if (Date.now() - warnedAt < 5 * 60 * 1000) return;
+		warnedAt = Date.now();
+		showToast(
+			`Lightning ${Math.round(nearest.km)} km ${compass(nearest.bearing)} of you`,
+			'icon-[mingcute--flash-fill]',
+			8000
+		);
+	});
+
+	// --- Forecast fields: a grid of forecasts over the map ------------------------------------
 	let bounds = $state(null);
 	let grid = $state(null);
 	let gridKey = '';
@@ -107,7 +161,7 @@
 	let gridTimer;
 	$effect(() => {
 		const b = bounds;
-		if (!shown.cape || !b) return;
+		if (mode !== 'forecast' || !b) return;
 		clearTimeout(gridTimer);
 		gridTimer = setTimeout(async () => {
 			// A bit more than what's shown, rounded so small moves don't load it again
@@ -124,8 +178,8 @@
 			gridKey = key;
 			gridLoading = true;
 			try {
-				const columns = 11;
-				const rows = 9;
+				const columns = 12;
+				const rows = 10;
 				const points = await stormGrid(area.north, area.south, area.west, area.east, columns, rows);
 				if (key !== gridKey) return;
 				grid = { columns, rows, points };
@@ -134,42 +188,95 @@
 			} finally {
 				gridLoading = false;
 			}
-		}, 700);
+		}, 600);
 	});
-	let cape = $derived.by(() => {
-		if (!shown.cape || !grid) return null;
+	let mapField = $derived.by(() => {
+		if (mode !== 'forecast' || !grid) return null;
 		const rows = [];
 		for (let r = 0; r < grid.rows; r++) {
 			rows.push(
 				grid.points.slice(r * grid.columns, (r + 1) * grid.columns).map((p) => ({
 					lat: p.lat,
 					lon: p.lon,
-					value: p.hours[hour]?.cape ?? 0
+					value: p.hours[hour] ? field.value(p.hours[hour]) : 0
 				}))
 			);
 		}
-		return rows;
+		return { rows, colour: field.colour };
 	});
 	let hourTime = $derived(grid?.points.find((p) => p.hours[hour])?.hours[hour]?.time ?? null);
 
-	// --- A place looked at ----------------------------------------------------------------
+	/** The field's value at a place (between the grid points) */
+	function fieldAt(place) {
+		const rows = mapField?.rows;
+		if (!rows) return null;
+		const north = rows[0][0].lat;
+		const south = rows[rows.length - 1][0].lat;
+		const west = rows[0][0].lon;
+		const east = rows[0][rows[0].length - 1].lon;
+		const fr = ((north - place.lat) / (north - south)) * (rows.length - 1);
+		const fc = ((place.lon - west) / (east - west)) * (rows[0].length - 1);
+		if (fr < 0 || fc < 0 || fr > rows.length - 1 || fc > rows[0].length - 1) return null;
+		const r0 = Math.floor(fr);
+		const c0 = Math.floor(fc);
+		const r1 = Math.min(rows.length - 1, r0 + 1);
+		const c1 = Math.min(rows[0].length - 1, c0 + 1);
+		const tr = fr - r0;
+		const tc = fc - c0;
+		return (
+			(rows[r0][c0].value * (1 - tc) + rows[r0][c1].value * tc) * (1 - tr) +
+			(rows[r1][c0].value * (1 - tc) + rows[r1][c1].value * tc) * tr
+		);
+	}
+
+	// --- The pointer ----------------------------------------------------------------------
+	let hover = $state(null);
+	let readout = $derived.by(() => {
+		if (!hover) return null;
+		const coords = `${hover.lat.toFixed(2)}°, ${hover.lon.toFixed(2)}°`;
+		if (mode === 'forecast') {
+			const value = fieldAt(hover);
+			if (value == null) return { coords, text: '' };
+			const text =
+				field.id === 'risk'
+					? LEVELS[Math.min(4, Math.round(value))].label
+					: `${field.id === 'li' ? value.toFixed(1) : Math.round(value)} ${field.unit}`;
+			return { coords, text: `${field.label} ${text}` };
+		}
+		if (!home) return { coords, text: '' };
+		const km = distanceKm(home, hover);
+		const y = Math.sin(((hover.lon - home.lon) * Math.PI) / 180);
+		const x =
+			Math.cos((home.lat * Math.PI) / 180) * Math.tan((hover.lat * Math.PI) / 180) -
+			Math.sin((home.lat * Math.PI) / 180) * Math.cos(((hover.lon - home.lon) * Math.PI) / 180);
+		const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+		return { coords, text: `${Math.round(km)} km ${compass(bearing)} of ${home.name}` };
+	});
+
+	// --- A place looked at --------------------------------------------------------------------
 	let probe = $state(null);
+	let probeName = $state('');
 	let outlook = $state(null);
 	let alerts = $state(null);
+	let pickedWarnings = $state([]);
 	let probeError = $state('');
-	/** The air above the place: at the hour of the most energy, or now */
 	let profile = $state(null);
 	let profileAt = $state('peak');
-	let diagram = $state('hodograph');
-	// Counts the places looked at: answers for an earlier one are dropped
+	let tab = $state('overview');
+	let panelOpen = $state(true);
+	// Answers for a place looked at before are dropped
 	let probeId = 0;
-	async function pick(place) {
+	function pick(place, areas = [], name = '') {
 		probe = place;
+		probeName = name;
+		pickedWarnings = areas;
 		outlook = null;
 		alerts = null;
-		probeError = '';
-		const id = ++probeId;
 		profile = null;
+		probeError = '';
+		panelOpen = true;
+		if (areas.length) tab = 'warnings';
+		const id = ++probeId;
 		stormOutlook(place.lat, place.lon)
 			.then((result) => {
 				if (id !== probeId) return;
@@ -182,7 +289,6 @@
 			.then((data) => id === probeId && (alerts = data.alerts ?? []))
 			.catch(() => id === probeId && (alerts = []));
 	}
-
 	function loadProfile(id = probeId) {
 		if (!probe) return;
 		const time = profileAt === 'peak' && outlook ? outlook.peak.time : Date.now();
@@ -190,49 +296,82 @@
 			.then((result) => id === probeId && (profile = result))
 			.catch(() => id === probeId && (profile = null));
 	}
-
-	// --- Lightning ------------------------------------------------------------------------
-	// Strikes around your place, and a warning when one comes close
-	const NEAR_KM = 15;
-	let nearby = $derived(home ? strikesNear($strikes, home, 50, 15 * 60 * 1000) : null);
-	let warnedAt = 0;
 	$effect(() => {
-		const nearest = nearby?.nearest;
-		if (!nearest || nearest.km > NEAR_KM || Date.now() - nearest.time > 60000) return;
-		if (Date.now() - warnedAt < 5 * 60 * 1000) return;
-		warnedAt = Date.now();
-		showToast(
-			`Lightning ${Math.round(nearest.km)} km ${compass(nearest.bearing)} of you`,
-			'icon-[mingcute--flash-fill]',
-			8000
-		);
+		if (home && !probe) pick({ lat: home.lat, lon: home.lon }, [], home.name);
 	});
+	let probeLabel = $derived(
+		probeName ||
+			(probe && home && distanceKm(home, probe) < 1
+				? home.name
+				: probe
+					? `${probe.lat.toFixed(2)}°, ${probe.lon.toFixed(2)}°`
+					: '')
+	);
+	let probeLevel = $derived(outlook ? LEVELS[outlook.level] : null);
+	let widest = $derived(Math.max(500, ...(outlook?.hours.map((x) => x.cape) ?? [])));
+
+	// --- Finding a place ----------------------------------------------------------------------
+	let query = $state('');
+	let results = $state([]);
+	let searchTimer;
+	function search() {
+		clearTimeout(searchTimer);
+		const name = query.trim();
+		if (name.length < 2) {
+			results = [];
+			return;
+		}
+		searchTimer = setTimeout(async () => {
+			try {
+				results = await searchPlaces(name);
+			} catch {
+				results = [];
+			}
+		}, 300);
+	}
+	function goToPlace(place, makeHome = false) {
+		query = '';
+		results = [];
+		if (makeHome) setPlace(UID, place);
+		flyTo(place, Math.max(view?.zoom ?? 7, 8));
+		pick({ lat: place.lat, lon: place.lon }, [], place.name);
+	}
+	function useMyLocation() {
+		clearPlace();
+		const place = $detectedPlace;
+		if (place) goToPlace(place);
+	}
 
 	onMount(() => {
 		const stopLightning = useLightning();
 		loadRadar();
-		const refresh = setInterval(loadRadar, 5 * 60 * 1000);
+		loadWarnings();
+		const refresh = setInterval(
+			() => {
+				loadRadar();
+				loadWarnings();
+			},
+			5 * 60 * 1000
+		);
 		let wait = 0;
 		const step = setInterval(() => {
 			if (!playing || frames.length < 2) return;
-			if (frame === frames.length - 1 && wait++ < 3) return;
+			if (frame === frames.length - 1 && wait++ < 4) return;
 			wait = 0;
 			frame = (frame + 1) % frames.length;
-		}, 500);
+		}, 450);
 		return () => {
 			stopLightning();
 			clearInterval(refresh);
 			clearInterval(step);
 			clearTimeout(gridTimer);
+			clearTimeout(saveTimer);
 		};
 	});
-	$effect(() => {
-		if (home && !probe) pick({ lat: home.lat, lon: home.lon });
-	});
 
-	const ago = (time) => {
-		const minutes = Math.round((Date.now() / 1000 - time) / 60);
-		return minutes <= 0 ? (minutes < -2 ? `in ${-minutes} min` : 'now') : `${minutes} min ago`;
+	const ago = (seconds) => {
+		const minutes = Math.round((Date.now() / 1000 - seconds) / 60);
+		return minutes <= 0 ? (minutes < -2 ? `in ${-minutes} min` : 'now') : `−${minutes} min`;
 	};
 	const clock = (ms) =>
 		new Date(ms).toLocaleString(undefined, {
@@ -240,144 +379,286 @@
 			hour: '2-digit',
 			minute: '2-digit'
 		});
-	const SEVERITY = {
-		minor: '#facc15',
-		moderate: '#fb923c',
-		severe: '#ef4444',
-		extreme: '#c026d3'
-	};
-	const LAYERS = [
-		{ key: 'radar', label: 'Radar', icon: 'icon-[mingcute--rainstorm-line]' },
-		{ key: 'warnings', label: 'DWD warnings', icon: 'icon-[mingcute--warning-line]' },
-		{ key: 'cape', label: 'Storm energy (CAPE)', icon: 'icon-[mingcute--fire-line]' },
-		{ key: 'lightning', label: 'Lightning', icon: 'icon-[mingcute--flash-line]' },
-		{ key: 'satellite', label: 'Satellite (IR)', icon: 'icon-[mingcute--earth-line]' }
+	const hhmm = (ms) =>
+		new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+	const time = (value) => (value ? clock(value) : '');
+	const css = ([r, g, b, a]) => `rgba(${r}, ${g}, ${b}, ${Math.max(a, 0.6)})`;
+	const PANEL_TABS = [
+		{ id: 'overview', label: 'Outlook' },
+		{ id: 'sounding', label: 'Sounding' },
+		{ id: 'hodograph', label: 'Hodograph' },
+		{ id: 'warnings', label: 'Warnings' }
 	];
-	const CAPE_LEGEND = [100, 500, 1000, 2000, 3000];
-	const css = ([r, g, b, _a]) => `rgb(${r} ${g} ${b})`;
-	let probeLevel = $derived(outlook ? LEVELS[outlook.level] : null);
-	let widest = $derived(Math.max(500, ...(outlook?.hours.map((x) => x.cape) ?? [])));
+	const glass = 'bg-[#15181d]/85 backdrop-blur-xl ring-1 ring-white/10 shadow-xl shadow-black/30';
 </script>
 
-<div class="relative h-full min-h-[560px] overflow-hidden rounded-lg">
+<div class="relative h-full min-h-[560px] overflow-hidden rounded-lg bg-[#111418]">
 	{#if view}
 		<StormMap
 			lat={view.lat}
 			lon={view.lon}
 			zoom={view.zoom}
 			{layers}
-			{cape}
-			strikes={shown.lightning ? $strikes : null}
-			markers={[
-				...(home ? [{ lat: home.lat, lon: home.lon, kind: 'home' }] : []),
-				...(probe ? [{ lat: probe.lat, lon: probe.lon, kind: 'probe' }] : [])
-			]}
+			field={mapField}
+			warnings={shown.warnings ? warnings : null}
+			strikes={mode === 'live' && shown.lightning ? $strikes : null}
+			{home}
+			{probe}
+			rings={shown.rings ? [25, 50, 100] : []}
 			onmove={moveTo}
-			onpick={pick}
+			onpick={(place, areas) => pick(place, areas)}
+			onhover={(place) => (hover = place)}
 			onbounds={(b) => (bounds = b)}
 		/>
 	{/if}
 
-	<!-- Title and layers -->
-	<div class="absolute top-4 left-4 flex flex-col gap-2 pointer-events-none">
-		<div
-			class="flex items-center gap-2 px-4 h-11 rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10 pointer-events-auto"
-		>
+	<!-- Top: place, search and the two modes -->
+	<div
+		class="absolute top-3 left-3 flex items-center gap-2 {panelOpen
+			? 'right-[24.5rem]'
+			: 'right-3'}"
+	>
+		<div class="flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-2xl {glass}">
 			<span class="icon-[mingcute--thunderstorm-fill] size-5 text-amber-300"></span>
-			<h1 class="font-extrabold tracking-tight">Storm center</h1>
+			<span class="font-extrabold tracking-tight hidden xl:block">Storm center</span>
+			<div class="relative ms-1">
+				<span
+					class="absolute left-2.5 top-1/2 -translate-y-1/2 icon-[mingcute--search-line] size-4 text-white/40"
+				></span>
+				<input
+					bind:value={query}
+					oninput={search}
+					onkeydown={(e) => e.key === 'Enter' && results[0] && goToPlace(results[0])}
+					placeholder="Search a place"
+					class="w-56 h-8 pl-8 pr-2 rounded-xl bg-white/[0.06] text-sm outline-none ring-1 ring-white/10 focus:ring-white/30 placeholder:text-white/35"
+				/>
+				{#if results.length}
+					<div class="absolute left-0 top-10 z-20 w-80 p-1 rounded-xl {glass}">
+						{#each results as place (place.lat + ',' + place.lon)}
+							<div class="flex items-center gap-1 rounded-lg hover:bg-white/[0.07]">
+								<button
+									class="flex-1 min-w-0 text-start px-2.5 py-1.5 cursor-pointer"
+									onclick={() => goToPlace(place)}
+								>
+									<span class="block text-sm font-semibold truncate">{place.name}</span>
+									<span class="block text-xs text-white/50 truncate">{place.region}</span>
+								</button>
+								<button
+									class="shrink-0 me-1 px-2 h-7 rounded-lg text-[11px] font-semibold text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
+									title="Use as your place: marked on the map, for warnings and lightning near you"
+									onclick={() => goToPlace(place, true)}>Set as mine</button
+								>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<button
+				class="flex items-center gap-1.5 h-8 px-2.5 rounded-xl text-sm font-semibold hover:bg-white/10 cursor-pointer {chosenPlace
+					? 'text-white/70'
+					: 'text-sky-300'}"
+				title={chosenPlace
+					? `Your place is set to ${home?.name}. Click to use where you are instead`
+					: `Where you are, found by your internet address`}
+				onclick={useMyLocation}
+			>
+				<span class="icon-[mingcute--location-line] size-4"></span>
+				<span class="max-w-28 truncate">{home?.name ?? 'Locating…'}</span>
+			</button>
 		</div>
-		<div class="flex flex-wrap gap-1.5 pointer-events-auto max-w-md">
-			{#each LAYERS as layer (layer.key)}
+		<div class="flex p-1 h-11 rounded-2xl {glass}" role="group" aria-label="Mode">
+			{#each [['live', 'Live', 'icon-[mingcute--radar-2-line]'], ['forecast', 'Forecast', 'icon-[mingcute--chart-line-line]']] as [value, label, icon] (value)}
 				<button
-					class="flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-semibold backdrop-blur-xl ring-1 cursor-pointer transition {shown[
+					class="flex items-center gap-1.5 px-3.5 rounded-xl text-sm font-semibold cursor-pointer transition {mode ===
+					value
+						? 'bg-white text-black'
+						: 'text-white/65 hover:text-white'}"
+					aria-pressed={mode === value}
+					onclick={() => setMode(value)}><span class="{icon} size-4"></span>{label}</button
+				>
+			{/each}
+		</div>
+		{#if !panelOpen}
+			<button
+				class="ms-auto flex items-center gap-2 h-11 px-4 rounded-2xl text-sm font-semibold cursor-pointer {glass}"
+				onclick={() => (panelOpen = true)}
+				><span class="icon-[mingcute--layout-right-line] size-4"></span>Analysis</button
+			>
+		{/if}
+	</div>
+
+	<!-- Left: the layers (Live) or the forecast maps (Forecast) -->
+	<div class="absolute left-3 top-[4.25rem] w-44 flex flex-col gap-0.5 p-1.5 rounded-2xl {glass}">
+		{#if mode === 'live'}
+			<p class="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40">
+				Layers
+			</p>
+			{#each LIVE_LAYERS as layer (layer.key)}
+				<button
+					class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer transition {shown[
 						layer.key
 					]
-						? 'bg-white text-black ring-white'
-						: 'bg-black/55 text-white/80 ring-white/10 hover:bg-black/70'}"
+						? 'bg-white/10 text-white'
+						: 'text-white/45 hover:text-white/80 hover:bg-white/[0.04]'}"
 					aria-pressed={!!shown[layer.key]}
 					onclick={() => toggle(layer.key)}
 				>
-					<span class="{layer.icon} size-4"></span>
-					{layer.label}
-					{#if layer.key === 'cape' && gridLoading}
-						<span class="icon-[mingcute--loading-line] size-3.5 animate-spin"></span>
+					<span class="{layer.icon} size-[18px]"></span>
+					<span class="flex-1 text-start">{layer.label}</span>
+					{#if layer.key === 'lightning' && shown.lightning}
+						<span
+							class="size-1.5 rounded-full {$lightningStatus === 'live'
+								? 'bg-green-400'
+								: 'bg-amber-400 animate-pulse'}"
+							title={$lightningStatus === 'live' ? 'Live' : 'Connecting'}
+						></span>
+					{:else if layer.key === 'warnings' && shown.warnings}
+						<span class="text-[11px] tabular-nums text-white/50"
+							>{warningsError ? '!' : (warnings?.length ?? '…')}</span
+						>
 					{/if}
 				</button>
 			{/each}
-		</div>
+		{:else}
+			<p class="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40">
+				Forecast maps
+			</p>
+			{#each FIELDS as f (f.id)}
+				<button
+					class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer transition {fieldId ===
+					f.id
+						? 'bg-white text-black'
+						: 'text-white/60 hover:text-white hover:bg-white/[0.06]'}"
+					title={f.hint}
+					onclick={() => setField(f.id)}
+				>
+					<span class="{FIELD_ICONS[f.id]} size-[18px]"></span>
+					<span class="flex-1 text-start">{f.label}</span>
+				</button>
+			{/each}
+			<div class="my-1 h-px bg-white/10"></div>
+			<button
+				class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer {shown.warnings
+					? 'bg-white/10 text-white'
+					: 'text-white/45 hover:text-white/80'}"
+				onclick={() => toggle('warnings')}
+				><span class="icon-[mingcute--warning-line] size-[18px]"></span>Warnings</button
+			>
+		{/if}
 	</div>
 
 	<!-- Zoom -->
 	<div
-		class="absolute top-4 right-[26rem] flex flex-col rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10"
+		class="absolute bottom-24 flex flex-col rounded-2xl {glass} {panelOpen
+			? 'right-[24.5rem]'
+			: 'right-3'}"
 	>
 		<button
-			class="grid place-items-center size-9 cursor-pointer hover:text-primary-300"
+			class="grid place-items-center size-9 cursor-pointer hover:text-sky-300"
 			aria-label="Zoom in"
 			onclick={() => view && moveTo({ ...view, zoom: Math.min(11, view.zoom + 1) })}
 			><span class="icon-[mingcute--add-line] size-4"></span></button
 		>
 		<button
-			class="grid place-items-center size-9 cursor-pointer hover:text-primary-300"
+			class="grid place-items-center size-9 cursor-pointer hover:text-sky-300 border-t border-white/10"
 			aria-label="Zoom out"
 			onclick={() => view && moveTo({ ...view, zoom: Math.max(3, view.zoom - 1) })}
 			><span class="icon-[mingcute--minimize-line] size-4"></span></button
 		>
 		{#if home}
 			<button
-				class="grid place-items-center size-9 cursor-pointer hover:text-primary-300 border-t border-white/10"
+				class="grid place-items-center size-9 cursor-pointer hover:text-sky-300 border-t border-white/10"
 				aria-label="Back to {home.name}"
 				title="Back to {home.name}"
-				onclick={() => moveTo({ lat: home.lat, lon: home.lon, zoom: Math.max(view?.zoom ?? 7, 7) })}
-				><span class="icon-[mingcute--location-line] size-4"></span></button
+				onclick={() => flyTo(home)}
+				><span class="icon-[mingcute--aiming-2-line] size-4"></span></button
 			>
 		{/if}
 	</div>
 
-	<!-- Time: the radar's past, the forecast hour of the CAPE map -->
-	<div class="absolute bottom-4 left-4 right-[26rem] flex flex-col gap-2 pointer-events-none">
-		{#if shown.lightning}
-			<div
-				class="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10 pointer-events-auto text-sm"
-			>
-				<span
-					class="icon-[mingcute--flash-fill] size-4 shrink-0 {$lightningStatus === 'live'
-						? 'text-yellow-300'
-						: 'text-white/40'}"
-				></span>
-				<span class="font-semibold shrink-0">
-					{$lightningStatus === 'live'
-						? 'Lightning live'
-						: $lightningStatus === 'connecting'
-							? 'Connecting…'
-							: 'Lightning offline, retrying'}
-				</span>
-				{#if nearby && home}
-					<span class="text-white/70 truncate">
-						{nearby.count}
-						{nearby.count === 1 ? 'strike' : 'strikes'} within 50 km of {home.name} (15 min){#if nearby.nearest}
-							· nearest <strong class="text-white"
-								>{Math.round(nearby.nearest.km)} km {compass(nearby.nearest.bearing)}</strong
-							>, {Math.max(0, Math.round((Date.now() - nearby.nearest.time) / 60000))} min ago{/if}
-					</span>
-				{/if}
-				<span class="ms-auto hidden xl:flex items-center gap-2 text-[10px] text-white/60 shrink-0">
-					{#each [['#ffffff', '<1'], ['#fde047', '5'], ['#fb923c', '10'], ['#ef4444', '20'], ['#7f1d1d', '30 min']] as [colour, label] (label)}
-						<span class="flex items-center gap-1"
-							><span class="size-2 rounded-full" style="background: {colour}"></span>{label}</span
-						>
-					{/each}
-				</span>
+	<!-- Bottom: time -->
+	<div
+		class="absolute bottom-3 left-3 flex flex-col gap-2 pointer-events-none {panelOpen
+			? 'right-[24.5rem]'
+			: 'right-3'}"
+	>
+		{#if readout}
+			<div class="self-end px-3 py-1.5 rounded-xl text-xs tabular-nums {glass}">
+				<span class="text-white/50">{readout.coords}</span>
+				{#if readout.text}<span class="ms-2 font-semibold">{readout.text}</span>{/if}
 			</div>
 		{/if}
-		{#if shown.cape && grid}
-			<div
-				class="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10 pointer-events-auto"
-			>
-				<span class="icon-[mingcute--flash-fill] size-4 text-amber-300 shrink-0"></span>
-				<span class="w-28 shrink-0 text-sm font-semibold tabular-nums"
-					>{hourTime ? clock(hourTime) : ''}</span
+		{#if mode === 'live'}
+			<div class="flex items-center gap-3 h-14 px-3 rounded-2xl pointer-events-auto {glass}">
+				<button
+					class="grid place-items-center size-9 shrink-0 rounded-full bg-white text-black cursor-pointer hover:scale-105 transition disabled:opacity-40"
+					aria-label={playing ? 'Pause the radar' : 'Play the radar'}
+					disabled={!shown.radar || !frames.length}
+					onclick={() => (playing = !playing)}
 				>
+					<span
+						class="{playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-4"
+					></span>
+				</button>
+				<div class="w-24 shrink-0 leading-tight">
+					<p class="text-sm font-bold tabular-nums">
+						{frames[frame] ? hhmm(frames[frame].time * 1000) : '–'}
+					</p>
+					<p class="text-[11px] text-white/50 tabular-nums">
+						{frames[frame]
+							? `Radar ${ago(frames[frame].time)}`
+							: shown.radar
+								? 'Loading…'
+								: 'Radar off'}
+					</p>
+				</div>
+				<input
+					type="range"
+					min="0"
+					max={Math.max(0, frames.length - 1)}
+					bind:value={frame}
+					oninput={() => (playing = false)}
+					disabled={!shown.radar || !frames.length}
+					class="flex-1 accent-sky-400"
+					aria-label="Radar time"
+				/>
+				{#if shown.lightning}
+					<div class="hidden md:block w-px h-8 bg-white/10"></div>
+					<div class="hidden md:flex items-center gap-2 shrink-0 text-sm">
+						<span
+							class="icon-[mingcute--flash-fill] size-5 {nearby?.count
+								? 'text-yellow-300'
+								: 'text-white/30'}"
+						></span>
+						<div class="leading-tight">
+							<p class="font-bold tabular-nums">
+								{nearby?.count ?? 0}
+								<span class="font-normal text-white/50">strikes · 50 km · 15 min</span>
+							</p>
+							<p class="text-[11px] text-white/60">
+								{#if $lightningStatus !== 'live'}
+									Lightning connecting…
+								{:else if nearby?.nearest}
+									Nearest {Math.round(nearby.nearest.km)} km {compass(nearby.nearest.bearing)}, {Math.max(
+										0,
+										Math.round((Date.now() - nearby.nearest.time) / 60000)
+									)} min ago
+								{:else}
+									None near {home?.name ?? 'you'}
+								{/if}
+							</p>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{:else}
+			<div class="flex items-center gap-3 h-14 px-3 rounded-2xl pointer-events-auto {glass}">
+				<div class="w-32 shrink-0 leading-tight">
+					<p class="text-sm font-bold">{hourTime ? clock(hourTime) : '–'}</p>
+					<p class="text-[11px] text-white/50">
+						{gridLoading ? 'Loading the forecast…' : `+${hour} h · ${field.label}`}
+					</p>
+				</div>
 				<input
 					type="range"
 					min="0"
@@ -386,158 +667,176 @@
 					class="flex-1 accent-amber-400"
 					aria-label="Forecast hour"
 				/>
-				<div class="hidden lg:flex items-center gap-1 text-[10px] text-white/60 tabular-nums">
-					{#each CAPE_LEGEND as value (value)}
-						<span class="flex items-center gap-1"
-							><span class="size-2.5 rounded-sm" style="background: {css(capeColour(value))}"
-							></span>{value}</span
-						>
-					{/each}
-					<span>J/kg</span>
-				</div>
-			</div>
-		{/if}
-		{#if shown.radar && frames.length}
-			<div
-				class="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-black/60 backdrop-blur-xl ring-1 ring-white/10 pointer-events-auto"
-			>
-				<button
-					class="grid place-items-center size-8 shrink-0 rounded-full bg-white/10 hover:bg-white/20 cursor-pointer"
-					aria-label={playing ? 'Pause' : 'Play'}
-					onclick={() => (playing = !playing)}
+				<div
+					class="hidden lg:flex items-center gap-1.5 shrink-0 text-[10px] text-white/60 tabular-nums"
 				>
-					<span
-						class="{playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-4"
-					></span>
-				</button>
-				<span class="w-28 shrink-0 text-sm font-semibold tabular-nums"
-					>Radar · {frames[frame] ? ago(frames[frame].time) : ''}</span
-				>
-				<div class="flex-1 flex gap-0.5">
-					{#each frames as f, i (f.path)}
-						<button
-							class="flex-1 h-2 rounded-full cursor-pointer {i === frame
-								? 'bg-white'
-								: f.time > Date.now() / 1000
-									? 'bg-sky-300/40'
-									: 'bg-white/25 hover:bg-white/50'}"
-							aria-label={ago(f.time)}
-							onclick={() => {
-								frame = i;
-								playing = false;
-							}}
-						></button>
+					{#each field.legend as value (value)}
+						<span class="flex items-center gap-1">
+							<span class="size-2.5 rounded-sm" style="background: {css(field.colour(value))}"
+							></span>
+							{field.id === 'risk' ? LEVELS[value].label : value}
+						</span>
 					{/each}
+					{#if field.unit}<span>{field.unit}</span>{/if}
 				</div>
 			</div>
 		{/if}
 	</div>
 
-	<!-- The place looked at -->
-	<aside
-		class="absolute top-4 right-4 bottom-4 w-[24rem] flex flex-col gap-3 p-4 rounded-2xl bg-black/65 backdrop-blur-xl ring-1 ring-white/10 overflow-y-auto"
-	>
-		{#if changingPlace}
-			<div>
-				<p class="text-sm text-white/60 mb-2">Your city, marked on the map:</p>
-				<PlacePicker
-					uid={UID}
-					label="Set my city"
-					ondone={() => {
-						changingPlace = false;
-						probe = null;
-						// To the new city
-						setWidgetData(UID, { view: null });
-						view = null;
-					}}
-				/>
-			</div>
-		{/if}
-		{#if probe}
-			<div>
-				<div class="flex items-center gap-2">
-					<p
-						class="flex-1 min-w-0 truncate text-xs font-bold uppercase tracking-wide text-white/50"
-					>
-						{home && Math.abs(probe.lat - home.lat) < 0.01 && Math.abs(probe.lon - home.lon) < 0.01
-							? home.name
-							: `${probe.lat.toFixed(2)}°, ${probe.lon.toFixed(2)}°`} · next 24 h
-					</p>
-					{#if home && !changingPlace}
-						<button
-							class="shrink-0 text-[11px] font-semibold text-white/50 hover:text-white cursor-pointer"
-							onclick={() => (changingPlace = true)}>Change city</button
-						>
-					{/if}
-				</div>
-				{#if outlook && probeLevel}
-					<div class="mt-2 flex items-center gap-3">
+	<!-- Right: the analysis of the place looked at -->
+	{#if panelOpen}
+		<aside
+			class="absolute top-3 right-3 bottom-3 w-[23rem] flex flex-col rounded-2xl overflow-hidden {glass}"
+		>
+			<header class="p-4 pb-3 border-b border-white/[0.06]">
+				<div class="flex items-start gap-3">
+					{#if probeLevel}
 						<span
-							class="grid place-items-center size-12 rounded-2xl text-black"
+							class="grid place-items-center size-11 shrink-0 rounded-xl text-black"
 							style="background: {probeLevel.colour}"
 						>
-							<span class="icon-[mingcute--thunderstorm-fill] size-7"></span>
+							<span class="icon-[mingcute--thunderstorm-fill] size-6"></span>
 						</span>
-						<div>
-							<p class="text-xl font-extrabold" style="color: {probeLevel.colour}">
-								{probeLevel.label}
-							</p>
-							<p class="text-xs text-white/60">
-								{outlook.thunder
-									? `Thunder expected from ${outlook.thunder.hour}:00`
-									: `Peak energy at ${outlook.peak.hour}:00`}
-							</p>
-						</div>
-					</div>
-					<div class="mt-3 grid grid-cols-3 gap-2">
-						{#each [['CAPE', Math.round(outlook.peak.cape), 'J/kg', 'Energy for storms'], ['LI', outlook.li.toFixed(1), '', 'Below 0: unstable air'], ['Shear', Math.round(outlook.shear), 'm/s', 'Over 15: organised storms'], ['Gusts', Math.round(outlook.gust * 3.6), 'km/h', 'Strongest gust'], ['Dew point', Math.round(outlook.dew), '°C', 'Moisture in the air'], ['Rain', Math.max(...outlook.hours.map((x) => x.rain)), '%', 'Highest chance']] as [label, value, unit, hint] (label)}
-							<div class="p-2 rounded-xl bg-white/5" title={hint}>
-								<p class="text-[10px] font-bold uppercase text-white/50">{label}</p>
-								<p class="text-lg font-extrabold tabular-nums leading-tight">
-									{value}<span class="text-[10px] font-semibold text-white/50"> {unit}</span>
-								</p>
-							</div>
-						{/each}
-					</div>
-					<!-- Hour by hour: CAPE as bars, coloured by the level of that hour -->
-					<div class="mt-3 flex items-end gap-px h-16">
-						{#each outlook.hours as h, i (i)}
-							{@const level = LEVELS[levelOf(h.cape, h.li, h.shear, h.thunder)]}
-							<span
-								class="relative flex-1 flex flex-col justify-end h-full"
-								title="{h.hour}:00 · CAPE {Math.round(h.cape)} · LI {h.li.toFixed(
-									1
-								)} · shear {Math.round(h.shear)} m/s · {h.rain}% rain"
-							>
-								{#if h.thunder}
-									<span
-										class="absolute -top-0.5 left-1/2 -translate-x-1/2 icon-[mingcute--flash-fill] size-2.5 text-yellow-300"
-									></span>
-								{/if}
-								<span
-									class="block rounded-sm"
-									style="height: {Math.max(
-										5,
-										(h.cape / widest) * 100
-									)}%; background: {level.colour}"
-								></span>
-							</span>
-						{/each}
-					</div>
-					<p class="mt-1 flex justify-between text-[10px] text-white/45 tabular-nums">
-						<span>{outlook.hours[0]?.hour}:00</span><span>+12h</span><span>+24h</span>
-					</p>
-				{:else}
-					<p class="mt-2 text-sm text-white/60">{probeError || 'Loading the forecast…'}</p>
-				{/if}
-			</div>
-			{#if outlook}
-				<div>
-					<div class="flex items-center gap-2 mb-2">
-						<p class="flex-1 text-xs font-bold uppercase tracking-wide text-white/50">
-							Sounding {profile ? `· ${clock(profile.time)}` : ''}
+					{:else}
+						<span class="grid place-items-center size-11 shrink-0 rounded-xl bg-white/5">
+							<span class="icon-[mingcute--loading-line] size-5 animate-spin text-white/40"></span>
+						</span>
+					{/if}
+					<div class="min-w-0 flex-1">
+						<p class="font-bold truncate">{probeLabel || 'Click the map'}</p>
+						<p class="text-sm" style="color: {probeLevel?.colour ?? 'inherit'}">
+							{#if outlook && probeLevel}
+								{probeLevel.label} ·
+								<span class="text-white/60"
+									>{outlook.thunder
+										? `thunder from ${outlook.thunder.hour}:00`
+										: `peak energy ${outlook.peak.hour}:00`}</span
+								>
+							{:else}
+								<span class="text-white/50">{probeError || 'Loading…'}</span>
+							{/if}
 						</p>
-						<div class="flex p-0.5 rounded-lg bg-white/5 text-[11px] font-semibold">
+					</div>
+					<button
+						class="grid place-items-center size-8 rounded-lg text-white/50 hover:text-white hover:bg-white/10 cursor-pointer"
+						aria-label="Hide the analysis"
+						onclick={() => (panelOpen = false)}
+						><span class="icon-[mingcute--close-line] size-4"></span></button
+					>
+				</div>
+				<div class="mt-3 grid grid-cols-4 p-1 rounded-xl bg-white/[0.05] text-xs font-semibold">
+					{#each PANEL_TABS as t (t.id)}
+						<button
+							class="relative h-7 rounded-lg cursor-pointer transition {tab === t.id
+								? 'bg-white/15 text-white'
+								: 'text-white/55 hover:text-white'}"
+							onclick={() => (tab = t.id)}
+						>
+							{t.label}
+							{#if t.id === 'warnings' && (alerts?.length || pickedWarnings.length)}
+								<span class="absolute top-1 right-1.5 size-1.5 rounded-full bg-amber-400"></span>
+							{/if}
+						</button>
+					{/each}
+				</div>
+			</header>
+
+			<div class="flex-1 min-h-0 overflow-y-auto p-4">
+				{#if tab === 'overview'}
+					{#if outlook}
+						<div class="grid grid-cols-3 gap-2">
+							{#each [['CAPE', Math.round(outlook.peak.cape), 'J/kg', 'Energy for storms (500+: storms, 2000+: violent)'], ['LI', outlook.li.toFixed(1), '', 'Lifted index: below 0 unstable, below −4 very'], ['Shear', Math.round(outlook.shear), 'm/s', 'Deep shear: 20+ supercells'], ['Gusts', Math.round(outlook.gust * 3.6), 'km/h', 'Strongest gust'], ['Dew point', Math.round(outlook.dew), '°C', 'Moisture: 15+ fuels strong storms'], ['Rain', Math.max(...outlook.hours.map((x) => x.rain)), '%', 'Highest chance of rain']] as [label, value, unit, hint] (label)}
+								<div class="p-2.5 rounded-xl bg-white/[0.04]" title={hint}>
+									<p class="text-[10px] font-bold uppercase tracking-wide text-white/45">{label}</p>
+									<p class="text-lg font-extrabold tabular-nums leading-tight">
+										{value}<span class="text-[10px] font-semibold text-white/45"> {unit}</span>
+									</p>
+								</div>
+							{/each}
+						</div>
+						<p class="mt-5 mb-2 text-[10px] font-bold uppercase tracking-wider text-white/45">
+							Next 24 hours · CAPE, coloured by risk
+						</p>
+						<div class="flex items-end gap-px h-20">
+							{#each outlook.hours as h, i (i)}
+								{@const level = LEVELS[levelOf(h.cape, h.li, h.shear, h.thunder)]}
+								<span
+									class="relative flex-1 flex flex-col justify-end h-full"
+									title="{h.hour}:00 · CAPE {Math.round(h.cape)} · LI {h.li.toFixed(
+										1
+									)} · shear {Math.round(h.shear)} m/s · {h.rain}% rain"
+								>
+									{#if h.thunder}
+										<span
+											class="absolute -top-0.5 left-1/2 -translate-x-1/2 icon-[mingcute--flash-fill] size-2.5 text-yellow-300"
+										></span>
+									{/if}
+									<span
+										class="block rounded-sm"
+										style="height: {Math.max(
+											4,
+											(h.cape / widest) * 100
+										)}%; background: {level.colour}"
+									></span>
+								</span>
+							{/each}
+						</div>
+						<p class="mt-1 flex justify-between text-[10px] text-white/40 tabular-nums">
+							<span>{outlook.hours[0]?.hour}:00</span><span>+12 h</span><span>+24 h</span>
+						</p>
+						{#if profile}
+							<p class="mt-5 mb-2 text-[10px] font-bold uppercase tracking-wider text-white/45">
+								Severe ingredients · {clock(profile.time)}
+							</p>
+							<div class="flex flex-wrap gap-1.5 mb-2">
+								{#if profile.stp >= 1}
+									<span
+										class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-fuchsia-500 text-black"
+										>Tornado possible</span
+									>
+								{/if}
+								{#if profile.scp >= 1}
+									<span
+										class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-500 text-black"
+										>Supercells</span
+									>
+								{/if}
+								{#if profile.hail}
+									<span
+										class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-sky-300 text-black"
+										>Large hail</span
+									>
+								{/if}
+								{#if profile.cin < -100}
+									<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/10"
+										>Capped (CIN {Math.round(profile.cin)})</span
+									>
+								{/if}
+								{#if profile.stp < 1 && profile.scp < 1 && !profile.hail}
+									<span
+										class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white/[0.06] text-white/60"
+										>No severe signals</span
+									>
+								{/if}
+							</div>
+							<div class="grid grid-cols-4 gap-1.5">
+								{#each [['SRH 1', Math.round(profile.srh1), 'Helicity 0–1 km (100+: tornadoes)'], ['SRH 3', Math.round(profile.srh3), 'Helicity 0–3 km (150+: supercells)'], ['STP', profile.stp.toFixed(1), 'Significant tornado parameter (1+)'], ['SCP', profile.scp.toFixed(1), 'Supercell composite (1+)'], ['LCL', `${Math.round(profile.lcl)}m`, 'Cloud base (under 1000 m: tornadoes likelier)'], ['CIN', Math.round(profile.cin), 'Inhibition: the lid on storms'], ['0 °C', `${Math.round(profile.freezing)}m`, 'Freezing level (low: hail reaches the ground)'], ['Motion', `${Math.round(profile.motion.speed * 3.6)} ${compass(profile.motion.towards)}`, 'Where a right-moving supercell goes, km/h (Bunkers)']] as [label, value, hint] (label)}
+									<div class="p-1.5 rounded-lg bg-white/[0.04]" title={hint}>
+										<p class="text-[9px] font-bold uppercase text-white/45">{label}</p>
+										<p class="text-sm font-extrabold tabular-nums truncate">{value}</p>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					{:else}
+						<p class="text-sm text-white/50">{probeError || 'Loading the forecast…'}</p>
+					{/if}
+				{:else if tab === 'sounding' || tab === 'hodograph'}
+					<div class="flex items-center gap-2 mb-3">
+						<p class="flex-1 text-xs text-white/50">
+							{profile ? `Model sounding · ${clock(profile.time)}` : 'Loading the sounding…'}
+						</p>
+						<div class="flex p-0.5 rounded-lg bg-white/[0.05] text-[11px] font-semibold">
 							{#each [['peak', 'Peak'], ['now', 'Now']] as [value, label] (value)}
 								<button
 									class="px-2 h-6 rounded-md cursor-pointer {profileAt === value
@@ -553,98 +852,74 @@
 						</div>
 					</div>
 					{#if profile}
-						<div class="flex flex-wrap gap-1.5 mb-2">
-							{#if profile.stp >= 1}
-								<span
-									class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-fuchsia-500 text-black"
-									>Tornado possible</span
-								>
-							{/if}
-							{#if profile.scp >= 1}
-								<span
-									class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-500 text-black"
-									>Supercells</span
-								>
-							{/if}
-							{#if profile.hail}
-								<span
-									class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-sky-300 text-black"
-									>Large hail</span
-								>
-							{/if}
-							{#if profile.cin < -100}
-								<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/10"
-									>Capped (CIN {Math.round(profile.cin)})</span
-								>
+						<div class="grid place-items-center">
+							{#if tab === 'sounding'}
+								<SkewT {profile} width={330} height={360} />
+								<p class="mt-2 text-[11px] text-white/45">
+									Red: temperature · green: dew point · dashed: a rising parcel · LCL: cloud base
+								</p>
+							{:else}
+								<Hodograph {profile} size={330} />
+								<p class="mt-2 text-[11px] text-white/45">
+									Wind with height: red 0–1 km, green 1–3, yellow 3–6, blue above · RM: supercell
+									motion
+								</p>
 							{/if}
 						</div>
-						<div class="grid grid-cols-4 gap-1.5">
-							{#each [['SRH 1', Math.round(profile.srh1), 'm²/s²', 'Storm relative helicity 0–1 km: low level spin (over 100: tornadoes)'], ['SRH 3', Math.round(profile.srh3), 'm²/s²', 'Storm relative helicity 0–3 km: rotating updrafts (over 150: supercells)'], ['STP', profile.stp.toFixed(1), '', 'Significant tornado parameter (over 1: strong tornadoes possible)'], ['SCP', profile.scp.toFixed(1), '', 'Supercell composite (over 1: supercells)'], ['Shear 1', Math.round(profile.shear1), 'm/s', 'Bulk shear 0–1 km'], ['Shear 6', Math.round(profile.shear6), 'm/s', 'Bulk shear 0–6 km (over 20: supercells)'], ['LCL', Math.round(profile.lcl), 'm', 'Cloud base above ground (under 1000 m: tornadoes likelier)'], ['CIN', Math.round(profile.cin), 'J/kg', 'Inhibition: the lid on the storms'], ['0 °C', Math.round(profile.freezing), 'm', 'Freezing level (low: hail reaches the ground)'], ['Motion', `${Math.round(profile.motion.speed * 3.6)}`, `km/h ${compass(profile.motion.towards)}`, 'Where a right-moving supercell goes (Bunkers)']] as [label, value, unit, hint] (label)}
-								<div class="p-1.5 rounded-lg bg-white/5" title={hint}>
-									<p class="text-[9px] font-bold uppercase text-white/50">{label}</p>
-									<p class="text-sm font-extrabold tabular-nums leading-tight truncate">
-										{value}<span class="text-[9px] font-semibold text-white/50"> {unit}</span>
-									</p>
+					{/if}
+				{:else}
+					{#if pickedWarnings.length}
+						<p class="mb-2 text-[10px] font-bold uppercase tracking-wider text-white/45">
+							Clicked area
+						</p>
+						<div class="flex flex-col gap-2 mb-4">
+							{#each pickedWarnings as area, i (i)}
+								<div
+									class="p-3 rounded-xl bg-white/[0.04]"
+									style="box-shadow: inset 3px 0 0 {SEVERITY_COLOURS[area.severity]}"
+								>
+									<p class="font-semibold">{area.headline || area.event}</p>
+									<p class="text-[11px] text-white/50">{time(area.onset)} – {time(area.expires)}</p>
+									{#if area.description}
+										<p class="mt-1 text-xs text-white/70">{area.description}</p>
+									{/if}
 								</div>
 							{/each}
 						</div>
-						<div class="mt-2 flex p-0.5 rounded-lg bg-white/5 text-[11px] font-semibold w-fit">
-							{#each [['hodograph', 'Hodograph'], ['skewt', 'Skew-T']] as [value, label] (value)}
-								<button
-									class="px-2.5 h-6 rounded-md cursor-pointer {diagram === value
-										? 'bg-white/15'
-										: 'text-white/55 hover:text-white'}"
-									onclick={() => (diagram = value)}>{label}</button
+					{/if}
+					<p class="mb-2 text-[10px] font-bold uppercase tracking-wider text-white/45">
+						DWD warnings here
+					</p>
+					{#if alerts === null}
+						<p class="text-sm text-white/50">Loading…</p>
+					{:else if !alerts.length}
+						<p class="flex items-center gap-2 text-sm text-white/70">
+							<span class="icon-[mingcute--check-circle-fill] size-4 text-green-400"></span>
+							None (warnings cover Germany)
+						</p>
+					{:else}
+						<div class="flex flex-col gap-2">
+							{#each alerts as alert (alert.id ?? alert.alert_id ?? alert.event_en)}
+								<div
+									class="p-3 rounded-xl bg-white/[0.04]"
+									style="box-shadow: inset 3px 0 0 {SEVERITY_COLOURS[alert.severity] ?? '#facc15'}"
 								>
+									<p class="font-semibold">{alert.event_en ?? alert.event_de}</p>
+									<p class="text-[11px] text-white/50">
+										{time(alert.onset)} – {time(alert.expires)}
+									</p>
+									{#if alert.description_en}
+										<p class="mt-1 text-xs text-white/70">{alert.description_en}</p>
+									{/if}
+								</div>
 							{/each}
 						</div>
-						<div class="mt-2 grid place-items-center">
-							{#if diagram === 'hodograph'}
-								<Hodograph {profile} size={330} />
-							{:else}
-								<SkewT {profile} width={340} height={330} />
-							{/if}
-						</div>
-					{:else}
-						<p class="text-sm text-white/60">Loading the sounding…</p>
 					{/if}
-				</div>
-			{/if}
-			<div>
-				<p class="text-xs font-bold uppercase tracking-wide text-white/50 mb-2">
-					DWD warnings here
-				</p>
-				{#if alerts === null}
-					<p class="text-sm text-white/60">Loading…</p>
-				{:else if !alerts.length}
-					<p class="flex items-center gap-2 text-sm text-white/70">
-						<span class="icon-[mingcute--check-circle-fill] size-4 text-green-400"></span>
-						None (warnings are for Germany only)
-					</p>
-				{:else}
-					<div class="flex flex-col gap-1.5">
-						{#each alerts as alert (alert.id ?? alert.alert_id ?? alert.event_en)}
-							<div
-								class="p-2 rounded-xl bg-white/5"
-								style="box-shadow: inset 3px 0 0 {SEVERITY[alert.severity] ?? '#facc15'}"
-							>
-								<p class="text-sm font-semibold">{alert.event_en ?? alert.event_de}</p>
-								<p class="text-[11px] text-white/55">
-									{clock(alert.onset)} – {clock(alert.expires)}
-								</p>
-								{#if alert.description_en}
-									<p class="mt-1 text-xs text-white/70 line-clamp-3">{alert.description_en}</p>
-								{/if}
-							</div>
-						{/each}
-					</div>
 				{/if}
 			</div>
-		{:else if home}
-			<p class="text-sm text-white/60">Click a place on the map to see its storm outlook.</p>
-		{/if}
-		<p class="mt-auto text-[11px] text-white/40">
-			Click anywhere on the map for its outlook · drag to move · scroll to zoom
-		</p>
-	</aside>
+			<footer class="px-4 py-2.5 border-t border-white/[0.06] text-[11px] text-white/40">
+				Click the map for any place · drag to move · scroll to zoom
+			</footer>
+		</aside>
+	{/if}
 </div>
