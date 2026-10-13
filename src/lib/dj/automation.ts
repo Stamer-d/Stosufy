@@ -217,21 +217,23 @@ export function mixCurves(plan: MixPlan, times: MixTimes): MixCurves {
 			break;
 		}
 		case 'build': {
-			// The old song builds up into the one: it thins out (a high-pass, faster and faster),
-			// more and more into reverb, its last bars into an eighth-note echo; half a beat before
-			// the one only the build's tail is left, and on the one the new song drops in
+			// The old song builds up into the one: it thins out (a high-pass, faster and faster,
+			// a little louder to make up for it), more and more into reverb, its last bars into an
+			// eighth-note echo, its last bar in shorter and shorter rolls (see the timeline); on
+			// the one it stops, its tail rings on and the new song drops in
 			const length = Math.max(beat, tW - tS);
-			echo = { time: beat * 0.5, feedback: 0.55 };
+			echo = { time: beat * 0.5, feedback: 0.5 };
 			const hp = list(A, 'hp');
 			for (let i = 0; i <= 32; i++) {
 				const x = i / 32;
-				hp.push({ t: tS + length * x, v: 10 * (1800 / 10) ** (x ** 1.8) });
+				hp.push({ t: tS + length * x, v: 10 * (900 / 10) ** (x ** 1.6) });
 			}
-			ramp(list(A, 'reverb'), tS + length * 0.4, tW - beat / 2, 0, 0.55, 'in');
-			ramp(list(A, 'echo'), tW - Math.min(bar * 2, length / 2), tW - beat / 2, 0, 0.6, 'in');
-			jump(list(A, 'dry'), tW - beat / 2, 1, 0, 0.01);
-			jump(list(A, 'echo'), tW - beat / 2 + 0.01, 0.6, 0, 0.01);
-			jump(list(A, 'reverb'), tW - beat / 2 + 0.01, 0.55, 0, 0.01);
+			ramp(list(A, 'vol'), tS, tW, 1, 1.5, 'in');
+			ramp(list(A, 'reverb'), tS + length * 0.3, tW, 0, 0.6, 'in');
+			ramp(list(A, 'echo'), tW - Math.min(bar * 2, length / 2), tW - beat, 0, 0.5, 'in');
+			jump(list(A, 'echo'), tW - beat, 0.5, 0, 0.01);
+			jump(list(A, 'dry'), tW, 1, 0, 0.006);
+			jump(list(A, 'reverb'), tW, 0.6, 0, 0.006);
 			tail = tW + 4;
 			break;
 		}
