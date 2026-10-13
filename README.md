@@ -57,8 +57,9 @@ yourself.
 
 ### 🎛️ DJ mode
 
-- **Two decks** with waveforms, beat grids taken from the beatmap, sync, EQ, filter, loops, hot cues and recording.
-- **Easy mode.** Press MIX and Stosufy times a clean transition on the beat for you. Choose bass swap, filter sweep, echo out, crossfade or cut, and add riser FX.
+- **Two decks** with waveforms, beat grids taken from the beatmap (checked against the audio), sync, key lock, a three-band EQ with kills, filter, loops, hot cues and recording.
+- **Smart mixes.** Stosufy listens to both songs (intro, choruses, outro, how the song ends, key) and mixes on their phrases like a DJ: the new song's intro under the old one's outro with the basslines swapped on the one, tempos matched without changing the pitch, an echo out or a segue when the songs don't fit together. Every move is timed to the sample.
+- **Easy mode.** Press MIX and Stosufy plans the transition for you, or pick blend, filter, crossfade, echo out, wash out, brake or cut yourself.
 - **Auto DJ.** Mixes through a playlist by itself, and you can still pick the next song.
 
 ### 👥 Social & Customisation

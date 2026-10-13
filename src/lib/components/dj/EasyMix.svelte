@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import Fader from './Fader.svelte';
 	import Knob from './Knob.svelte';
-	import { TRANSITIONS } from '#lib/dj/engine.ts';
+	import { TRANSITIONS, STYLE_NAMES } from '#lib/dj/engine.ts';
 
 	let { mixer, state: mix, colors } = $props();
 
@@ -38,15 +38,25 @@
 	let target = $derived(lead === 'A' ? 'B' : lead === 'B' ? 'A' : null);
 	let ready = $derived(!!target && mix[target].duration > 0 && !mix[target].loading);
 
-	/** What the mix will do, from the engine's plan */
+	/** What the mix will do, from the engine's plan (again as the songs or settings change,
+	 * and every few seconds while a song plays: it starts on the next phrase that fits) */
+	let clock = $state(0);
+	onMount(() => {
+		const timer = setInterval(() => (clock = performance.now()), 2000);
+		return () => clearInterval(timer);
+	});
 	let plan = $derived.by(() => {
+		void clock;
 		void mix.A.tempo;
 		void mix.B.tempo;
 		void mix.A.song;
 		void mix.B.song;
+		void mix.A.key;
+		void mix.B.key;
 		void mix.transitionType;
-		if (!ready || !lead) return null;
-		return mixer.plan(mixer.decks[lead], mixer.decks[target]);
+		void mix.keyLock;
+		if (!ready || !lead || mix.transition) return null;
+		return mixer.preview()?.plan ?? null;
 	});
 
 	const FIT = {
@@ -63,7 +73,12 @@
 		tricky: {
 			label: 'Tempo ride',
 			class: 'text-amber-300 bg-amber-400/15',
-			tip: 'Tempos far apart: they meet in the middle, slowly, and the new song glides back after'
+			tip: 'Tempos further apart: they meet over the last bars, and the new song glides back after'
+		},
+		far: {
+			label: 'On the one',
+			class: 'text-sky-200 bg-sky-400/15',
+			tip: 'Tempos too far apart to play together: the new song comes in on the one'
 		},
 		clash: {
 			label: 'No beat to match',
@@ -71,20 +86,29 @@
 			tip: 'A song without a tempo: the old one echoes out'
 		}
 	};
-	const typeName = (id) => TRANSITIONS.find((t) => t.id === id)?.name ?? id;
+	const typeName = (id) => STYLE_NAMES[id] ?? TRANSITIONS.find((t) => t.id === id)?.name ?? id;
 	const percent = (change) => `${change >= 0 ? '+' : ''}${(change * 100).toFixed(1)}%`;
 </script>
 
 <section
 	class="shrink-0 w-[19rem] flex flex-col items-center gap-3 p-4 rounded-2xl bg-white/[0.035] ring-1 ring-white/[0.06]"
 >
-	{#if plan}
+	{#if mix.transition}
+		<div class="text-center">
+			<span class="px-3 py-1 rounded-full text-sm font-black text-violet-200 bg-violet-400/15"
+				>{typeName(mix.transition.type)}</span
+			>
+			<p class="mt-2 text-xs text-white/50">{mix.transition.from} → {mix.transition.to}</p>
+		</div>
+	{:else if plan}
 		{@const fit = FIT[plan.fit.rating]}
 		<div class="text-center" title={fit.tip}>
 			<span class="px-3 py-1 rounded-full text-sm font-black {fit.class}">{fit.label}</span>
 			<p class="mt-2 text-xs text-white/50">
-				{#if plan.fit.change != null}
-					{target} plays at {percent(plan.fit.change)} to match {lead}
+				{#if plan.beatmatch && Math.abs(plan.rateB - 1) > 0.001}
+					{target} plays at {percent(plan.rateB - 1)} to match {lead}{mix.keyLock && mix.canKeyLock
+						? ', in its own key'
+						: ''}
 				{:else}
 					{fit.tip}
 				{/if}
@@ -106,7 +130,7 @@
 	{#if mix.transition}
 		<button
 			class="relative size-40 rounded-full grid place-items-center cursor-pointer"
-			title="Stop the mix where it is"
+			title="Stop the mix: before the swap the new song goes again, after it the old one does"
 			onclick={() => mixer.cancelMix()}
 		>
 			<svg viewBox="0 0 100 100" class="absolute inset-0 -rotate-90">
@@ -160,13 +184,11 @@
 	{/if}
 
 	{#if plan && !mix.transition}
-		<p class="text-xs text-center text-white/60 leading-relaxed">
-			<b class="text-white/90">{typeName(plan.type)}</b>
-			{plan.type === 'cut' ? 'on the next bar' : `over ${plan.bars} bars`}{plan.inPoint !==
-			(mix[target]?.hotCues?.[0] ?? mix[target]?.cue)
-				? ', the new song lands on its drop'
-				: ''}
+		<p class="text-xs text-center text-white/60 leading-relaxed" title={plan.options}>
+			{plan.why}
 		</p>
+	{:else if mix.transition}
+		<p class="text-xs text-center text-white/60 leading-relaxed">{mix.transition.why}</p>
 	{/if}
 
 	<div class="flex flex-wrap justify-center gap-1">
@@ -187,16 +209,19 @@
 
 	<div class="flex gap-3 text-xs text-white/70">
 		<label
-			class="flex items-center gap-1.5 cursor-pointer"
-			title="A rising sweep and some reverb in the mix"
+			class="flex items-center gap-1.5 cursor-pointer {mix.canKeyLock ? '' : 'opacity-40'}"
+			title={mix.canKeyLock
+				? 'Songs played faster or slower keep their pitch (no chipmunk voices)'
+				: "The key lock doesn't run here"}
 		>
 			<input
 				type="checkbox"
-				checked={mix.hype}
-				onchange={(e) => mixer.setOptions({ hype: e.currentTarget.checked })}
+				checked={mix.keyLock && mix.canKeyLock}
+				disabled={!mix.canKeyLock}
+				onchange={(e) => mixer.setOptions({ keyLock: e.currentTarget.checked })}
 				class="accent-violet-400"
 			/>
-			Riser FX
+			Key lock
 		</label>
 		<label
 			class="flex items-center gap-1.5 cursor-pointer"

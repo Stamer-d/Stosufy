@@ -114,3 +114,53 @@ export function beatsIn(grid: Grid, from: number, to: number) {
 	});
 	return beats;
 }
+
+/** The bar starts in a time range (all of them, for the song's analysis) */
+export function downbeats(grid: Grid, from: number, to: number) {
+	const times: number[] = [];
+	grid.forEach((point, i) => {
+		const end = Math.min(grid[i + 1]?.time ?? Infinity, to);
+		const bar = point.beat * point.meter;
+		const start = i === 0 ? from : Math.max(from, point.time);
+		for (let k = Math.ceil((start - point.time) / bar - 1e-6); ; k++) {
+			const time = point.time + k * bar;
+			if (time >= end - 1e-6) break;
+			times.push(time);
+		}
+	});
+	return times;
+}
+
+/** The grid moved by some seconds (to where the beats are in the decoded audio) */
+export function shiftGrid(grid: Grid, seconds: number): Grid {
+	return grid.map((point) => ({ ...point, time: point.time + seconds }));
+}
+
+/**
+ * Beats counted through the whole song, also across tempo changes (each section starts on a
+ * whole beat): the beat a time is on, and back. To keep two songs' beats together in a mix.
+ */
+export function beatIndex(grid: Grid, time: number) {
+	if (!grid.length) return 0;
+	let count = 0;
+	for (let i = 0; i < grid.length; i++) {
+		const point = grid[i];
+		const next = grid[i + 1];
+		if (!next || time < next.time) return count + (time - point.time) / point.beat;
+		count += Math.round((next.time - point.time) / point.beat);
+	}
+	return count;
+}
+
+export function beatTime(grid: Grid, index: number) {
+	if (!grid.length) return index * 0.5;
+	let count = 0;
+	for (let i = 0; i < grid.length; i++) {
+		const point = grid[i];
+		const next = grid[i + 1];
+		const beats = next ? Math.round((next.time - point.time) / point.beat) : Infinity;
+		if (index < count + beats || !next) return point.time + (index - count) * point.beat;
+		count += beats;
+	}
+	return 0;
+}

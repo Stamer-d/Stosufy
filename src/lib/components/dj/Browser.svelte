@@ -46,13 +46,15 @@
 		if (!leadBpm || !bpm) return null;
 		return Math.min(...[1, 2, 0.5].map((f) => Math.abs((leadBpm * f) / bpm - 1)));
 	}
+	// (like the mixes: blended as they are up to 8 %, the tempos meet up to 20 %, further
+	// apart the new song comes in on the one)
 	const fitOf = (d) =>
-		d == null ? null : d <= 0.03 ? 'perfect' : d <= 0.07 ? 'good' : d <= 0.43 ? 'tricky' : 'clash';
+		d == null ? null : d <= 0.03 ? 'perfect' : d <= 0.08 ? 'good' : d <= 0.2 ? 'tricky' : 'far';
 	const FIT = {
 		perfect: { label: 'Perfect', class: 'bg-green-400/20 text-green-300' },
 		good: { label: 'Good', class: 'bg-lime-400/15 text-lime-300' },
 		tricky: { label: 'Tempo ride', class: 'bg-amber-400/15 text-amber-300' },
-		clash: { label: 'No beat', class: 'bg-white/10 text-white/50' }
+		far: { label: 'On the one', class: 'bg-white/10 text-white/60' }
 	};
 
 	let songs = $derived.by(() => {

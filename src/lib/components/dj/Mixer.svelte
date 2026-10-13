@@ -209,7 +209,10 @@
 			{#each BARS as bars (bars)}
 				<button
 					aria-pressed={mix.transitionBars === bars}
-					disabled={mix.transitionType === 'cut'}
+					disabled={!['blend', 'filter', 'crossfade'].includes(mix.transitionType)}
+					title={mix.transitionType === 'smart'
+						? 'Smart picks the length from the songs'
+						: `Mix over ${bars} bars`}
 					class="h-7 min-w-8 px-1.5 rounded-md text-[11px] font-bold cursor-pointer ring-1 transition disabled:opacity-30 {mix.transitionBars ===
 					bars
 						? 'bg-white text-black ring-white'
@@ -217,8 +220,26 @@
 					onclick={() => mixer.setTransition(mix.transitionType, bars)}>{bars}</button
 				>
 			{/each}
+			<label
+				class="ml-1 flex items-center gap-1 text-[10px] font-bold text-white/50 cursor-pointer {mix.canKeyLock
+					? ''
+					: 'opacity-40'}"
+				title={mix.canKeyLock
+					? 'Key lock: songs played faster or slower keep their pitch'
+					: "The key lock doesn't run here"}
+			>
+				<input
+					type="checkbox"
+					checked={mix.keyLock && mix.canKeyLock}
+					disabled={!mix.canKeyLock}
+					onchange={(e) => mixer.setOptions({ keyLock: e.currentTarget.checked })}
+					class="accent-violet-400"
+				/>
+				KEY
+			</label>
 			{#if mix.transition}
 				<button
+					title={mix.transition.why}
 					class="ml-auto relative h-8 px-3 rounded-md text-xs font-black bg-red-500/80 hover:bg-red-500 cursor-pointer overflow-hidden"
 					onclick={() => mixer.cancelMix()}
 				>
@@ -232,7 +253,7 @@
 			{:else}
 				<button
 					title={canMix
-						? `Mix from ${leading} to ${target} on the next bar`
+						? `Mix from ${leading} to ${target}`
 						: 'Play one deck and load a song on the other'}
 					disabled={!canMix}
 					class="ml-auto h-8 px-3 rounded-md text-xs font-black cursor-pointer transition disabled:opacity-40 disabled:cursor-default text-black"
