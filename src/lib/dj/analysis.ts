@@ -480,8 +480,15 @@ export async function analyzeSong(
 	const median = sorted[sorted.length >> 1] ?? 0;
 	const top = sorted[Math.floor(sorted.length * 0.85)] ?? 1;
 
-	// The peaks: the mapper's kiai, else the loudest stretches (4 bars or more)
-	let drops = kiai.filter((k) => k.end - k.start >= bar * 2);
+	// The peaks: the mapper's kiai (pieces of one chorus less than 4 bars apart as one), else
+	// the loudest stretches (4 bars or more)
+	let drops: Section[] = [];
+	for (const k of [...kiai].sort((x, y) => x.start - y.start)) {
+		const last = drops.at(-1);
+		if (last && k.start - last.end < bar * 4) last.end = Math.max(last.end, k.end);
+		else drops.push({ ...k });
+	}
+	drops = drops.filter((k) => k.end - k.start >= bar * 2);
 	if (!drops.length) {
 		const threshold = Math.max(median, top * 0.88);
 		let run: Section | null = null;

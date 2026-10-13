@@ -82,6 +82,12 @@ export const TRANSITIONS: { id: TransitionType; name: string; description: strin
 	},
 	{ id: 'crossfade', name: 'Crossfade', description: 'A smooth fade from one to the other' },
 	{
+		id: 'build',
+		name: 'Build-up',
+		description:
+			'The old song builds up (thinning out into reverb and echo), the new one drops in on the one'
+	},
+	{
 		id: 'echo',
 		name: 'Echo out',
 		description: 'The old song echoes away, the new one comes in on the one'
@@ -104,6 +110,7 @@ export const STYLE_NAMES: Record<MixStyle, string> = {
 	blend: 'Blend',
 	filter: 'Filter blend',
 	crossfade: 'Crossfade',
+	build: 'Build-up',
 	echo: 'Echo out',
 	wash: 'Wash out',
 	brake: 'Brake',
@@ -1529,16 +1536,31 @@ export class Mixer {
 			const iB = Math.round(beatIndex(to.grid, plan.startB));
 			const beats = Math.ceil(beatIndex(from.grid, plan.endA) - iA) + 4;
 			const at = (k: number) => tStart + (beatTime(from.grid, iA + k) - plan.startA) / plan.rateA;
-			const song = (k: number) => beatTime(to.grid, iB + k * plan.factor);
+			// Its beats as they're played: its first bars looped a few times (a short intro made
+			// longer), then on from there
+			const loop = plan.loopB;
+			const span = loop ? loop.bars * (sectionAt(to.grid, plan.startB)?.meter ?? 4) : 0;
+			const looped = loop ? span * loop.times : 0;
+			const beatOf = (v: number) =>
+				!loop ? iB + v : v < looped ? iB + (v % span) : iB + span + (v - looped);
+			const song = (k: number) => beatTime(to.grid, beatOf(k * plan.factor));
 			for (let k = 0; k < beats; k++) {
 				const t = at(k);
-				const rate = (song(k + 1) - song(k)) / (at(k + 1) - t);
+				const input = song(k);
+				// (on to its next beat; at a loop's end it jumps back after this one)
+				const rate =
+					(beatTime(to.grid, beatOf(k * plan.factor) + plan.factor) - input) / (at(k + 1) - t);
 				const last = segmentsB.at(-1);
-				if (last && Math.abs(last.rate - rate) < 1e-6) continue;
+				if (
+					last &&
+					Math.abs(last.rate - rate) < 1e-6 &&
+					Math.abs(last.input + (t - last.at) * last.rate - input) < 1e-4
+				)
+					continue;
 				segmentsB.push({
 					at: t,
 					playing: true,
-					input: song(k),
+					input,
 					rate,
 					loop: null,
 					keyLock: keyLockB
@@ -1570,8 +1592,9 @@ export class Mixer {
 				});
 			}
 		} else {
+			// On the one (after the old song's build-up or effect)
 			segmentsB.push({
-				at: tStart,
+				at: tSwap,
 				playing: true,
 				input: plan.startB,
 				rate: plan.rateB,
@@ -1618,7 +1641,7 @@ export class Mixer {
 		from.scheduleCurves(curves.A, curves.tail);
 		const restB = Math.max(tStart, ...Object.values(curves.B).map((list) => list?.at(-1)?.t ?? 0));
 		to.scheduleCurves(curves.B, restB + 0.01);
-		if (curves.echo) from.mixEcho(curves.echo, Math.max(t0, tSwap - beat * 1.5), curves.tail);
+		if (curves.echo) from.mixEcho(curves.echo, Math.max(t0, tStart - 0.01), curves.tail);
 		// Both heard through the crossfader (the old one already is), the new one's fader up
 		if (this.crossfader !== 0.5) this.setCrossfader(0.5);
 		if (from.state.loop) from.state = { ...from.state, loop: null };
@@ -1676,6 +1699,7 @@ export class Mixer {
 			rateB: to.liveRate,
 			drums: false,
 			throwEcho: false,
+			loopB: null,
 			keys: null,
 			fit: this.compat(from, to),
 			why: 'Blend from here: the basslines swap on the bar, the old song fades out',
@@ -1754,17 +1778,42 @@ export class Mixer {
 	startAuto(queue: MapSet[], source: string) {
 		this.auto = { on: true, queue, index: -1, source };
 		const playing = this.leading();
-		if (!playing) {
+		if (playing) {
+			// (from the song that plays, if it's in the list)
+			this.auto.index = queue.findIndex((s) => sameSong(s, playing.state.song));
+		} else {
 			this.auto.index = 0;
 			const deck = this.decks.A;
 			deck.pickedByUser = false;
 			deck.load(queue[0]).then(() => {
 				if (this.auto.on && this.auto.index === 0) deck.play();
 			});
-		} else {
-			this.auto.index = -1;
 		}
 		this.emit();
+	}
+
+	/**
+	 * The queue's next song after the one that played last, never the song that plays now (nor
+	 * one with the same audio): -1 if there's none
+	 */
+	private autoNextIndex(playing: MapSet | null) {
+		const queue = this.auto.queue;
+		for (let k = 1; k <= queue.length; k++) {
+			const i = (((this.auto.index + k) % queue.length) + queue.length) % queue.length;
+			const song = queue[i];
+			if (song && !(playing && (sameSong(song, playing) || song.id === playing.id))) return i;
+		}
+		return -1;
+	}
+
+	/** The song Auto DJ mixes into next (the one the user put on the other deck, else the queue's) */
+	autoNext(): MapSet | null {
+		if (!this.auto.on) return null;
+		const lead = this.leading();
+		const next = lead ? this.other(lead.id) : null;
+		if (next?.pickedByUser && next.state.song) return next.state.song;
+		const i = this.autoNextIndex(lead?.state.song ?? null);
+		return i >= 0 ? this.auto.queue[i] : null;
 	}
 
 	stopAuto() {
@@ -1828,10 +1877,12 @@ export class Mixer {
 		const queue = this.auto.queue;
 		if (!queue.length || !playing) return;
 		const next = this.other(playing.id);
-		const nextIndex = (this.auto.index + 1) % queue.length;
-		// What the user put on the other deck plays next; else the list's next song
+		const nextIndex = this.autoNextIndex(playing.state.song);
+		// What the user put on the other deck plays next; else the list's next song (never the
+		// one that plays)
 		const userPick = next.pickedByUser && next.state.song && !next.state.error;
-		if (!userPick && (next.state.song?.id !== queue[nextIndex]?.id || next.state.error)) {
+		if (!userPick && nextIndex < 0) return;
+		if (!userPick && (!sameSong(next.state.song, queue[nextIndex]) || next.state.error)) {
 			if (next.state.loading || next.state.playing) return;
 			this.autoBusy = true;
 			try {

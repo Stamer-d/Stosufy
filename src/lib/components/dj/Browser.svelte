@@ -46,10 +46,10 @@
 		if (!leadBpm || !bpm) return null;
 		return Math.min(...[1, 2, 0.5].map((f) => Math.abs((leadBpm * f) / bpm - 1)));
 	}
-	// (like the mixes: blended as they are up to 8 %, the tempos meet up to 20 %, further
+	// (like the mixes: blended as they are up to 8 %, the tempos meet up to 25 %, further
 	// apart the new song comes in on the one)
 	const fitOf = (d) =>
-		d == null ? null : d <= 0.03 ? 'perfect' : d <= 0.08 ? 'good' : d <= 0.2 ? 'tricky' : 'far';
+		d == null ? null : d <= 0.03 ? 'perfect' : d <= 0.08 ? 'good' : d <= 0.25 ? 'tricky' : 'far';
 	const FIT = {
 		perfect: { label: 'Perfect', class: 'bg-green-400/20 text-green-300' },
 		good: { label: 'Good', class: 'bg-lime-400/15 text-lime-300' },
@@ -112,11 +112,12 @@
 	}
 
 	let nextUp = $derived.by(() => {
-		if (!mix.auto.on || !mix.auto.queue.length) return null;
-		const lead =
-			mix.A.playing && !mix.B.playing ? 'B' : mix.B.playing && !mix.A.playing ? 'A' : null;
-		const picked = lead && mixer.decks[lead].pickedByUser ? mix[lead].song : null;
-		return picked ?? mix.auto.queue[(mix.auto.index + 1) % mix.auto.queue.length];
+		void mix.A.song;
+		void mix.B.song;
+		void mix.A.playing;
+		void mix.B.playing;
+		void mix.auto;
+		return mixer.autoNext();
 	});
 </script>
 

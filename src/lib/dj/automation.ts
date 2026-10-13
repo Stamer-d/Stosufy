@@ -125,7 +125,8 @@ export function mixCurves(plan: MixPlan, times: MixTimes): MixCurves {
 			const mids = tS + pre * (pre >= bar * 4 ? 0.5 : 0.25);
 			if (pre > 0) {
 				const full = quiet ?? Infinity;
-				ramp(list(B, 'vol'), tS, Math.min(tS + Math.min(bar * 2, pre / 4), full), 0, 1, 'db');
+				// (it rises over the first quarter of the mix: a long mix builds up slowly)
+				ramp(list(B, 'vol'), tS, Math.min(tS + Math.min(bar * 4, pre / 4), full), 0, 1, 'db');
 				const high = list(B, 'high');
 				ramp(high, tS, Math.min(tS + pre / 2, full), 0.25, 1, 'smooth');
 				const mid = list(B, 'mid');
@@ -156,20 +157,22 @@ export function mixCurves(plan: MixPlan, times: MixTimes): MixCurves {
 					ramp(l, tW, tE, from, 0, 'db');
 				}
 			}
-			if (plan.throwEcho && tE > tW + beat) {
-				// The old song's last beat into its echo, ringing on over the new one
+			if (plan.throwEcho) {
+				// The old song's last beat into its echo, ringing on over the new one (on the swap
+				// itself when it stops there, before its next peak)
 				echo = { time: beat * 0.75, feedback: 0.5 };
 				const e = list(A, 'echo');
 				e.push({ t: tE - beat, v: 0 });
 				jump(e, tE - beat, 0, 0.8, 0.004);
 				jump(e, tE, 0.8, 0, 0.004);
-				for (const band of ['mid', 'high'] as const) {
-					// (the echo hears the song as it was: its bands stay up to the end)
-					const l = list(A, band);
-					l.length = 0;
-					if (pre > 0) ramp(l, mids, tW, 1, 0.7, 'smooth');
-					ramp(l, tW, tE - beat, pre > 0 ? 0.7 : 1, 0.5, 'smooth');
-				}
+				if (tE - beat > tW + 0.05)
+					for (const band of ['mid', 'high'] as const) {
+						// (the echo hears the song as it was: its bands stay up to the end)
+						const l = list(A, band);
+						l.length = 0;
+						if (pre > 0) ramp(l, mids, tW, 1, 0.7, 'smooth');
+						ramp(l, tW, tE - beat, pre > 0 ? 0.7 : 1, 0.5, 'smooth');
+					}
 				jump(list(A, 'dry'), tE, 1, 0, 0.008);
 				tail = tE + beat * 6;
 			} else jump(list(A, 'vol'), tE, 1, 0, 0.01);
@@ -211,6 +214,25 @@ export function mixCurves(plan: MixPlan, times: MixTimes): MixCurves {
 			list(B, 'low').push({ t: tS, v: 0 });
 			jump(list(B, 'low'), tW, 0, 1, 0.02);
 			jump(list(A, 'low'), tW, 1, 0, 0.02);
+			break;
+		}
+		case 'build': {
+			// The old song builds up into the one: it thins out (a high-pass, faster and faster),
+			// more and more into reverb, its last bars into an eighth-note echo; half a beat before
+			// the one only the build's tail is left, and on the one the new song drops in
+			const length = Math.max(beat, tW - tS);
+			echo = { time: beat * 0.5, feedback: 0.55 };
+			const hp = list(A, 'hp');
+			for (let i = 0; i <= 32; i++) {
+				const x = i / 32;
+				hp.push({ t: tS + length * x, v: 10 * (1800 / 10) ** (x ** 1.8) });
+			}
+			ramp(list(A, 'reverb'), tS + length * 0.4, tW - beat / 2, 0, 0.55, 'in');
+			ramp(list(A, 'echo'), tW - Math.min(bar * 2, length / 2), tW - beat / 2, 0, 0.6, 'in');
+			jump(list(A, 'dry'), tW - beat / 2, 1, 0, 0.01);
+			jump(list(A, 'echo'), tW - beat / 2 + 0.01, 0.6, 0, 0.01);
+			jump(list(A, 'reverb'), tW - beat / 2 + 0.01, 0.55, 0, 0.01);
+			tail = tW + 4;
 			break;
 		}
 		case 'echo': {
