@@ -10,8 +10,9 @@
 // - Keys that clash: only the new song's drums and highs before the swap, a short overlap.
 // - Two full songs never play together for long: an intro under an outro or a breakdown.
 // - Mixes build up over 16 or 32 bars: a short intro is looped to fill them (a DJ's intro
-//   loop). A song without an intro, or tempos too far apart: the old song builds up (thinning
-//   out into reverb and echo) and the new one drops in on the one.
+//   loop). A song without an intro comes in from its start with only its highs (hats,
+//   cymbals) under the old song, its mids and bass on the swap. Tempos too far apart: the old
+//   song builds up (thinning out into reverb and echo) and the new one drops in on the one.
 // - Auto DJ leaves a longer song after one of its peaks, in the part before the next one: the
 //   new song's drop comes where the old one's next drop would have.
 
@@ -230,14 +231,20 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 		if (!beatmatchable) return null;
 		const first = barCeil(a, Math.max(now, earliest));
 		const room = Math.max(0, barsBetween(a, first, swapA) - (ramp ? 4 : 0));
-		const drums = keys === 0 && style !== 'crossfade';
+		let drums = keys === 0 && style !== 'crossfade';
+		const own = introBars / factor;
+		// No intro to speak of: it comes in from its start with only its highs, for 8 bars
+		const cold = !B.placed && introBars < 4 && style !== 'crossfade';
+		if (cold) drums = true;
 		const limit = Math.min(room, target, drums ? 8 : 32);
 		let pre = musical(limit);
 		let start = startB;
 		let swapB = swapB0;
 		let loopB: MixPlan['loopB'] = null;
-		const own = introBars / factor;
-		if (B.placed) {
+		if (cold) {
+			start = startB;
+			swapB = barsLater(b, startB, pre * factor);
+		} else if (B.placed) {
 			// From where the user put it, the swap where it falls
 			pre = musical(Math.min(limit, Math.max(8, own)));
 			swapB = barsLater(b, startB, pre * factor);
@@ -278,13 +285,15 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 		const how =
 			pre === 0
 				? 'it comes in on the one'
-				: drums
-					? 'the keys clash: only its drums first'
-					: style === 'filter'
-						? 'it opens up as the old one thins out'
-						: loopB
-							? 'its intro looped under the old one'
-							: 'its intro under the old one';
+				: cold
+					? 'from its start, only its highs first'
+					: drums
+						? 'the keys clash: only its drums first'
+						: style === 'filter'
+							? 'it opens up as the old one thins out'
+							: loopB
+								? 'its intro looped under the old one'
+								: 'its intro under the old one';
 		return {
 			...base,
 			style,
@@ -434,14 +443,15 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 							: -0.5;
 		if (p.loopB) s -= 0.04 * (p.loopB.times - 1);
 		if (p.post >= 2) s -= 0.25 * Math.max(0, busyness(a, p.swapA, p.endA) - 0.5);
-		if (keys === 0) s -= 0.35;
+		// (keys that clash: only its drums first, a little less good)
+		if (keys === 0) s -= 0.12;
 		if (keys === 2) s += 0.05;
 		s -= Math.abs(p.rateB - 1) * 1.5 + (p.rampFrom != null ? 0.1 : 0);
 		if (a.boundaries.some((x) => Math.abs(x - p.swapA) < 0.05)) s += 0.05;
 		return s;
 	};
-	const buildScore =
-		0.7 + (beatmatchable ? 0 : 0.35) + (introBars < 4 ? 0.15 : 0) + (keys === 0 ? 0.1 : 0);
+	// (a build-up now and then, above all for tempos too far apart to blend)
+	const buildScore = 0.5 + (beatmatchable ? 0 : 0.35);
 
 	if (o.auto) {
 		for (const region of exitRegions(a, now)) {
@@ -599,7 +609,10 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 	// A DJ doesn't make the same move every time: the last one a little less likely, and a
 	// little taste of its own for each pair of songs
 	for (const option of options) {
-		if (o.history[0] === option.plan.style) option.score *= 0.9;
+		if (o.history[0] === option.plan.style)
+			option.score *= option.plan.style === 'build' ? 0.6 : 0.9;
+		else if (o.history[1] === option.plan.style && option.plan.style === 'build')
+			option.score *= 0.8;
 		option.score *= 0.93 + 0.14 * chance(seed + option.plan.style + option.plan.swapA.toFixed(1));
 	}
 	options.sort((x, y) => y.score - x.score);

@@ -1504,25 +1504,6 @@ export class Mixer {
 		const tSwap = timeA(plan.swapA);
 		const tEnd = timeA(plan.endA);
 		const beat = (sectionAt(from.grid, plan.swapA)?.beat ?? 0.5) / plan.rateA;
-		// A build-up ends in rolls: its last bar's first half in half-beat loops, then quarter
-		// beats (each from where the song would be, so it stays on the beat)
-		if (plan.style === 'build') {
-			const songBeat = sectionAt(from.grid, plan.swapA)?.beat ?? 0.5;
-			for (const [beats, size] of [
-				[4, 0.5],
-				[2, 0.25]
-			]) {
-				const input = plan.swapA - beats * songBeat;
-				segmentsA.push({
-					at: timeA(input),
-					playing: true,
-					input,
-					rate: plan.rateA,
-					loop: { start: input, end: input + size * songBeat },
-					keyLock
-				});
-			}
-		}
 		// The old song stops: slowing to a halt (brake), or once it's gone
 		if (plan.style === 'brake') {
 			const last = segmentsA.at(-1)!;
