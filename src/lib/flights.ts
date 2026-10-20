@@ -1,8 +1,8 @@
 // Flights, like on Flightradar24: live positions from the ADS-B community networks
-// (airplanes.live, adsb.lol as a fallback), the aircraft and its route from adsbdb, photos
-// from planespotters.net. Plus how they're drawn on a map.
+// (airplanes.live, adsb.fi and adsb.lol, whichever answers), the aircraft and its route from
+// adsbdb, photos from planespotters.net. Plus how they're drawn on a map.
 
-import { fastFetch } from './fastFetch';
+import { fetchWithin } from './fastFetch';
 
 export interface TrailPoint {
 	lat: number;
@@ -93,55 +93,185 @@ export function planeNow(plane: Plane, time = Date.now()) {
 }
 
 // --- The networks ---------------------------------------------------------------------------
+// Three community networks with the same kind of answers. Each is asked one request at a time
+// within its limit (what the map shows before the rest). One that refuses (blocked, too many
+// requests) or doesn't answer in time rests a while and the next one is asked: a slow or
+// closed network never holds up the planes.
 
-// airplanes.live allows about a request a second: all its requests wait their turn
-let queue: Promise<unknown> = Promise.resolve();
-let lastRequest = 0;
-function inTurn<T>(task: () => Promise<T>): Promise<T> {
-	const run = queue.then(async () => {
-		const wait = lastRequest + 1100 - Date.now();
-		if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-		lastRequest = Date.now();
-		return task();
-	});
-	queue = run.catch(() => {});
-	return run;
+/** What's asked: the planes around a place, or by hex, callsign, registration, squawk, type */
+type Ask =
+	| { kind: 'point'; lat: string; lon: string; r: number }
+	| { kind: 'hex' | 'callsign' | 'reg' | 'squawk' | 'type'; value: string }
+	| { kind: 'mil' };
+
+interface Network {
+	name: string;
+	/** Where to ask, or null where the network can't answer that */
+	url: (ask: Ask) => string | null;
+	/** Only for what the map shows (it allows few requests a day) */
+	spare?: boolean;
+	/** Not asked until then (ms) */
+	restUntil: number;
+	/** Failures in a row */
+	failures: number;
+	/** When the last request started (ms) */
+	last: number;
+	busy: boolean;
+	timer?: ReturnType<typeof setTimeout>;
+	waiting: { urgent: boolean; go: () => void }[];
 }
 
-async function aircraftList(path: string, fallback?: string): Promise<any[]> {
-	const sources = [
-		() => inTurn(() => fastFetch(`https://api.airplanes.live/v2/${path}`)),
-		...(fallback ? [() => fastFetch(`https://api.adsb.lol/v2/${fallback}`)] : [])
-	];
+const network = (
+	name: string,
+	url: Network['url'],
+	options: Partial<Pick<Network, 'spare'>> = {}
+): Network => ({
+	name,
+	url,
+	...options,
+	restUntil: 0,
+	failures: 0,
+	last: 0,
+	busy: false,
+	waiting: []
+});
+const value = (ask: Ask) => ('value' in ask ? encodeURIComponent(ask.value) : '');
+
+const NETWORKS: Network[] = [
+	network('airplanes.live', (ask) => {
+		const base = 'https://api.airplanes.live/v2/';
+		if (ask.kind === 'point') return `${base}point/${ask.lat}/${ask.lon}/${ask.r}`;
+		if (ask.kind === 'mil') return `${base}mil`;
+		return `${base}${ask.kind}/${value(ask)}`;
+	}),
+	network('adsb.fi', (ask) => {
+		const base = 'https://opendata.adsb.fi/api/v2/';
+		if (ask.kind === 'point') return `${base}lat/${ask.lat}/lon/${ask.lon}/dist/${ask.r}`;
+		if (ask.kind === 'mil') return `${base}mil`;
+		if (ask.kind === 'type') return null;
+		const path = { hex: 'hex', callsign: 'callsign', reg: 'registration', squawk: 'sqk' }[ask.kind];
+		return `${base}${path}/${value(ask)}`;
+	}),
+	// 500 requests a day: the last one asked, and only for the planes on the map
+	network(
+		'adsb.lol',
+		(ask) => {
+			const base = 'https://api.adsb.lol/v2/';
+			if (ask.kind === 'point') return `${base}lat/${ask.lat}/lon/${ask.lon}/dist/${ask.r}`;
+			if (ask.kind === 'mil') return `${base}mil`;
+			return `${base}${ask.kind === 'squawk' ? 'sqk' : ask.kind}/${value(ask)}`;
+		},
+		{ spare: true }
+	)
+];
+
+/** About a request a second for each network (their limit) */
+const GAP_MS = 1100;
+/** Longer than that, an answer is given up on */
+const ANSWER_MS = 10000;
+
+function nextInTurn(n: Network) {
+	if (n.busy || n.timer || !n.waiting.length) return;
+	const wait = n.last + GAP_MS - Date.now();
+	if (wait > 0) {
+		n.timer = setTimeout(() => {
+			n.timer = undefined;
+			nextInTurn(n);
+		}, wait);
+		return;
+	}
+	const urgent = n.waiting.findIndex((w) => w.urgent);
+	const [next] = n.waiting.splice(Math.max(0, urgent), 1);
+	n.busy = true;
+	n.last = Date.now();
+	next.go();
+}
+
+/** A request to a network when it's its turn (urgent ones before the others) */
+async function inTurn<T>(n: Network, urgent: boolean, task: () => Promise<T>): Promise<T> {
+	await new Promise<void>((go) => {
+		n.waiting.push({ urgent, go });
+		nextInTurn(n);
+	});
+	try {
+		return await task();
+	} finally {
+		n.busy = false;
+		nextInTurn(n);
+	}
+}
+
+class Refused extends Error {
+	constructor(
+		readonly status: number,
+		/** How long it says to wait (s), where it says */
+		readonly retryAfter: number | null,
+		name: string
+	) {
+		super(`${name} answered HTTP ${status}`);
+	}
+}
+
+/** How long a network rests after a failure (ms): 0 where only this ask failed */
+function restAfter(error: unknown, n: Network) {
+	if (error instanceof Refused) {
+		// Too many requests: as long as it says, from 10 s to an hour (adsb.lol's requests of
+		// the day used up: asked again every hour)
+		if (error.status === 429) return Math.min(3600, Math.max(10, error.retryAfter ?? 30)) * 1000;
+		// Blocked (or it wants a key)
+		if (error.status === 401 || error.status === 403) return 15 * 60 * 1000;
+		if (error.status < 500) return 0;
+	}
+	// No answer, or an error on its side: a while, longer each time (the others answer meanwhile)
+	n.failures++;
+	return Math.min(5 * 60 * 1000, 15000 * 2 ** (n.failures - 1));
+}
+
+const resting = new Error('Resting');
+
+async function aircraftList(ask: Ask, background = false): Promise<any[]> {
 	let failure: unknown = null;
-	for (const source of sources) {
+	for (const n of NETWORKS) {
+		const url = n.url(ask);
+		if (!url || (background && n.spare) || n.restUntil > Date.now()) continue;
 		try {
-			const response = await source();
-			if (!response.ok) throw new Error(`HTTP ${response.status}`);
-			const data = await response.json();
-			return data.ac ?? data.aircraft ?? [];
+			const list = await inTurn(n, !background, () =>
+				// Went to rest while this one waited: the next network
+				n.restUntil > Date.now()
+					? Promise.reject(resting)
+					: fetchWithin(url, ANSWER_MS, async (response) => {
+							if (!response.ok) {
+								const wait =
+									response.headers.get('retry-after') ?? response.headers.get('x-ratelimit-reset');
+								throw new Refused(response.status, wait ? Number(wait) || null : null, n.name);
+							}
+							const data = await response.json();
+							return (data.ac ?? data.aircraft ?? []) as any[];
+						})
+			);
+			n.failures = 0;
+			return list;
 		} catch (error) {
+			if (error === resting) continue;
+			n.restUntil = Math.max(n.restUntil, Date.now() + restAfter(error, n));
 			failure = error;
 		}
 	}
-	throw failure ?? new Error("Couldn't reach the flight data");
+	throw failure ?? new Error('The flight networks are busy, again in a moment');
 }
 
 /** The planes within a radius (nautical miles, 250 at most) of a place */
-export const planesAround = (lat: number, lon: number, radiusNm: number) => {
-	const r = Math.max(1, Math.min(250, Math.round(radiusNm)));
-	const la = lat.toFixed(3);
-	const lo = lon.toFixed(3);
-	return aircraftList(`point/${la}/${lo}/${r}`, `lat/${la}/lon/${lo}/dist/${r}`);
-};
-export const planeByHex = (hex: string) => aircraftList(`hex/${hex}`, `hex/${hex}`);
+export const planesAround = (lat: number, lon: number, radiusNm: number) =>
+	aircraftList({
+		kind: 'point',
+		lat: lat.toFixed(3),
+		lon: lon.toFixed(3),
+		r: Math.max(1, Math.min(250, Math.round(radiusNm)))
+	});
+export const planeByHex = (hex: string) => aircraftList({ kind: 'hex', value: hex });
 export const planesByCallsign = (callsign: string) =>
-	aircraftList(
-		`callsign/${encodeURIComponent(callsign)}`,
-		`callsign/${encodeURIComponent(callsign)}`
-	);
-export const planesByRegistration = (reg: string) =>
-	aircraftList(`reg/${encodeURIComponent(reg)}`, `reg/${encodeURIComponent(reg)}`);
+	aircraftList({ kind: 'callsign', value: callsign });
+export const planesByRegistration = (reg: string) => aircraftList({ kind: 'reg', value: reg });
 
 /** A plane looked for by callsign, registration or ICAO hex */
 export async function findPlanes(query: string) {
@@ -174,10 +304,11 @@ export async function flightTrack(hex: string): Promise<TrailPoint[] | null> {
 	for (const host of hosts) {
 		try {
 			const [full, recent] = await Promise.all(
-				['full', 'recent'].map(async (kind) => {
-					const response = await fastFetch(host + file(kind));
-					return response.ok ? response.json() : null;
-				})
+				['full', 'recent'].map((kind) =>
+					fetchWithin(host + file(kind), 15000, (response) =>
+						response.ok ? response.json() : Promise.resolve(null)
+					)
+				)
 			);
 			const points = [...traceOf(full), ...traceOf(recent)].sort((a, b) => a.time - b.time);
 			if (points.length) return currentFlight(points);
@@ -310,17 +441,19 @@ export async function topFlights(count = 10): Promise<TopFlight[]> {
 		const old = found.get(plane.hex);
 		if (!old || old.score < score) found.set(plane.hex, { plane, why, score });
 	};
+	// After what the map shows (they wait their turn behind it)
+	const background = (ask: Ask) => aircraftList(ask, true).catch(() => []);
 	for (const [squawk, info] of Object.entries(SQUAWKS)) {
-		const list = await aircraftList(`squawk/${squawk}`, `sqk/${squawk}`).catch(() => []);
+		const list = await background({ kind: 'squawk', value: squawk });
 		for (const ac of list) add(ac, info.score, info.why);
 	}
 	for (const type of ['A124', 'BLCF', 'A337', 'A3ST', 'B748', 'A388']) {
-		const list = await aircraftList(`type/${type}`, `type/${type}`).catch(() => []);
+		const list = await background({ kind: 'type', value: type });
 		const info = SPECIAL_TYPES[type];
 		// The highest and fastest of a common type first
 		for (const ac of list) add(ac, info.score + Math.min(5, (ac.gs ?? 0) / 120), info.why);
 	}
-	const military = await aircraftList('mil', 'mil').catch(() => []);
+	const military = await background({ kind: 'mil' });
 	for (const ac of military) {
 		const info = SPECIAL_TYPES[ac.t];
 		if (info) add(ac, info.score, info.why);
@@ -375,9 +508,9 @@ async function photoOf(hex: string, registration: string, fallback: any) {
 		...(registration ? [`https://api.planespotters.net/pub/photos/reg/${registration}`] : [])
 	]) {
 		try {
-			const response = await fastFetch(url);
-			if (!response.ok) continue;
-			const photo = (await response.json()).photos?.[0];
+			const photo = await fetchWithin(url, 10000, async (response) =>
+				response.ok ? (await response.json()).photos?.[0] : null
+			);
 			if (photo)
 				return {
 					url: photo.thumbnail?.src ?? photo.thumbnail_large?.src,
@@ -407,12 +540,19 @@ export function flightInfo(plane: Pick<Plane, 'hex' | 'callsign' | 'registration
 			let data: any = null;
 			try {
 				const callsign = plane.callsign ? `?callsign=${encodeURIComponent(plane.callsign)}` : '';
-				const response = await fastFetch(
-					`https://api.adsbdb.com/v0/aircraft/${plane.hex}${callsign}`
+				data = await fetchWithin(
+					`https://api.adsbdb.com/v0/aircraft/${plane.hex}${callsign}`,
+					10000,
+					async (response) => {
+						// Not known (404): no route; anything else: asked again next time
+						if (response.status === 404) return null;
+						if (!response.ok) throw new Error(`adsbdb answered HTTP ${response.status}`);
+						return (await response.json()).response;
+					}
 				);
-				if (response.ok) data = (await response.json()).response;
 			} catch {
-				// Without it: no route
+				// Without it: no route, for now
+				infoCache.delete(key);
 			}
 			const aircraft = data?.aircraft ?? null;
 			const route = data?.flightroute ?? null;

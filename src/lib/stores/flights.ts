@@ -50,6 +50,10 @@ let area: { lat: number; lon: number; radiusNm: number } | null = null;
 let users = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const known = new Map<string, Plane>();
+/** An answer is on its way (one at a time: the networks answer one request at a time) */
+let loading = false;
+/** The map moved meanwhile: loaded again as soon as that answer is here */
+let again = false;
 
 /** The area the map shows (its middle, and how far to its corners) */
 export function setFlightArea(next: { lat: number; lon: number; radiusNm: number } | null) {
@@ -61,7 +65,9 @@ export function setFlightArea(next: { lat: number; lon: number; radiusNm: number
 		Math.abs(area.radiusNm - next.radiusNm) > area.radiusNm * 0.2;
 	area = next;
 	// Moved somewhere else: loaded soon, not at the next turn
-	if (changed && users && next) schedule(500);
+	if (!changed || !users || !next) return;
+	if (loading) again = true;
+	else schedule(400);
 }
 
 function schedule(ms: number) {
@@ -71,13 +77,19 @@ function schedule(ms: number) {
 
 async function poll() {
 	if (!users) return;
-	const now = Date.now();
+	if (loading) {
+		again = true;
+		return;
+	}
 	const where = area;
 	if (!where) return schedule(1000);
 	if (document.hidden) return schedule(EVERY_MS);
 	if (get(flightStatus).state !== 'live') flightStatus.set({ state: 'loading' });
+	loading = true;
+	again = false;
 	try {
 		const list = await planesAround(where.lat, where.lon, where.radiusNm);
+		const now = Date.now();
 		const seen = new Set<string>();
 		for (const ac of list) {
 			const hex = String(ac.hex ?? '').toLowerCase();
@@ -96,16 +108,22 @@ async function poll() {
 				known.set(hex, plane);
 			}
 		}
-		for (const key of known.keys()) if (!seen.has(key)) known.delete(key);
+		if (!users) return;
+		// Planes gone from the area are taken off, unless the map moved on meanwhile (this
+		// answer was for where it was): the next answer, for where it is now, decides
+		if (!again) for (const key of known.keys()) if (!seen.has(key)) known.delete(key);
 		planes.set([...known.values()]);
 		flightStatus.set({ state: 'live' });
 	} catch (error) {
+		if (!users) return;
 		flightStatus.set({
 			state: 'error',
 			error: error instanceof Error ? error.message : String(error)
 		});
+	} finally {
+		loading = false;
+		if (users) schedule(again ? 0 : EVERY_MS);
 	}
-	schedule(EVERY_MS);
 }
 
 /** A plane found elsewhere (search, the top list): shown right away */

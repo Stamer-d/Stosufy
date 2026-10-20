@@ -55,6 +55,9 @@
 					"url": "https://api.adsb.lol/*"
 				},
 				{
+					"url": "https://opendata.adsb.fi/*"
+				},
+				{
 					"url": "https://get.geojs.io/*"
 				},
 				{

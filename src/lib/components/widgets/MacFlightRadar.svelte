@@ -1,8 +1,8 @@
 <script>
-	// A flight radar: the planes around you live (ADS-B from airplanes.live, adsb.lol as a
-	// fallback), moving smoothly between updates, coloured by height. Click one for its flight.
+	// A flight radar: the planes around you live (ADS-B from the community networks, see
+	// flights.ts), moving smoothly between updates, coloured by height. Click one for its flight.
 	import { onMount } from 'svelte';
-	import { fastFetch as fetch } from '#lib/fastFetch.ts';
+	import { planesAround } from '#lib/flights.ts';
 	import Widget from './MacWidget.svelte';
 	import WidgetMap from './WidgetMap.svelte';
 	import PlacePicker from './PlacePicker.svelte';
@@ -26,31 +26,35 @@
 	const planes = new Map();
 	let lastUpdate = 0;
 
-	async function load() {
+	/** One answer at a time (the networks answer one request at a time) */
+	let loading = false;
+	let loadAgain = false;
+	/** `moved`: the place or zoom changed (loaded again once the answer on its way is here) */
+	async function load(moved = false) {
 		if (!place) return;
-		// What the view shows, as a radius in nautical miles (a bit more, for planes coming in)
-		const kmPerPixel = (40075 * Math.cos((place.lat * Math.PI) / 180)) / (256 * 2 ** zoom);
-		const radius = Math.min(
-			250,
-			Math.ceil(((Math.hypot(width, height) / 2) * kmPerPixel * 1.2) / 1.852)
-		);
-		const sources = [
-			`https://api.airplanes.live/v2/point/${place.lat}/${place.lon}/${radius}`,
-			`https://api.adsb.lol/v2/lat/${place.lat}/lon/${place.lon}/dist/${radius}`
-		];
-		for (const url of sources) {
-			try {
-				const response = await fetch(url);
-				if (!response.ok) continue;
-				const data = await response.json();
-				update(data.ac ?? data.aircraft ?? []);
-				error = '';
-				return;
-			} catch {
-				// the next source
-			}
+		if (loading) {
+			loadAgain ||= moved;
+			return;
 		}
-		error = "Couldn't reach the flight data";
+		const where = place;
+		// What the view shows, as a radius in nautical miles (a bit more, for planes coming in)
+		const kmPerPixel = (40075 * Math.cos((where.lat * Math.PI) / 180)) / (256 * 2 ** zoom);
+		const radius = Math.ceil(((Math.hypot(width, height) / 2) * kmPerPixel * 1.2) / 1.852);
+		loading = true;
+		loadAgain = false;
+		try {
+			const list = await planesAround(where.lat, where.lon, radius);
+			// For a place left meanwhile: the next answer
+			if (where === place) {
+				update(list);
+				error = '';
+			}
+		} catch {
+			error = "Couldn't reach the flight data";
+		} finally {
+			loading = false;
+			if (loadAgain) load(true);
+		}
 	}
 
 	function update(list) {
@@ -216,11 +220,11 @@
 		void zoom;
 		planes.clear();
 		selected = null;
-		load();
+		load(true);
 	});
 
 	onMount(() => {
-		const timer = setInterval(load, 8000);
+		const timer = setInterval(() => load(), 8000);
 		let frame;
 		let last = 0;
 		const loop = (t) => {
