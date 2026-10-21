@@ -151,8 +151,8 @@
 				<span class="icon-[mingcute--disc-line] size-[18px]"></span>
 			</button>
 			<button
-				title="Storm center"
-				aria-label="Storm center"
+				title="Weather"
+				aria-label="Weather"
 				aria-pressed={page.url.pathname === '/storm'}
 				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
 					.url.pathname === '/storm'
@@ -160,7 +160,7 @@
 					: 'text-secondary-600 hover:text-white'}"
 				onclick={() => go('/storm')}
 			>
-				<span class="icon-[mingcute--thunderstorm-line] size-[18px]"></span>
+				<span class="icon-[mingcute--sun-cloudy-line] size-[18px]"></span>
 			</button>
 			<button
 				title="Flight radar"
