@@ -9,7 +9,7 @@ import { ago, clockTime, scale } from '../features';
 type Rgba = [number, number, number, number];
 
 /** Places over the area in rows (north to south) and columns (west to east) */
-function grid(a: Area, columns = 14, rows = 10) {
+function grid(a: Area, columns = 10, rows = 8) {
 	const points: { lat: number; lon: number }[] = [];
 	for (let r = 0; r < rows; r++)
 		for (let c = 0; c < columns; c++)
@@ -20,19 +20,37 @@ function grid(a: Area, columns = 14, rows = 10) {
 	return { points, columns, rows };
 }
 
-/** Current values of Open-Meteo over the area, as the map's rows */
+/** Areas loaded in the last half hour: moving back and forth doesn't ask again */
+const fieldCache = new Map<string, { at: number; answer: any }>();
+
+/**
+ * Current values of Open-Meteo over the area, as the map's rows. Each place counts as a
+ * call of its 10,000 a day: few places, rounded areas, kept a while
+ */
 async function openMeteoField(
 	url: string,
 	variables: string[],
 	value: (current: Record<string, number | null>) => number,
-	a: Area,
+	area: Area,
 	signal: AbortSignal
 ) {
+	const step = Math.max(0.25, (area.east - area.west) / 8);
+	const r = (v: number) => Math.round(v / step) * step;
+	const a = {
+		...area,
+		north: Math.min(85, r(area.north)),
+		south: Math.max(-85, r(area.south)),
+		west: r(area.west),
+		east: r(area.east)
+	};
 	const { points, columns, rows } = grid(a);
-	const data = await getJson(
-		`${url}?latitude=${points.map((p) => p.lat).join(',')}&longitude=${points.map((p) => p.lon).join(',')}&current=${variables.join(',')}&timezone=GMT`,
-		signal
-	);
+	const request = `${url}?latitude=${points.map((p) => p.lat).join(',')}&longitude=${points.map((p) => p.lon).join(',')}&current=${variables.join(',')}&timezone=GMT`;
+	const kept = fieldCache.get(request);
+	const data =
+		kept && Date.now() - kept.at < 30 * 60 * 1000 ? kept.answer : await getJson(request, signal);
+	if (fieldCache.size > 100) fieldCache.delete(fieldCache.keys().next().value!);
+	if (!data?.error)
+		fieldCache.set(request, { at: kept?.answer === data ? kept.at : Date.now(), answer: data });
 	if (data?.error) throw new Error(data.reason ?? 'Open-Meteo refused');
 	const list = Array.isArray(data) ? data : [data];
 	const values = points.map((p, i) => {

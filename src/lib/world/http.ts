@@ -71,6 +71,9 @@ export async function backendJson<T = any>(path: string, signal?: AbortSignal): 
 		25000
 	).catch((error) => {
 		if (/answered 503/.test(error.message)) throw new NotConfigured('Not set up on the server yet');
+		// The source's limit (or ours under it): it's asked again in a while
+		if (/answered 429/.test(error.message))
+			throw new Error('Busy right now (its limit is shared): again in a few minutes');
 		throw error;
 	});
 	return response.json();
