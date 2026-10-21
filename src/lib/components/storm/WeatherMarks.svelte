@@ -9,7 +9,8 @@
 		isolines,
 		extremes,
 		gridOnScreen,
-		onGrid
+		onGrid,
+		afterMoves
 	} from '#lib/weatherField.ts';
 	import { fromWorldPixel, worldPixel, TILE } from '#lib/map.ts';
 	import { windCss } from '#lib/weather.ts';
@@ -206,8 +207,14 @@
 		}
 	}
 
+	// While the map is dragged what's written moves along, and is written anew once it rests
+	let rested = $state(0);
+	const moves = afterMoves(() => rested++);
+	$effect(() => moves.stop);
 	$effect(() => {
 		if (!canvas) return;
+		const what = [grid, layer, time, labels, isobars, zoom, width, height, rested];
+		if (moves.moved(canvas, worldPixel(lat, lon, zoom), what)) return;
 		const ratio = devicePixelRatio || 1;
 		const cw = Math.ceil(width * ratio);
 		const ch = Math.ceil(height * ratio);

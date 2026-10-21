@@ -44,7 +44,7 @@
 	 *   lines?: { paths: [number, number][][], colour?: string } | null,
 	 *   onmove?: (view: { lat: number, lon: number, zoom: number }) => void,
 	 *   onpick?: (place: { lat: number, lon: number }, warnings: import('#lib/storm.ts').WarningArea[]) => void,
-	 *   onhover?: (place: { lat: number, lon: number } | null, point?: { x: number, y: number }) => void,
+	 *   onhover?: (place: { lat: number, lon: number } | null) => void,
 	 *   onbounds?: (bounds: { north: number, south: number, west: number, east: number }) => void
 	 * }}
 	 */
@@ -160,9 +160,7 @@
 	function move(event) {
 		const rect = event.currentTarget.getBoundingClientRect();
 		if (!drag) {
-			const x = event.clientX - rect.left;
-			const y = event.clientY - rect.top;
-			onhover(toPlace(x, y), { x, y });
+			onhover(toPlace(event.clientX - rect.left, event.clientY - rect.top));
 			return;
 		}
 		const dx = event.clientX - drag.x;

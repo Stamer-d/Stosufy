@@ -282,7 +282,7 @@
 				/>
 			</div>
 			<div class="relative mt-4 grid grid-cols-3 gap-1.5">
-				<div class="px-2.5 py-2 rounded-xl bg-black/20 backdrop-blur-sm">
+				<div class="px-2.5 py-2 rounded-xl bg-black/25">
 					<p class="flex items-center gap-1 text-[10px] font-bold uppercase text-white/60">
 						<WindArrow towards={now.windFrom + 180} size={12} />Wind
 					</p>
@@ -291,14 +291,14 @@
 					</p>
 					<p class="text-[10px] text-white/60 truncate">{direction(now.windFrom)} · Bft {force}</p>
 				</div>
-				<div class="px-2.5 py-2 rounded-xl bg-black/20 backdrop-blur-sm">
+				<div class="px-2.5 py-2 rounded-xl bg-black/25">
 					<p class="flex items-center gap-1 text-[10px] font-bold uppercase text-white/60">
 						<span class="icon-[mingcute--drop-fill] size-3"></span>Humidity
 					</p>
 					<p class="text-sm font-extrabold tabular-nums">{Math.round(now.humidity)}%</p>
 					<p class="text-[10px] text-white/60 truncate">Dew point {Math.round(now.dew)}°</p>
 				</div>
-				<div class="px-2.5 py-2 rounded-xl bg-black/20 backdrop-blur-sm">
+				<div class="px-2.5 py-2 rounded-xl bg-black/25">
 					<p class="flex items-center gap-1 text-[10px] font-bold uppercase text-white/60">
 						<span class="icon-[mingcute--umbrella-fill] size-3"></span>Today
 					</p>
@@ -392,7 +392,7 @@
 										? 'text-white/60'
 										: 'text-white'}">{i ? `${String(h.hour).padStart(2, '0')}` : 'Now'}</span
 								>
-								<WeatherIcon code={h.code} day={h.isDay} size={34} animated={i < 3} />
+								<WeatherIcon code={h.code} day={h.isDay} size={34} animated={false} />
 							</div>
 						{/each}
 					</div>
@@ -596,7 +596,7 @@
 						<span class="block text-[13px] font-bold truncate">{dayName(d.day)}</span>
 						<span class="block text-[10px] text-white/45">{date(d.day)}</span>
 					</span>
-					<WeatherIcon code={d.code} size={30} animated={i === 0} />
+					<WeatherIcon code={d.code} size={30} animated={false} />
 					<span class="w-9 shrink-0 text-[11px] font-semibold tabular-nums text-sky-300">
 						{#if d.rainChance >= 10}{d.rainChance}%{/if}
 					</span>

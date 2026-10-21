@@ -387,3 +387,42 @@ export function extremes(values: Float32Array, columns: number, rows: number, re
 	}
 	return found;
 }
+
+// --- Moving with the map -------------------------------------------------------------------------
+
+/**
+ * Keeps a drawing in step with a map that's dragged without drawing it each step: while only
+ * the view moves, what's drawn is shifted along with it, and drawn anew (`redraw`) once the
+ * map has rested a moment
+ */
+export function afterMoves(redraw: () => void, rest = 140) {
+	let drawn: { x: number; y: number; what: unknown[] } | null = null;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	return {
+		/**
+		 * True when the drawing can stay (only shifted); false when it's to be drawn now (`what`:
+		 * all it's drawn from besides where the map is)
+		 */
+		moved(canvas: HTMLElement, centre: { x: number; y: number }, what: unknown[]) {
+			const same =
+				drawn !== null &&
+				drawn.what.length === what.length &&
+				drawn.what.every((value, i) => value === what[i]);
+			if (same && drawn) {
+				if (drawn.x !== centre.x || drawn.y !== centre.y) {
+					canvas.style.transform = `translate(${drawn.x - centre.x}px, ${drawn.y - centre.y}px)`;
+					clearTimeout(timer);
+					timer = setTimeout(redraw, rest);
+				}
+				return true;
+			}
+			clearTimeout(timer);
+			drawn = { x: centre.x, y: centre.y, what };
+			canvas.style.transform = '';
+			return false;
+		},
+		stop() {
+			clearTimeout(timer);
+		}
+	};
+}

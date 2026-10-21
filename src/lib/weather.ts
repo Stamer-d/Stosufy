@@ -275,7 +275,7 @@ export interface PlaceWeather {
 	now: WeatherHour;
 	/** Rain in quarter hours for the next two hours (mm in each) */
 	quarters: { time: number; rain: number }[];
-	/** From this hour on, a week */
+	/** From this hour on, three days */
 	hours: WeatherHour[];
 	/** Today and the next 13 days */
 	days: WeatherDay[];
@@ -374,7 +374,7 @@ export async function placeForecast(lat: number, lon: number): Promise<PlaceWeat
 		0,
 		all.findIndex((hour) => hour.time > now - 3600e3)
 	);
-	const hours = all.slice(first, first + 7 * 24);
+	const hours = all.slice(first, first + 72);
 
 	const c = data.current ?? {};
 	const current = hours[0] ?? all[all.length - 1];

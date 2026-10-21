@@ -14,7 +14,6 @@
 	import SkewT from '#lib/components/storm/SkewT.svelte';
 	import PlaceForecast from '#lib/components/storm/PlaceForecast.svelte';
 	import WeatherIcon from '#lib/components/storm/WeatherIcon.svelte';
-	import WeatherTooltip from '#lib/components/storm/WeatherTooltip.svelte';
 	import ForecastTimeline from '#lib/components/storm/ForecastTimeline.svelte';
 	import RadarTimeline from '#lib/components/storm/RadarTimeline.svelte';
 	import RadarLegend from '#lib/components/storm/RadarLegend.svelte';
@@ -339,9 +338,6 @@
 
 	// --- The pointer ----------------------------------------------------------------------
 	let hover = $state(null);
-	let hoverPoint = $state(null);
-	let mapWidth = $state(0);
-	let mapHeight = $state(0);
 	/** How far and where from your place */
 	let hoverWhere = $derived(
 		hover && home
@@ -658,14 +654,13 @@
 	let nowSky = $derived(forecast ? skyOf(forecast.now.code) : null);
 	// Something on the right: the plane or quake picked, or the place's forecast and analysis
 	let rightOpen = $derived(!!flight || !!quake || (panelOpen && !quakesOn));
-	const glass = 'bg-[#15181d]/85 backdrop-blur-xl ring-1 ring-white/10 shadow-xl shadow-black/30';
+	// No blur behind the panels: the map under them moves every frame (the wind), and blurring
+	// it again each frame made everything lag. Each panel is a layer of its own, so the map
+	// moving under it doesn't paint what's in it again.
+	const glass = 'bg-[#15181d]/[0.97] ring-1 ring-white/10 shadow-xl shadow-black/30 transform-gpu';
 </script>
 
-<div
-	class="relative h-full min-h-[560px] overflow-hidden rounded-lg bg-[#111418]"
-	bind:clientWidth={mapWidth}
-	bind:clientHeight={mapHeight}
->
+<div class="relative h-full min-h-[560px] overflow-hidden rounded-lg bg-[#111418]">
 	{#if view}
 		<StormMap
 			lat={view.lat}
@@ -702,25 +697,8 @@
 				if (quakesOn) quakeId = null;
 				else pick(place, areas);
 			}}
-			onhover={(place, point) => {
-				hover = place;
-				hoverPoint = point ?? null;
-			}}
+			onhover={(place) => (hover = place)}
 			onbounds={(b) => (bounds = b)}
-		/>
-	{/if}
-
-	{#if mode === 'forecast' && hover && hoverPoint}
-		<WeatherTooltip
-			weather={mapLayer.group === 'weather' || !storm ? weather : null}
-			storm={mapLayer.group === 'storm' ? storm : null}
-			{time}
-			place={hover}
-			point={hoverPoint}
-			width={mapWidth}
-			height={mapHeight}
-			layer={mapLayer.id}
-			where={hoverWhere}
 		/>
 	{/if}
 
@@ -801,7 +779,12 @@
 				onclick={() => (panelOpen = true)}
 			>
 				{#if forecast}
-					<WeatherIcon code={forecast.now.code} day={forecast.now.isDay} size={26} />
+					<WeatherIcon
+						code={forecast.now.code}
+						day={forecast.now.isDay}
+						size={26}
+						animated={false}
+					/>
 					<span class="tabular-nums">{Math.round(forecast.now.temp)}°</span>
 				{:else}
 					<span class="icon-[mingcute--layout-right-line] size-4"></span>
@@ -1111,7 +1094,12 @@
 				<div class="flex items-center gap-3">
 					<span class="grid place-items-center size-11 shrink-0 rounded-xl bg-white/[0.05]">
 						{#if forecast}
-							<WeatherIcon code={forecast.now.code} day={forecast.now.isDay} size={38} />
+							<WeatherIcon
+								code={forecast.now.code}
+								day={forecast.now.isDay}
+								size={38}
+								animated={false}
+							/>
 						{:else if forecastError}
 							<span class="icon-[mingcute--warning-line] size-5 text-rose-400"></span>
 						{:else}

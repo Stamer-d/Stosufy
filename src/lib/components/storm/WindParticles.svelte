@@ -22,7 +22,7 @@
 	/** Points of the wind's raster per grid point */
 	const FACTOR = 4;
 	/** Each speck's trail: its last positions */
-	const TRAIL = 9;
+	const TRAIL = 8;
 	/** Pixels a frame (at 60 a second) per m/s of wind */
 	const SPEED = 0.19;
 	/** By wind speed (m/s): how strong a speck shows and how wide */
@@ -64,6 +64,8 @@
 	let sizes = BANDS.map(() => 0);
 	let head = 0;
 	let seen = null;
+	/** Nothing drawn now (no need to clear it again each frame) */
+	let empty = true;
 
 	/** A speck somewhere new, its trail all at that point */
 	function spawn(i, w, h) {
@@ -78,7 +80,8 @@
 	}
 
 	function scatter(w, h) {
-		count = Math.round(Math.min(5500, Math.max(600, (w * h) / 230)));
+		// Enough to show the flow, few enough for slower computers
+		count = Math.round(Math.min(3200, Math.max(500, (w * h) / 380)));
 		xs = new Float32Array(count * TRAIL);
 		ys = new Float32Array(count * TRAIL);
 		age = new Uint16Array(count);
@@ -103,12 +106,15 @@
 		if (canvas.width !== cw) canvas.width = cw;
 		if (canvas.height !== ch) canvas.height = ch;
 		const c = canvas.getContext('2d');
-		c.setTransform(1, 0, 0, 1, 0, 0);
-		c.clearRect(0, 0, cw, ch);
 		if (!wind || !place || !w || !h || place.width !== Math.ceil(w)) {
+			if (!empty) c.clearRect(0, 0, canvas.width, canvas.height);
+			empty = true;
 			seen = null;
 			return;
 		}
+		c.setTransform(1, 0, 0, 1, 0, 0);
+		c.clearRect(0, 0, cw, ch);
+		empty = false;
 		// The map moved: the specks with it; zoomed or resized: anew
 		const view = { x: centre.x, y: centre.y, zoom, w, h };
 		if (!seen || seen.zoom !== view.zoom || seen.w !== w || seen.h !== h) scatter(w, h);

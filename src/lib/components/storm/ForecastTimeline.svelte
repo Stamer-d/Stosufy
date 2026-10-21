@@ -1,8 +1,6 @@
 <script>
 	// The forecast's time: play it (the maps move smoothly from hour to hour), or drag along the
 	// days. Each day is marked, every third hour has a tick, now is where it starts.
-	import { onMount } from 'svelte';
-
 	/**
 	 * @type {{
 	 *   base: number,
@@ -76,14 +74,16 @@
 		event.preventDefault();
 	}
 
-	// Playing: on smoothly, a short rest at the end, then from now again
-	onMount(() => {
+	// Playing: on smoothly, a short rest at the end, then from now again (nothing runs while
+	// paused)
+	$effect(() => {
+		if (!playing) return;
 		let last = 0;
 		let rest = 0;
 		let frame = requestAnimationFrame(function loop(now) {
 			const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
 			last = now;
-			if (playing && !loading && hours > 1) {
+			if (!loading && hours > 1) {
 				if (value >= hours - 1) {
 					rest += dt;
 					if (rest > 1.2) {
