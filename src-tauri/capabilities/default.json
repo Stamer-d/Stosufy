@@ -89,6 +89,63 @@
 				},
 				{
 					"url": "https://raw.githubusercontent.com/fraxen/tectonicplates/*"
+				},
+				{
+					"url": "https://www.tsunami.gov/*"
+				},
+				{
+					"url": "https://www.gdacs.org/*"
+				},
+				{
+					"url": "https://eonet.gsfc.nasa.gov/*"
+				},
+				{
+					"url": "https://www.pegelonline.wsv.de/*"
+				},
+				{
+					"url": "https://air-quality-api.open-meteo.com/*"
+				},
+				{
+					"url": "https://marine-api.open-meteo.com/*"
+				},
+				{
+					"url": "https://data.sensor.community/*"
+				},
+				{
+					"url": "https://www.imis.bfs.de/*"
+				},
+				{
+					"url": "https://api.transitous.org/*"
+				},
+				{
+					"url": "https://api.citybik.es/*"
+				},
+				{
+					"url": "https://meri.digitraffic.fi/*"
+				},
+				{
+					"url": "https://tie.digitraffic.fi/*"
+				},
+				{
+					"url": "https://verkehr.autobahn.de/*"
+				},
+				{
+					"url": "https://celestrak.org/*"
+				},
+				{
+					"url": "https://ll.thespacedevs.com/*"
+				},
+				{
+					"url": "https://services.swpc.noaa.gov/*"
+				},
+				{
+					"url": "https://api.tfl.gov.uk/*"
+				},
+				{
+					"url": "https://webcams.nyctmc.org/*"
+				},
+				{
+					"url": "https://cwwp2.dot.ca.gov/*"
 				}
 			],
 			"deny": [

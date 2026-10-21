@@ -91,9 +91,9 @@
 			{/if}
 			<button
 				class="grid place-items-center size-6 shrink-0 rounded-full text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
-				title="Open the storm center"
-				aria-label="Open the storm center"
-				onclick={() => goto('/storm')}
+				title="Open the world center"
+				aria-label="Open the world center"
+				onclick={() => goto('/world?category=weather')}
 				><span class="icon-[mingcute--fullscreen-2-line] size-3.5"></span></button
 			>
 		</div>

@@ -151,28 +151,16 @@
 				<span class="icon-[mingcute--disc-line] size-[18px]"></span>
 			</button>
 			<button
-				title="Storm center"
-				aria-label="Storm center"
-				aria-pressed={page.url.pathname === '/storm'}
+				title="World center"
+				aria-label="World center"
+				aria-pressed={page.url.pathname === '/world'}
 				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
-					.url.pathname === '/storm'
+					.url.pathname === '/world'
 					? 'text-primary-500'
 					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => go('/storm')}
+				onclick={() => go('/world')}
 			>
-				<span class="icon-[mingcute--thunderstorm-line] size-[18px]"></span>
-			</button>
-			<button
-				title="Flight radar"
-				aria-label="Flight radar"
-				aria-pressed={page.url.pathname === '/flights'}
-				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
-					.url.pathname === '/flights'
-					? 'text-primary-500'
-					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => go('/flights')}
-			>
-				<span class="icon-[mingcute--airplane-line] size-[18px]"></span>
+				<span class="icon-[mingcute--earth-2-line] size-[18px]"></span>
 			</button>
 			<button
 				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}

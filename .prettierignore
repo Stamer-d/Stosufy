@@ -6,3 +6,6 @@ yarn.lock
 # Build output
 src-tauri/target
 src-tauri/gen
+
+# Data files (kept compact)
+static/data

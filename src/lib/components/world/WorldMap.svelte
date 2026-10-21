@@ -1,16 +1,18 @@
 <script>
-	// The big map of the storm center: drag to move, scroll to zoom, click to look at a place.
+	// The big map of the world center: drag to move, scroll to zoom, click to look at a place.
 	// Tile layers (radar, satellite) can have a lower top zoom than the map: their tiles are
 	// then shown bigger. Forecast fields are drawn from a grid of points, the DWD warnings
 	// as areas, lightning as it strikes, planes where they fly (moving on between updates),
-	// earthquakes as circles by their size (and lines like the plates' boundaries under them).
+	// earthquakes as circles by their size (and lines like the plates' boundaries under them),
+	// and whatever the trackers put on it (see world/features.ts; those that move every frame).
 	import { onMount } from 'svelte';
 	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
 	import { drawStrikes, SEVERITY_COLOURS } from '#lib/storm.ts';
 	import { radarSrc } from '#lib/radarClean.ts';
-	import RadarCanvas from './RadarCanvas.svelte';
+	import RadarCanvas from '../storm/RadarCanvas.svelte';
 	import { planeNow, drawPlane, drawTrail, altitudeColour, greatCircle } from '#lib/flights.ts';
 	import { drawQuakes, quakeAt } from '#lib/quakes.ts';
+	import { drawShapes, drawShapesUnder, featureAt } from '#lib/world/features.ts';
 
 	/**
 	 * @type {{
@@ -37,6 +39,10 @@
 	 *   quakeColour?: import('#lib/quakes.ts').QuakeColouring,
 	 *   onquake?: (quake: import('#lib/quakes.ts').Quake) => void,
 	 *   lines?: { paths: [number, number][][], colour?: string } | null,
+	 *   features?: import('#lib/world/types.ts').Feature[],
+	 *   movers?: import('#lib/world/types.ts').Feature[],
+	 *   selectedFeature?: string | null,
+	 *   onfeature?: (feature: import('#lib/world/types.ts').Feature) => void,
 	 *   onmove?: (view: { lat: number, lon: number, zoom: number }) => void,
 	 *   onpick?: (place: { lat: number, lon: number }, warnings: import('#lib/storm.ts').WarningArea[]) => void,
 	 *   onhover?: (place: { lat: number, lon: number } | null) => void,
@@ -70,6 +76,10 @@
 		quakeColour = 'age',
 		onquake = () => {},
 		lines = null,
+		features = [],
+		movers = [],
+		selectedFeature = null,
+		onfeature = () => {},
 		onmove = () => {},
 		onpick = () => {},
 		onhover = () => {},
@@ -84,6 +94,8 @@
 	let planeCanvas = $state();
 	let quakeCanvas = $state();
 	let lineCanvas = $state();
+	let featureCanvas = $state();
+	let moverCanvas = $state();
 
 	let centre = $derived(worldPixel(lat, lon, zoom));
 
@@ -176,8 +188,13 @@
 				!plane && quakes?.length
 					? quakeAt(quakes, toScreen, x, y, { shifts, scale: quakeScale })
 					: null;
+			const feature =
+				!plane && !quake && (movers.length || features.length)
+					? featureAt([...features, ...movers], toScreen, x, y, toPlace(x, y), { shifts })
+					: null;
 			if (plane) onplane(plane);
 			else if (quake) onquake(quake);
+			else if (feature) onfeature(feature);
 			else onpick(toPlace(x, y), warningsAt(x, y));
 		}
 		drag = null;
@@ -408,6 +425,51 @@
 		});
 	}
 
+	// --- The trackers' features: those that stay drawn again when something changed (often
+	// while some pulse), those that move on every frame ------------------------------------------
+	let featuresDrawn = '';
+	let featuresDrawnFor = null;
+	let featuresDrawnAt = 0;
+	let featuresPulse = $derived(features.some((f) => f.pulse));
+	function drawFeatureLayer() {
+		if (!featureCanvas || !width || !height) return;
+		if (!features.length && !featuresDrawnFor?.length) return;
+		const now = performance.now();
+		const key = `${centre.x},${centre.y},${zoom},${width},${height},${selectedFeature}`;
+		if (
+			key === featuresDrawn &&
+			features === featuresDrawnFor &&
+			now - featuresDrawnAt < (featuresPulse ? 50 : 1000)
+		)
+			return;
+		featuresDrawn = key;
+		featuresDrawnFor = features;
+		featuresDrawnAt = now;
+		const { c, ratio } = prepare(featureCanvas);
+		c.setTransform(ratio, 0, 0, ratio, 0, 0);
+		if (!features.length) return;
+		const options = { shifts, zoom, selected: selectedFeature };
+		drawShapesUnder(c, features, toScreen, options);
+		drawShapes(c, features, toScreen, width, height, options);
+	}
+	let moversDrawnAt = 0;
+	let moversEmpty = true;
+	function drawMoverLayer() {
+		if (!moverCanvas || !width || !height) return;
+		if (!movers.length && moversEmpty) return;
+		const now = performance.now();
+		// 30 frames a second are smooth enough
+		if (now - moversDrawnAt < 33) return;
+		moversDrawnAt = now;
+		const { c, ratio } = prepare(moverCanvas);
+		c.setTransform(ratio, 0, 0, ratio, 0, 0);
+		moversEmpty = !movers.length;
+		if (!movers.length) return;
+		const options = { shifts, zoom, selected: selectedFeature, now: Date.now() };
+		drawShapesUnder(c, movers, toScreen, options);
+		drawShapes(c, movers, toScreen, width, height, options);
+	}
+
 	// --- The rain radar (see RadarCanvas) ------------------------------------------------------
 	let radarTiles = $derived(radar && width && height ? tiles(7) : []);
 
@@ -510,7 +572,9 @@
 	onMount(() => {
 		let frame = requestAnimationFrame(function loop() {
 			drawLightning();
+			drawFeatureLayer();
 			drawQuakeLayer();
+			drawMoverLayer();
 			drawPlanes();
 			frame = requestAnimationFrame(loop);
 		});
@@ -571,7 +635,9 @@
 	{/each}
 	<canvas bind:this={lightningCanvas} class="absolute inset-0 size-full pointer-events-none"
 	></canvas>
+	<canvas bind:this={featureCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	<canvas bind:this={quakeCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
+	<canvas bind:this={moverCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	<canvas bind:this={planeCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	{#if homeAt}
 		<svg class="absolute inset-0 size-full pointer-events-none overflow-visible">
