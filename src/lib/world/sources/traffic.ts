@@ -8,6 +8,7 @@ import type { Feature, LayerSource } from '../types';
 import { getJson, backendJson, cached, inBatches, NotConfigured } from '../http';
 import { alongLine, decodePolyline, deadReckoning, ago, clockTime } from '../features';
 import { distanceKm } from '../../map';
+import { addWidget } from '../../homeWidgets';
 
 const MOTIS = 'https://api.transitous.org/api';
 
@@ -172,37 +173,76 @@ export const stops: LayerSource = {
 	},
 	async details(f, signal) {
 		const p = f.data;
-		const answer = await getJson(
-			`${MOTIS}/v6/stoptimes?stopId=${encodeURIComponent(p.stopId)}&n=14`,
-			signal
-		);
-		const times = answer?.stopTimes ?? [];
+		const rows = await departures({ stopId: p.stopId }, 14, signal);
 		return {
 			title: p.name,
 			subtitle: 'Next departures',
-			rowsTitle: times.length ? 'Departures' : 'No departures soon',
-			rows: times.map((t: any) => {
-				const time = t.place?.departure ?? t.place?.arrival;
-				const late = delay(time, t.place?.scheduledDeparture ?? t.place?.scheduledArrival);
-				const mode = modeOf(t.mode);
-				return {
-					title: `${t.routeShortName || t.displayName || mode.label} → ${t.headsign || t.tripTo?.name || ''}`,
-					sub: [
-						mode.label,
-						t.place?.track ? `Platform ${t.place.track}` : '',
-						t.cancelled ? 'Cancelled' : ''
-					]
-						.filter(Boolean)
-						.join(' · '),
-					value: time ? hhmm(Date.parse(time)) : '',
-					badge: t.cancelled ? '✕' : late > 0 ? `+${late}` : undefined,
-					colour: colourOf(t.routeColor, mode.colour)
-				};
-			}),
+			rowsTitle: rows.length ? 'Departures' : 'No departures soon',
+			rows,
+			actions: [
+				{
+					label: 'Show its departures on the home screen',
+					icon: 'icon-[mingcute--layout-grid-line]',
+					run: () =>
+						addWidget('mac-departures', { stop: { id: p.stopId, name: p.name } }, 'the departures')
+				}
+			],
 			source: 'Transitous, open public transport data'
 		};
 	}
 };
+
+/** The next departures of a stop, or of the stops around a place (within `radius` m) */
+export async function departures(
+	where: { stopId: string } | { lat: number; lon: number; radius: number },
+	n: number,
+	signal?: AbortSignal
+) {
+	const query =
+		'stopId' in where
+			? `stopId=${encodeURIComponent(where.stopId)}`
+			: `center=${where.lat.toFixed(5)},${where.lon.toFixed(5)}&radius=${where.radius}`;
+	const answer = await getJson(`${MOTIS}/v6/stoptimes?${query}&n=${n}`, signal);
+	return ((answer?.stopTimes ?? []) as any[]).map((t) => {
+		const time = t.place?.departure ?? t.place?.arrival;
+		const late = delay(time, t.place?.scheduledDeparture ?? t.place?.scheduledArrival);
+		const mode = modeOf(t.mode);
+		return {
+			title: `${t.routeShortName || t.displayName || mode.label} → ${t.headsign || t.tripTo?.name || ''}`,
+			sub: [
+				mode.label,
+				'stopId' in where ? '' : t.place?.name,
+				t.place?.track ? `Platform ${t.place.track}` : '',
+				t.cancelled ? 'Cancelled' : ''
+			]
+				.filter(Boolean)
+				.join(' · '),
+			value: time ? hhmm(Date.parse(time)) : '',
+			time: time ? Date.parse(time) : 0,
+			badge: t.cancelled ? '✕' : late > 0 ? `+${late}` : undefined,
+			colour: colourOf(t.routeColor, mode.colour),
+			line: t.routeShortName || t.displayName || mode.label
+		};
+	});
+}
+
+/** Stops by their name, the nearest to a place first */
+export async function findStops(
+	text: string,
+	near?: { lat: number; lon: number },
+	signal?: AbortSignal
+) {
+	const bias = near ? `&place=${near.lat.toFixed(4)},${near.lon.toFixed(4)}&placeBias=5` : '';
+	const list = await getJson<any[]>(
+		`${MOTIS}/v1/geocode?text=${encodeURIComponent(text)}&type=STOP&numResults=6${bias}`,
+		signal
+	);
+	return (list ?? []).map((m) => ({
+		id: m.id as string,
+		name: m.name as string,
+		where: (m.areas ?? []).map((a: any) => a.name).find(Boolean) as string | undefined
+	}));
+}
 
 // --- Shared bikes ------------------------------------------------------------------------------
 

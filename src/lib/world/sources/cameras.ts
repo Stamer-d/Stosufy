@@ -4,11 +4,12 @@
 // public feeds: no cameras that someone just forgot to protect.
 
 import type { Feature, LayerSource } from '../types';
-import { getJson, backendJson } from '../http';
+import { getJson, backendJson, cached } from '../http';
+import { addWidget } from '../../homeWidgets';
 import { autobahnService } from './traffic';
 import { ago } from '../features';
 
-interface Camera {
+export interface Camera {
 	id: string;
 	lat: number;
 	lon: number;
@@ -165,9 +166,31 @@ function cameraDetails(f: Feature) {
 		subtitle: c.where,
 		image: { url: c.image, every: c.every, video: c.video, caption: 'Live picture' },
 		links: c.link ? [{ label: 'At the operator', url: c.link }] : [],
+		actions: [
+			{
+				label: 'Show it on the home screen',
+				icon: 'icon-[mingcute--layout-grid-line]',
+				run: () => addWidget('mac-webcam', { camera: c }, 'the webcam')
+			}
+		],
 		source: SOURCES[c.source]?.label ?? c.source
 	};
 }
+
+/** All the public traffic cameras (kept for hours: they hardly change) */
+export const publicCameras = (signal: AbortSignal) =>
+	cached('public-cameras', 6 * 60 * 60 * 1000, async () => {
+		const results = await Promise.allSettled([
+			tflCameras(signal),
+			finlandCameras(signal),
+			nycCameras(signal),
+			caltransCameras(signal),
+			autobahnCameras(signal)
+		]);
+		return results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+	});
+
+export const cameraSource = (c: Camera) => SOURCES[c.source]?.label ?? c.source;
 
 export const webcams: LayerSource = {
 	id: 'webcams',

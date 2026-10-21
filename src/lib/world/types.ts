@@ -69,6 +69,8 @@ export interface Details {
 	rows?: { title: string; sub?: string; value?: string; colour?: string; badge?: string }[];
 	rowsTitle?: string;
 	links?: { label: string; url: string }[];
+	/** Buttons that do something in the app (like putting it on the home screen) */
+	actions?: { label: string; icon: string; run: () => void }[];
 	/** Who the data comes from */
 	source: string;
 }

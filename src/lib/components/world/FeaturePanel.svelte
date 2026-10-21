@@ -200,6 +200,16 @@
 				</div>
 			</div>
 		{/if}
+		{#if details.actions?.length}
+			<div class="flex flex-col gap-2">
+				{#each details.actions as action (action.label)}
+					<button
+						class="flex items-center justify-center gap-2 h-10 rounded-xl bg-sky-400/15 text-sky-200 hover:bg-sky-400/25 text-sm font-semibold cursor-pointer"
+						onclick={action.run}><span class="{action.icon} size-4"></span>{action.label}</button
+					>
+				{/each}
+			</div>
+		{/if}
 		{#if details.links?.length}
 			<div class="flex flex-col gap-2">
 				{#each details.links as link (link.url)}

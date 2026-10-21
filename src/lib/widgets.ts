@@ -24,6 +24,11 @@ import MacWarnings from './components/widgets/MacWarnings.svelte';
 import MacFlightRadar from './components/widgets/MacFlightRadar.svelte';
 import MacLightning from './components/widgets/MacLightning.svelte';
 import MacQuakes from './components/widgets/MacQuakes.svelte';
+import MacAirQuality from './components/widgets/MacAirQuality.svelte';
+import MacIss from './components/widgets/MacIss.svelte';
+import MacDepartures from './components/widgets/MacDepartures.svelte';
+import MacAlerts from './components/widgets/MacAlerts.svelte';
+import MacWebcam from './components/widgets/MacWebcam.svelte';
 
 export type WidgetFamily = 'macos' | 'linux' | 'minimal';
 
@@ -144,6 +149,36 @@ export const WIDGETS: Record<
 		description: 'The quakes of the last week around you, live',
 		family: 'macos',
 		component: MacQuakes
+	},
+	'mac-alerts': {
+		name: 'World alerts',
+		description: 'Tsunami warnings and the big disasters going on now',
+		family: 'macos',
+		component: MacAlerts
+	},
+	'mac-air': {
+		name: 'Air quality',
+		description: 'The air where you are: air quality index, dust, ozone, pollen and UV',
+		family: 'macos',
+		component: MacAirQuality
+	},
+	'mac-departures': {
+		name: 'Departures',
+		description: 'The next buses and trains of a stop, live with their delays',
+		family: 'macos',
+		component: MacDepartures
+	},
+	'mac-iss': {
+		name: 'ISS',
+		description: 'The space station over the world now, and when it flies over you',
+		family: 'macos',
+		component: MacIss
+	},
+	'mac-webcam': {
+		name: 'Webcam',
+		description: 'The live picture of a public webcam near you (or one you pick)',
+		family: 'macos',
+		component: MacWebcam
 	},
 	'linux-fetch': {
 		name: 'stosufetch',

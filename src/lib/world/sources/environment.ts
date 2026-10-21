@@ -213,6 +213,43 @@ export const FIELDS: FieldSource[] = [
 	}
 ];
 
+/** The air at a place now (for its widget) */
+export async function airNow(lat: number, lon: number, signal?: AbortSignal) {
+	const pollen = ['alder', 'birch', 'grass', 'mugwort', 'olive', 'ragweed'].map(
+		(k) => `${k}_pollen`
+	);
+	const data = await getJson(
+		`${AIR}?latitude=${lat}&longitude=${lon}&current=european_aqi,pm2_5,pm10,nitrogen_dioxide,ozone,uv_index,${pollen.join(',')}&timezone=GMT`,
+		signal
+	);
+	const c = data?.current ?? {};
+	const pollenValues = pollen.map((k) => c[k]).filter((v) => v != null) as number[];
+	return {
+		aqi: num(c.european_aqi),
+		pm25: num(c.pm2_5),
+		pm10: num(c.pm10),
+		no2: num(c.nitrogen_dioxide),
+		o3: num(c.ozone),
+		uv: num(c.uv_index),
+		pollen: pollenValues.length ? Math.max(...pollenValues) : NaN,
+		time: c.time ? Date.parse(`${c.time}Z`) : null
+	};
+}
+
+/** The European air quality index's words and colours */
+export function aqiLevel(aqi: number) {
+	const levels: [number, string, string][] = [
+		[20, 'Good', '#50f0e6'],
+		[40, 'Fair', '#50ccaa'],
+		[60, 'Moderate', '#f0e641'],
+		[80, 'Poor', '#ff5050'],
+		[100, 'Very poor', '#960032'],
+		[Infinity, 'Extremely poor', '#7d2181']
+	];
+	const [, label, colour] = levels.find(([limit]) => aqi < limit) ?? levels[levels.length - 1];
+	return { label, colour };
+}
+
 // --- The community's fine dust sensors ---------------------------------------------------------
 
 /** PM2.5 in the European index's colours */

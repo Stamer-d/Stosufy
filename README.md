@@ -62,6 +62,17 @@ yourself.
 - **Easy mode.** Press MIX and Stosufy plans the transition for you, or pick blend, filter, crossfade, echo out, wash out, brake or cut yourself.
 - **Auto DJ.** Mixes through a playlist by itself, and you can still pick the next song.
 
+### 🌍 World center
+
+One map of everything you can follow live, by category. Layers can be pinned to show in every category.
+
+- **Weather.** Rain radar, lightning you can hear, DWD warnings, satellite and storm forecast maps with soundings.
+- **Earth.** Earthquakes, tsunami alerts, disasters (GDACS), volcanoes, wildfires and fire hotspots, NASA's events, river levels.
+- **Environment.** Maps of air quality, fine dust, NO₂, ozone, pollen, UV and waves; dust sensors and radiation probes.
+- **Traffic.** Flights, buses, trams and trains moving along their lines with live delays, departures at any stop, ships, shared bikes, the Autobahn.
+- **Space.** The ISS and when it flies over you, satellites and Starlink, rocket launches, the aurora and space weather.
+- **Cameras.** Public traffic cameras and webcams worldwide with their live picture.
+
 ### 👥 Social & Customisation
 
 - **Friends.** See what your friends are listening to, and **Listen Together** in sync.

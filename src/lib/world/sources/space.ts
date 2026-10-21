@@ -17,10 +17,11 @@ import type { Feature, FieldSource, LayerSource } from '../types';
 import { getJson, cached } from '../http';
 import { ago, clockTime, scale } from '../features';
 import { compass } from '../../storm';
+import { addWidget } from '../../homeWidgets';
 
 // --- Orbits -------------------------------------------------------------------------------------
 
-function positionOf(satrec: SatRec, time: number) {
+export function positionOf(satrec: SatRec, time: number) {
 	const date = new Date(time);
 	const pv = propagate(satrec, date);
 	if (!pv || !pv.position || typeof pv.position === 'boolean') return null;
@@ -78,7 +79,7 @@ export function setObserver(place: { lat: number; lon: number; name?: string } |
 }
 
 /** When it flies over a place (higher than 10°) in the next two days */
-function passes(satrec: SatRec, place: { lat: number; lon: number }, hours = 48) {
+export function passes(satrec: SatRec, place: { lat: number; lon: number }, hours = 48) {
 	const observerGeo = {
 		latitude: (place.lat * Math.PI) / 180,
 		longitude: (place.lon * Math.PI) / 180,
@@ -157,6 +158,16 @@ function satelliteDetails(f: Feature) {
 			value: `${Math.round(p.maxElevation)}°`
 		})),
 		links: [{ label: 'At N2YO', url: `https://www.n2yo.com/satellite/?s=${omm.NORAD_CAT_ID}` }],
+		actions:
+			omm.NORAD_CAT_ID === 25544
+				? [
+						{
+							label: 'Show the ISS on the home screen',
+							icon: 'icon-[mingcute--layout-grid-line]',
+							run: () => addWidget('mac-iss', {}, 'the ISS')
+						}
+					]
+				: [],
 		source: 'CelesTrak orbital elements, positions by SGP4'
 	};
 }
@@ -264,6 +275,14 @@ export const starlink = satelliteLayer({
 	size: 1.5,
 	step: 2000
 });
+
+/** The ISS's orbit (for its widget) */
+export async function issOrbit(signal: AbortSignal) {
+	const omm = ((await elements('stations', signal)) ?? []).find(
+		(o: any) => o.NORAD_CAT_ID === 25544
+	);
+	return omm ? satrecOf(omm) : null;
+}
 
 // --- Rocket launches ------------------------------------------------------------------------------
 
