@@ -175,6 +175,18 @@
 				<span class="icon-[mingcute--airplane-line] size-[18px]"></span>
 			</button>
 			<button
+				title="Earthquakes"
+				aria-label="Earthquakes"
+				aria-pressed={page.url.pathname === '/quakes'}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
+					.url.pathname === '/quakes'
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={() => go('/quakes')}
+			>
+				<span class="icon-[ri--earthquake-line] size-[18px]"></span>
+			</button>
+			<button
 				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-label={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-pressed={$focusMode}

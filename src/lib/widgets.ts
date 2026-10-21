@@ -23,6 +23,7 @@ import MacStormPotential from './components/widgets/MacStormPotential.svelte';
 import MacWarnings from './components/widgets/MacWarnings.svelte';
 import MacFlightRadar from './components/widgets/MacFlightRadar.svelte';
 import MacLightning from './components/widgets/MacLightning.svelte';
+import MacQuakes from './components/widgets/MacQuakes.svelte';
 
 export type WidgetFamily = 'macos' | 'linux' | 'minimal';
 
@@ -137,6 +138,12 @@ export const WIDGETS: Record<
 		description: 'The planes around you, live; click one for its flight',
 		family: 'macos',
 		component: MacFlightRadar
+	},
+	'mac-quakes': {
+		name: 'Earthquakes',
+		description: 'The quakes of the last week around you, live',
+		family: 'macos',
+		component: MacQuakes
 	},
 	'linux-fetch': {
 		name: 'stosufetch',

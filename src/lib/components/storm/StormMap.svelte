@@ -2,17 +2,20 @@
 	// The big map of the storm center: drag to move, scroll to zoom, click to look at a place.
 	// Tile layers (radar, satellite) can have a lower top zoom than the map: their tiles are
 	// then shown bigger. Forecast fields are drawn from a grid of points, the DWD warnings
-	// as areas, lightning as it strikes, planes where they fly (moving on between updates).
+	// as areas, lightning as it strikes, planes where they fly (moving on between updates),
+	// earthquakes as circles by their size (and lines like the plates' boundaries under them).
 	import { onMount } from 'svelte';
 	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
 	import { drawStrikes, SEVERITY_COLOURS } from '#lib/storm.ts';
 	import { radarSrc } from '#lib/radarClean.ts';
 	import RadarCanvas from './RadarCanvas.svelte';
 	import { planeNow, drawPlane, drawTrail, altitudeColour, greatCircle } from '#lib/flights.ts';
+	import { drawQuakes, quakeAt } from '#lib/quakes.ts';
 
 	/**
 	 * @type {{
 	 *   lat: number, lon: number, zoom: number,
+	 *   minZoom?: number, maxZoom?: number,
 	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number, maxZoom?: number, clean?: boolean }[],
 	 *   field?: { rows: { lat: number, lon: number, value: number }[][], colour: (v: number) => number[] } | null,
 	 *   warnings?: import('#lib/storm.ts').WarningArea[] | null,
@@ -29,6 +32,11 @@
 	 *   planeColour?: string | null,
 	 *   trailMinutes?: number,
 	 *   onplane?: (plane: import('#lib/flights.ts').Plane) => void,
+	 *   quakes?: import('#lib/quakes.ts').Quake[] | null,
+	 *   selectedQuake?: string | null,
+	 *   quakeColour?: import('#lib/quakes.ts').QuakeColouring,
+	 *   onquake?: (quake: import('#lib/quakes.ts').Quake) => void,
+	 *   lines?: { paths: [number, number][][], colour?: string } | null,
 	 *   onmove?: (view: { lat: number, lon: number, zoom: number }) => void,
 	 *   onpick?: (place: { lat: number, lon: number }, warnings: import('#lib/storm.ts').WarningArea[]) => void,
 	 *   onhover?: (place: { lat: number, lon: number } | null) => void,
@@ -39,6 +47,8 @@
 		lat,
 		lon,
 		zoom,
+		minZoom = 3,
+		maxZoom = 11,
 		layers = [],
 		field = null,
 		warnings = null,
@@ -55,6 +65,11 @@
 		planeColour = null,
 		trailMinutes = 0,
 		onplane = () => {},
+		quakes = null,
+		selectedQuake = null,
+		quakeColour = 'age',
+		onquake = () => {},
+		lines = null,
 		onmove = () => {},
 		onpick = () => {},
 		onhover = () => {},
@@ -67,6 +82,8 @@
 	let areaCanvas = $state();
 	let lightningCanvas = $state();
 	let planeCanvas = $state();
+	let quakeCanvas = $state();
+	let lineCanvas = $state();
 
 	let centre = $derived(worldPixel(lat, lon, zoom));
 
@@ -110,6 +127,15 @@
 		return fromWorldPixel(centre.x + x - width / 2, centre.y + y - height / 2, zoom);
 	}
 	let kmPerPixel = $derived((40075 * Math.cos((lat * Math.PI) / 180)) / (TILE * 2 ** zoom));
+	/** Where the world repeats on the screen (zoomed far out it shows more than once) */
+	let shifts = $derived.by(() => {
+		const world = TILE * 2 ** zoom;
+		const list = [];
+		const first = Math.floor((centre.x - width / 2) / world);
+		const last = Math.floor((centre.x + width / 2) / world);
+		for (let n = first; n <= last; n++) list.push(n * world);
+		return list;
+	});
 
 	// The area shown, for loading what's in it
 	$effect(() => {
@@ -146,7 +172,12 @@
 			const x = event.clientX - rect.left;
 			const y = event.clientY - rect.top;
 			const plane = planeAt(x, y);
+			const quake =
+				!plane && quakes?.length
+					? quakeAt(quakes, toScreen, x, y, { shifts, scale: quakeScale })
+					: null;
 			if (plane) onplane(plane);
+			else if (quake) onquake(quake);
 			else onpick(toPlace(x, y), warningsAt(x, y));
 		}
 		drag = null;
@@ -157,7 +188,7 @@
 		// One step per scroll gesture
 		if (performance.now() - wheelAt < 180) return;
 		wheelAt = performance.now();
-		const next = Math.max(3, Math.min(11, zoom + (event.deltaY < 0 ? 1 : -1)));
+		const next = Math.max(minZoom, Math.min(maxZoom, zoom + (event.deltaY < 0 ? 1 : -1)));
 		if (next === zoom) return;
 		// The place under the pointer stays where it is
 		const rect = event.currentTarget.getBoundingClientRect();
@@ -277,6 +308,39 @@
 		return hit.map(({ area }) => area);
 	}
 
+	// --- Lines (like the plates' boundaries), in pixels of the world at zoom 0 ------------------
+	let linePath = $derived.by(() => {
+		if (!lines?.paths.length) return null;
+		const path = new Path2D();
+		for (const line of lines.paths)
+			line.forEach(([lineLon, lineLat], i) => {
+				const p = worldPixel(lineLat, lineLon, 0);
+				if (i) path.lineTo(p.x, p.y);
+				else path.moveTo(p.x, p.y);
+			});
+		return path;
+	});
+	$effect(() => {
+		if (!lineCanvas || !width || !height) return;
+		const { c, ratio } = prepare(lineCanvas);
+		if (!linePath) return;
+		const k = 2 ** zoom;
+		c.strokeStyle = lines.colour ?? 'rgba(248, 113, 113, 0.55)';
+		c.lineWidth = 1.4 / k;
+		c.lineJoin = 'round';
+		for (const shift of shifts) {
+			c.setTransform(
+				k * ratio,
+				0,
+				0,
+				k * ratio,
+				(width / 2 - centre.x + shift) * ratio,
+				(height / 2 - centre.y) * ratio
+			);
+			c.stroke(linePath);
+		}
+	});
+
 	// --- Lightning, every frame (so it moves with the map; new strikes flash, old ones fade) ---
 	// Where each strike is on the world at zoom 0, worked out once per strike
 	const projected = new WeakMap();
@@ -312,6 +376,38 @@
 		};
 		drawStrikes(c, strikes, screen, width, height, zoom >= 8 ? 1.4 : 1, kmPerPixel);
 	}
+	// --- Earthquakes: drawn again when something changed, often while new ones pulse ----------
+	let quakesDrawn = '';
+	let quakesDrawnFor = null;
+	let quakesDrawnAt = 0;
+	let quakeScale = $derived(zoom <= 3 ? 0.85 : 1);
+	let pulsing = $derived(!!quakes?.some((q) => Date.now() - q.time < 60 * 60 * 1000));
+	function drawQuakeLayer() {
+		if (!quakeCanvas || !width || !height) return;
+		// None now and none drawn (the storm center and flight radar)
+		if (!quakes?.length && !quakesDrawnFor?.length) return;
+		const now = performance.now();
+		const key = `${centre.x},${centre.y},${zoom},${width},${height},${quakeColour},${selectedQuake}`;
+		if (
+			key === quakesDrawn &&
+			quakes === quakesDrawnFor &&
+			now - quakesDrawnAt < (pulsing ? 33 : 1000)
+		)
+			return;
+		quakesDrawn = key;
+		quakesDrawnFor = quakes;
+		quakesDrawnAt = now;
+		const { c, ratio } = prepare(quakeCanvas);
+		c.setTransform(ratio, 0, 0, ratio, 0, 0);
+		if (!quakes?.length) return;
+		drawQuakes(c, quakes, toScreen, width, height, {
+			shifts,
+			colourBy: quakeColour,
+			selected: selectedQuake,
+			scale: quakeScale
+		});
+	}
+
 	// --- The rain radar (see RadarCanvas) ------------------------------------------------------
 	let radarTiles = $derived(radar && width && height ? tiles(7) : []);
 
@@ -414,6 +510,7 @@
 	onMount(() => {
 		let frame = requestAnimationFrame(function loop() {
 			drawLightning();
+			drawQuakeLayer();
 			drawPlanes();
 			frame = requestAnimationFrame(loop);
 		});
@@ -460,6 +557,7 @@
 	{/each}
 	<RadarCanvas {radar} tiles={radarTiles} {width} {height} onready={onradarready} />
 	<canvas bind:this={areaCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
+	<canvas bind:this={lineCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	<!-- City names above the weather -->
 	{#each baseTiles as tile (tile.key)}
 		<img
@@ -473,6 +571,7 @@
 	{/each}
 	<canvas bind:this={lightningCanvas} class="absolute inset-0 size-full pointer-events-none"
 	></canvas>
+	<canvas bind:this={quakeCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	<canvas bind:this={planeCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	{#if homeAt}
 		<svg class="absolute inset-0 size-full pointer-events-none overflow-visible">

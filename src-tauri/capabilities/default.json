@@ -80,6 +80,15 @@
 				},
 				{
 					"url": "https://globe.adsb.fi/*"
+				},
+				{
+					"url": "https://www.seismicportal.eu/*"
+				},
+				{
+					"url": "https://earthquake.usgs.gov/*"
+				},
+				{
+					"url": "https://raw.githubusercontent.com/fraxen/tectonicplates/*"
 				}
 			],
 			"deny": [

@@ -68,6 +68,16 @@ export function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lo
 	return 12742 * Math.asin(Math.sqrt(h));
 }
 
+/** The direction from one place to another, in degrees from north */
+export function bearing(from: { lat: number; lon: number }, to: { lat: number; lon: number }) {
+	const rad = Math.PI / 180;
+	const y = Math.sin((to.lon - from.lon) * rad) * Math.cos(to.lat * rad);
+	const x =
+		Math.cos(from.lat * rad) * Math.sin(to.lat * rad) -
+		Math.sin(from.lat * rad) * Math.cos(to.lat * rad) * Math.cos((to.lon - from.lon) * rad);
+	return (((Math.atan2(y, x) / rad) % 360) + 360) % 360;
+}
+
 /** The place at pixels of the whole world at a zoom level */
 export function fromWorldPixel(x: number, y: number, zoom: number) {
 	const size = TILE * 2 ** zoom;
