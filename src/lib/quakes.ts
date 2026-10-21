@@ -164,6 +164,16 @@ export function plateBoundaries() {
 	return plates;
 }
 
+// --- What's shown --------------------------------------------------------------------------
+
+export const QUAKE_PERIODS = [
+	{ id: 'hour', label: '1 h', ms: HOUR },
+	{ id: 'day', label: '24 h', ms: DAY },
+	{ id: 'week', label: '7 days', ms: 7 * DAY }
+];
+/** The smallest magnitude shown (0: all) */
+export const QUAKE_MAGNITUDES = [0, 2.5, 4.5, 6];
+
 // --- How they look -------------------------------------------------------------------------
 
 export const AGE_COLOURS = [

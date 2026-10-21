@@ -1,9 +1,11 @@
 <script>
 	// The storm center, like the tools storm chasers use: Live shows what happens now (rain
 	// radar, lightning, DWD warnings, satellite), Forecast the ingredients for storms over the
-	// next 24 hours as maps (risk, CAPE, lifted index, shear, gusts). Any place clicked gets
-	// its full analysis: outlook, sounding, hodograph and warnings.
+	// next 24 hours as maps (risk, CAPE, lifted index, shear, gusts), Quakes the earthquakes of
+	// the week (live from the EMSC) over the plates' boundaries. Any place clicked gets its full
+	// analysis: outlook, sounding, hodograph and warnings; any quake clicked all about it.
 	import { onMount, untrack } from 'svelte';
+	import { page } from '$app/state';
 	import { fastFetch as tauriFetch } from '#lib/fastFetch.ts';
 	import StormMap from '#lib/components/storm/StormMap.svelte';
 	import Hodograph from '#lib/components/storm/Hodograph.svelte';
@@ -28,7 +30,7 @@
 		warningAreas,
 		compass
 	} from '#lib/storm.ts';
-	import { tileBounds, distanceKm } from '#lib/map.ts';
+	import { tileBounds, distanceKm, bearing } from '#lib/map.ts';
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 	import { thunderOn, toggleThunder, setListener, setView } from '#lib/stores/thunder.ts';
@@ -42,6 +44,11 @@
 		useFlights
 	} from '#lib/stores/flights.ts';
 	import { kmBetween, flightInfo } from '#lib/flights.ts';
+	import QuakeRail from '#lib/components/quakes/QuakeRail.svelte';
+	import QuakeLegend from '#lib/components/quakes/QuakeLegend.svelte';
+	import QuakePanel from '#lib/components/quakes/QuakePanel.svelte';
+	import { quakes, useQuakes, onNewQuakes } from '#lib/stores/quakes.ts';
+	import { QUAKE_PERIODS, plateBoundaries } from '#lib/quakes.ts';
 
 	const UID = '_storm';
 	let saved = $derived($widgetData[UID] ?? {});
@@ -71,9 +78,11 @@
 	let saveTimer;
 	function moveTo(next) {
 		viewSettled = true;
-		view = next;
+		// A world further east or west is the same place (zoomed far out the map repeats)
+		const kept = { ...next, lon: ((((next.lon + 180) % 360) + 360) % 360) - 180 };
+		view = kept;
 		clearTimeout(saveTimer);
-		saveTimer = setTimeout(() => setWidgetData(UID, { view: next }), 800);
+		saveTimer = setTimeout(() => setWidgetData(UID, { view: kept }), 800);
 	}
 	const flyTo = (place, zoom = Math.max(view?.zoom ?? 7, 7)) =>
 		moveTo({ lat: place.lat, lon: place.lon, zoom });
@@ -87,11 +96,20 @@
 		satellite: false,
 		flights: false,
 		rings: true,
+		plates: true,
 		...saved.layers
 	});
 	let fieldId = $derived(saved.field ?? 'risk');
 	let field = $derived(FIELDS.find((f) => f.id === fieldId) ?? FIELDS[0]);
-	const setMode = (value) => setWidgetData(UID, { mode: value });
+	// Only the earthquakes zoom out to the whole world
+	let minZoom = $derived(mode === 'quakes' ? 2 : 3);
+	function setMode(value) {
+		setWidgetData(UID, { mode: value });
+		if (!view) return;
+		// Quakes are seen from further out (a region at least), the weather not from as far
+		if (value === 'quakes' && view.zoom > 5) moveTo({ ...view, zoom: 5 });
+		else if (value !== 'quakes' && view.zoom < 3) moveTo({ ...view, zoom: 3 });
+	}
 	const toggle = (key) => setWidgetData(UID, { layers: { ...shown, [key]: !shown[key] } });
 	const setField = (id) => setWidgetData(UID, { field: id });
 
@@ -329,6 +347,102 @@
 		});
 	});
 
+	// --- Earthquakes (the EMSC's, live; see stores/quakes.ts) -----------------------------------
+	let quakesOn = $derived(mode === 'quakes');
+	let quakePeriod = $derived(
+		QUAKE_PERIODS.find((p) => p.id === saved.quakePeriod) ?? QUAKE_PERIODS[1]
+	);
+	let quakeMinMag = $derived(saved.quakeMinMag ?? 0);
+	let quakeSort = $derived(saved.quakeSort ?? 'latest');
+	let quakeColour = $derived(saved.quakeColour ?? 'age');
+	// The times shown age (and quakes leave the last hour)
+	let now = $state(Date.now());
+	let shownQuakes = $derived(
+		quakesOn
+			? $quakes.filter(
+					(q) => now - q.time < quakePeriod.ms && (!quakeMinMag || q.mag >= quakeMinMag)
+				)
+			: []
+	);
+	let strongestQuake = $derived(
+		shownQuakes.reduce((best, q) => (!best || q.mag > best.mag ? q : best), null)
+	);
+	/** Those on the map, for the list */
+	let listedQuakes = $derived.by(() => {
+		const b = bounds;
+		const span = b ? b.east - b.west : 360;
+		const list = b
+			? shownQuakes.filter(
+					(q) =>
+						q.lat <= b.north &&
+						q.lat >= b.south &&
+						(span >= 360 || (((q.lon - b.west) % 360) + 360) % 360 <= span)
+				)
+			: shownQuakes;
+		return quakeSort === 'strongest'
+			? [...list].sort((x, y) => y.mag - x.mag || y.time - x.time)
+			: list;
+	});
+	let quakeId = $state(null);
+	let quake = $derived(
+		quakesOn && quakeId ? ($quakes.find((q) => q.id === quakeId) ?? null) : null
+	);
+	// Picked from the list, it stays on the map even when the filters leave it out
+	let mapQuakes = $derived(
+		quake && !shownQuakes.includes(quake) ? [...shownQuakes, quake] : shownQuakes
+	);
+	function pickQuake(q, fly = false) {
+		quakeId = q.id;
+		if (fly) moveTo({ lat: q.lat, lon: q.lon, zoom: Math.max(view?.zoom ?? 5, 6) });
+	}
+	$effect(() => {
+		if (!quakesOn) return;
+		const stop = useQuakes();
+		// New ones near you, or very strong ones anywhere
+		const stopNews = onNewQuakes((list) => {
+			const here = home;
+			const notable = list.filter(
+				(q) => q.mag >= 6 || (here && q.mag >= 2.5 && distanceKm(here, q) <= 300)
+			);
+			if (!notable.length) return;
+			const q = notable.reduce((best, other) => (other.mag > best.mag ? other : best));
+			const km = here ? distanceKm(here, q) : Infinity;
+			showToast(
+				`Earthquake M${q.mag.toFixed(1)} · ${km <= 1000 ? `${Math.round(km)} km ${compass(bearing(here, q))} of you` : q.region}`,
+				'icon-[ri--earthquake-fill]',
+				8000
+			);
+		});
+		const tick = setInterval(() => (now = Date.now()), 30000);
+		return () => {
+			stop();
+			stopNews();
+			clearInterval(tick);
+		};
+	});
+	// Opened for a quake (from the widget): to it once the quakes are here
+	let openQuake = page.url.searchParams.get('quake');
+	$effect(() => {
+		if (!openQuake || !quakesOn) return;
+		const q = $quakes.find((other) => other.id === openQuake);
+		if (!q) return;
+		openQuake = null;
+		untrack(() => pickQuake(q, true));
+	});
+	// The plates' boundaries (where most quakes are)
+	let plates = $state.raw(null);
+	$effect(() => {
+		if (!quakesOn || !shown.plates || plates) return;
+		plateBoundaries()
+			.then((paths) => (plates = paths))
+			.catch((error) => console.warn('Could not load the plate boundaries', error));
+	});
+	let plateLines = $derived(
+		quakesOn && shown.plates && plates
+			? { paths: plates, colour: 'rgba(248, 113, 113, 0.45)' }
+			: null
+	);
+
 	// --- A place looked at --------------------------------------------------------------------
 	let probe = $state(null);
 	let probeName = $state('');
@@ -423,6 +537,8 @@
 	}
 
 	onMount(() => {
+		// Opened for the earthquakes (from the widget)
+		if (openQuake || page.url.searchParams.get('mode') === 'quakes') setMode('quakes');
 		const stopLightning = useLightning();
 		loadRadar();
 		loadWarnings();
@@ -475,6 +591,8 @@
 		{ id: 'hodograph', label: 'Hodograph' },
 		{ id: 'warnings', label: 'Warnings' }
 	];
+	// Something on the right: the plane or quake picked, or the analysis
+	let rightOpen = $derived(!!flight || !!quake || (panelOpen && !quakesOn));
 	const glass = 'bg-[#15181d]/85 backdrop-blur-xl ring-1 ring-white/10 shadow-xl shadow-black/30';
 </script>
 
@@ -487,17 +605,23 @@
 			{layers}
 			{radar}
 			onradarready={setRadarReady}
+			{minZoom}
 			field={mapField}
-			warnings={shown.warnings ? warnings : null}
+			warnings={shown.warnings && !quakesOn ? warnings : null}
 			strikes={mode === 'live' && shown.lightning ? $strikes : null}
 			{home}
-			{probe}
-			rings={shown.rings ? [25, 50, 100] : []}
+			probe={quakesOn ? null : probe}
+			rings={shown.rings && !quakesOn ? [25, 50, 100] : []}
 			planes={flightsOn ? $planes : null}
 			selectedPlane={$followed}
 			planeColour="#f8fafc"
 			track={$followedTrack}
 			{route}
+			quakes={quakesOn ? mapQuakes : null}
+			selectedQuake={quakeId}
+			{quakeColour}
+			lines={plateLines}
+			onquake={(q) => pickQuake(q)}
 			onplane={(plane) => {
 				followed.set(plane.hex);
 				panelOpen = true;
@@ -505,22 +629,25 @@
 			onmove={moveTo}
 			onpick={(place, areas) => {
 				followed.set(null);
-				pick(place, areas);
+				if (quakesOn) quakeId = null;
+				else pick(place, areas);
 			}}
 			onhover={(place) => (hover = place)}
 			onbounds={(b) => (bounds = b)}
 		/>
 	{/if}
 
-	<!-- Top: place, search and the two modes -->
+	<!-- Top: place, search and the modes (their names and the title where there's room) -->
 	<div
-		class="absolute top-3 left-3 flex items-center gap-2 {panelOpen || flight
+		class="@container absolute top-3 left-3 flex items-center gap-2 {rightOpen
 			? 'right-[24.5rem]'
 			: 'right-3'}"
 	>
 		<div class="flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-2xl {glass}">
 			<span class="icon-[mingcute--thunderstorm-fill] size-5 text-amber-300"></span>
-			<span class="font-extrabold tracking-tight hidden xl:block">Storm center</span>
+			<span class="font-extrabold tracking-tight whitespace-nowrap hidden @min-[55rem]:block"
+				>Storm center</span
+			>
 			<div class="relative ms-1">
 				<span
 					class="absolute left-2.5 top-1/2 -translate-y-1/2 icon-[mingcute--search-line] size-4 text-white/40"
@@ -567,18 +694,21 @@
 			</button>
 		</div>
 		<div class="flex p-1 h-11 rounded-2xl {glass}" role="group" aria-label="Mode">
-			{#each [['live', 'Live', 'icon-[mingcute--radar-2-line]'], ['forecast', 'Forecast', 'icon-[mingcute--chart-line-line]']] as [value, label, icon] (value)}
+			{#each [['live', 'Live', 'icon-[mingcute--radar-2-line]'], ['forecast', 'Forecast', 'icon-[mingcute--chart-line-line]'], ['quakes', 'Quakes', 'icon-[ri--earthquake-line]']] as [value, label, icon] (value)}
 				<button
 					class="flex items-center gap-1.5 px-3.5 rounded-xl text-sm font-semibold cursor-pointer transition {mode ===
 					value
 						? 'bg-white text-black'
 						: 'text-white/65 hover:text-white'}"
 					aria-pressed={mode === value}
-					onclick={() => setMode(value)}><span class="{icon} size-4"></span>{label}</button
+					title={label}
+					onclick={() => setMode(value)}
+					><span class="{icon} size-4"></span><span class="hidden @min-[47rem]:inline">{label}</span
+					></button
 				>
 			{/each}
 		</div>
-		{#if !panelOpen && !flight}
+		{#if !panelOpen && !flight && !quakesOn}
 			<button
 				class="ms-auto flex items-center gap-2 h-11 px-4 rounded-2xl text-sm font-semibold cursor-pointer {glass}"
 				onclick={() => (panelOpen = true)}
@@ -587,69 +717,90 @@
 		{/if}
 	</div>
 
-	<!-- Left: the layers (Live) or the forecast maps (Forecast) -->
-	<div class="absolute left-3 top-[4.25rem] w-44 flex flex-col gap-0.5 p-1.5 rounded-2xl {glass}">
-		{#if mode === 'live'}
-			<p class="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40">
-				Layers
-			</p>
-			{#each LIVE_LAYERS as layer (layer.key)}
+	<!-- Left: the layers (Live), the forecast maps (Forecast) or the earthquakes (Quakes) -->
+	{#if quakesOn}
+		<div
+			class="absolute left-3 top-[4.25rem] w-72 max-h-[calc(100%-10.5rem)] flex flex-col rounded-2xl overflow-hidden {glass}"
+		>
+			<QuakeRail
+				listed={listedQuakes}
+				total={shownQuakes.length}
+				strongest={strongestQuake}
+				loaded={$quakes.length > 0}
+				period={quakePeriod.id}
+				minMag={quakeMinMag}
+				sort={quakeSort}
+				selectedId={quakeId}
+				{home}
+				{now}
+				onchange={(change) => setWidgetData(UID, change)}
+				onpick={(q) => pickQuake(q, true)}
+			/>
+		</div>
+	{:else}
+		<div class="absolute left-3 top-[4.25rem] w-44 flex flex-col gap-0.5 p-1.5 rounded-2xl {glass}">
+			{#if mode === 'live'}
+				<p class="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40">
+					Layers
+				</p>
+				{#each LIVE_LAYERS as layer (layer.key)}
+					<button
+						class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer transition {shown[
+							layer.key
+						]
+							? 'bg-white/10 text-white'
+							: 'text-white/45 hover:text-white/80 hover:bg-white/[0.04]'}"
+						aria-pressed={!!shown[layer.key]}
+						onclick={() => toggle(layer.key)}
+					>
+						<span class="{layer.icon} size-[18px]"></span>
+						<span class="flex-1 text-start">{layer.label}</span>
+						{#if layer.key === 'lightning' && shown.lightning}
+							<span
+								class="size-1.5 rounded-full {$lightningStatus === 'live'
+									? 'bg-green-400'
+									: 'bg-amber-400 animate-pulse'}"
+								title={$lightningStatus === 'live' ? 'Live' : 'Connecting'}
+							></span>
+						{:else if layer.key === 'warnings' && shown.warnings}
+							<span class="text-[11px] tabular-nums text-white/50"
+								>{warningsError ? '!' : (warnings?.length ?? '…')}</span
+							>
+						{/if}
+					</button>
+				{/each}
+			{:else}
+				<p class="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40">
+					Forecast maps
+				</p>
+				{#each FIELDS as f (f.id)}
+					<button
+						class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer transition {fieldId ===
+						f.id
+							? 'bg-white text-black'
+							: 'text-white/60 hover:text-white hover:bg-white/[0.06]'}"
+						title={f.hint}
+						onclick={() => setField(f.id)}
+					>
+						<span class="{FIELD_ICONS[f.id]} size-[18px]"></span>
+						<span class="flex-1 text-start">{f.label}</span>
+					</button>
+				{/each}
+				<div class="my-1 h-px bg-white/10"></div>
 				<button
-					class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer transition {shown[
-						layer.key
-					]
+					class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer {shown.warnings
 						? 'bg-white/10 text-white'
-						: 'text-white/45 hover:text-white/80 hover:bg-white/[0.04]'}"
-					aria-pressed={!!shown[layer.key]}
-					onclick={() => toggle(layer.key)}
+						: 'text-white/45 hover:text-white/80'}"
+					onclick={() => toggle('warnings')}
+					><span class="icon-[mingcute--warning-line] size-[18px]"></span>Warnings</button
 				>
-					<span class="{layer.icon} size-[18px]"></span>
-					<span class="flex-1 text-start">{layer.label}</span>
-					{#if layer.key === 'lightning' && shown.lightning}
-						<span
-							class="size-1.5 rounded-full {$lightningStatus === 'live'
-								? 'bg-green-400'
-								: 'bg-amber-400 animate-pulse'}"
-							title={$lightningStatus === 'live' ? 'Live' : 'Connecting'}
-						></span>
-					{:else if layer.key === 'warnings' && shown.warnings}
-						<span class="text-[11px] tabular-nums text-white/50"
-							>{warningsError ? '!' : (warnings?.length ?? '…')}</span
-						>
-					{/if}
-				</button>
-			{/each}
-		{:else}
-			<p class="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40">
-				Forecast maps
-			</p>
-			{#each FIELDS as f (f.id)}
-				<button
-					class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer transition {fieldId ===
-					f.id
-						? 'bg-white text-black'
-						: 'text-white/60 hover:text-white hover:bg-white/[0.06]'}"
-					title={f.hint}
-					onclick={() => setField(f.id)}
-				>
-					<span class="{FIELD_ICONS[f.id]} size-[18px]"></span>
-					<span class="flex-1 text-start">{f.label}</span>
-				</button>
-			{/each}
-			<div class="my-1 h-px bg-white/10"></div>
-			<button
-				class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer {shown.warnings
-					? 'bg-white/10 text-white'
-					: 'text-white/45 hover:text-white/80'}"
-				onclick={() => toggle('warnings')}
-				><span class="icon-[mingcute--warning-line] size-[18px]"></span>Warnings</button
-			>
-		{/if}
-	</div>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Zoom -->
 	<div
-		class="absolute bottom-24 flex flex-col rounded-2xl {glass} {panelOpen || flight
+		class="absolute bottom-24 flex flex-col rounded-2xl {glass} {rightOpen
 			? 'right-[24.5rem]'
 			: 'right-3'}"
 	>
@@ -662,9 +813,18 @@
 		<button
 			class="grid place-items-center size-9 cursor-pointer hover:text-sky-300 border-t border-white/10"
 			aria-label="Zoom out"
-			onclick={() => view && moveTo({ ...view, zoom: Math.max(3, view.zoom - 1) })}
+			onclick={() => view && moveTo({ ...view, zoom: Math.max(minZoom, view.zoom - 1) })}
 			><span class="icon-[mingcute--minimize-line] size-4"></span></button
 		>
+		{#if quakesOn}
+			<button
+				class="grid place-items-center size-9 cursor-pointer hover:text-sky-300 border-t border-white/10"
+				aria-label="The whole world"
+				title="The whole world"
+				onclick={() => moveTo({ lat: 25, lon: view?.lon ?? 15, zoom: 2 })}
+				><span class="icon-[mingcute--earth-2-line] size-4"></span></button
+			>
+		{/if}
 		{#if home}
 			<button
 				class="grid place-items-center size-9 cursor-pointer hover:text-sky-300 border-t border-white/10"
@@ -678,7 +838,7 @@
 
 	<!-- Bottom: time -->
 	<div
-		class="absolute bottom-3 left-3 flex flex-col gap-2 pointer-events-none {panelOpen || flight
+		class="absolute bottom-3 left-3 flex flex-col gap-2 pointer-events-none {rightOpen
 			? 'right-[24.5rem]'
 			: 'right-3'}"
 	>
@@ -776,7 +936,7 @@
 					</div>
 				{/if}
 			</div>
-		{:else}
+		{:else if mode === 'forecast'}
 			<div class="flex items-center gap-3 h-14 px-3 rounded-2xl pointer-events-auto {glass}">
 				<div class="w-32 shrink-0 leading-tight">
 					<p class="text-sm font-bold">{hourTime ? clock(hourTime) : '–'}</p>
@@ -805,6 +965,18 @@
 					{#if field.unit}<span>{field.unit}</span>{/if}
 				</div>
 			</div>
+		{:else}
+			<div
+				class="self-start max-w-full flex items-center gap-3 h-14 px-2 rounded-2xl overflow-hidden pointer-events-auto {glass}"
+			>
+				<QuakeLegend
+					colourBy={quakeColour}
+					plates={!!shown.plates}
+					sizes={!rightOpen}
+					oncolour={(by) => setWidgetData(UID, { quakeColour: by })}
+					onplates={() => toggle('plates')}
+				/>
+			</div>
 		{/if}
 	</div>
 
@@ -818,7 +990,20 @@
 				onopen={() => goto(`/flights?hex=${flight.hex}`)}
 			/>
 		</aside>
-	{:else if panelOpen}
+	{:else if quake}
+		<aside
+			class="absolute top-3 right-3 bottom-3 w-[23rem] flex flex-col rounded-2xl overflow-hidden {glass}"
+		>
+			<QuakePanel
+				{quake}
+				all={$quakes}
+				{home}
+				{now}
+				onclose={() => (quakeId = null)}
+				onpick={(q) => pickQuake(q, true)}
+			/>
+		</aside>
+	{:else if panelOpen && !quakesOn}
 		<aside
 			class="absolute top-3 right-3 bottom-3 w-[23rem] flex flex-col rounded-2xl overflow-hidden {glass}"
 		>

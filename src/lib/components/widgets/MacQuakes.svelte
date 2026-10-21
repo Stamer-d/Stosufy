@@ -159,9 +159,9 @@
 				</span>
 				<button
 					class="grid place-items-center size-6 shrink-0 rounded-full text-white/60 hover:text-white hover:bg-white/10 cursor-pointer pointer-events-auto"
-					title="Open the earthquake map"
-					aria-label="Open the earthquake map"
-					onclick={() => goto('/quakes')}
+					title="Open the earthquakes in the storm center"
+					aria-label="Open the earthquakes in the storm center"
+					onclick={() => goto('/storm?mode=quakes')}
 					><span class="icon-[mingcute--fullscreen-2-line] size-3.5"></span></button
 				>
 			</div>
@@ -182,9 +182,9 @@
 						</div>
 						<button
 							class="grid place-items-center size-7 shrink-0 rounded-full text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
-							title="Show it on the earthquake map"
-							aria-label="Show it on the earthquake map"
-							onclick={() => goto(`/quakes?id=${encodeURIComponent(selected.id)}`)}
+							title="Show it in the storm center"
+							aria-label="Show it in the storm center"
+							onclick={() => goto(`/storm?quake=${encodeURIComponent(selected.id)}`)}
 							><span class="icon-[mingcute--arrow-right-up-line] size-4"></span></button
 						>
 					</div>
