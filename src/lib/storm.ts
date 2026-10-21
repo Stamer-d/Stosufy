@@ -2,6 +2,8 @@
 // how unstable the air is (lifted index), the wind shear that organizes storms, gusts and
 // dew point, and from them a risk level like the outlooks of storm prediction centres.
 
+import { openMeteo, loadGrid, type GridArea } from './weather';
+
 export const LEVELS = [
 	{ label: 'Quiet', colour: '#4ade80' },
 	{ label: 'Marginal', colour: '#facc15' },
@@ -108,15 +110,6 @@ function outlookOf(hours: StormHour[]): StormOutlook {
 	};
 }
 
-/** Open-Meteo's answer, or an error with its reason (e.g. too many requests today) */
-async function openMeteo(url: string) {
-	const response = await fetch(url);
-	const data = await response.json().catch(() => null);
-	if (!response.ok || !data || data.error)
-		throw new Error(data?.reason ?? `Open-Meteo answered ${response.status}`);
-	return data;
-}
-
 /** The next 24 hours at a place */
 export async function stormOutlook(lat: number, lon: number): Promise<StormOutlook> {
 	const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${HOURLY}&wind_speed_unit=ms&timezone=auto&forecast_days=2`;
@@ -124,56 +117,21 @@ export async function stormOutlook(lat: number, lon: number): Promise<StormOutlo
 	return outlookOf(hoursOf(data).slice(0, 24));
 }
 
-/** A grid of places over an area, each with its next 24 hours (for the CAPE map) */
-export async function stormGrid(
-	north: number,
-	south: number,
-	west: number,
-	east: number,
-	columns: number,
-	rows: number
-): Promise<{ lat: number; lon: number; hours: StormHour[] }[]> {
-	const points: { lat: number; lon: number }[] = [];
-	for (let r = 0; r < rows; r++) {
-		for (let c = 0; c < columns; c++) {
-			points.push({
-				lat: Math.round((north - ((north - south) * r) / (rows - 1)) * 100) / 100,
-				lon: Math.round((west + ((east - west) * c) / (columns - 1)) * 100) / 100
-			});
-		}
-	}
-	const url =
-		`https://api.open-meteo.com/v1/forecast?latitude=${points.map((p) => p.lat).join(',')}` +
-		`&longitude=${points.map((p) => p.lon).join(',')}&hourly=${HOURLY}&wind_speed_unit=ms&timezone=GMT&forecast_days=2`;
-	const data = await openMeteo(url);
-	const list = Array.isArray(data) ? data : [data];
-	return points.map((point, i) => ({
-		...point,
-		hours: list[i] ? hoursOf(list[i]).slice(0, 24) : []
-	}));
-}
-
-/** CAPE as colour, like on convection maps */
-export function capeColour(cape: number): [number, number, number, number] {
-	const stops: [number, [number, number, number, number]][] = [
-		[0, [0, 0, 0, 0]],
-		[100, [74, 222, 128, 0.25]],
-		[500, [250, 204, 21, 0.5]],
-		[1000, [251, 146, 60, 0.6]],
-		[2000, [244, 63, 94, 0.65]],
-		[3000, [217, 70, 239, 0.7]],
-		[4500, [255, 255, 255, 0.75]]
-	];
-	if (cape <= 0) return stops[0][1];
-	for (let i = 1; i < stops.length; i++) {
-		const [at, colour] = stops[i];
-		if (cape <= at) {
-			const [from, previous] = stops[i - 1];
-			const t = (cape - from) / (at - from);
-			return previous.map((v, k) => v + (colour[k] - v) * t) as [number, number, number, number];
-		}
-	}
-	return stops[stops.length - 1][1];
+/** The storm ingredients of the next two days over an area (for the maps) */
+export function stormGrid(area: GridArea) {
+	return loadGrid(area, HOURLY.split(','), 48, (h, i) => {
+		const [u1, v1] = vector(h.wind_speed_10m[i] ?? 0, h.wind_direction_10m[i] ?? 0);
+		const [u2, v2] = vector(h.wind_speed_500hPa[i] ?? 0, h.wind_direction_500hPa[i] ?? 0);
+		const cape = h.cape[i] ?? 0;
+		const li = h.lifted_index[i] ?? 0;
+		const shear = Math.hypot(u2 - u1, v2 - v1);
+		return {
+			cape,
+			li,
+			shear,
+			risk: levelOf(cape, li, shear, (h.weather_code[i] ?? 0) >= 95)
+		};
+	});
 }
 
 // --- The air above a place: sounding, hodograph and the parameters chasers use -------------
@@ -466,125 +424,6 @@ export function drawStrikes(
 		}
 	}
 }
-
-// --- Map fields of the forecast (colour scales like on convection maps) ---------------------
-
-type Rgba = [number, number, number, number];
-
-function scale(stops: [number, Rgba][], value: number): Rgba {
-	if (value <= stops[0][0]) return stops[0][1];
-	for (let i = 1; i < stops.length; i++) {
-		const [at, colour] = stops[i];
-		if (value <= at) {
-			const [from, previous] = stops[i - 1];
-			const t = (value - from) / (at - from);
-			return previous.map((v, k) => v + (colour[k] - v) * t) as Rgba;
-		}
-	}
-	return stops[stops.length - 1][1];
-}
-
-export interface Field {
-	id: string;
-	label: string;
-	unit: string;
-	/** What it shows, in a few words */
-	hint: string;
-	/** Its value at a forecast hour of a point */
-	value: (hour: StormHour) => number;
-	colour: (value: number) => Rgba;
-	/** Values for the legend */
-	legend: number[];
-}
-
-export const FIELDS: Field[] = [
-	{
-		id: 'risk',
-		label: 'Storm risk',
-		unit: '',
-		hint: 'Energy, instability and shear together, from quiet to high',
-		value: (h) => levelOf(h.cape, h.li, h.shear, h.thunder),
-		colour: (v) =>
-			v < 0.5
-				? [0, 0, 0, 0]
-				: (([r, g, b]) => [r, g, b, 0.3 + v * 0.1])(
-						LEVELS[Math.min(4, Math.round(v))].colour
-							.slice(1)
-							.match(/../g)!
-							.map((x) => parseInt(x, 16))
-					),
-		legend: [1, 2, 3, 4]
-	},
-	{
-		id: 'cape',
-		label: 'CAPE',
-		unit: 'J/kg',
-		hint: 'Energy for storms: from 500 storms can grow, from 2000 they can be violent',
-		value: (h) => h.cape,
-		colour: capeColour,
-		legend: [100, 500, 1000, 2000, 3000]
-	},
-	{
-		id: 'li',
-		label: 'Lifted index',
-		unit: '',
-		hint: 'How unstable the air is: below 0 storms can form, below −4 strong ones',
-		value: (h) => h.li,
-		colour: (v) =>
-			scale(
-				[
-					[-8, [217, 70, 239, 0.7]],
-					[-6, [244, 63, 94, 0.65]],
-					[-4, [251, 146, 60, 0.6]],
-					[-2, [250, 204, 21, 0.5]],
-					[0, [74, 222, 128, 0.25]],
-					[1, [0, 0, 0, 0]]
-				],
-				v
-			),
-		legend: [0, -2, -4, -6, -8]
-	},
-	{
-		id: 'shear',
-		label: 'Deep shear',
-		unit: 'm/s',
-		hint: 'Wind shear 0–6 km: it organises storms; from 20 supercells',
-		value: (h) => h.shear,
-		colour: (v) =>
-			scale(
-				[
-					[8, [0, 0, 0, 0]],
-					[12, [56, 189, 248, 0.35]],
-					[16, [74, 222, 128, 0.45]],
-					[20, [250, 204, 21, 0.55]],
-					[25, [251, 146, 60, 0.6]],
-					[30, [244, 63, 94, 0.65]],
-					[40, [217, 70, 239, 0.7]]
-				],
-				v
-			),
-		legend: [12, 16, 20, 25, 30]
-	},
-	{
-		id: 'gust',
-		label: 'Gusts',
-		unit: 'km/h',
-		hint: 'The strongest gusts expected',
-		value: (h) => h.gust * 3.6,
-		colour: (v) =>
-			scale(
-				[
-					[40, [0, 0, 0, 0]],
-					[55, [250, 204, 21, 0.45]],
-					[75, [251, 146, 60, 0.55]],
-					[100, [244, 63, 94, 0.65]],
-					[130, [217, 70, 239, 0.7]]
-				],
-				v
-			),
-		legend: [55, 75, 100, 130]
-	}
-];
 
 // --- DWD warnings as areas ---------------------------------------------------------------------
 

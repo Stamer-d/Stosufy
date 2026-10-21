@@ -1,7 +1,8 @@
 <script>
 	// The rain radar on a map: every frame's tiles kept as pictures (see radarTiles.ts), the
-	// frame shown drawn on a canvas. The loop plays without flicker, a moved map draws at once,
-	// and there are no holes: a tile still loading shows the newest frame before it, or (just
+	// frame shown drawn on a canvas. The loop plays without flicker (each frame fades in over the
+	// one before, so the rain flows instead of jumping), a moved map draws at once, and there
+	// are no holes: a tile still loading shows the newest frame before it, or (just
 	// zoomed) the same place from the zoom before, bigger or smaller, until it's there. Radar
 	// errors are left out, tiles that couldn't be loaded are asked for again a little later.
 	import { onMount } from 'svelte';
@@ -26,7 +27,13 @@
 	 */
 	let { radar, tiles, width, height, onready = () => {} } = $props();
 
-	let canvas = $state();
+	// Two canvases: the next frame fades in on top of the one shown
+	let canvasA = $state();
+	let canvasB = $state();
+	let front = 0;
+	let shownIndex = -1;
+	let shownView = '';
+	let hideTimer = null;
 
 	/** Grows as tiles come in: what's drawn and which frames are ready follow it */
 	let version = $state(0);
@@ -135,13 +142,34 @@
 
 	let drawn = '';
 	function draw() {
-		if (!canvas || !width || !height) return;
+		if (!canvasA || !canvasB || !width || !height) return;
 		const frames = radar?.frames ?? [];
 		const index = radar ? Math.min(radar.frame, frames.length - 1) : -1;
 		const first = tiles[0];
 		const key = `${index}|${frames[index]?.path}|${first?.z}/${first?.x}/${first?.y}|${first?.left},${first?.top},${first?.size},${tiles.length}|${width},${height}|${version}`;
 		if (key === drawn) return;
 		drawn = key;
+		// A new frame on the same view fades in; anything else is drawn where it shows
+		const view = `${first?.z}/${first?.x}/${first?.y}|${first?.left},${first?.top},${first?.size}|${width},${height}`;
+		const fade = index >= 0 && shownIndex >= 0 && index !== shownIndex && view === shownView;
+		const canvases = [canvasA, canvasB];
+		const target = fade ? 1 - front : front;
+		const canvas = canvases[target];
+		shownIndex = index;
+		shownView = view;
+		if (fade) {
+			const old = canvases[front];
+			canvas.style.zIndex = '1';
+			old.style.zIndex = '0';
+			canvas.style.opacity = '1';
+			canvas.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: 'ease-out' });
+			clearTimeout(hideTimer);
+			hideTimer = setTimeout(() => (old.style.opacity = '0'), 340);
+			front = target;
+		} else {
+			canvas.style.opacity = '1';
+			canvases[1 - front].style.opacity = '0';
+		}
 		const ratio = devicePixelRatio || 1;
 		const w = Math.ceil(width * ratio);
 		const h = Math.ceil(height * ratio);
@@ -207,14 +235,14 @@
 		return () => {
 			cancelAnimationFrame(frame);
 			clearTimeout(retryTimer);
+			clearTimeout(hideTimer);
 			// What's still waiting for this map isn't loaded
 			wanted = new Set();
 		};
 	});
 </script>
 
-<canvas
-	bind:this={canvas}
-	class="absolute inset-0 size-full pointer-events-none"
-	style="opacity: {radar?.opacity ?? 0.85}"
-></canvas>
+<div class="absolute inset-0 isolate pointer-events-none" style="opacity: {radar?.opacity ?? 0.85}">
+	<canvas bind:this={canvasA} class="absolute inset-0 size-full"></canvas>
+	<canvas bind:this={canvasB} class="absolute inset-0 size-full opacity-0"></canvas>
+</div>

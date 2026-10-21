@@ -66,7 +66,7 @@ yourself.
 
 One map of everything you can follow live, by category. Layers can be pinned to show in every category.
 
-- **Weather.** Rain radar, lightning you can hear, DWD warnings, satellite and storm forecast maps with soundings.
+- **Weather.** Rain radar, lightning you can hear, the wind blowing, DWD warnings and satellite. Forecast maps for three days that play hour by hour (temperature, wind, rain and snow, clouds, gusts, pressure, storm risk, CAPE, lifted index, shear), and any place's forecast with its storm outlook and sounding.
 - **Earth.** Earthquakes, tsunami alerts, disasters (GDACS), volcanoes, wildfires and fire hotspots, NASA's events, river levels.
 - **Environment.** Maps of air quality, fine dust, NO₂, ozone, pollen, UV and waves; dust sensors and radiation probes.
 - **Traffic.** Flights, buses, trams and trains moving along their lines with live delays, departures at any stop, ships, shared bikes, the Autobahn.

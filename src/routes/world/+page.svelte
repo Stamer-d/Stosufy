@@ -1,6 +1,7 @@
 <script>
 	// The world center: one map with everything that can be followed live, by category.
-	// Weather (radar, lightning, DWD warnings, satellite, and the storm forecast maps), Earth
+	// Weather (radar, lightning, the wind blowing, DWD warnings, satellite; the forecast's maps
+	// for three days, playing hour by hour, and any place's forecast and storm analysis), Earth
 	// (earthquakes, tsunami alerts, disasters, volcanoes, fires, NASA's events, river levels,
 	// plate boundaries), Environment (air quality, pollen, UV, waves, dust sensors,
 	// radiation), Traffic (flights, public transport moving along its lines, stops with their
@@ -20,6 +21,11 @@
 	import QuakeRail from '#lib/components/quakes/QuakeRail.svelte';
 	import QuakeLegend from '#lib/components/quakes/QuakeLegend.svelte';
 	import QuakePanel from '#lib/components/quakes/QuakePanel.svelte';
+	import WeatherIcon from '#lib/components/storm/WeatherIcon.svelte';
+	import ForecastTimeline from '#lib/components/storm/ForecastTimeline.svelte';
+	import RadarTimeline from '#lib/components/storm/RadarTimeline.svelte';
+	import RadarLegend from '#lib/components/storm/RadarLegend.svelte';
+	import MapLegend from '#lib/components/storm/MapLegend.svelte';
 	import {
 		widgetData,
 		placeOf,
@@ -29,7 +35,10 @@
 		clearPlace,
 		searchPlaces
 	} from '#lib/stores/widgetData.ts';
-	import { stormGrid, LEVELS, FIELDS, warningAreas, compass } from '#lib/storm.ts';
+	import { stormGrid, warningAreas, compass } from '#lib/storm.ts';
+	import { placeForecast, weatherGrid, gridCache } from '#lib/weather.ts';
+	import { MAP_LAYERS, legendGradient, limit } from '#lib/weatherLayers.ts';
+	import { valuesAt, valueAt, onGrid } from '#lib/weatherField.ts';
 	import { tileBounds, distanceKm, bearing } from '#lib/map.ts';
 	import { strikes, lightningStatus, useLightning, strikesNear } from '#lib/stores/lightning.ts';
 	import { showToast } from '#lib/stores/toast.ts';
@@ -112,6 +121,10 @@
 	let weatherMode = $derived(saved.mode === 'forecast' ? 'forecast' : 'live');
 	let on = $derived({
 		...Object.fromEntries(LAYERS.map((l) => [l.id, !!l.on])),
+		// Over the forecast's maps
+		flow: true,
+		values: true,
+		isobars: false,
 		...saved.layers
 	});
 	let pinned = $derived(saved.pinned ?? []);
@@ -186,6 +199,7 @@
 
 	// --- Rain radar (RainViewer): the last two hours as a loop --------------------------------
 	let frames = $state([]);
+	let pastFrames = $state(0);
 	let host = $state('');
 	let frame = $state(0);
 	let playing = $state(true);
@@ -198,6 +212,7 @@
 			const list = [...(data.radar?.past ?? []), ...(data.radar?.nowcast ?? [])];
 			const wasLast = frame >= frames.length - 1;
 			frames = list;
+			pastFrames = data.radar?.past?.length ?? list.length;
 			if (wasLast || frame >= list.length) frame = Math.max(0, (data.radar?.past?.length ?? 1) - 1);
 		} catch {
 			frames = [];
@@ -290,81 +305,141 @@
 		);
 	});
 
-	// --- Forecast fields: a grid of forecasts over the map ------------------------------------
-	let fieldId = $derived(saved.field ?? 'risk');
-	let field = $derived(FIELDS.find((f) => f.id === fieldId) ?? FIELDS[0]);
+	// --- The forecast's maps: grids of points over the view (see weather.ts) -------------------
 	let forecastOn = $derived(category === 'weather' && weatherMode === 'forecast');
-	let grid = $state(null);
-	let gridKey = '';
+	let mapLayer = $derived(MAP_LAYERS.find((l) => l.id === saved.layer) ?? MAP_LAYERS[0]);
+	const setLayer = (id) => set({ layer: id });
+	// What's drawn over a forecast map
+	let overlays = $derived([
+		{
+			key: 'flow',
+			label: 'Wind flow',
+			icon: 'icon-[mingcute--wind-line]',
+			hint: 'The wind blowing over the map'
+		},
+		{
+			key: 'values',
+			label: 'Values',
+			icon: 'icon-[mingcute--hashtag-line]',
+			hint: "The map's values written on it"
+		},
+		...(mapLayer.group === 'weather' && !mapLayer.isobars
+			? [
+					{
+						key: 'isobars',
+						label: 'Isobars',
+						icon: 'icon-[mingcute--route-line]',
+						hint: 'Lines of equal air pressure, with the highs and lows'
+					}
+				]
+			: []),
+		{
+			key: 'warnings',
+			label: 'Warnings',
+			icon: 'icon-[mingcute--warning-line]',
+			hint: 'The DWD warnings now'
+		}
+	]);
+	const weatherGrids = gridCache(weatherGrid);
+	const stormGrids = gridCache(stormGrid);
+	let weather = $state.raw(null);
+	let storm = $state.raw(null);
 	let gridLoading = $state(false);
 	let gridError = $state('');
-	// Areas loaded before (for 20 minutes): moving back and forth doesn't load them again
-	const gridCache = new Map();
-	let hour = $state(0);
+	/** Asks again now and then (grids older than half an hour are loaded anew) */
+	let gridTick = $state(0);
+	let windOn = $derived(here('wind') && weatherLive);
+	// Each point of a grid is a request with Open-Meteo: none for the whole world at once
+	let gridZoom = $derived((view?.zoom ?? 0) >= 3);
+	let needWeather = $derived(
+		gridZoom && ((forecastOn && (mapLayer.group === 'weather' || on.flow)) || windOn)
+	);
+	let needStorm = $derived(gridZoom && forecastOn && mapLayer.group === 'storm');
 	let gridTimer;
+	let gridAsk = 0;
 	$effect(() => {
 		const b = bounds;
-		if (!forecastOn || !b) return;
+		const wantWeather = needWeather;
+		const wantStorm = needStorm;
+		void gridTick;
+		if (!b) return;
+		// One that's here shows at once
+		untrack(() => {
+			const w = wantWeather && weatherGrids.find(b);
+			if (w) weather = w;
+			const s = wantStorm && stormGrids.find(b);
+			if (s) storm = s;
+		});
 		clearTimeout(gridTimer);
 		gridTimer = setTimeout(async () => {
-			// A bit more than what's shown, rounded so small moves don't load it again
-			const r = (v, s) => Math.round(v / s) * s;
-			const step = Math.max(0.25, (b.east - b.west) / 8);
-			const area = {
-				north: Math.min(80, r(b.north + step, step)),
-				south: Math.max(-80, r(b.south - step, step)),
-				west: r(b.west - step, step),
-				east: r(b.east + step, step)
-			};
-			const key = JSON.stringify(area);
-			if (key === gridKey) return;
-			gridKey = key;
-			const cachedGrid = gridCache.get(key);
-			if (cachedGrid && Date.now() - cachedGrid.at < 20 * 60 * 1000) {
-				grid = cachedGrid.grid;
-				gridError = '';
-				return;
-			}
+			const ask = ++gridAsk;
+			const jobs = [];
+			if (wantWeather && !weatherGrids.find(b))
+				jobs.push(weatherGrids.get(b).then((grid) => ask === gridAsk && (weather = grid)));
+			if (wantStorm && !stormGrids.find(b))
+				jobs.push(stormGrids.get(b).then((grid) => ask === gridAsk && (storm = grid)));
+			if (!jobs.length) return;
 			gridLoading = true;
 			try {
-				const columns = 12;
-				const rows = 10;
-				const points = await stormGrid(area.north, area.south, area.west, area.east, columns, rows);
-				if (key !== gridKey) return;
-				grid = { columns, rows, points };
-				gridError = '';
-				gridCache.set(key, { at: Date.now(), grid });
+				await Promise.all(jobs);
+				if (ask === gridAsk) gridError = '';
 			} catch (error) {
-				if (key !== gridKey) return;
-				gridKey = '';
-				gridError = `Couldn't load the forecast${error?.message ? `: ${error.message}` : ''}`;
+				if (ask === gridAsk)
+					gridError = `Couldn't load the forecast${error?.message ? `: ${error.message}` : ''}`;
 			} finally {
-				if (key === gridKey || !gridKey) gridLoading = false;
+				if (ask === gridAsk) gridLoading = false;
 			}
-		}, 600);
+		}, 450);
 	});
-	let forecastField = $derived.by(() => {
-		if (!forecastOn || !grid) return null;
-		const rows = [];
-		for (let r = 0; r < grid.rows; r++) {
-			rows.push(
-				grid.points.slice(r * grid.columns, (r + 1) * grid.columns).map((p) => ({
-					lat: p.lat,
-					lon: p.lon,
-					value: p.hours[hour] ? field.value(p.hours[hour]) : 0
-				}))
-			);
-		}
-		return { rows, colour: field.colour };
+
+	// The time shown: hours from this one on (they play smoothly, see ForecastTimeline)
+	let base = $state(Math.floor(Date.now() / 3600e3) * 3600e3);
+	let liveTime = $state(Date.now());
+	let hourOffset = $state(0);
+	let forecastPlaying = $state(false);
+	let forecastHours = $derived(mapLayer.group === 'storm' ? 48 : 72);
+	$effect(() => {
+		if (hourOffset > forecastHours - 1) hourOffset = forecastHours - 1;
 	});
-	let hourTime = $derived(grid?.points.find((p) => p.hours[hour])?.hours[hour]?.time ?? null);
-	/** The map coloured now: the forecast, or the category's map */
+	let time = $derived(base + hourOffset * 3600e3);
+	let mapGrid = $derived(mapLayer.group === 'storm' ? storm : weather);
+	let weatherMap = $derived(
+		forecastOn && gridZoom && mapGrid
+			? {
+					grid: mapGrid,
+					layer: mapLayer,
+					time,
+					playing: forecastPlaying,
+					labels: on.values,
+					isobars: mapLayer.group === 'weather' && on.isobars
+				}
+			: null
+	);
+	let windMap = $derived(
+		weather && gridZoom && ((forecastOn && on.flow) || windOn)
+			? {
+					grid: weather,
+					time: forecastOn ? time : liveTime,
+					opacity: forecastOn ? 1 : 0.7
+				}
+			: null
+	);
+
+	/** The forecast map's value at a place (for the legend's marker) */
+	function layerValueAt(place) {
+		const grid = mapGrid;
+		const at = grid && onGrid(grid, place.lat, place.lon);
+		const values = at && valuesAt(grid, mapLayer.key, time);
+		return values
+			? limit(mapLayer.key, valueAt(values, grid.columns, grid.rows, at.gx, at.gy))
+			: null;
+	}
+
+	/** The category's coloured map now */
 	let mapField = $derived(
-		forecastOn
-			? forecastField
-			: activeField && $fieldState.id === activeField.id && $fieldState.rows
-				? { rows: $fieldState.rows, colour: activeField.colour }
-				: null
+		activeField && $fieldState.id === activeField.id && $fieldState.rows
+			? { rows: $fieldState.rows, colour: activeField.colour }
+			: null
 	);
 
 	/** The coloured map's value at a place (between the grid points) */
@@ -392,19 +467,13 @@
 
 	// --- The pointer ----------------------------------------------------------------------
 	let hover = $state(null);
+	// The forecast's value shows on its legend, not here
 	let readout = $derived.by(() => {
-		if (!hover) return null;
+		if (!hover || forecastOn) return null;
 		const coords = `${hover.lat.toFixed(2)}°, ${hover.lon.toFixed(2)}°`;
 		if (mapField) {
 			const value = fieldAt(hover);
 			if (value != null && isFinite(value)) {
-				if (forecastOn) {
-					const text =
-						field.id === 'risk'
-							? LEVELS[Math.min(4, Math.round(value))].label
-							: `${field.id === 'li' ? value.toFixed(1) : Math.round(value)} ${field.unit}`;
-					return { coords, text: `${field.label} ${text}` };
-				}
 				const shown = activeField.format ? activeField.format(value) : Math.round(value);
 				return { coords, text: `${activeField.label} ${shown} ${activeField.unit}` };
 			}
@@ -573,16 +642,36 @@
 		platesOn && plates ? { paths: plates, colour: 'rgba(248, 113, 113, 0.45)' } : null
 	);
 
-	// --- A place looked at (the weather's analysis) --------------------------------------------
+	let hoverValue = $derived(forecastOn && hover ? layerValueAt(hover) : null);
+
+	// --- A place looked at (its forecast and storm analysis) ----------------------------------
 	let probe = $state(null);
 	let probeName = $state('');
 	let pickedWarnings = $state([]);
 	let panelOpen = $state(true);
+	let forecast = $state.raw(null);
+	let forecastError = $state('');
+	// Answers for a place looked at before are dropped
+	let probeId = 0;
 	function pick(place, areas = [], name = '') {
 		probe = place;
 		probeName = name;
 		pickedWarnings = areas;
 		panelOpen = true;
+		forecast = null;
+		forecastError = '';
+		loadForecast(++probeId);
+	}
+	function loadForecast(id = probeId) {
+		if (!probe) return;
+		placeForecast(probe.lat, probe.lon)
+			.then((result) => id === probeId && (forecast = result))
+			.catch(
+				(error) =>
+					id === probeId &&
+					!forecast &&
+					(forecastError = `Couldn't load the forecast${error?.message ? `: ${error.message}` : ''}`)
+			);
 	}
 	$effect(() => {
 		if (home && !probe) untrack(() => pick({ lat: home.lat, lon: home.lon }, [], home.name));
@@ -632,11 +721,14 @@
 	}
 
 	onMount(() => {
-		// Opened for a category, a quake or a plane (from the widgets)
+		// Opened for a category, the weather's live view or forecast, a quake or a plane (from
+		// the widgets)
 		const params = page.url.searchParams;
-		const wanted = params.get('category') ?? (params.get('mode') === 'quakes' ? 'earth' : null);
+		const mode = params.get('mode');
+		const wanted = params.get('category') ?? (mode === 'quakes' ? 'earth' : null);
 		if (openQuake) set({ category: 'earth' });
 		else if (wanted && CATEGORIES.some((c) => c.id === wanted)) set({ category: wanted });
+		if (mode === 'forecast' || mode === 'live') set({ mode });
 		const hex = params.get('hex')?.toLowerCase();
 		if (hex) {
 			set({ category: 'traffic' });
@@ -644,8 +736,26 @@
 			flyWhenFound = hex;
 		}
 		const tick = setInterval(() => (now = Date.now()), 30000);
+		const refresh = setInterval(
+			() => {
+				loadForecast();
+				gridTick++;
+			},
+			5 * 60 * 1000
+		);
+		const clockTimer = setInterval(() => {
+			liveTime = Date.now();
+			const hour = Math.floor(Date.now() / 3600e3) * 3600e3;
+			// A new hour: the forecast's time stays where it was
+			if (hour !== base) {
+				hourOffset = Math.max(0, hourOffset - (hour - base) / 3600e3);
+				base = hour;
+			}
+		}, 60 * 1000);
 		return () => {
 			clearInterval(tick);
+			clearInterval(refresh);
+			clearInterval(clockTimer);
 			setView(null);
 			stopAll();
 			clearTimeout(gridTimer);
@@ -690,29 +800,31 @@
 		flights: {
 			count: $planes.length,
 			state: $flightStatus.state === 'error' ? 'error' : undefined
+		},
+		wind: {
+			state: !gridZoom
+				? 'zoom'
+				: weather
+					? undefined
+					: gridError
+						? 'error'
+						: gridLoading
+							? 'loading'
+							: undefined,
+			error: gridError
 		}
 	});
 
-	const ago = (seconds) => {
-		const minutes = Math.round((Date.now() / 1000 - seconds) / 60);
-		return minutes <= 0 ? (minutes < -2 ? `in ${-minutes} min` : 'now') : `−${minutes} min`;
-	};
 	const clock = (ms) =>
 		new Date(ms).toLocaleString(undefined, {
 			weekday: 'short',
 			hour: '2-digit',
 			minute: '2-digit'
 		});
-	const hhmm = (ms) =>
-		new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-	const FIELD_ICONS = {
-		risk: 'icon-[mingcute--thunderstorm-line]',
-		cape: 'icon-[mingcute--fire-line]',
-		li: 'icon-[mingcute--arrow-up-circle-line]',
-		shear: 'icon-[mingcute--wind-line]',
-		gust: 'icon-[mingcute--tornado-line]'
-	};
-	const glass = 'bg-[#15181d]/85 backdrop-blur-xl ring-1 ring-white/10 shadow-xl shadow-black/30';
+	// No blur behind the panels: the map under them moves every frame (the wind, planes), and
+	// blurring it again each frame made everything lag. Each panel is a layer of its own, so the
+	// map moving under it doesn't paint what's in it again.
+	const glass = 'bg-[#15181d] ring-1 ring-white/10 shadow-xl shadow-black/30 transform-gpu';
 </script>
 
 <div class="relative h-full min-h-[560px] overflow-hidden rounded-lg bg-[#111418]">
@@ -726,6 +838,8 @@
 			layers={tileLayers}
 			{radar}
 			onradarready={setRadarReady}
+			weather={weatherMap}
+			wind={windMap}
 			field={mapField}
 			warnings={warningsOn ? warnings : null}
 			strikes={lightningOn ? $strikes : null}
@@ -766,7 +880,7 @@
 	<!-- Top: place, search and the categories (names and title where there's room) -->
 	<div
 		class="@container absolute top-3 left-3 flex items-center gap-2 {rightOpen
-			? 'right-[24.5rem]'
+			? 'right-[26.5rem]'
 			: 'right-3'}"
 	>
 		<div class="flex items-center gap-2 h-11 pl-3 pr-1.5 shrink-0 rounded-2xl {glass}">
@@ -838,10 +952,22 @@
 		</div>
 		{#if category === 'weather' && !rightOpen}
 			<button
-				class="ms-auto flex items-center gap-2 h-11 px-4 shrink-0 rounded-2xl text-sm font-semibold cursor-pointer {glass}"
+				class="ms-auto flex items-center gap-2 h-11 px-3 shrink-0 rounded-2xl text-sm font-semibold cursor-pointer {glass}"
 				onclick={() => (panelOpen = true)}
-				><span class="icon-[mingcute--layout-right-line] size-4"></span>Analysis</button
 			>
+				{#if forecast}
+					<WeatherIcon
+						code={forecast.now.code}
+						day={forecast.now.isDay}
+						size={26}
+						animated={false}
+					/>
+					<span class="tabular-nums">{Math.round(forecast.now.temp)}°</span>
+				{:else}
+					<span class="icon-[mingcute--layout-right-line] size-4"></span>
+				{/if}
+				<span class="max-w-32 truncate">{probeLabel || 'Forecast'}</span>
+			</button>
 		{/if}
 	</div>
 
@@ -849,7 +975,7 @@
 	<div
 		class="absolute left-3 top-[4.25rem] {category === 'weather'
 			? 'w-60'
-			: 'w-72'} max-h-[calc(100%-10.5rem)] flex flex-col rounded-2xl overflow-hidden {glass}"
+			: 'w-72'} max-h-[calc(100%-11.5rem)] flex flex-col rounded-2xl overflow-hidden {glass}"
 	>
 		<div class="min-h-0 overflow-y-auto">
 			{#if category === 'weather'}
@@ -870,32 +996,68 @@
 				</div>
 				{#if weatherMode === 'forecast'}
 					<div class="flex flex-col gap-0.5 p-1.5">
-						<p
-							class="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40"
-						>
-							Forecast maps
-						</p>
-						{#each FIELDS as f (f.id)}
-							<button
-								class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer transition {fieldId ===
-								f.id
-									? 'bg-white text-black'
-									: 'text-white/60 hover:text-white hover:bg-white/[0.06]'}"
-								title={f.hint}
-								onclick={() => set({ field: f.id })}
+						{#each [['weather', 'Weather maps'], ['storm', 'Storm maps']] as [group, title] (group)}
+							<p
+								class="px-2 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-white/40 {group ===
+								'storm'
+									? 'mt-1.5'
+									: ''}"
 							>
-								<span class="{FIELD_ICONS[f.id]} size-[18px]"></span>
-								<span class="flex-1 text-start">{f.label}</span>
+								{title}
+							</p>
+							{#each MAP_LAYERS.filter((l) => l.group === group) as l (l.id)}
+								<button
+									class="group flex items-center gap-2.5 h-8 px-2.5 rounded-xl text-[13px] font-semibold cursor-pointer transition {mapLayer.id ===
+									l.id
+										? 'bg-white text-black shadow-md shadow-black/30'
+										: 'text-white/65 hover:text-white hover:bg-white/[0.06]'}"
+									aria-pressed={mapLayer.id === l.id}
+									title={l.hint}
+									onclick={() => setLayer(l.id)}
+								>
+									<span class="{l.icon} size-[17px] shrink-0"></span>
+									<span class="flex-1 text-start truncate">{l.label}</span>
+									<span
+										class="w-7 h-1.5 shrink-0 rounded-full ring-1 {mapLayer.id === l.id
+											? 'ring-black/10'
+											: 'ring-white/10 opacity-70 group-hover:opacity-100'}"
+										style="background: {legendGradient(l)}"
+									></span>
+								</button>
+							{/each}
+						{/each}
+						<div class="my-1.5 h-px bg-white/10"></div>
+						<p class="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-white/40">
+							On the map
+						</p>
+						{#each overlays as o (o.key)}
+							<button
+								class="flex items-center gap-2.5 h-8 px-2.5 rounded-xl text-[13px] font-medium cursor-pointer transition {on[
+									o.key
+								]
+									? 'text-white'
+									: 'text-white/45 hover:text-white/80'}"
+								aria-pressed={!!on[o.key]}
+								title={o.hint}
+								onclick={() => toggle(o.key)}
+							>
+								<span class="{o.icon} size-[17px] shrink-0"></span>
+								<span class="flex-1 text-start">{o.label}</span>
+								<span
+									class="relative w-7 h-4 shrink-0 rounded-full transition {on[o.key]
+										? 'bg-sky-400'
+										: 'bg-white/15'}"
+								>
+									<span
+										class="absolute top-0.5 size-3 rounded-full bg-white shadow transition-all {on[
+											o.key
+										]
+											? 'left-3.5'
+											: 'left-0.5'}"
+									></span>
+								</span>
 							</button>
 						{/each}
-						<div class="my-1 h-px bg-white/10"></div>
-						<button
-							class="flex items-center gap-2.5 h-9 px-2.5 rounded-xl text-sm font-medium cursor-pointer {on.warnings
-								? 'bg-white/10 text-white'
-								: 'text-white/45 hover:text-white/80'}"
-							onclick={() => toggle('warnings')}
-							><span class="icon-[mingcute--warning-line] size-[18px]"></span>Warnings</button
-						>
 					</div>
 				{:else}
 					<LayerRail
@@ -950,8 +1112,8 @@
 
 	<!-- Zoom -->
 	<div
-		class="absolute bottom-24 flex flex-col rounded-2xl {glass} {rightOpen
-			? 'right-[24.5rem]'
+		class="absolute bottom-[6.5rem] flex flex-col rounded-2xl {glass} {rightOpen
+			? 'right-[26.5rem]'
 			: 'right-3'}"
 	>
 		{#if flight}
@@ -997,7 +1159,7 @@
 	<!-- Bottom: the weather's time, or the legends -->
 	<div
 		class="absolute bottom-3 left-3 flex flex-col gap-2 pointer-events-none {rightOpen
-			? 'right-[24.5rem]'
+			? 'right-[26.5rem]'
 			: 'right-3'}"
 	>
 		{#if readout}
@@ -1006,48 +1168,20 @@
 				{#if readout.text}<span class="ms-2 font-semibold">{readout.text}</span>{/if}
 			</div>
 		{/if}
-		{#if forecastOn && gridError}
+		{#if forecastOn && (gridError || !gridZoom)}
 			<div
 				class="self-start flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-rose-200 {glass}"
 			>
 				<span class="icon-[mingcute--warning-line] size-4 shrink-0 text-rose-400"></span>
-				{gridError}
+				{gridZoom ? gridError : 'Zoom in for the forecast maps'}
 			</div>
 		{/if}
 		{#if category === 'weather' && weatherMode === 'live'}
-			<div class="flex items-center gap-3 h-14 px-3 rounded-2xl pointer-events-auto {glass}">
-				<button
-					class="grid place-items-center size-9 shrink-0 rounded-full bg-white text-black cursor-pointer hover:scale-105 transition disabled:opacity-40"
-					aria-label={playing ? 'Pause the radar' : 'Play the radar'}
-					disabled={!radarOn || !frames.length}
-					onclick={() => (playing = !playing)}
-				>
-					<span
-						class="{playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-4"
-					></span>
-				</button>
-				<div class="w-24 shrink-0 leading-tight">
-					<p class="text-sm font-bold tabular-nums">
-						{frames[frame] ? hhmm(frames[frame].time * 1000) : '–'}
-					</p>
-					<p class="text-[11px] text-white/50 tabular-nums">
-						{frames[frame] && radarOn
-							? `Radar ${ago(frames[frame].time)}`
-							: radarOn
-								? 'Loading…'
-								: 'Radar off'}
-					</p>
-				</div>
-				<input
-					type="range"
-					min="0"
-					max={Math.max(0, frames.length - 1)}
-					bind:value={frame}
-					oninput={() => (playing = false)}
-					disabled={!radarOn || !frames.length}
-					class="flex-1 accent-sky-400"
-					aria-label="Radar time"
-				/>
+			<div class="flex items-center gap-3 h-16 px-3 rounded-2xl pointer-events-auto {glass}">
+				<RadarTimeline {frames} past={pastFrames} bind:frame bind:playing on={radarOn} />
+				{#if radarOn}
+					<div class="hidden xl:block"><RadarLegend /></div>
+				{/if}
 				{#if lightningOn}
 					<div class="hidden md:block w-px h-8 bg-white/10"></div>
 					<button
@@ -1095,32 +1229,19 @@
 				{/if}
 			</div>
 		{:else if forecastOn}
-			<div class="flex items-center gap-3 h-14 px-3 rounded-2xl pointer-events-auto {glass}">
-				<div class="w-32 shrink-0 leading-tight">
-					<p class="text-sm font-bold">{hourTime ? clock(hourTime) : '–'}</p>
-					<p class="text-[11px] text-white/50">
-						{gridLoading ? 'Loading the forecast…' : `+${hour} h · ${field.label}`}
-					</p>
+			<div class="flex items-stretch gap-2 pointer-events-auto">
+				<div class="hidden lg:flex items-center w-60 shrink-0 px-3.5 rounded-2xl {glass}">
+					<MapLegend layer={mapLayer} marker={hoverValue} />
 				</div>
-				<input
-					type="range"
-					min="0"
-					max="23"
-					bind:value={hour}
-					class="flex-1 accent-amber-400"
-					aria-label="Forecast hour"
-				/>
-				<div
-					class="hidden lg:flex items-center gap-1.5 shrink-0 text-[10px] text-white/60 tabular-nums"
-				>
-					{#each field.legend as value (value)}
-						<span class="flex items-center gap-1">
-							<span class="size-2.5 rounded-sm" style="background: {css(field.colour(value))}"
-							></span>
-							{field.id === 'risk' ? LEVELS[value].label : value}
-						</span>
-					{/each}
-					{#if field.unit}<span>{field.unit}</span>{/if}
+				<div class="flex-1 min-w-0 flex items-center h-16 px-3 rounded-2xl {glass}">
+					<ForecastTimeline
+						{base}
+						hours={forecastHours}
+						bind:value={hourOffset}
+						bind:playing={forecastPlaying}
+						loading={gridLoading && !mapGrid}
+						label={mapLayer.label}
+					/>
 				</div>
 			</div>
 		{:else if activeField || legends.length || (category === 'earth' && quakesOn)}
@@ -1186,7 +1307,7 @@
 	<!-- Right: the plane, quake or thing picked, or the analysis of the place looked at -->
 	{#if rightPanel}
 		<aside
-			class="absolute top-3 right-3 bottom-3 w-[23rem] flex flex-col rounded-2xl overflow-hidden {glass}"
+			class="absolute top-3 right-3 bottom-3 w-[25rem] flex flex-col rounded-2xl overflow-hidden {glass}"
 		>
 			{#if rightPanel === 'flight'}
 				<div class="flex-1 min-h-0 overflow-y-auto">
@@ -1212,6 +1333,8 @@
 					place={probe}
 					label={probeLabel}
 					areas={pickedWarnings}
+					{forecast}
+					{forecastError}
 					onclose={closeRight}
 				/>
 			{/if}

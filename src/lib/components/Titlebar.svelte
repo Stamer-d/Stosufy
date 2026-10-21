@@ -211,17 +211,15 @@
 			<Dropdown>
 				<svelte:fragment slot="trigger">
 					<button
-						class="mr-3 flex items-center gap-2 rounded-full p-0.5 pr-3 bg-secondary-200 hover:bg-secondary-300 cursor-pointer transition"
+						class="mr-3 grid place-items-center rounded-full p-0.5 bg-secondary-200 hover:bg-secondary-300 cursor-pointer transition"
 						aria-label="Account menu"
+						title={$user?.username ?? 'Account'}
 					>
 						<img
 							src={$user?.avatar_url ?? '/logo.png'}
 							class="size-7 rounded-full object-cover"
 							alt=""
 						/>
-						{#if $user?.username}
-							<span class="text-sm font-semibold">{$user.username}</span>
-						{/if}
 					</button>
 				</svelte:fragment>
 				<svelte:fragment slot="menu">

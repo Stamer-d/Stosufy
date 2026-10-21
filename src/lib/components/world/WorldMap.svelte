@@ -1,15 +1,19 @@
 <script>
 	// The big map of the world center: drag to move, scroll to zoom, click to look at a place.
 	// Tile layers (radar, satellite) can have a lower top zoom than the map: their tiles are
-	// then shown bigger. Forecast fields are drawn from a grid of points, the DWD warnings
-	// as areas, lightning as it strikes, planes where they fly (moving on between updates),
-	// earthquakes as circles by their size (and lines like the plates' boundaries under them),
-	// and whatever the trackers put on it (see world/features.ts; those that move every frame).
+	// then shown bigger. The forecast's maps are drawn from a grid of points (smooth colours,
+	// the values written on them, the wind blowing), a category's coloured map (like the air
+	// quality) from its grid of values, the DWD warnings as areas, lightning as it strikes, planes where they fly (moving on between updates), earthquakes as circles by
+	// their size (and lines like the plates' boundaries under them), and whatever the trackers
+	// put on it (see world/features.ts; those that move every frame).
 	import { onMount } from 'svelte';
 	import { worldPixel, fromWorldPixel, TILE, baseTile, labelTile } from '#lib/map.ts';
 	import { drawStrikes, SEVERITY_COLOURS } from '#lib/storm.ts';
 	import { radarSrc } from '#lib/radarClean.ts';
 	import RadarCanvas from '../storm/RadarCanvas.svelte';
+	import WeatherField from '../storm/WeatherField.svelte';
+	import WeatherMarks from '../storm/WeatherMarks.svelte';
+	import WindParticles from '../storm/WindParticles.svelte';
 	import { planeNow, drawPlane, drawTrail, altitudeColour, greatCircle } from '#lib/flights.ts';
 	import { drawQuakes, quakeAt } from '#lib/quakes.ts';
 	import { drawShapes, drawShapesUnder, featureAt } from '#lib/world/features.ts';
@@ -19,6 +23,8 @@
 	 *   lat: number, lon: number, zoom: number,
 	 *   minZoom?: number, maxZoom?: number,
 	 *   layers?: { key: string, url: (z: number, x: number, y: number) => string, opacity?: number, maxZoom?: number, clean?: boolean }[],
+	 *   weather?: { grid: import('#lib/weather.ts').WeatherGrid, layer: import('#lib/weatherLayers.ts').MapLayer | null, time: number, playing?: boolean, labels?: boolean, isobars?: boolean } | null,
+	 *   wind?: { grid: import('#lib/weather.ts').WeatherGrid, time: number, opacity?: number } | null,
 	 *   field?: { rows: { lat: number, lon: number, value: number }[][], colour: (v: number) => number[] } | null,
 	 *   warnings?: import('#lib/storm.ts').WarningArea[] | null,
 	 *   strikes?: { time: number, lat: number, lon: number }[] | null,
@@ -56,6 +62,8 @@
 		minZoom = 3,
 		maxZoom = 11,
 		layers = [],
+		weather = null,
+		wind = null,
 		field = null,
 		warnings = null,
 		strikes = null,
@@ -88,13 +96,13 @@
 
 	let width = $state(0);
 	let height = $state(0);
-	let fieldCanvas = $state();
 	let areaCanvas = $state();
 	let lightningCanvas = $state();
 	let planeCanvas = $state();
 	let quakeCanvas = $state();
 	let lineCanvas = $state();
 	let featureCanvas = $state();
+	let fieldCanvas = $state();
 	let moverCanvas = $state();
 
 	let centre = $derived(worldPixel(lat, lon, zoom));
@@ -230,7 +238,7 @@
 		return { c, ratio };
 	}
 
-	// --- A forecast field --------------------------------------------------------------------
+	// --- A category's coloured map: its values joined between the points ----------------------
 	$effect(() => {
 		if (!fieldCanvas || !width || !height) return;
 		// Drawn small and shown smoothly scaled up
@@ -246,22 +254,43 @@
 		const south = rows[count - 1][0].lat;
 		const west = rows[0][0].lon;
 		const east = rows[0][columns - 1].lon;
+		// The map keeps a longitude to a column of the screen and a latitude to a row: where each
+		// is on the grid is worked out once
+		const world = TILE * 2 ** zoom;
+		const across = new Float32Array(w).fill(-1);
+		for (let px = 0; px < w; px++) {
+			const placeLon = ((centre.x - width / 2 + px * step) / world) * 360 - 180;
+			for (const shift of [0, -360, 360]) {
+				const fc = ((placeLon + shift - west) / (east - west)) * (columns - 1);
+				if (fc >= 0 && fc <= columns - 1) {
+					across[px] = fc;
+					break;
+				}
+			}
+		}
+		const down = new Float32Array(h).fill(-1);
+		for (let py = 0; py < h; py++) {
+			const placeLat = fromWorldPixel(0, centre.y - height / 2 + py * step, zoom).lat;
+			const fr = ((north - placeLat) / (north - south)) * (count - 1);
+			if (fr >= 0 && fr <= count - 1) down[py] = fr;
+		}
 		const image = c.createImageData(w, h);
 		for (let py = 0; py < h; py++) {
+			const fr = down[py];
+			if (fr < 0) continue;
+			const r0 = Math.floor(fr);
+			const r1 = Math.min(count - 1, r0 + 1);
+			const tr = fr - r0;
 			for (let px = 0; px < w; px++) {
-				const place = toPlace(px * step, py * step);
-				const fr = ((north - place.lat) / (north - south)) * (count - 1);
-				const fc = ((place.lon - west) / (east - west)) * (columns - 1);
-				if (fr < 0 || fc < 0 || fr > count - 1 || fc > columns - 1) continue;
-				const r0 = Math.floor(fr);
+				const fc = across[px];
+				if (fc < 0) continue;
 				const c0 = Math.floor(fc);
-				const r1 = Math.min(count - 1, r0 + 1);
 				const c1 = Math.min(columns - 1, c0 + 1);
-				const tr = fr - r0;
 				const tc = fc - c0;
 				const value =
 					(rows[r0][c0].value * (1 - tc) + rows[r0][c1].value * tc) * (1 - tr) +
 					(rows[r1][c0].value * (1 - tc) + rows[r1][c1].value * tc) * tr;
+				if (!isFinite(value)) continue;
 				const [r, g, b, a] = field.colour(value);
 				const i = (py * w + px) * 4;
 				image.data[i] = r;
@@ -607,6 +636,19 @@
 		/>
 	{/each}
 	<canvas bind:this={fieldCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
+	{#if weather}
+		<WeatherField
+			grid={weather.grid}
+			layer={weather.layer}
+			time={weather.time}
+			fast={weather.playing}
+			{lat}
+			{lon}
+			{zoom}
+			{width}
+			{height}
+		/>
+	{/if}
 	{#each layerTiles as { layer, tiles: list } (layer.key)}
 		{#each list as tile (tile.key)}
 			<img
@@ -620,6 +662,18 @@
 		{/each}
 	{/each}
 	<RadarCanvas {radar} tiles={radarTiles} {width} {height} onready={onradarready} />
+	{#if wind}
+		<WindParticles
+			grid={wind.grid}
+			time={wind.time}
+			opacity={wind.opacity ?? 1}
+			{lat}
+			{lon}
+			{zoom}
+			{width}
+			{height}
+		/>
+	{/if}
 	<canvas bind:this={areaCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	<canvas bind:this={lineCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>
 	<!-- City names above the weather -->
@@ -633,6 +687,20 @@
 			onerror={(e) => /** @type {HTMLElement} */ (e.currentTarget).classList.add('invisible')}
 		/>
 	{/each}
+	{#if weather}
+		<WeatherMarks
+			grid={weather.grid}
+			layer={weather.layer}
+			time={weather.time}
+			labels={weather.labels}
+			isobars={weather.isobars}
+			{lat}
+			{lon}
+			{zoom}
+			{width}
+			{height}
+		/>
+	{/if}
 	<canvas bind:this={lightningCanvas} class="absolute inset-0 size-full pointer-events-none"
 	></canvas>
 	<canvas bind:this={featureCanvas} class="absolute inset-0 size-full pointer-events-none"></canvas>

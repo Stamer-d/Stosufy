@@ -56,6 +56,14 @@ const BUILTIN: LayerInfo[] = [
 		on: true
 	},
 	{
+		id: 'wind',
+		category: 'weather',
+		label: 'Wind',
+		icon: 'icon-[mingcute--wind-line]',
+		hint: 'The wind blowing over the map (Open-Meteo)',
+		on: true
+	},
+	{
 		id: 'warnings',
 		category: 'weather',
 		label: 'Warnings',
