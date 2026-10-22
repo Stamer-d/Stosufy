@@ -15,6 +15,8 @@
 	import { djOpen } from '#lib/dj/engine.ts';
 	import { page } from '$app/state';
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
+	import { logout } from '#lib/stores/account.ts';
+	import { showToast } from '#lib/stores/toast.ts';
 
 	const appWindow = getCurrentWindow();
 	// macOS has its own window buttons (top left, over the bar): room for them, no others
@@ -64,6 +66,9 @@
 			await relaunch();
 		}
 	}
+
+	let logoutOpen = $state(false);
+	let loggingOut = $state(false);
 
 	async function refreshAuth() {
 		const keys = $keyStore;
@@ -259,6 +264,14 @@
 					>
 						Refresh login
 					</Button>
+					<Button
+						on:click={() => (logoutOpen = true)}
+						type="ghost"
+						class="w-full rounded-md text-sm hover:bg-secondary-400"
+						icon="icon-[mingcute--exit-line]"
+					>
+						Log out
+					</Button>
 				</svelte:fragment>
 			</Dropdown>
 		{/if}
@@ -288,6 +301,30 @@
 		{/if}
 	</div>
 </header>
+
+<Modal bind:open={logoutOpen} title="Log out">
+	<p class="text-sm leading-relaxed">
+		Log out of <strong>{$user?.username}</strong> on this computer? Your playlists stay in your account,
+		and your downloaded songs stay on this computer. The osu! session key is removed too.
+	</p>
+	<div class="mt-5 flex justify-end gap-2">
+		<Button type="ghost" on:click={() => (logoutOpen = false)}>Cancel</Button>
+		<Button
+			type="primary"
+			disabled={loggingOut}
+			on:click={async () => {
+				loggingOut = true;
+				try {
+					await logout();
+				} catch (error) {
+					console.error('Could not log out:', error);
+					showToast("Couldn't log out, try again", 'icon-[mingcute--warning-line]');
+					loggingOut = false;
+				}
+			}}>{loggingOut ? 'Logging out…' : 'Log out'}</Button
+		>
+	</div>
+</Modal>
 
 <Modal bind:open={updateModal.show} title="Updates">
 	{#if updateModal.hasUpdate === null}

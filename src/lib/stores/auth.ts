@@ -3,7 +3,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { load } from '@tauri-apps/plugin-store';
 import { goto } from '$app/navigation';
 import { user } from './user';
-import { getStosufyUser } from '../api';
+import { getStosufyUser, API_URL } from '../api';
 import type { Keys, User } from '../types';
 import { offline, isNetworkError, noteNetworkError, whenOnline } from './network';
 
@@ -15,6 +15,11 @@ export const keyStore = writable<Keys>({
 });
 
 const clientId = '40234';
+/**
+ * Only for builds from before the Stamer API kept the secret: the login asks the API, which
+ * holds it; this is used only while the API doesn't have it yet (and is gone from builds
+ * made without it)
+ */
 const clientSecret = import.meta.env.VITE_CLIENT_SECRET;
 const redirectUrl = 'stosufynew://callback';
 /** friends.read: to show what the user's osu! friends listen to */
@@ -98,6 +103,35 @@ export async function checkSessionKey(sessionKey: string): Promise<SessionKeyChe
 	};
 }
 
+/**
+ * Asks for osu! tokens with the code of the login link or the refresh token: through the
+ * Stamer API, which keeps the app's client secret, else (not set up there yet) osu! itself
+ */
+async function tokenRequest(grant: { code: string } | { refresh_token: string }) {
+	try {
+		const response = await fetch(`${API_URL}stosufy/oauth/token`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(grant)
+		});
+		if (response.status !== 503 || !clientSecret) return response;
+	} catch (error) {
+		if (!clientSecret) throw error;
+	}
+	return fetch('https://osu.ppy.sh/oauth/token', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			client_id: clientId,
+			client_secret: clientSecret,
+			...grant,
+			...('code' in grant
+				? { grant_type: 'authorization_code', redirect_uri: redirectUrl }
+				: { grant_type: 'refresh_token' })
+		})
+	});
+}
+
 let refreshing: Promise<any> | null = null;
 
 /**
@@ -112,18 +146,7 @@ export function refreshToken(refreshToken: string) {
 
 async function requestRefresh(refreshToken: string) {
 	try {
-		const response = await fetch('https://osu.ppy.sh/oauth/token', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				client_id: clientId,
-				client_secret: clientSecret,
-				refresh_token: refreshToken,
-				grant_type: 'refresh_token'
-			})
-		});
+		const response = await tokenRequest({ refresh_token: refreshToken });
 		if (!response.ok) {
 			return null;
 		}
@@ -144,6 +167,21 @@ async function requestRefresh(refreshToken: string) {
 
 /** The last logged in user, to start offline with */
 const LAST_USER = 'stosufy-last-user';
+
+/** Forgets the login on this device: the tokens, the session key and the last user */
+export async function forgetLogin() {
+	const empty: Keys = { access_token: '', refresh_token: '', expiry_time: 0, sessionKey: '' };
+	keyStore.set(empty);
+	try {
+		localStorage.removeItem(LAST_USER);
+	} catch {
+		// Nothing kept
+	}
+	// Saved now: the app starts over right after this
+	const keyData = await load('keyStore.json');
+	await keyData.set('store', empty);
+	await keyData.save();
+}
 
 /**
  * The osu! access token, renewed first if it ran out or is about to (timers don't run while
@@ -189,19 +227,7 @@ export function authCode(link: string | undefined): string | null {
 
 export async function exchangeCode(code: string) {
 	try {
-		const response = await fetch('https://osu.ppy.sh/oauth/token', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				client_id: clientId,
-				client_secret: clientSecret,
-				code: code,
-				grant_type: 'authorization_code',
-				redirect_uri: redirectUrl
-			})
-		});
+		const response = await tokenRequest({ code });
 
 		if (!response.ok) {
 			throw new Error(`HTTP error! status: ${response.status}`);
