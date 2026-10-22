@@ -105,7 +105,7 @@ export async function checkSessionKey(sessionKey: string): Promise<SessionKeyChe
 
 /**
  * Asks for osu! tokens with the code of the login link or the refresh token: through the
- * Stamer API, which keeps the app's client secret, else (not set up there yet) osu! itself
+ * Stamer API, which keeps the app's client secret, else osu! itself
  */
 async function tokenRequest(grant: { code: string } | { refresh_token: string }) {
 	try {
@@ -114,7 +114,9 @@ async function tokenRequest(grant: { code: string } | { refresh_token: string })
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(grant)
 		});
-		if (response.status !== 503 || !clientSecret) return response;
+		// Not set up there (503), not there yet (404) or in trouble: osu! itself, if this
+		// build can; what osu! turns down (401) is the answer
+		if (!clientSecret || (response.status < 500 && response.status !== 404)) return response;
 	} catch (error) {
 		if (!clientSecret) throw error;
 	}
