@@ -7,8 +7,15 @@
 	let timer = null;
 	let count = 0;
 
+	let checking = false;
 	async function checkStatus() {
-		let accessTokenValid = await verifyAccessToken($keyStore.access_token);
+		if (checking) return;
+		checking = true;
+		// No connection right now: tried again with the next check
+		let accessTokenValid = await verifyAccessToken($keyStore.access_token).catch(() => ({
+			status: false
+		}));
+		checking = false;
 		count++;
 		if (count > 9) {
 			clearInterval(timer);
@@ -24,6 +31,7 @@
 
 	onMount(() => {
 		timer = setInterval(checkStatus, 3000);
+		checkStatus();
 	});
 
 	onDestroy(() => {

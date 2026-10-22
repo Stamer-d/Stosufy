@@ -6,7 +6,7 @@ import { get, writable } from 'svelte/store';
 import { open } from '@tauri-apps/plugin-shell';
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import * as api from '../api';
-import { keyStore, exchangeCode, osuAuthUrl } from './auth';
+import { keyStore, exchangeCode, osuAuthUrl, authCode } from './auth';
 import { user, userSettings, updateUserSettings } from './user';
 import { currentSong, songQueue, setSongQueue, setPlaybackMod, queuePanelOpen } from './audio';
 import { currentMod, MODS } from './mods';
@@ -166,10 +166,11 @@ export async function listenAlong(friend: api.FriendActivity) {
 /** Asks osu! again, now with access to the friend list */
 export async function connectFriends() {
 	const stop = await onOpenUrl(async (urls) => {
-		if (!urls[0]?.includes('code=')) return;
+		const code = authCode(urls.find((url) => url.includes('code=')));
+		if (!code) return;
 		stop();
 		try {
-			const tokens = await exchangeCode(urls[0].split('code=')[1]);
+			const tokens = await exchangeCode(code);
 			keyStore.update((keys) => ({
 				...keys,
 				access_token: tokens.access_token,

@@ -5,7 +5,7 @@ import { derived, get, writable } from 'svelte/store';
 import { readFile, writeFile, mkdir, exists, readTextFile } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
 import { fetch } from '@tauri-apps/plugin-http';
-import { keyStore } from '../stores/auth';
+import { freshToken } from '../stores/auth';
 import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
 import { currentSong, setPlaybackMod, skipForward, withoutPlaybackLock } from '../stores/audio';
@@ -159,8 +159,8 @@ export const activePlay = writable<{
 
 const API = 'https://osu.ppy.sh/api/v2';
 
-function authorization() {
-	return { Authorization: `Bearer ${get(keyStore).access_token}` };
+async function authorization() {
+	return { Authorization: `Bearer ${await freshToken()}` };
 }
 
 function apiError(status: number, what: string) {
@@ -179,7 +179,11 @@ export function leaderboard(mapId: string): Promise<LeaderboardScore[]> {
 	if (!leaderboards.has(mapId)) {
 		const request = (async () => {
 			const response = await fetch(`${API}/beatmaps/${mapId}/scores?mode=osu&limit=50`, {
-				headers: { ...authorization(), 'x-api-version': '20240529', Accept: 'application/json' }
+				headers: {
+					...(await authorization()),
+					'x-api-version': '20240529',
+					Accept: 'application/json'
+				}
 			});
 			if (!response.ok) throw new Error(apiError(response.status, 'the leaderboard'));
 			const { scores } = (await response.json()) as { scores: any[] };
@@ -224,7 +228,7 @@ export async function downloadReplay(score: LeaderboardScore): Promise<Replay> {
 		}
 	}
 	const response = await fetch(`${API}/scores/${score.id}/download`, {
-		headers: { ...authorization(), 'x-api-version': '20240529' }
+		headers: { ...(await authorization()), 'x-api-version': '20240529' }
 	});
 	if (!response.ok) throw new Error(apiError(response.status, 'this replay'));
 	const data = new Uint8Array(await response.arrayBuffer());

@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 
 	import Button from '#lib/components/Button.svelte';
 	import Input from '#lib/components/Input.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import {
+		authCode,
 		checkSessionKey,
 		exchangeCode,
 		keyStore,
@@ -54,21 +55,44 @@
 		checking = false;
 	}
 
-	onMount(async () => {
-		if ($keyStore.sessionKey) {
-			sessionKeyValid = await checkSessionKey($keyStore?.sessionKey);
-		}
+	let loginError: string | null = null;
+	let stopListening: (() => void) | null = null;
+	let destroyed = false;
 
-		await onOpenUrl(async (urls) => {
+	onMount(async () => {
+		const stop = await onOpenUrl(async (urls) => {
 			// Only the osu! login callback; other links (e.g. listening sessions) aren't for here
-			if (!urls[0]?.includes('code=')) return;
-			const code = urls[0].split('code=')[1];
-			const tokenData = await exchangeCode(code);
-			$keyStore.access_token = tokenData.access_token;
-			$keyStore.refresh_token = tokenData.refresh_token;
-			$keyStore.expiry_time = Date.now() + tokenData.expires_in * 1000;
-			goto('/callback');
-		});
+			const code = authCode(urls.find((url) => url.includes('code=')));
+			if (!code) return;
+			loginError = null;
+			try {
+				const tokenData = await exchangeCode(code);
+				keyStore.update((keys) => ({
+					...keys,
+					access_token: tokenData.access_token,
+					refresh_token: tokenData.refresh_token,
+					expiry_time: Date.now() + tokenData.expires_in * 1000
+				}));
+				goto('/callback');
+			} catch (error) {
+				loginError = `osu! didn't accept the login (${error instanceof Error ? error.message : error}). Please try again.`;
+			}
+		}).catch(() => null);
+		// Left the page while the listener was set up
+		if (destroyed) stop?.();
+		else stopListening = stop;
+
+		if ($keyStore.sessionKey) {
+			sessionKeyValid = await checkSessionKey($keyStore.sessionKey).catch(() => ({
+				status: false,
+				status_code: 0
+			}));
+		}
+	});
+
+	onDestroy(() => {
+		destroyed = true;
+		stopListening?.();
 	});
 </script>
 
@@ -79,6 +103,16 @@
 		<p class="mt-2 text-sm text-secondary-600 text-center">
 			Listen to osu! beatmaps and build your own playlists.
 		</p>
+
+		{#if loginError}
+			<div
+				class="mt-6 w-full flex items-start gap-2 rounded-lg bg-red-500/10 ring-1 ring-red-500/30 px-3 py-2.5 text-sm text-red-300"
+				role="alert"
+			>
+				<span class="icon-[mingcute--warning-line] size-5 shrink-0"></span>
+				{loginError}
+			</div>
+		{/if}
 
 		{#if keyEntered && (sessionKeyValid.status_code === 429 || sessionKeyValid.status_code === 401)}
 			<div

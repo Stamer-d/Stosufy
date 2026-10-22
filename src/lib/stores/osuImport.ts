@@ -6,7 +6,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { readDir, readTextFile, exists, stat } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 import * as path from '@tauri-apps/api/path';
-import { keyStore } from './auth';
+import { freshToken } from './auth';
 import { mapDataStore, saveMapData, backfillImages } from './data';
 import { getPlaylistSongs } from './playlist';
 import { parseOsuFile, mainBpm } from '../osuFile';
@@ -270,7 +270,7 @@ async function fillDetails(sets: StoredMapSet[]) {
 		try {
 			const response = await fetch(
 				`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${batch.join('&ids[]=')}`,
-				{ headers: { Authorization: `Bearer ${get(keyStore).access_token}` } }
+				{ headers: { Authorization: `Bearer ${await freshToken()}` } }
 			);
 			if (!response.ok) return;
 			const { beatmaps } = await response.json();

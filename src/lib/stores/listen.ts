@@ -5,7 +5,7 @@
 import { get, writable } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
 import * as api from '../api';
-import { keyStore } from './auth';
+import { keyStore, freshToken } from './auth';
 import { user } from './user';
 import { mapDataStore, downloadBeatmap } from './data';
 import { currentMod, MODS } from './mods';
@@ -101,7 +101,7 @@ export async function startSession() {
 
 /** Joins a session by its code (or a stosufynew://listen/CODE link) */
 export async function joinSession(input: string) {
-	const code = input.trim().split('/').pop().toUpperCase();
+	const code = input.trim().replace(/\/+$/, '').split('/').pop()?.toUpperCase();
 	if (!code) return;
 	leaveSession(false);
 	previousMod = currentMod();
@@ -141,7 +141,7 @@ async function stream(code: string, signal: AbortSignal, attempt: number) {
 			headers: {
 				'Content-Type': 'application/json',
 				Accept: 'text/event-stream',
-				Authorization: `Bearer ${get(keyStore).access_token}`
+				Authorization: `Bearer ${await freshToken()}`
 			},
 			body: JSON.stringify({ query: SUBSCRIPTION, variables: { code } }),
 			signal
@@ -281,7 +281,8 @@ export async function songFor(playback: ListenPlayback): Promise<MapSet | null> 
 	loadingSong = key;
 	listen.update((state) => ({ ...state, activity: `Downloading ${playback.title}…` }));
 	try {
-		const { access_token: token, sessionKey } = get(keyStore);
+		const token = await freshToken();
+		const { sessionKey } = get(keyStore);
 		const response = await fetch(`https://osu.ppy.sh/api/v2/beatmapsets/${playback.setId}`, {
 			headers: { Authorization: `Bearer ${token}` }
 		});

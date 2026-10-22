@@ -3,7 +3,7 @@
 
 import { get, writable } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
-import { keyStore } from './auth';
+import { freshToken } from './auth';
 import { user, userSettings, updateUserSettings } from './user';
 import { playlists, createPlaylist, addSongToPlaylist, getPlaylistSongs } from './playlist';
 import { queueDownloads } from './downloadQueue';
@@ -60,7 +60,7 @@ const MAX_FAVOURITES = 500;
 
 async function osuApi(path: string) {
 	const response = await fetch(`https://osu.ppy.sh/api/v2/${path}`, {
-		headers: { Authorization: `Bearer ${get(keyStore).access_token}` }
+		headers: { Authorization: `Bearer ${await freshToken()}` }
 	});
 	if (!response.ok) throw new Error(`osu! API error (HTTP ${response.status})`);
 	return response.json();

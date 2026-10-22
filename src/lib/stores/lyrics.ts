@@ -4,7 +4,7 @@
 
 import { derived, get, writable } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
-import { keyStore } from './auth';
+import { freshToken } from './auth';
 import { currentSong, songQueue } from './audio';
 import { userSettings, updateUserSettings } from './user';
 import type { MapSet } from '../types';
@@ -104,7 +104,7 @@ async function unicodeNames(setId: number | string) {
 	if (!(Number(setId) > 0)) return null;
 	try {
 		const response = await fetch(`https://osu.ppy.sh/api/v2/beatmapsets/${setId}`, {
-			headers: { Authorization: `Bearer ${get(keyStore).access_token}` }
+			headers: { Authorization: `Bearer ${await freshToken()}` }
 		});
 		if (!response.ok) return null;
 		const set = await response.json();

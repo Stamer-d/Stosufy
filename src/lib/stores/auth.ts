@@ -21,24 +21,22 @@ const redirectUrl = 'stosufynew://callback';
 const scope = 'public friends.read';
 export const osuAuthUrl = `https://osu.ppy.sh/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=code&scope=${encodeURIComponent(scope)}`;
 
-async function initializeStores() {
-	await load('keyStore.json')
-		.then((keyData) => {
-			return keyData.get<Keys>('store');
-		})
-		.then((storedData) => {
-			if (storedData) {
-				keyStore.set(storedData);
-			}
-			keyStore.subscribe(async (value) => {
-				await load('keyStore.json').then((keyData) => {
-					keyData.set('store', value);
-				});
+let storesLoaded: Promise<void> | null = null;
+
+/** Loads the saved keys and keeps them saved; once (going online again starts over) */
+function initializeStores() {
+	storesLoaded ??= load('keyStore.json')
+		.then(async (keyData) => {
+			const storedData = await keyData.get<Keys>('store');
+			if (storedData) keyStore.set(storedData);
+			keyStore.subscribe((value) => {
+				keyData.set('store', value).catch((err) => console.error('Error saving keyStore:', err));
 			});
 		})
 		.catch((err) => {
 			console.error('Error loading keyStore:', err);
 		});
+	return storesLoaded;
 }
 
 /** Asks for the osu! session key (downloads need it, and it's optional at the login) */
@@ -100,7 +98,19 @@ export async function checkSessionKey(sessionKey: string): Promise<SessionKeyChe
 	};
 }
 
-export async function refreshToken(refreshToken: string) {
+let refreshing: Promise<any> | null = null;
+
+/**
+ * Gets new tokens with the refresh token: null when osu! turns it down. Refreshes that
+ * overlap share one request (osu! hands out a new refresh token each time, so a second
+ * request with the old one would be turned down).
+ */
+export function refreshToken(refreshToken: string) {
+	refreshing ??= requestRefresh(refreshToken).finally(() => (refreshing = null));
+	return refreshing;
+}
+
+async function requestRefresh(refreshToken: string) {
 	try {
 		const response = await fetch('https://osu.ppy.sh/oauth/token', {
 			method: 'POST',
@@ -132,7 +142,6 @@ export async function refreshToken(refreshToken: string) {
 	}
 }
 
-let refreshing: Promise<unknown> | null = null;
 /** The last logged in user, to start offline with */
 const LAST_USER = 'stosufy-last-user';
 
@@ -144,10 +153,7 @@ export async function freshToken(force = false): Promise<string> {
 	const keys = get(keyStore);
 	if (!keys.refresh_token) return keys.access_token;
 	if (force || keys.expiry_time - Date.now() < 60 * 1000) {
-		refreshing ??= refreshToken(keys.refresh_token)
-			.catch(() => null)
-			.finally(() => (refreshing = null));
-		await refreshing;
+		await refreshToken(keys.refresh_token).catch(() => null);
 	}
 	return get(keyStore).access_token;
 }
@@ -168,6 +174,16 @@ export async function verifyAccessToken(
 		// No connection is no reason to log in again
 		if (isNetworkError(error)) throw error;
 		return { status: false, userData: null };
+	}
+}
+
+/** The code of the osu! login link (stosufynew://callback?code=…), or null for other links */
+export function authCode(link: string | undefined): string | null {
+	if (!link?.includes('code=')) return null;
+	try {
+		return new URL(link).searchParams.get('code');
+	} catch {
+		return decodeURIComponent(link.split('code=')[1].split('&')[0]);
 	}
 }
 
@@ -233,22 +249,45 @@ export async function checkAccessToken(shouldPush = true, round = 0): Promise<bo
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+let scheduledFor = 0;
 
-// Refreshes the access token one minute before it expires, retrying every minute on failure
+// Refreshes the access token one minute before it expires, retrying every minute while the
+// connection fails
 function scheduleTokenRefresh() {
 	clearTimeout(refreshTimer);
-	const refreshIn = Math.max(get(keyStore).expiry_time - Date.now() - 60 * 1000, 0);
+	scheduledFor = get(keyStore).expiry_time;
+	const refreshIn = Math.max(scheduledFor - Date.now() - 60 * 1000, 0);
 	refreshTimer = setTimeout(async () => {
-		try {
-			if (await refreshToken(get(keyStore).refresh_token)) {
-				scheduleTokenRefresh();
-				return;
+		// Offline it can't work: tried again once a minute (and the token is renewed before
+		// use anyway, see freshToken)
+		let retryIn = 60 * 1000;
+		if (!get(offline)) {
+			try {
+				if (await refreshToken(get(keyStore).refresh_token)) return scheduleTokenRefresh();
+				// Turned down by osu! (or it has trouble): not asked again every minute
+				retryIn = 10 * 60 * 1000;
+			} catch {
+				// No connection; refreshToken already logs the error
 			}
-		} catch {
-			// refreshToken already logs the error
 		}
-		refreshTimer = setTimeout(scheduleTokenRefresh, 60 * 1000);
+		refreshTimer = setTimeout(scheduleTokenRefresh, retryIn);
 	}, refreshIn);
+}
+
+/**
+ * Keeps the refresh scheduled for the tokens there are: new ones from the login, or ones
+ * renewed early by freshToken, move the refresh along
+ */
+let following = false;
+function followTokens() {
+	if (following) return;
+	following = true;
+	keyStore.subscribe(({ refresh_token, expiry_time }) => {
+		if (!refresh_token) {
+			clearTimeout(refreshTimer);
+			scheduledFor = 0;
+		} else if (expiry_time !== scheduledFor) scheduleTokenRefresh();
+	});
 }
 
 /** Starts the app without a connection: with the last user and the songs on this computer */
@@ -269,6 +308,7 @@ function startOffline() {
 
 export async function startTokenRefresh() {
 	await initializeStores();
+	followTokens();
 	// Never logged in: that needs a connection anyway
 	if (!get(keyStore).refresh_token) {
 		goto('/login', { replaceState: true });
@@ -291,5 +331,4 @@ export async function startTokenRefresh() {
 		throw error;
 	}
 	goto('/home', { replaceState: true });
-	scheduleTokenRefresh();
 }
