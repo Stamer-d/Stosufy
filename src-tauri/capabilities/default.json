@@ -17,146 +17,50 @@
 		{
 			"identifier": "http:default",
 			"allow": [
-				{
-					"url": "https://*.tauri.app"
-				},
-				{
-					"url": "https://osu.ppy.sh/*"
-				},
-				{
-					"url": "https://assets.ppy.sh/*"
-				},
-				{
-					"url": "https://api.stamer-d.de/*"
-				},
-				{
-					"url": "https://lrclib.net/*"
-				},
-				{
-					"url": "https://api.github.com/repos/ppy/osu-resources/*"
-				},
-				{
-					"url": "https://raw.githubusercontent.com/ppy/osu-resources/*"
-				},
-				{
-					"url": "https://api.rainviewer.com/*"
-				},
-				{
-					"url": "https://tilecache.rainviewer.com/*"
-				},
-				{
-					"url": "https://api.brightsky.dev/*"
-				},
-				{
-					"url": "https://api.airplanes.live/*"
-				},
-				{
-					"url": "https://api.adsb.lol/*"
-				},
-				{
-					"url": "https://opendata.adsb.fi/*"
-				},
-				{
-					"url": "https://get.geojs.io/*"
-				},
-				{
-					"url": "https://maps.dwd.de/*"
-				},
-				{
-					"url": "https://api.adsbdb.com/*"
-				},
-				{
-					"url": "https://api.planespotters.net/*"
-				},
-				{
-					"url": "https://globe.airplanes.live/*"
-				},
-				{
-					"url": "https://globe.adsb.lol/*"
-				},
-				{
-					"url": "https://adsb.lol/*"
-				},
-				{
-					"url": "https://globe.adsb.fi/*"
-				},
-				{
-					"url": "https://www.seismicportal.eu/*"
-				},
-				{
-					"url": "https://earthquake.usgs.gov/*"
-				},
-				{
-					"url": "https://raw.githubusercontent.com/fraxen/tectonicplates/*"
-				},
-				{
-					"url": "https://www.tsunami.gov/*"
-				},
-				{
-					"url": "https://www.gdacs.org/*"
-				},
-				{
-					"url": "https://eonet.gsfc.nasa.gov/*"
-				},
-				{
-					"url": "https://www.pegelonline.wsv.de/*"
-				},
-				{
-					"url": "https://api.open-meteo.com/*"
-				},
-				{
-					"url": "https://geocoding-api.open-meteo.com/*"
-				},
-				{
-					"url": "https://air-quality-api.open-meteo.com/*"
-				},
-				{
-					"url": "https://marine-api.open-meteo.com/*"
-				},
-				{
-					"url": "https://data.sensor.community/*"
-				},
-				{
-					"url": "https://www.imis.bfs.de/*"
-				},
-				{
-					"url": "https://api.transitous.org/*"
-				},
-				{
-					"url": "https://api.citybik.es/*"
-				},
-				{
-					"url": "https://meri.digitraffic.fi/*"
-				},
-				{
-					"url": "https://tie.digitraffic.fi/*"
-				},
-				{
-					"url": "https://verkehr.autobahn.de/*"
-				},
-				{
-					"url": "https://celestrak.org/*"
-				},
-				{
-					"url": "https://ll.thespacedevs.com/*"
-				},
-				{
-					"url": "https://services.swpc.noaa.gov/*"
-				},
-				{
-					"url": "https://api.tfl.gov.uk/*"
-				},
-				{
-					"url": "https://webcams.nyctmc.org/*"
-				},
-				{
-					"url": "https://cwwp2.dot.ca.gov/*"
-				}
-			],
-			"deny": [
-				{
-					"url": "https://private.tauri.app"
-				}
+				{ "url": "https://osu.ppy.sh/*" },
+				{ "url": "https://assets.ppy.sh/*" },
+				{ "url": "https://api.stamer-d.de/*" },
+				{ "url": "https://lrclib.net/*" },
+				{ "url": "https://api.github.com/repos/ppy/osu-resources/*" },
+				{ "url": "https://raw.githubusercontent.com/ppy/osu-resources/*" },
+				{ "url": "https://api.rainviewer.com/*" },
+				{ "url": "https://tilecache.rainviewer.com/*" },
+				{ "url": "https://api.brightsky.dev/*" },
+				{ "url": "https://api.airplanes.live/*" },
+				{ "url": "https://api.adsb.lol/*" },
+				{ "url": "https://opendata.adsb.fi/*" },
+				{ "url": "https://get.geojs.io/*" },
+				{ "url": "https://maps.dwd.de/*" },
+				{ "url": "https://api.adsbdb.com/*" },
+				{ "url": "https://api.planespotters.net/*" },
+				{ "url": "https://globe.airplanes.live/*" },
+				{ "url": "https://globe.adsb.lol/*" },
+				{ "url": "https://adsb.lol/*" },
+				{ "url": "https://globe.adsb.fi/*" },
+				{ "url": "https://www.seismicportal.eu/*" },
+				{ "url": "https://earthquake.usgs.gov/*" },
+				{ "url": "https://raw.githubusercontent.com/fraxen/tectonicplates/*" },
+				{ "url": "https://www.tsunami.gov/*" },
+				{ "url": "https://www.gdacs.org/*" },
+				{ "url": "https://eonet.gsfc.nasa.gov/*" },
+				{ "url": "https://www.pegelonline.wsv.de/*" },
+				{ "url": "https://api.open-meteo.com/*" },
+				{ "url": "https://geocoding-api.open-meteo.com/*" },
+				{ "url": "https://air-quality-api.open-meteo.com/*" },
+				{ "url": "https://marine-api.open-meteo.com/*" },
+				{ "url": "https://data.sensor.community/*" },
+				{ "url": "https://www.imis.bfs.de/*" },
+				{ "url": "https://api.transitous.org/*" },
+				{ "url": "https://api.citybik.es/*" },
+				{ "url": "https://meri.digitraffic.fi/*" },
+				{ "url": "https://tie.digitraffic.fi/*" },
+				{ "url": "https://verkehr.autobahn.de/*" },
+				{ "url": "https://celestrak.org/*" },
+				{ "url": "https://ll.thespacedevs.com/*" },
+				{ "url": "https://services.swpc.noaa.gov/*" },
+				{ "url": "https://api.tfl.gov.uk/*" },
+				{ "url": "https://webcams.nyctmc.org/*" },
+				{ "url": "https://cwwp2.dot.ca.gov/*" }
 			]
 		},
 		"websocket:default",
@@ -164,28 +68,207 @@
 		"shell:default",
 		"deep-link:default",
 		"fs:default",
-		"dialog:allow-open",
 		{
-			"identifier": "fs:allow-home-read",
-			"allow": [{ "path": "$HOME/**" }],
-			"deny": [
-				{ "path": "$HOME/.ssh/**" },
-				{ "path": "$HOME/.gnupg/**" },
-				{ "path": "$HOME/.aws/**" }
+			"identifier": "fs:allow-read-dir",
+			"allow": [
+				{ "path": "$HOME/Stosufy" },
+				{ "path": "$HOME/Stosufy/**" },
+				{ "path": "$LOCALDATA/osu!" },
+				{ "path": "$LOCALDATA/osu!/**" },
+				{ "path": "$HOME/.local/share/osu-wine/**" },
+				{ "path": "$HOME/.local/share/osu-stable/**" },
+				{ "path": "$HOME/osu!/**" },
+				{ "path": "$HOME/Games/osu!/**" },
+				{ "path": "$HOME/Applications/osu!.app/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles" },
+				{ "path": "$HOME/.wine/drive_c/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Application Support/osu-wine/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/Program Files/osu!/**"
+				}
 			]
 		},
 		{
-			"identifier": "fs:allow-home-write",
-			"allow": [{ "path": "$HOME/Stosufy/**" }]
+			"identifier": "fs:allow-read-file",
+			"allow": [
+				{ "path": "$HOME/Stosufy" },
+				{ "path": "$HOME/Stosufy/**" },
+				{ "path": "$LOCALDATA/osu!" },
+				{ "path": "$LOCALDATA/osu!/**" },
+				{ "path": "$HOME/.local/share/osu-wine/**" },
+				{ "path": "$HOME/.local/share/osu-stable/**" },
+				{ "path": "$HOME/osu!/**" },
+				{ "path": "$HOME/Games/osu!/**" },
+				{ "path": "$HOME/Applications/osu!.app/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles" },
+				{ "path": "$HOME/.wine/drive_c/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Application Support/osu-wine/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/Program Files/osu!/**"
+				}
+			]
 		},
 		{
-			"identifier": "fs:allow-temp-read",
-			"allow": [{ "path": "$TEMP/**" }]
+			"identifier": "fs:allow-read-text-file",
+			"allow": [
+				{ "path": "$HOME/Stosufy" },
+				{ "path": "$HOME/Stosufy/**" },
+				{ "path": "$LOCALDATA/osu!" },
+				{ "path": "$LOCALDATA/osu!/**" },
+				{ "path": "$HOME/.local/share/osu-wine/**" },
+				{ "path": "$HOME/.local/share/osu-stable/**" },
+				{ "path": "$HOME/osu!/**" },
+				{ "path": "$HOME/Games/osu!/**" },
+				{ "path": "$HOME/Applications/osu!.app/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles" },
+				{ "path": "$HOME/.wine/drive_c/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Application Support/osu-wine/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/Program Files/osu!/**"
+				}
+			]
 		},
 		{
-			"identifier": "fs:allow-temp-write",
-			"allow": [{ "path": "$TEMP/**" }]
+			"identifier": "fs:allow-exists",
+			"allow": [
+				{ "path": "$HOME/Stosufy" },
+				{ "path": "$HOME/Stosufy/**" },
+				{ "path": "$LOCALDATA/osu!" },
+				{ "path": "$LOCALDATA/osu!/**" },
+				{ "path": "$HOME/.local/share/osu-wine/**" },
+				{ "path": "$HOME/.local/share/osu-stable/**" },
+				{ "path": "$HOME/osu!/**" },
+				{ "path": "$HOME/Games/osu!/**" },
+				{ "path": "$HOME/Applications/osu!.app/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles" },
+				{ "path": "$HOME/.wine/drive_c/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Application Support/osu-wine/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/Program Files/osu!/**"
+				}
+			]
 		},
+		{
+			"identifier": "fs:allow-stat",
+			"allow": [
+				{ "path": "$HOME/Stosufy" },
+				{ "path": "$HOME/Stosufy/**" },
+				{ "path": "$LOCALDATA/osu!" },
+				{ "path": "$LOCALDATA/osu!/**" },
+				{ "path": "$HOME/.local/share/osu-wine/**" },
+				{ "path": "$HOME/.local/share/osu-stable/**" },
+				{ "path": "$HOME/osu!/**" },
+				{ "path": "$HOME/Games/osu!/**" },
+				{ "path": "$HOME/Applications/osu!.app/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles" },
+				{ "path": "$HOME/.wine/drive_c/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/Games/osu/prefix/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/users/*/AppData/Local/osu!/**" },
+				{ "path": "$HOME/.local/share/bottles/bottles/osu/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Application Support/osu-wine/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{ "path": "$HOME/Library/Application Support/osu-wine/drive_c/Program Files/osu!/**" },
+				{ "path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/osu!/**" },
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/users/*/AppData/Local/osu!/**"
+				},
+				{
+					"path": "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*/drive_c/Program Files/osu!/**"
+				}
+			]
+		},
+		{
+			"identifier": "fs:allow-mkdir",
+			"allow": [{ "path": "$HOME/Stosufy" }, { "path": "$HOME/Stosufy/**" }]
+		},
+		{
+			"identifier": "fs:allow-write-file",
+			"allow": [{ "path": "$HOME/Stosufy" }, { "path": "$HOME/Stosufy/**" }]
+		},
+		{
+			"identifier": "fs:allow-write-text-file",
+			"allow": [{ "path": "$HOME/Stosufy" }, { "path": "$HOME/Stosufy/**" }]
+		},
+		{
+			"identifier": "fs:allow-remove",
+			"allow": [{ "path": "$HOME/Stosufy" }, { "path": "$HOME/Stosufy/**" }]
+		},
+		{
+			"identifier": "fs:allow-rename",
+			"allow": [{ "path": "$HOME/Stosufy" }, { "path": "$HOME/Stosufy/**" }]
+		},
+		"dialog:allow-open",
 		"core:window:default",
 		"core:window:allow-start-dragging",
 		"core:window:allow-minimize",
