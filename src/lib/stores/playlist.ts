@@ -331,15 +331,14 @@ export async function getPlaylistSongs(
 		const responseDataPromises = responses.map((res) => res.json());
 		const responseData = await Promise.all(responseDataPromises);
 
-		let allBeatmaps: any[] = [];
+		// By id: big playlists (thousands of songs) would otherwise search the list per song
+		const beatmapsById = new Map<string, any>();
 		for (const data of responseData) {
-			if (data.beatmaps) {
-				allBeatmaps = [...allBeatmaps, ...data.beatmaps];
-			}
+			for (const beatmap of data.beatmaps ?? []) beatmapsById.set(String(beatmap.id), beatmap);
 		}
 
 		const enhancedSongs = playlistSongs.map((song) => {
-			const beatmap = allBeatmaps.find((bm) => bm.id?.toString() === song.map_id?.toString());
+			const beatmap = beatmapsById.get(String(song.map_id));
 
 			return {
 				id: song.id,

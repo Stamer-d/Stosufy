@@ -105,16 +105,12 @@ async function extractAudioFromBeatmap(
 	homeDir: string,
 	mapSetsDir: string
 ) {
+	let extractDir: string | null = null;
 	try {
 		// Report progress
 		self.postMessage({ type: 'progress', progress: 30, setId });
 
-		const extractDir = await fs.path.join(
-			homeDir,
-			'Stosufy',
-			'extract',
-			`osu-extract-${Date.now()}`
-		);
+		extractDir = await fs.path.join(homeDir, 'Stosufy', 'extract', `osu-extract-${Date.now()}`);
 		await fs.mkdir(extractDir);
 
 		// Write zip to file
@@ -317,6 +313,8 @@ async function extractAudioFromBeatmap(
 		return null;
 	} catch (error) {
 		console.error('Error in worker extractAudioFromBeatmap:', error);
+		// A failed download leaves no copy of the beatmap behind
+		if (extractDir) await fs.remove(extractDir).catch(() => {});
 		throw error;
 	}
 }

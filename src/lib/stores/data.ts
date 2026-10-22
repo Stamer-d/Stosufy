@@ -9,11 +9,11 @@ import {
 	exists,
 	mkdir,
 	BaseDirectory,
-	create,
 	readTextFile,
 	writeFile,
 	readFile,
-	remove
+	remove,
+	rename
 } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
@@ -32,6 +32,11 @@ const BACKFILL_REQUEST_DELAY = 2_000;
 const BACKFILL_RATE_LIMIT_DELAY = 60_000;
 
 export const mapDataStore = writable<Record<string, StoredMapSet>>({});
+/**
+ * Whether the song data was read: until then (or if it can't be read) nothing is saved, so
+ * an empty library never replaces the one on disk
+ */
+let mapDataReady = false;
 export const downloads = writable<Record<string, DownloadState>>({});
 
 (async function initialize() {
@@ -50,22 +55,48 @@ export const downloads = writable<Record<string, DownloadState>>({});
 			await mkdir(mapSetsDir, { baseDir: BaseDirectory.Home });
 		}
 
+		// Leftovers of downloads cut off by closing the app (each a whole beatmap); before
+		// the library loads, so no download has started yet
+		await remove(await path.join(homeDir, 'Stosufy', 'extract'), {
+			baseDir: BaseDirectory.Home,
+			recursive: true
+		}).catch(() => {});
+
 		// Create or load map data file
 		if (!(await exists(mapDataFile, { baseDir: BaseDirectory.Home }))) {
-			const file = await create(mapDataFile, { baseDir: BaseDirectory.Home });
-			file.write(new TextEncoder().encode('{}'));
-			file.close();
+			await writeTextFile(mapDataFile, '{}', { baseDir: BaseDirectory.Home });
 		} else {
-			const mapData = JSON.parse(await readTextFile(mapDataFile, { baseDir: BaseDirectory.Home }));
-			mapDataStore.set(mapData);
+			mapDataStore.set(await readMapData());
 			removeStoryboards();
 		}
+		mapDataReady = true;
 		setTimeout(backfillImages, BACKFILL_START_DELAY);
 		setTimeout(backfillDetails, BACKFILL_START_DELAY * 1.5);
 	} catch (error) {
 		console.error('Error initializing data store:', error);
 	}
 })();
+
+/**
+ * The saved song data. A file that can't be read (cut off by a crash while it was written)
+ * is kept as a copy, so the library can be recovered, and the app starts with an empty one.
+ */
+async function readMapData(): Promise<Record<string, StoredMapSet>> {
+	const text = await readTextFile(mapDataFile, { baseDir: BaseDirectory.Home });
+	try {
+		return JSON.parse(text);
+	} catch (error) {
+		console.error('The song data could not be read, a copy is kept:', error);
+		const copy = mapDataFile.replace(/\.json$/, `.broken-${Date.now()}.json`);
+		await writeTextFile(copy, text, { baseDir: BaseDirectory.Home }).catch(() => {});
+		showToast(
+			"Your downloaded songs' data couldn't be read. A copy was kept in the Songs folder.",
+			'icon-[mingcute--warning-line]',
+			10000
+		);
+		return {};
+	}
+}
 
 /** Storyboards were removed: frees the space of the ones saved before, once */
 async function removeStoryboards() {
@@ -114,11 +145,23 @@ async function writeMapData() {
 	saveTimer = null;
 	const waiters = saveWaiters;
 	saveWaiters = [];
-	saving = saving.then(() =>
-		writeTextFile(mapDataFile, JSON.stringify(get(mapDataStore)), {
-			baseDir: BaseDirectory.Home
-		}).catch((error) => console.error('Could not save the song data:', error))
-	);
+	saving = saving.then(async () => {
+		if (!mapDataReady) return;
+		// Written next to it and then put in its place: a crash while writing can't leave
+		// a cut off file (and with it an empty library)
+		const temporary = `${mapDataFile}.tmp`;
+		try {
+			await writeTextFile(temporary, JSON.stringify(get(mapDataStore)), {
+				baseDir: BaseDirectory.Home
+			});
+			await rename(temporary, mapDataFile, {
+				oldPathBaseDir: BaseDirectory.Home,
+				newPathBaseDir: BaseDirectory.Home
+			});
+		} catch (error) {
+			console.error('Could not save the song data:', error);
+		}
+	});
 	await saving;
 	waiters.forEach((resolve) => resolve());
 }
@@ -255,7 +298,31 @@ const downloadWorkers: Record<string, Worker> = {};
 /** The start of the error of a download without the session key (it's asked for instead) */
 const NO_KEY = 'Downloads need your osu_session key';
 
-export async function downloadBeatmap(
+/** Downloads under way, by set: asking again waits for the same one */
+const downloadsRunning = new Map<string, Promise<string>>();
+
+/**
+ * Downloads a beatmap set (or reads its song if it's downloaded) and returns the song's
+ * audio as base64
+ */
+export function downloadBeatmap(
+	mapSetData: MapSet,
+	mapId: number | string,
+	sessionKey?: string,
+	accessToken?: string,
+	options: { quiet?: boolean } = {}
+): Promise<string> {
+	const setId = mapSetData.id.toString();
+	const running = downloadsRunning.get(setId);
+	if (running) return running;
+	const download = runDownload(mapSetData, mapId, sessionKey, accessToken, options).finally(() =>
+		downloadsRunning.delete(setId)
+	);
+	downloadsRunning.set(setId, download);
+	return download;
+}
+
+async function runDownload(
 	mapSetData: MapSet,
 	mapId: number | string,
 	sessionKey?: string,
@@ -263,7 +330,6 @@ export async function downloadBeatmap(
 	{ quiet = false }: { quiet?: boolean } = {}
 ): Promise<string> {
 	const setId = mapSetData.id.toString();
-	if (downloadWorkers[setId]) return;
 	try {
 		const cachedAudio = await getCachedAudio(setId, mapId);
 		if (cachedAudio) {
@@ -309,9 +375,11 @@ export async function downloadBeatmap(
 		downloads.update((d) => ({ ...d, [setId]: { isDownloading: true, progress: 20 } }));
 		console.log(setId, mapId, 'Downloading beatmap...');
 		// Only statistics: a failing backend must not break the download
-		addSong(accessToken, parseInt(setId), parseInt(mapId.toString())).catch((error) =>
-			console.warn('Could not register the download:', error)
-		);
+		addSong(
+			accessToken || get(keyStore).access_token,
+			parseInt(setId),
+			parseInt(mapId.toString())
+		).catch((error) => console.warn('Could not register the download:', error));
 		const buffer = await response.arrayBuffer();
 		// .osz files are zip archives; anything else is usually the osu! login page
 		const magic = new Uint8Array(buffer, 0, Math.min(2, buffer.byteLength));
@@ -585,7 +653,7 @@ function setStoredFields(setId: string, change: Partial<StoredMapSet>) {
  */
 export async function fetchMissingVideos() {
 	if (['checking', 'downloading'].includes(get(videoFetch).state)) return;
-	const { access_token: token, sessionKey } = get(keyStore);
+	const { sessionKey } = get(keyStore);
 	const fail = (message: string) => videoFetch.update((s) => ({ ...s, state: 'error', message }));
 	try {
 		videoFetch.set({ state: 'checking', done: 0, total: 0 });
@@ -600,7 +668,7 @@ export async function fetchMissingVideos() {
 			const ids = batch.map((set) => Object.keys(set.beatmaps).find((id) => /^\d+$/.test(id)));
 			const response = await fetch(
 				`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${ids.join('&ids[]=')}`,
-				{ headers: { Authorization: `Bearer ${token}` } }
+				{ headers: { Authorization: `Bearer ${await freshToken()}` } }
 			);
 			if (!response.ok) return fail(`osu! API error (HTTP ${response.status})`);
 			const { beatmaps } = await response.json();
@@ -704,8 +772,8 @@ function queueVideoConversion(
 		const targetPath = removeSource
 			? sourcePath.replace(/\.[^.]+$/, '.mp4')
 			: await path.join(mapSetsDir, `${setId}-video.mp4`);
+		const ffmpeg = new FFmpeg();
 		try {
-			const ffmpeg = new FFmpeg();
 			await ffmpeg.load();
 			const input = `input.${sourcePath.split('.').pop()}`;
 			await ffmpeg.writeFile(input, await readFile(sourcePath, { baseDir: BaseDirectory.Home }));
@@ -729,7 +797,6 @@ function queueVideoConversion(
 				'output.mp4'
 			]);
 			const data = (await ffmpeg.readFile('output.mp4')) as Uint8Array;
-			ffmpeg.terminate();
 			if (!data.length) throw new Error('empty output');
 			await writeFile(targetPath, data, { baseDir: BaseDirectory.Home });
 			mapDataStore.update((all) =>
@@ -741,6 +808,7 @@ function queueVideoConversion(
 		} catch (error) {
 			console.warn('Could not convert the video of', setId, error);
 		} finally {
+			ffmpeg.terminate();
 			if (removeSource) {
 				await remove(sourcePath, { baseDir: BaseDirectory.Home }).catch(() => {});
 			}
@@ -767,37 +835,39 @@ export function ensureVideo(setId: string) {
 }
 
 async function convertToOpus(inputPath: string, targetPath: string) {
+	// Each FFmpeg is a worker with its own memory: ended when done, also after an error
 	const ffmpeg = new FFmpeg();
-	await ffmpeg.load();
-	const ext = inputPath.split('.').pop().toLowerCase();
-	const now = Date.now();
-	const inputFileName = `${now}.${ext}`;
+	try {
+		await ffmpeg.load();
+		const ext = inputPath.split('.').pop().toLowerCase();
+		const now = Date.now();
+		const inputFileName = `${now}.${ext}`;
 
-	const audioData = await readFile(inputPath);
+		const audioData = await readFile(inputPath);
 
-	await ffmpeg.writeFile(inputFileName, new Uint8Array(audioData));
-	await ffmpeg.exec([
-		'-i',
-		inputFileName,
-		'-c:a',
-		'libvorbis',
-		'-b:a',
-		'128k',
-		'-threads',
-		'4',
-		'-application',
-		'audio',
-		'-vn',
-		`${now}.opus`
-	]);
-	const data = (await ffmpeg.readFile(`${now}.opus`)) as Uint8Array;
-	await writeFile(targetPath, data, {
-		baseDir: BaseDirectory.Home
-	});
-	await ffmpeg.deleteFile(inputFileName);
-	await ffmpeg.deleteFile(`${now}.opus`);
-
-	return true;
+		await ffmpeg.writeFile(inputFileName, new Uint8Array(audioData));
+		await ffmpeg.exec([
+			'-i',
+			inputFileName,
+			'-c:a',
+			'libvorbis',
+			'-b:a',
+			'128k',
+			'-threads',
+			'4',
+			'-application',
+			'audio',
+			'-vn',
+			`${now}.opus`
+		]);
+		const data = (await ffmpeg.readFile(`${now}.opus`)) as Uint8Array;
+		await writeFile(targetPath, data, {
+			baseDir: BaseDirectory.Home
+		});
+		return true;
+	} finally {
+		ffmpeg.terminate();
+	}
 }
 
 async function updateMapsetData(mapsetData: MapSet) {
@@ -922,6 +992,7 @@ export function colorFromImage(url: string): Promise<string | null> {
 					const canvas = offscreenCanvas(16, 16);
 					const context = canvas.getContext('2d');
 					context.drawImage(bitmap, 0, 0, 16, 16);
+					bitmap.close();
 					const pixels = context.getImageData(0, 0, 16, 16).data;
 					let r = 0;
 					let g = 0;
