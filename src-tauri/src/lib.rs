@@ -1,6 +1,17 @@
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // First, so a second start hands over to the running app before anything else starts
+        // (with the deep-link feature it passes on its link, e.g. the login or an invite)
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -9,9 +20,6 @@ pub fn run() {
         // Remembers folders the user picked (e.g. the osu! Songs folder) across restarts
         .plugin(tauri_plugin_persisted_scope::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_single_instance::init(|_app, argv, _cwd| {
-          println!("a new app instance was opened with {argv:?} and the deep link event was already triggered");
-        }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())

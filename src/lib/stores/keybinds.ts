@@ -258,7 +258,17 @@ function accelerator(bind: string) {
 /** The global shortcuts that couldn't be set, e.g. because another app uses them */
 export const keybindErrors = writable<Partial<Record<KeybindAction, string>>>({});
 
-async function registerGlobal() {
+/**
+ * Sets the global shortcuts anew, one change after the other: two at once (recording a
+ * shortcut starts and ends quickly) would set the same shortcut twice and report it taken
+ */
+let registering: Promise<void> = Promise.resolve();
+function registerGlobal() {
+	registering = registering.then(setGlobalShortcuts, setGlobalShortcuts);
+	return registering;
+}
+
+async function setGlobalShortcuts() {
 	const wanted = get(recordingKeybind) ? {} : keybinds().global;
 	for (const shortcut of registered) await unregister(shortcut).catch(() => {});
 	registered = [];
