@@ -104,6 +104,17 @@ export async function attach(audio: HTMLMediaElement | null | undefined) {
 	}
 }
 
+/**
+ * Takes a song that won't play again out of the graph: a connected source keeps its element
+ * (and the whole song's data) alive for as long as the app runs
+ */
+export function detach(audio: HTMLMediaElement) {
+	for (const node of [sources.get(audio), volumes.get(audio), fades.get(audio)]) node?.disconnect();
+	sources.delete(audio);
+	volumes.delete(audio);
+	fades.delete(audio);
+}
+
 /** A song's volume and where its fade is when it gets routed (set by the mixer) */
 let routedLevels: (audio: HTMLMediaElement) => { volume: number; fade: number } = (audio) => ({
 	volume: audio.volume,

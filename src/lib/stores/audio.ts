@@ -8,7 +8,7 @@ import { sameSong } from '../tracks';
 import { offline } from './network';
 import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
 import { playableBytes } from '../audioDecode';
-import { attach, applyEq, eqSettings } from './equalizer';
+import { attach, applyEq, detach, eqSettings } from './equalizer';
 import { showToast } from './toast';
 import { librarySong, similarSongs } from './radio';
 import { setRPCActivity } from './discord';
@@ -115,16 +115,14 @@ const releasing = new Set<HTMLAudioElement>();
 /** Fades a song out quickly and stops it (instead of cutting it off) */
 function release(audio: HTMLAudioElement) {
 	if (releasing.has(audio)) return;
-	if (audio.paused) {
-		audio.pause();
-		untrack(audio);
-		return;
-	}
+	if (audio.paused) return discard(audio);
 	releasing.add(audio);
 	fadeTo(audio, 0, SWITCH_OUT_MS, (t) => 1 - (1 - t) ** 2).then(() => {
+		releasing.delete(audio);
+		// Still the current song when the next one couldn't be loaded: only stopped
+		if (get(songQueue).audio !== audio) return discard(audio);
 		audio.pause();
 		untrack(audio);
-		releasing.delete(audio);
 	});
 }
 
@@ -166,11 +164,15 @@ function localMapId(song: MapSet) {
  */
 let loadGeneration = 0;
 
-/** Throws away a song's audio that won't be played */
+/**
+ * Throws away a song's audio that won't be played (again): stopped, out of the mixer and
+ * the audio graph, and its data freed (a whole song each)
+ */
 function discard(audio: HTMLAudioElement | null | undefined) {
 	if (!audio) return;
 	audio.pause();
 	untrack(audio);
+	detach(audio);
 	if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src);
 }
 
@@ -603,8 +605,9 @@ let crossfadeId = 0;
 function finishCrossfade() {
 	crossfadeId++;
 	if (fadingOut) {
-		fadingOut.pause();
-		untrack(fadingOut);
+		// Still the current song if the crossfade's next song couldn't be loaded
+		if (get(songQueue).audio === fadingOut) fadingOut.pause();
+		else discard(fadingOut);
 		fadingOut = null;
 	}
 }
