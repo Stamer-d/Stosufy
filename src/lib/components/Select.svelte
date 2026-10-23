@@ -75,11 +75,11 @@
 
 <svelte:window onclick={handleWindowClick} />
 
-<div class="relative" bind:this={container}>
+<div class="relative max-w-full" bind:this={container}>
 	<button
 		type="button"
 		role="combobox"
-		class="h-10 flex items-center gap-2 pl-3 pr-2.5 rounded-lg bg-secondary-300 text-sm font-medium text-white whitespace-nowrap cursor-pointer transition hover:bg-secondary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 {open
+		class="h-10 max-w-full flex items-center gap-2 pl-3 pr-2.5 rounded-lg bg-secondary-300 text-sm font-medium text-white whitespace-nowrap cursor-pointer transition hover:bg-secondary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 {open
 			? 'bg-secondary-400'
 			: ''}"
 		aria-haspopup="listbox"
@@ -96,9 +96,10 @@
 			<span class="{icon} size-4 shrink-0 text-secondary-600"></span>
 		{/if}
 		{#if !hideLabel}
-			<span class="text-secondary-600">{label}:</span>
+			<span class="shrink-0 text-secondary-600">{label}:</span>
 		{/if}
-		<span>{selected.label}</span>
+		<!-- (a long one is cut short where the select has no more room) -->
+		<span class="min-w-0 truncate" title={selected.label}>{selected.label}</span>
 		<span
 			class="icon-[fa6-solid--chevron-down] size-3 shrink-0 text-secondary-600 transition-transform duration-150 {open
 				? 'rotate-180'
