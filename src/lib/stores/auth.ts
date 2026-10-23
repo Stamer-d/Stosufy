@@ -3,7 +3,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { load } from '@tauri-apps/plugin-store';
 import { goto } from '$app/navigation';
 import { user } from './user';
-import { getStosufyUser, API_URL } from '../api';
+import { getStosufyUser } from '../api';
 import type { Keys, User } from '../types';
 import { offline, isNetworkError, noteNetworkError, whenOnline } from './network';
 
@@ -15,11 +15,6 @@ export const keyStore = writable<Keys>({
 });
 
 const clientId = '40234';
-/**
- * Only for builds from before the Stamer API kept the secret: the login asks the API, which
- * holds it; this is used only while the API doesn't have it yet (and is gone from builds
- * made without it)
- */
 const clientSecret = import.meta.env.VITE_CLIENT_SECRET;
 const redirectUrl = 'stosufynew://callback';
 /** friends.read: to show what the user's osu! friends listen to */
@@ -103,37 +98,6 @@ export async function checkSessionKey(sessionKey: string): Promise<SessionKeyChe
 	};
 }
 
-/**
- * Asks for osu! tokens with the code of the login link or the refresh token: through the
- * Stamer API, which keeps the app's client secret, else osu! itself
- */
-async function tokenRequest(grant: { code: string } | { refresh_token: string }) {
-	try {
-		const response = await fetch(`${API_URL}stosufy/oauth/token`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(grant)
-		});
-		// Not set up there (503), not there yet (404) or in trouble: osu! itself, if this
-		// build can; what osu! turns down (401) is the answer
-		if (!clientSecret || (response.status < 500 && response.status !== 404)) return response;
-	} catch (error) {
-		if (!clientSecret) throw error;
-	}
-	return fetch('https://osu.ppy.sh/oauth/token', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			client_id: clientId,
-			client_secret: clientSecret,
-			...grant,
-			...('code' in grant
-				? { grant_type: 'authorization_code', redirect_uri: redirectUrl }
-				: { grant_type: 'refresh_token' })
-		})
-	});
-}
-
 let refreshing: Promise<any> | null = null;
 
 /**
@@ -148,7 +112,18 @@ export function refreshToken(refreshToken: string) {
 
 async function requestRefresh(refreshToken: string) {
 	try {
-		const response = await tokenRequest({ refresh_token: refreshToken });
+		const response = await fetch('https://osu.ppy.sh/oauth/token', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				client_id: clientId,
+				client_secret: clientSecret,
+				refresh_token: refreshToken,
+				grant_type: 'refresh_token'
+			})
+		});
 		if (!response.ok) {
 			return null;
 		}
@@ -229,7 +204,19 @@ export function authCode(link: string | undefined): string | null {
 
 export async function exchangeCode(code: string) {
 	try {
-		const response = await tokenRequest({ code });
+		const response = await fetch('https://osu.ppy.sh/oauth/token', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				client_id: clientId,
+				client_secret: clientSecret,
+				code: code,
+				grant_type: 'authorization_code',
+				redirect_uri: redirectUrl
+			})
+		});
 
 		if (!response.ok) {
 			throw new Error(`HTTP error! status: ${response.status}`);
