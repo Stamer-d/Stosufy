@@ -240,6 +240,9 @@
 		try {
 			const result = await fetchMaps(query, '', filters);
 			if (requestId !== searchRequestId) return;
+			// Replacing a list: start at its top again. Left scrolled down, the end of the new
+			// (shorter) list would be in view right away and load page after page up to there
+			if (allMaps.length) scrollToStart();
 			osuMapsSearch = result;
 			allMaps = result.beatmapsets ?? [];
 			searchError = null;
@@ -304,6 +307,21 @@
 
 	// The list scrolls inside the main panel, not the window
 	const scrollRoot = (element) => element.closest('[data-scroll-container]');
+
+	let discoverSectionEl = $state(null);
+
+	/** Scrolls back up to the start of the beatmaps (on the search page to the very top) */
+	function scrollToStart() {
+		const root = discoverSectionEl && scrollRoot(discoverSectionEl);
+		if (!root) return;
+		if (searchPage) {
+			root.scrollTop = 0;
+			return;
+		}
+		// On the home page only when scrolled past the start, so the sections above stay put
+		const offset = discoverSectionEl.getBoundingClientRect().top - root.getBoundingClientRect().top;
+		if (offset < 0) root.scrollTop += offset;
+	}
 
 	function isInView(element) {
 		const bottom = scrollRoot(element)?.getBoundingClientRect().bottom ?? window.innerHeight;
@@ -500,7 +518,7 @@
 {/snippet}
 
 {#snippet discoverSection()}
-	<section>
+	<section bind:this={discoverSectionEl}>
 		<div class="flex flex-wrap items-center gap-2 mb-4">
 			<h2 class="flex-1 text-xl font-bold tracking-tight">
 				{searchPage ? (search ? 'Beatmaps' : 'Popular beatmaps') : 'Discover beatmaps'}
