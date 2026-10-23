@@ -76,7 +76,7 @@ function settings() {
 			(sound) => s.hitsoundParts?.[sound] === false
 		),
 		offset: s.hitsoundOffset ?? 0,
-		skinsFolder: s.skinsFolder ?? null
+		skinsFolder: s.osuFolder ?? s.skinsFolder ?? null
 	};
 }
 

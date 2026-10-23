@@ -89,12 +89,12 @@
 
 <section
 	use:songDrop={(song) => deck.userLoad(song)}
-	class="flex-1 min-w-0 flex flex-col gap-3 p-4 rounded-2xl bg-white/[0.035] ring-1 ring-white/[0.06] transition data-[dropping=true]:ring-2 data-[dropping=true]:ring-white/70 data-[dropping=true]:bg-white/[0.09]"
+	class="@container flex-1 min-w-0 flex flex-col gap-3 p-4 rounded-2xl bg-white/[0.035] ring-1 ring-white/[0.06] transition data-[dropping=true]:ring-2 data-[dropping=true]:ring-white/70 data-[dropping=true]:bg-white/[0.09]"
 >
 	<div class="flex items-center gap-4 {side === 'right' ? 'flex-row-reverse text-right' : ''}">
 		<!-- The record -->
 		<div
-			class="relative shrink-0 size-40 rounded-full bg-gradient-to-b from-zinc-700 to-zinc-950 ring-2 ring-black shadow-2xl shadow-black/60 cursor-grab active:cursor-grabbing touch-none select-none"
+			class="relative shrink-0 size-28 @sm:size-32 @md:size-40 rounded-full bg-gradient-to-b from-zinc-700 to-zinc-950 ring-2 ring-black shadow-2xl shadow-black/60 cursor-grab active:cursor-grabbing touch-none select-none"
 			role="slider"
 			aria-label="Record of deck {deck.id}: turn it to push or scrub"
 			aria-valuenow={0}
@@ -140,17 +140,27 @@
 				style="background: {color}">{deck.id}</span
 			>
 			{#if ds.song}
-				<p class="text-lg font-black leading-tight line-clamp-2">{ds.song.title}</p>
+				<p
+					class="text-base @md:text-lg font-black leading-tight line-clamp-2 [overflow-wrap:anywhere]"
+				>
+					{ds.song.title}
+				</p>
 				<p class="text-sm text-white/50 truncate">{ds.song.artist}</p>
 				{#if ds.loading}<p class="text-xs text-white/50 mt-1">Loading…</p>{/if}
 				{#if ds.error}<p class="text-xs text-red-400 mt-1">{ds.error}</p>{/if}
 			{:else}
 				<p class="text-white/50">Drag a song from the list onto this deck</p>
 			{/if}
-			<p class="mt-2 text-3xl font-black tabular-nums leading-none" style="color: {color}">
-				{bpm}<span class="text-xs text-white/40 font-bold ml-1">{bpm ? 'BPM' : ''}</span
+			<p
+				class="mt-2 flex flex-wrap items-baseline gap-x-1 gap-y-1 text-2xl @md:text-3xl font-black tabular-nums leading-none {side ===
+				'right'
+					? 'justify-end'
+					: ''}"
+				style="color: {color}"
+			>
+				{bpm}<span class="text-xs text-white/40 font-bold">{bpm ? 'BPM' : ''}</span
 				>{#if ds.key}<span
-						class="ml-2 align-middle px-1.5 py-0.5 rounded-md bg-white/10 text-xs font-bold text-white/70"
+						class="ml-1 self-center px-1.5 py-0.5 rounded-md bg-white/10 text-xs font-bold text-white/70"
 						title="The song's key (Camelot): neighbours on the wheel mix in harmony">{ds.key}</span
 					>{/if}
 			</p>

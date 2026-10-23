@@ -43,3 +43,11 @@ export function sameSong(a: MapSet | null | undefined, b: MapSet | null | undefi
 export function songKey(song: MapSet) {
 	return `${song.id}:${song.track ?? 0}`;
 }
+
+/** The artists of a song: collaborations ("feat.", "vs.", "×") count for each of them */
+export function artistsOf(artist: string) {
+	return artist
+		.split(/\s+(?:feat\.?|ft\.?|featuring|vs\.?|×)\s+/i)
+		.map((name) => name.trim())
+		.filter(Boolean);
+}

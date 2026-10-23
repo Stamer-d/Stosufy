@@ -194,7 +194,7 @@
 					{/if}
 					<Button class="flex-1 justify-center" on:click={chooseFolder}>
 						<span class="icon-[mingcute--folder-open-line] size-4"></span>
-						{detectedFolder ? 'Other folder' : 'Pick the osu! Songs folder'}
+						{detectedFolder ? 'Other osu! folder' : 'Pick your osu! folder'}
 					</Button>
 				</div>
 				<p class="mt-2 text-xs text-secondary-600">

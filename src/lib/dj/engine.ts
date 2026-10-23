@@ -272,6 +272,8 @@ export class Deck {
 	private curves: Curves | null = null;
 	private curvesRest = 0;
 	private echoMixUntil = 0;
+	/** Until when a play or pause by hand is still on its way to the timeline */
+	private settleAt = 0;
 	private onChange: () => void;
 	onPlay: () => void = () => {};
 	beforePlay: (deck: Deck) => void = () => {};
@@ -552,7 +554,7 @@ export class Deck {
 
 	/** Changes what plays from a moment on (anything planned after it is dropped) */
 	private change(change: Partial<Omit<Segment, 'at'>>, at = this.changeAt()) {
-		this.player?.change(at, { keyLock: this.keyLock, ...change });
+		return this.player?.change(at, { keyLock: this.keyLock, ...change });
 	}
 
 	/** Where the song is (s) at a time of the audio clock (now); in a loop, inside it */
@@ -575,7 +577,8 @@ export class Deck {
 		// Started by hand while synced: on the other deck's beat
 		if (when === undefined) this.beforePlay(this);
 		const at = when ?? this.ctx.currentTime + LEAD;
-		this.change({ playing: true, rate: this.liveRate, loop: this.loopRange() }, at);
+		const segment = this.change({ playing: true, rate: this.liveRate, loop: this.loopRange() }, at);
+		this.settleAt = segment?.at ?? at;
 		this.state = { ...this.state, playing: true };
 		this.onPlay();
 		this.emit();
@@ -584,7 +587,8 @@ export class Deck {
 	pause() {
 		if (!this.state.playing) return;
 		this.braking = false;
-		this.change({ playing: false });
+		const at = this.changeAt();
+		this.settleAt = this.change({ playing: false }, at)?.at ?? at;
 		this.state = { ...this.state, playing: false };
 		this.emit();
 	}
@@ -660,7 +664,9 @@ export class Deck {
 			this.change({ playing: false, input: this.state.duration }, now);
 			playing = false;
 		}
-		if (playing !== this.state.playing) {
+		// (played or paused by hand a moment ago: the timeline isn't there yet, and a deck that
+		// was just paused mustn't count as started again, which would stop the player)
+		if (playing !== this.state.playing && now >= this.settleAt) {
 			this.state = { ...this.state, playing };
 			if (playing) this.onPlay();
 			else this.braking = false;

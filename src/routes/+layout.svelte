@@ -12,6 +12,8 @@
 	import { beforeNavigate, afterNavigate } from '$app/navigation';
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import { flushMapData } from '#lib/stores/data.ts';
+	import { flushHistory } from '#lib/stores/history.ts';
+	import { startMediaSession } from '#lib/stores/mediaSession.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
@@ -42,17 +44,18 @@
 	const scrolled = new Map();
 	beforeNavigate(({ from, to }) => {
 		// Going somewhere leaves the focus and DJ modes (they'd cover the page)
-		if (to?.url && from?.url.pathname !== to.url.pathname) {
+		if (to?.url && from?.url?.pathname !== to.url.pathname) {
 			focusMode.set(false);
 			djOpen.set(false);
 		}
-		if (from && scroller) scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
+		if (from?.url && scroller)
+			scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
 	});
 	afterNavigate(({ from, to, type }) => {
 		if (!scroller || !to) return;
 		const restore = type === 'popstate' ? scrolled.get(to.url.pathname + to.url.search) : 0;
 		// Only a new page, not a change of the same page's address (like a search)
-		if (type !== 'popstate' && from?.url.pathname === to.url.pathname) return;
+		if (type !== 'popstate' && from?.url?.pathname === to.url.pathname) return;
 		requestAnimationFrame(() => {
 			if (scroller) scroller.scrollTop = restore ?? 0;
 		});
@@ -105,6 +108,8 @@
 	}
 
 	onMount(async () => {
+		// The song in the system's media controls (Windows' overlay, the lock screen)
+		startMediaSession();
 		startBeatEffects();
 		startKeybinds();
 		startSettingsSync();
@@ -121,7 +126,7 @@
 		// Friends see you go offline right away instead of after a few minutes
 		getCurrentWindow()
 			.onCloseRequested(async () => {
-				await Promise.all([goOffline(), flushMapData()]);
+				await Promise.all([goOffline(), flushMapData(), flushHistory()]);
 			})
 			.catch(() => {});
 		await startTokenRefresh();

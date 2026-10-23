@@ -42,6 +42,8 @@
 	import DesktopCanvas from './DesktopCanvas.svelte';
 	import WidgetStore from './WidgetStore.svelte';
 	import MapperLink from './MapperLink.svelte';
+	import MixCover from './MixCover.svelte';
+	import { recentlyPlayed, dailyMixes, forgottenFavourites } from '#lib/stores/mixes.ts';
 
 	let editingWidgets = $state(false);
 	// The gameplay of the song on the desktop, like osu!'s autoplay
@@ -49,6 +51,11 @@
 	let widgetsInGameplay = $derived($userSettings.settings?.widgetsInGameplay ?? true);
 	const toggleGameplay = () => updateUserSettings({ gameplay: !gameplayOn });
 	let widgetStoreOpen = $state(false);
+	// The widgets make way when you play yourself (unless they're being edited)
+	let widgetsShown = $derived(
+		!$focusMode &&
+			(!gameplayOn || !$currentSong.song || editingWidgets || (widgetsInGameplay && !$playingLive))
+	);
 
 	// The desktop controls only show while the mouse moves over the desktop, like on macOS,
 	// so they don't sit on top of the widgets
@@ -96,9 +103,9 @@
 		controlsTimer = setTimeout(() => (controlsActive = false), CONTROLS_HIDE_DELAY);
 	}
 	import { wallpaper } from '#lib/stores/home.ts';
-	import { DEFAULT_HOME } from '#lib/stores/user.ts';
+	import { homeSettings as withSections } from '#lib/stores/user.ts';
 
-	let homeSettings = $derived({ ...DEFAULT_HOME, ...$userSettings.settings?.home });
+	let homeSettings = $derived(withSections($userSettings.settings?.home));
 
 	let hero = $derived($wallpaper);
 	let heroPlaying = $derived(sameSong($currentSong.song, hero.song) && $currentSong.isPlaying);
@@ -113,6 +120,18 @@
 
 	// Newest downloads first
 	let downloadedSongs = $derived(formatSongData($mapDataStore).reverse());
+	// What was heard last; the newest downloads until there's a history
+	let recentPlayed = $derived($recentlyPlayed.length >= 3);
+	let recentSongs = $derived(recentPlayed ? $recentlyPlayed : downloadedSongs);
+
+	function playRecent(song) {
+		if (!recentPlayed) return playDownloaded(song);
+		const index = $recentlyPlayed.findIndex((s) => sameSong(s, song));
+		setSongQueue(index, $recentlyPlayed, 'playlist', 'mix:recent');
+	}
+
+	let mixes = $derived([...$dailyMixes, ...($forgottenFavourites ? [$forgottenFavourites] : [])]);
+	const playMix = (mix) => setSongQueue(0, mix.songs, 'playlist', `mix:${mix.id}`);
 
 	function playDownloaded(song) {
 		// Play it within the "Downloaded Songs" playlist (sorted oldest first, like that page)
@@ -391,19 +410,21 @@
 {/snippet}
 
 {#snippet recentSection()}
-	{#if downloadedSongs.length}
+	{#if recentSongs.length}
 		<section>
 			<div class="flex items-baseline justify-between mb-3">
-				<h2 class="text-xl font-bold tracking-tight">Recently downloaded</h2>
+				<h2 class="text-xl font-bold tracking-tight">
+					{recentPlayed ? 'Recently played' : 'Recently downloaded'}
+				</h2>
 				<a
-					href="/playlist/-1"
+					href={recentPlayed ? '/wrapped' : '/playlist/-1'}
 					class="text-sm font-semibold text-secondary-600 hover:text-white hover:underline"
 				>
-					Show all
+					{recentPlayed ? 'Your Wrapped' : 'Show all'}
 				</a>
 			</div>
 			<div class="grid grid-cols-3 xl:grid-cols-6 gap-4">
-				{#each downloadedSongs.slice(0, 6) as song, index (songKey(song))}
+				{#each recentSongs.slice(0, 6) as song, index (songKey(song))}
 					{@const playingThis = sameSong($currentSong.song, song) && $currentSong.isPlaying}
 					<div class="group min-w-0 {index >= 3 ? 'hidden xl:block' : ''}">
 						<div class="relative aspect-square rounded-md overflow-hidden mb-2">
@@ -418,7 +439,7 @@
 								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
 									? 'opacity-100'
 									: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
-								onclick={() => (playingThis ? togglePlayback() : playDownloaded(song))}
+								onclick={() => (playingThis ? togglePlayback() : playRecent(song))}
 							>
 								<span
 									class="{playingThis
@@ -431,6 +452,46 @@
 							{song.title}
 						</p>
 						<p class="text-sm text-secondary-600 truncate">{song.artist}</p>
+					</div>
+				{/each}
+			</div>
+		</section>
+	{/if}
+{/snippet}
+
+{#snippet mixesSection()}
+	{#if mixes.length}
+		<section>
+			<h2 class="text-xl font-bold tracking-tight mb-3">Made for you</h2>
+			<div class="grid grid-cols-3 xl:grid-cols-5 gap-4">
+				{#each mixes as mix, index (mix.id)}
+					{@const playingThis = $songQueue.playlistId === `mix:${mix.id}` && $currentSong.isPlaying}
+					<div class="group min-w-0 {index >= 3 ? 'hidden xl:block' : ''}">
+						<div class="relative mb-2">
+							<a href="/mix/{mix.id}" class="block" aria-label="Open {mix.title}">
+								<MixCover songs={mix.songs} class="aspect-square rounded-md" />
+							</a>
+							<button
+								aria-label="Play {mix.title}"
+								class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {playingThis
+									? 'opacity-100'
+									: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
+								onclick={() => (playingThis ? togglePlayback() : playMix(mix))}
+							>
+								<span
+									class="{playingThis
+										? 'icon-[mingcute--pause-fill]'
+										: 'icon-[mingcute--play-fill]'} size-5"
+								></span>
+							</button>
+						</div>
+						<a
+							href="/mix/{mix.id}"
+							class="block font-semibold text-sm truncate hover:underline {playingThis
+								? 'text-primary-500'
+								: ''}">{mix.title}</a
+						>
+						<p class="text-sm text-secondary-600 line-clamp-2">{mix.description}</p>
 					</div>
 				{/each}
 			</div>
@@ -641,11 +702,11 @@
 				<div class="absolute inset-0 bg-black/45"></div>
 				<!-- (playing it yourself, it fills the window instead: PlayOverlay) -->
 				{#if !$playingLive && !$focusMode}
-					<Gameplay class="absolute inset-0" />
+					<!-- (its label would be under the widgets) -->
+					<Gameplay class="absolute inset-0" hideLabel={widgetsShown} />
 				{/if}
 			{/if}
-			<!-- The widgets make way when you play yourself (unless they're being edited) -->
-			{#if !$focusMode && (!gameplayOn || !$currentSong.song || editingWidgets || (widgetsInGameplay && !$playingLive))}
+			{#if widgetsShown}
 				<DesktopCanvas editing={editingWidgets} />
 			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -722,6 +783,8 @@
 				{@render playlistsSection()}
 			{:else if section.id === 'recent'}
 				{@render recentSection()}
+			{:else if section.id === 'mixes'}
+				{@render mixesSection()}
 			{:else if section.id === 'discover'}
 				{@render discoverSection()}
 			{/if}
@@ -743,6 +806,8 @@
 				{@render playlistsSection()}
 			{:else if section.id === 'recent'}
 				{@render recentSection()}
+			{:else if section.id === 'mixes'}
+				{@render mixesSection()}
 			{:else if section.id === 'discover'}
 				{@render discoverSection()}
 			{/if}

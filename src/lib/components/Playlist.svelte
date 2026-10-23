@@ -17,6 +17,7 @@
 	} from '#lib/stores/playlist.ts';
 	import { offline, noteNetworkError } from '#lib/stores/network.ts';
 	import { favourites, likedPlaylist, loadFavourites, LIKED_ID } from '#lib/stores/favourites.ts';
+	import { smartPlaylists, createSmartPlaylist } from '#lib/stores/smartPlaylists.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import ContextMenu from './ContextMenu.svelte';
@@ -257,6 +258,17 @@
 						class="w-full flex items-center gap-3 px-3 py-2 rounded text-sm text-start hover:bg-secondary-400 cursor-pointer"
 						onclick={() => {
 							addMenuOpen = false;
+							goto(`/smart/${createSmartPlaylist().id}?edit`);
+						}}
+					>
+						<span class="icon-[mingcute--magic-2-line] size-[18px] text-secondary-600"></span>
+						New smart playlist
+					</button>
+					<button
+						role="menuitem"
+						class="w-full flex items-center gap-3 px-3 py-2 rounded text-sm text-start hover:bg-secondary-400 cursor-pointer"
+						onclick={() => {
+							addMenuOpen = false;
 							$profileImportOpen = true;
 						}}
 					>
@@ -338,6 +350,38 @@
 				</ContextMenu>
 			</li>
 		{/each}
+		{#if $smartPlaylists.length}
+			<li class="px-2 pt-4 pb-1 text-xs font-bold uppercase tracking-wide text-secondary-600">
+				Smart playlists
+			</li>
+			{#each $smartPlaylists as smart (smart.id)}
+				{@const isActive = page.url?.pathname === `/smart/${smart.id}`}
+				<li>
+					<button
+						onclick={() => goto(`/smart/${smart.id}`)}
+						aria-current={isActive ? 'page' : undefined}
+						class="w-full flex items-center gap-3 p-2 rounded-md text-start cursor-pointer transition {isActive
+							? 'bg-secondary-300'
+							: 'hover:bg-secondary-200'}"
+					>
+						<span
+							class="size-12 shrink-0 grid place-items-center rounded-md bg-gradient-to-br from-primary-300 to-primary-700"
+						>
+							<span class="icon-[mingcute--magic-2-line] size-6 text-white/90"></span>
+						</span>
+						<span class="min-w-0">
+							<span class="block font-semibold truncate {isActive ? 'text-primary-500' : ''}"
+								>{smart.title}</span
+							>
+							<span class="block text-sm text-secondary-600 truncate">
+								Smart playlist · {smart.rules.length}
+								{smart.rules.length === 1 ? 'rule' : 'rules'}
+							</span>
+						</span>
+					</button>
+				</li>
+			{/each}
+		{/if}
 		{#if $savedPlaylists.length}
 			<li class="px-2 pt-4 pb-1 text-xs font-bold uppercase tracking-wide text-secondary-600">
 				Saved

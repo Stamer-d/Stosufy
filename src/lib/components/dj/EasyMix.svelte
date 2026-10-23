@@ -90,11 +90,12 @@
 	const percent = (change) => `${change >= 0 ? '+' : ''}${(change * 100).toFixed(1)}%`;
 </script>
 
+<!-- Under the decks (narrow windows) the big button sits left of the rest -->
 <section
-	class="shrink-0 w-[19rem] flex flex-col items-center gap-3 p-4 rounded-2xl bg-white/[0.035] ring-1 ring-white/[0.06]"
+	class="w-full lg:w-[19rem] grid grid-cols-[auto_minmax(0,1fr)] [grid-auto-flow:dense] items-center gap-x-6 gap-y-3 lg:flex lg:flex-col lg:items-center lg:gap-3 p-4 rounded-2xl bg-white/[0.035] ring-1 ring-white/[0.06]"
 >
 	{#if mix.transition}
-		<div class="text-center">
+		<div class="col-start-2 lg:col-auto lg:text-center">
 			<span class="px-3 py-1 rounded-full text-sm font-black text-violet-200 bg-violet-400/15"
 				>{typeName(mix.transition.type)}</span
 			>
@@ -102,7 +103,7 @@
 		</div>
 	{:else if plan}
 		{@const fit = FIT[plan.fit.rating]}
-		<div class="text-center" title={fit.tip}>
+		<div class="col-start-2 lg:col-auto lg:text-center" title={fit.tip}>
 			<span class="px-3 py-1 rounded-full text-sm font-black {fit.class}">{fit.label}</span>
 			<p class="mt-2 text-xs text-white/50">
 				{#if plan.beatmatch && Math.abs(plan.rateB - 1) > 0.001}
@@ -115,7 +116,7 @@
 			</p>
 		</div>
 	{:else}
-		<p class="text-center text-sm text-white/50 px-2 pt-2">
+		<p class="col-start-2 lg:col-auto lg:text-center text-sm text-white/50 lg:px-2 lg:pt-2">
 			{#if !mix.A.duration && !mix.B.duration}
 				Drag a song onto a deck and press play
 			{:else if !lead}
@@ -129,7 +130,7 @@
 	<!-- The big button -->
 	{#if mix.transition}
 		<button
-			class="relative size-40 rounded-full grid place-items-center cursor-pointer"
+			class="col-start-1 row-start-1 row-span-6 lg:row-auto lg:col-auto relative size-40 rounded-full grid place-items-center cursor-pointer"
 			title="Stop the mix: before the swap the new song goes again, after it the old one does"
 			onclick={() => mixer.cancelMix()}
 		>
@@ -167,7 +168,7 @@
 		<button
 			disabled={!ready}
 			title={ready ? `Mix from ${lead} to ${target}` : 'Play one deck and load a song on the other'}
-			class="size-40 rounded-full grid place-items-center text-black font-black cursor-pointer transition shadow-2xl disabled:cursor-default disabled:opacity-30 disabled:shadow-none hover:scale-[1.03] active:scale-95"
+			class="col-start-1 row-start-1 row-span-6 lg:row-auto lg:col-auto size-40 rounded-full grid place-items-center text-black font-black cursor-pointer transition shadow-2xl disabled:cursor-default disabled:opacity-30 disabled:shadow-none hover:scale-[1.03] active:scale-95"
 			style="background: {target
 				? `radial-gradient(circle at 30% 30%, white, ${colors[target]} 65%)`
 				: 'rgba(255,255,255,0.2)'}"
@@ -184,14 +185,19 @@
 	{/if}
 
 	{#if plan && !mix.transition}
-		<p class="text-xs text-center text-white/60 leading-relaxed" title={plan.options}>
+		<p
+			class="col-start-2 lg:col-auto text-xs lg:text-center text-white/60 leading-relaxed"
+			title={plan.options}
+		>
 			{plan.why}
 		</p>
 	{:else if mix.transition}
-		<p class="text-xs text-center text-white/60 leading-relaxed">{mix.transition.why}</p>
+		<p class="col-start-2 lg:col-auto text-xs lg:text-center text-white/60 leading-relaxed">
+			{mix.transition.why}
+		</p>
 	{/if}
 
-	<div class="flex flex-wrap justify-center gap-1">
+	<div class="col-start-2 lg:col-auto flex flex-wrap lg:justify-center gap-1">
 		{#each TRANSITIONS as transition (transition.id)}
 			<button
 				title={transition.description}
@@ -207,7 +213,7 @@
 		{/each}
 	</div>
 
-	<div class="flex gap-3 text-xs text-white/70">
+	<div class="col-start-2 lg:col-auto flex gap-3 text-xs text-white/70">
 		<label
 			class="flex items-center gap-1.5 cursor-pointer {mix.canKeyLock ? '' : 'opacity-40'}"
 			title={mix.canKeyLock
@@ -237,7 +243,7 @@
 		</label>
 	</div>
 
-	<div class="mt-auto w-full flex items-center gap-2">
+	<div class="col-start-2 lg:col-auto mt-auto w-full flex items-center gap-2">
 		<span class="text-xs font-black" style="color: {colors.A}">A</span>
 		<Fader
 			vertical={false}

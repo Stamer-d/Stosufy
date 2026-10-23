@@ -1,5 +1,4 @@
 <script>
-	import { open } from '@tauri-apps/plugin-dialog';
 	import { open as openUrl } from '@tauri-apps/plugin-shell';
 	import Range from './Range.svelte';
 	import Select from './Select.svelte';
@@ -7,6 +6,7 @@
 	import HitsoundParts from './HitsoundParts.svelte';
 	import { userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { hitsoundStatus } from '#lib/hitsounds/player.ts';
+	import { pickOsuFolder } from '#lib/stores/osuFolder.ts';
 	import {
 		listSkins,
 		osuSkinsDir,
@@ -25,6 +25,7 @@
 
 	$effect(() => {
 		settings.skinsFolder;
+		settings.osuFolder;
 		$skinsChanged;
 		osuSkinsDir().then((dir) => (osuFolder = dir));
 		listSkins().then((list) => (skins = list));
@@ -60,17 +61,9 @@
 		await removeSkin(id);
 	}
 
+	/** The osu! folder: its skins (and songs) come from there */
 	async function chooseFolder() {
-		const picked = await open({
-			title: 'Select your osu! Skins folder',
-			directory: true,
-			// Access to the skins inside it too, not just the folder itself
-			recursive: true,
-			defaultPath: osuFolder ?? undefined
-		});
-		if (typeof picked !== 'string') return;
-		updateUserSettings({ skinsFolder: picked });
-		skinsChanged.update((n) => n + 1);
+		if (await pickOsuFolder()) skinsChanged.update((n) => n + 1);
 	}
 
 	const STATUS = {
@@ -156,7 +149,9 @@
 			'Skin',
 			$skinTask.state === 'working'
 				? $skinTask.message
-				: 'Import any osu! skin (.osk) to hear its hitsounds',
+				: osuFolder
+					? 'Your osu! skins, or import any skin (.osk)'
+					: 'Import any osu! skin (.osk), or choose your osu! folder for its skins',
 			skinSelect
 		)}
 		{#if $skinTask.state === 'error'}
@@ -180,7 +175,7 @@
 				icon="icon-[mingcute--folder-open-line]"
 				on:click={chooseFolder}
 			>
-				{osuFolder ? 'Other osu! Skins folder' : 'osu! Skins folder'}
+				{osuFolder ? 'Other osu! folder' : 'Choose osu! folder'}
 			</Button>
 			<Button
 				type="normal"

@@ -1,3 +1,10 @@
+// The music player: the queue, the song that plays (an <audio> element through the mixer),
+// switching songs with fades and crossfades, the sleep timer and the radio.
+//
+// Every song change goes through loadSong(); what the app shows as playing follows the audio
+// element's own play and pause events, so it stays right whoever pauses it (the DJ mode, a
+// listening session, the end of the song).
+
 import { get, writable } from 'svelte/store';
 import { downloadBeatmap, mapDataStore, saveMapData } from './data';
 import { updateCurrentQueue, updateUserSettings, userSettings } from './user';
@@ -10,7 +17,7 @@ import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
 import { playableBytes } from '../audioDecode';
 import { attach, applyEq, detach, eqSettings } from './equalizer';
 import { showToast } from './toast';
-import { librarySong, similarSongs } from './radio';
+import { librarySong, radioSongs, afterSkip, RADIO_TOP_UP } from './radio';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
 import type {
@@ -33,20 +40,30 @@ export const focusMode = writable(false);
 /** Position of the current song, updated twice a second */
 export const playbackTime = writable({ current: 0, duration: 0 });
 
+/** How often the position is saved, so the next start goes on from there (s of the song) */
+const SAVE_POSITION_EVERY = 5;
+
 if (typeof window !== 'undefined') {
+	let savedAt = 0;
 	setInterval(() => {
-		const audio = get(songQueue).audio;
+		const { audio, type, playlistId } = get(songQueue);
 		const current = audio?.currentTime ?? 0;
 		const duration = audio?.duration || 0;
 		const previous = get(playbackTime);
 		if (previous.current !== current || previous.duration !== duration) {
 			playbackTime.set({ current, duration });
 		}
+		if (audio && type === 'playlist' && Math.abs(current - savedAt) >= SAVE_POSITION_EVERY) {
+			savedAt = current;
+			updateCurrentQueue({ currentSeconds: current || 0.001, playlistId });
+		}
 	}, 500);
 }
 
 const repeatMode = (): RepeatMode => get(userSettings).settings.repeat ?? 'off';
 const crossfadeSeconds = () => get(userSettings).settings?.crossfade ?? 0;
+
+// --- A song's audio ------------------------------------------------------------------------
 
 function bytesFromBase64(base64Data: string) {
 	const characters = atob(base64Data);
@@ -103,6 +120,88 @@ class OfflineError extends Error {
 	}
 }
 
+/**
+ * The difficulty whose song is saved locally, if the set is downloaded: songs from the
+ * beatmap search then play in full from the disk instead of the osu! preview
+ */
+function localMapId(song: MapSet) {
+	const stored = get(mapDataStore)[song.id];
+	if (!stored) return null;
+	const own = song.beatmaps?.find((map) => stored.beatmaps?.[map.id]?.audioFile)?.id;
+	return own ?? Object.values(stored.beatmaps ?? {}).find((map) => map.audioFile)?.id ?? null;
+}
+
+/**
+ * Throws away a song's audio that won't be played (again): stopped, out of the mixer and
+ * the audio graph, and its data freed (a whole song each)
+ */
+function discard(audio: HTMLAudioElement | null | undefined) {
+	if (!audio) return;
+	audio.pause();
+	untrack(audio);
+	detach(audio);
+	if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src);
+}
+
+/** The song's audio, loaded up to `currentSeconds` and ready to play */
+async function createAudio(song: MapSet, type: QueueType, currentSeconds = 0) {
+	let audio: HTMLAudioElement;
+	const mapId = localMapId(song);
+	const silent = fadeInNext || smoothIn;
+	if (type == 'preview' && !song.queued && mapId == null) {
+		audio = new Audio(`${song.preview_url}`);
+		track(audio, silent ? 0 : 1);
+	} else {
+		// Offline only downloaded songs can play
+		if (mapId == null && get(offline)) throw new OfflineError(song);
+		const playedMapId = mapId ?? song.beatmaps[0].id;
+		// Downloaded: straight from the file (no detour through the download, which also
+		// saved the whole library each time)
+		const localFile =
+			mapId != null ? get(mapDataStore)[song.id]?.beatmaps?.[mapId]?.audioFile : null;
+		const file = localFile
+			? await readFile(localFile, { baseDir: BaseDirectory.Home }).catch(() => null)
+			: null;
+		const bytes = file ?? bytesFromBase64(await downloadBeatmap(song, playedMapId));
+		// (Ogg as WAV where the web view can't play it: Safari's WebKit on macOS)
+		audio = new Audio(URL.createObjectURL(new Blob([await playableBytes(bytes)])));
+		track(audio, silent ? 0 : 1);
+		normalize(audio, song, playedMapId, bytes);
+	}
+	if (smoothIn && !fadeInNext) fadeInWhenPlaying(audio);
+	applyMod(audio);
+	audio.addEventListener('ended', () => {
+		// Ignore songs that were replaced in the meantime
+		if (get(songQueue).audio === audio) handleSongEnded();
+	});
+	audio.addEventListener('play', () => playingChanged(audio));
+	audio.addEventListener('pause', () => playingChanged(audio));
+	await new Promise<void>((resolve, reject) => {
+		audio.addEventListener('loadedmetadata', () => {
+			if (audio.duration > currentSeconds) {
+				audio.currentTime = currentSeconds;
+			}
+			resolve();
+		});
+		// A missing preview would otherwise keep waiting forever; callers skip the song
+		audio.addEventListener('error', () => reject(new Error(`Could not load ${song.title}`)), {
+			once: true
+		});
+	});
+	return audio;
+}
+
+/** The current song started or stopped: shown as playing or paused, also on Discord */
+function playingChanged(audio: HTMLAudioElement) {
+	if (get(songQueue).audio !== audio) return;
+	const playing = !audio.paused;
+	if (get(currentSong).isPlaying !== playing)
+		currentSong.update((cs) => ({ ...cs, isPlaying: playing }));
+	setRPCActivity(playing ? get(currentSong).song : null);
+}
+
+// --- Switching songs -----------------------------------------------------------------------
+
 // Set while the next song is loaded for a crossfade, so it starts silent
 let fadeInNext = false;
 // Set while the user switches songs: the old one fades out quickly, the new one fades in
@@ -143,18 +242,8 @@ function switchAway() {
 		smoothIn = true;
 		release(current.audio);
 	} else current?.audio?.pause();
+	currentSong.update((cs) => ({ ...cs, isPlaying: false }));
 	setRPCActivity(null);
-}
-
-/**
- * The difficulty whose song is saved locally, if the set is downloaded: songs from the
- * beatmap search then play in full from the disk instead of the osu! preview
- */
-function localMapId(song: MapSet) {
-	const stored = get(mapDataStore)[song.id];
-	if (!stored) return null;
-	const own = song.beatmaps?.find((map) => stored.beatmaps?.[map.id]?.audioFile)?.id;
-	return own ?? Object.values(stored.beatmaps ?? {}).find((map) => map.audioFile)?.id ?? null;
 }
 
 /**
@@ -164,62 +253,63 @@ function localMapId(song: MapSet) {
  */
 let loadGeneration = 0;
 
-/**
- * Throws away a song's audio that won't be played (again): stopped, out of the mixer and
- * the audio graph, and its data freed (a whole song each)
- */
-function discard(audio: HTMLAudioElement | null | undefined) {
-	if (!audio) return;
-	audio.pause();
-	untrack(audio);
-	detach(audio);
-	if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src);
+interface LoadOptions {
+	type: QueueType;
+	playlistId: PlaylistId | null;
+	/** Where the song starts (s) */
+	currentSeconds?: number;
+	/** Plays it once it's loaded (else it waits, paused) */
+	play?: boolean;
+	/**
+	 * A song that can't be loaded: the next one in this direction is tried (skipping through
+	 * the queue). Without it the user is told, and nothing changes.
+	 */
+	skipFailed?: 1 | -1;
 }
 
-async function getAudio(index: number, queue: MapSet[], type: QueueType, currentSeconds = 0) {
-	let audio: HTMLAudioElement = null;
-	const song = queue[index];
-	const mapId = localMapId(song);
-	if (type == 'preview' && !song.queued && mapId == null) {
-		audio = new Audio(`${song.preview_url}`);
-		track(audio, fadeInNext || smoothIn ? 0 : 1);
-	} else {
-		// Offline only downloaded songs can play
-		if (mapId == null && get(offline)) throw new OfflineError(song);
-		const playedMapId = mapId ?? song.beatmaps[0].id;
-		// Downloaded: straight from the file (no detour through the download, which also
-		// saved the whole library each time)
-		const localFile =
-			mapId != null ? get(mapDataStore)[song.id]?.beatmaps?.[mapId]?.audioFile : null;
-		const file = localFile
-			? await readFile(localFile, { baseDir: BaseDirectory.Home }).catch(() => null)
-			: null;
-		const bytes = file ?? bytesFromBase64(await downloadBeatmap(song, playedMapId));
-		// (Ogg as WAV where the web view can't play it: Safari's WebKit on macOS)
-		audio = new Audio(URL.createObjectURL(new Blob([await playableBytes(bytes)])));
-		track(audio, fadeInNext || smoothIn ? 0 : 1);
-		normalize(audio, song, playedMapId, bytes);
+/** Loads the song at `index` of `queue` and makes it the current song */
+async function loadSong(index: number, queue: MapSet[], options: LoadOptions): Promise<void> {
+	const { type, playlistId, currentSeconds = 0, play = true, skipFailed } = options;
+	const generation = ++loadGeneration;
+	let audio: HTMLAudioElement;
+	try {
+		audio = await createAudio(queue[index], type, currentSeconds).finally(() => (smoothIn = false));
+	} catch (error) {
+		if (generation !== loadGeneration) return;
+		if (skipFailed) {
+			const next = index + skipFailed;
+			if (next >= 0 && next < queue.length)
+				await loadSong(next, queue, { ...options, currentSeconds: 0 });
+			return;
+		}
+		if (error instanceof OfflineError) {
+			showToast(
+				`"${queue[index]?.title}" isn't downloaded, and you're offline`,
+				'icon-[mingcute--wifi-off-line]'
+			);
+			return;
+		}
+		console.error('Could not play', queue[index]?.title, error);
+		showToast(
+			`Couldn't play ${queue[index]?.title ?? 'this song'}`,
+			'icon-[mingcute--warning-line]'
+		);
+		return;
 	}
-	if (smoothIn && !fadeInNext) fadeInWhenPlaying(audio);
-	applyMod(audio);
-	audio.addEventListener('ended', () => {
-		// Ignore songs that were replaced in the meantime
-		if (get(songQueue).audio === audio) handleSongEnded();
+	if (generation !== loadGeneration) return discard(audio);
+	songQueue.set({ currentIndex: index, audio, queue, type, playlistId });
+	currentSong.set({ song: queue[index], isPlaying: false });
+	updateCurrentQueue({
+		index,
+		queue,
+		type,
+		playlistId,
+		currentSeconds: currentSeconds || 0.001
 	});
-	await new Promise<void>((resolve, reject) => {
-		audio.addEventListener('loadedmetadata', () => {
-			if (audio.duration > currentSeconds) {
-				audio.currentTime = currentSeconds;
-			}
-			resolve();
-		});
-		// A missing preview would otherwise keep waiting forever; callers skip the song
-		audio.addEventListener('error', () => reject(new Error(`Could not load ${song.title}`)), {
-			once: true
-		});
-	});
-	return audio;
+	if (play) startPlayback(audio);
 }
+
+// --- Locks ---------------------------------------------------------------------------------
 
 /**
  * While listening along in a session the host picks the songs: a lock set by listen.ts
@@ -253,6 +343,9 @@ function locked(quiet = false) {
 	return !!reason;
 }
 
+// --- Playing -------------------------------------------------------------------------------
+
+/** Plays `queue` from the song at `index` (or loads it paused, with `playSong` false) */
 export async function setSongQueue(
 	index: number,
 	queue: MapSet[],
@@ -262,8 +355,9 @@ export async function setSongQueue(
 	currentSeconds = 0
 ) {
 	if (locked()) return;
+	if (!queue[index]) return;
 	// Offline: on to the first downloaded song from there
-	if (get(offline) && index !== null && queue[index] && type !== 'preview') {
+	if (get(offline) && type !== 'preview') {
 		const playable = (i: number) => localMapId(queue[i]) != null;
 		if (!playable(index)) {
 			const next = [...queue.keys()].map((k) => (index + k) % queue.length).find(playable);
@@ -279,171 +373,71 @@ export async function setSongQueue(
 		}
 	}
 	switchAway();
-	currentSong.update((cs) => ({ ...cs, isPlaying: false }));
-	const generation = ++loadGeneration;
-	let audio: HTMLAudioElement;
-	if (index !== null) {
-		try {
-			audio = await getAudio(index, queue, type, currentSeconds).finally(() => (smoothIn = false));
-			if (generation !== loadGeneration) return discard(audio);
-		} catch (error) {
-			if (generation !== loadGeneration) return;
-			if (error instanceof OfflineError) {
-				showToast(
-					`"${queue[index]?.title}" isn't downloaded, and you're offline`,
-					'icon-[mingcute--wifi-off-line]'
-				);
-				return;
-			}
-			console.error('Could not play', queue[index]?.title, error);
-			showToast(
-				`Couldn't play ${queue[index]?.title ?? 'this song'}`,
-				'icon-[mingcute--warning-line]'
-			);
-			return;
-		}
-	}
-	songQueue.set({
-		currentIndex: index,
-		audio: audio,
-		queue: queue,
-		type: type,
-		playlistId: playlistId
-	});
-	currentSong.set({ song: queue[index], isPlaying: false });
-	updateCurrentQueue({ index, queue, type, playlistId, currentSeconds: currentSeconds });
-	if (playSong) togglePlayback();
+	await loadSong(index, queue, { type, playlistId, currentSeconds, play: playSong });
 	const shuffle = get(userSettings).settings.shuffle || false;
 	if (shuffle && currentSeconds == 0) await shuffleQueue();
 }
 
+/**
+ * The queue changed (a playlist was edited, shuffled, a search loaded more songs): the new
+ * one, without touching the song that plays. It stays the current song where it is in the
+ * new queue; `index` is where to go on from when it isn't in there (null: where it was).
+ */
 export async function updateSongQueue(
 	index: number | null,
 	queue?: MapSet[] | null,
 	type?: QueueType | null,
 	playlistId: PlaylistId | null = null
 ) {
-	if (!get(songQueue).queue || !get(currentSong).song) return;
 	const current = get(songQueue);
-	let audio: HTMLAudioElement;
-
-	const targetQueue = queue || current.queue;
-	const targetIndex = index;
-
-	if (
-		index != undefined &&
-		queue != undefined &&
-		type == 'playlist' &&
-		playlistId == get(songQueue).playlistId
-	) {
-		console.log('Updating song queue');
-	} else if (index !== null && targetIndex < targetQueue.length) {
-		const generation = ++loadGeneration;
-		try {
-			audio = await getAudio(targetIndex, targetQueue, type || current.type);
-			if (generation !== loadGeneration) return discard(audio);
-		} catch {
-			if (generation !== loadGeneration) return;
-			let newIndex;
-			if (get(songQueue).currentIndex < index) {
-				if (index < targetQueue.length - 1) {
-					newIndex = index + 1;
-				} else {
-					newIndex = 0;
-				}
-			} else {
-				newIndex = Math.max(0, index - 1);
-			}
-			await updateSongQueue(newIndex, queue, type, playlistId);
-			return;
-		}
-
-		currentSong.set({
-			song: targetQueue[targetIndex],
-			isPlaying: false
-		});
-	}
-
+	const song = get(currentSong).song;
+	if (!current.queue || !song) return;
+	const nextQueue = queue ?? current.queue;
+	const given = index ?? current.currentIndex ?? 0;
+	const found = sameSong(nextQueue[given], song)
+		? given
+		: nextQueue.findIndex((other) => sameSong(other, song));
+	const currentIndex = found >= 0 ? found : Math.min(given, Math.max(nextQueue.length - 1, 0));
 	songQueue.set({
-		currentIndex: targetIndex != undefined ? targetIndex : current.currentIndex,
-		audio: audio || current.audio,
-		queue: targetQueue,
-		type: type || current.type,
-		playlistId: playlistId || current.playlistId
+		...current,
+		currentIndex,
+		queue: nextQueue,
+		type: type ?? current.type,
+		playlistId: playlistId ?? current.playlistId
 	});
-
-	const newQueue = get(songQueue);
+	const next = get(songQueue);
 	updateCurrentQueue({
-		index: newQueue.currentIndex || 0,
-		queue: newQueue.queue,
-		type: newQueue.type,
-		playlistId: newQueue.playlistId,
-		currentSeconds: 0.001
+		index: currentIndex,
+		queue: nextQueue,
+		type: next.type,
+		playlistId: next.playlistId,
+		currentSeconds: current.audio?.currentTime || 0.001
 	});
 }
 
-export function stopPlayback(onlyPause = false) {
-	songQueue.update((current) => {
-		if (!current || !current.audio) return current;
-		// The song fading out of a crossfade keeps playing until the fade is done; stopping
-		// (or starting another song) ends the crossfade
-		if (current.audio !== fadingOut || !onlyPause) {
-			finishCrossfade();
-			current.audio.pause();
-		}
-		setRPCActivity(null);
-		if (!onlyPause) currentSong.update((cs) => ({ ...cs, isPlaying: false }));
-		return current;
-	});
+/** Plays the current song (it may first need the Nightcore beat ready) */
+function startPlayback(audio: HTMLAudioElement) {
+	// Playback starts with a click, so the Nightcore beat may create its audio now
+	if (get(userSettings).settings?.mod === 'NC') prepareBeats();
+	// (not played after all: shown as paused again)
+	audio.play().catch(() => playingChanged(audio));
+}
+
+export function stopPlayback() {
+	const audio = get(songQueue).audio;
+	if (!audio) return;
+	// Stopping ends a crossfade, the song fading out with it
+	finishCrossfade();
+	audio.pause();
+	currentSong.update((cs) => ({ ...cs, isPlaying: false }));
+	setRPCActivity(null);
 }
 
 export function togglePlayback() {
-	songQueue.update((current) => {
-		if (!current || !current.audio) return current;
-		if (current.audio.paused) {
-			// Playback starts with a click, so the Nightcore beat may create its audio now
-			if (get(userSettings).settings?.mod === 'NC') prepareBeats();
-			current.audio.play().then(() => {
-				currentSong.update((cs) => ({ ...cs, isPlaying: true }));
-			});
-			setRPCActivity(get(currentSong).song);
-
-			return current;
-		} else {
-			stopPlayback();
-
-			return current;
-		}
-	});
-}
-/** Loads and plays the song at `index` of `queue`, skipping songs that can't be loaded */
-async function playAt(index: number, queue: MapSet[], direction: 1 | -1 = 1) {
-	// A crossfade fades the old song itself
-	if (fadeInNext) stopPlayback(true);
-	else switchAway();
-	const generation = ++loadGeneration;
-	let audio: HTMLAudioElement;
-	try {
-		audio = await getAudio(index, queue, get(songQueue).type).finally(() => (smoothIn = false));
-		if (generation !== loadGeneration) return discard(audio);
-	} catch {
-		if (generation !== loadGeneration) return;
-		const next = index + direction;
-		if (next >= 0 && next < queue.length) await playAt(next, queue, direction);
-		return;
-	}
-	// The queue as it is now (it may have changed while the song loaded)
-	const current = get(songQueue);
-	songQueue.set({ ...current, currentIndex: index, audio, queue });
-	currentSong.set({ song: queue[index], isPlaying: false });
-	updateCurrentQueue({
-		index,
-		queue,
-		type: current.type,
-		playlistId: current.playlistId,
-		currentSeconds: 0.001
-	});
-	togglePlayback();
+	const audio = get(songQueue).audio;
+	if (!audio) return;
+	if (audio.paused) startPlayback(audio);
+	else stopPlayback();
 }
 
 /** Whether there is a song to skip forward to */
@@ -452,18 +446,37 @@ export function hasNext(queue: SongQueue, queuedSongs: MapSet[], repeat: RepeatM
 	return queuedSongs.length > 0 || queue.currentIndex < queue.queue.length - 1 || repeat === 'all';
 }
 
+/** Loads and plays the song at `index` of `queue`, skipping songs that can't be loaded */
+async function playAt(index: number, queue: MapSet[], direction: 1 | -1 = 1) {
+	// A crossfade fades the old song itself
+	if (!fadeInNext) switchAway();
+	const { type, playlistId } = get(songQueue);
+	await loadSong(index, queue, {
+		type: type ?? 'playlist',
+		playlistId: playlistId ?? null,
+		skipFailed: direction
+	});
+	if (type === 'radio') topUpRadio();
+}
+
 let isSkipping = false;
 
-export async function skipForward() {
-	if (locked()) return;
-	if (isSkipping) return; // Prevent concurrent skips
+/** Runs one skip at a time (quick clicks don't skip twice at once) */
+async function skipping(skip: () => Promise<void>) {
+	if (locked() || isSkipping) return;
 	isSkipping = true;
-
 	try {
+		await skip();
+	} finally {
+		isSkipping = false;
+	}
+}
+
+export function skipForward() {
+	return skipping(async () => {
 		const current = get(songQueue);
 		if (!current.queue?.length) return;
 		const [queuedSong, ...rest] = get(upNext);
-
 		if (queuedSong) {
 			// Play the queued song right after the current one, so "back" still works
 			upNext.set(rest);
@@ -472,34 +485,25 @@ export async function skipForward() {
 			await playAt(current.currentIndex + 1, queue);
 			return;
 		}
-
 		let next = current.currentIndex + 1;
 		if (next >= current.queue.length) {
 			if (repeatMode() !== 'all') return;
 			next = 0;
 		}
-		await playAt(next, current.queue);
-	} finally {
-		isSkipping = false;
-	}
+		await playAt(next, radioAfterSkip(current) ?? current.queue);
+	});
 }
 
-export async function skipBackward() {
-	if (locked()) return;
-	if (isSkipping) return; // Prevent concurrent skips
-	isSkipping = true;
-
-	try {
+export function skipBackward() {
+	return skipping(async () => {
 		const current = get(songQueue);
-
-		if (current.audio.currentTime > 2 || current.currentIndex === 0) {
+		if (!current.audio) return;
+		if (current.audio.currentTime > 2 || !current.currentIndex) {
 			current.audio.currentTime = 0;
 			return;
 		}
 		await playAt(current.currentIndex - 1, current.queue, -1);
-	} finally {
-		isSkipping = false;
-	}
+	});
 }
 
 /** Plays the song at `index` of the current queue (used by the queue panel) */
@@ -523,14 +527,12 @@ async function handleSongEnded() {
 	}
 	if (repeatMode() === 'one') {
 		current.audio.currentTime = 0;
-		current.audio.play();
+		startPlayback(current.audio);
 		return;
 	}
 	if (hasNext(current, get(upNext), repeatMode())) {
 		await skipForward();
-	} else if (await autoplay(current)) {
-		// Autoplay continues with similar songs
-	} else {
+	} else if (!(await autoplay(current))) {
 		// End of the queue: stop and rewind, so pressing play starts the song again
 		stopPlayback();
 		current.audio.currentTime = 0;
@@ -542,6 +544,8 @@ export function cycleRepeatMode() {
 	const next = order[(order.indexOf(repeatMode()) + 1) % order.length];
 	userSettings.update((u) => ({ ...u, settings: { ...u.settings, repeat: next } }));
 }
+
+// --- The queue -----------------------------------------------------------------------------
 
 /** Adds a song to the queue; `next` puts it in front of the other queued songs */
 export async function queueSong(song: MapSet, next = false) {
@@ -562,30 +566,31 @@ export function clearQueuedSongs() {
 	upNext.set([]);
 }
 
+/** The songs in a random order (every order as likely) */
+function shuffled<T>(items: T[]) {
+	const result = [...items];
+	for (let i = result.length - 1; i > 0; i--) {
+		const j = Math.floor(Math.random() * (i + 1));
+		[result[i], result[j]] = [result[j], result[i]];
+	}
+	return result;
+}
+
+/** Shuffles a playlist's queue, or puts it back in the playlist's order (as the setting is) */
 export async function shuffleQueue() {
 	const current = get(songQueue);
-	const shuffle = get(userSettings).settings.shuffle;
-	if (!current || !current.queue || current.queue.length === 0 || current.type != 'playlist')
-		return;
-
-	if (shuffle) {
-		const currentSongData = current.queue[current.currentIndex];
-		const shuffledQueue = [...current.queue].sort(() => Math.random() - 0.5);
-		const currentSongShuffledIndex = shuffledQueue.findIndex((song) =>
-			sameSong(song, currentSongData)
-		);
-		if (currentSongShuffledIndex > 0) {
-			shuffledQueue.splice(currentSongShuffledIndex, 1);
-			shuffledQueue.unshift(currentSongData);
-		}
-
-		await updateSongQueue(0, shuffledQueue, current.type, current.playlistId);
+	if (!current?.queue?.length || current.type != 'playlist') return;
+	const song = current.queue[current.currentIndex];
+	if (get(userSettings).settings.shuffle) {
+		// The song that plays first, the rest after it
+		const rest = current.queue.filter((_, i) => i !== current.currentIndex);
+		await updateSongQueue(0, [song, ...shuffled(rest)], current.type, current.playlistId);
 	} else {
 		const songs = get(playlistSongsCache)[current.playlistId]?.songs || [];
-		const currentSongData = current.queue[current.currentIndex];
-		const currentIndex = songs.findIndex((song) => sameSong(song, currentSongData));
+		// Not a playlist of the library (a mix, a friend's song): the order stays as it is
+		if (!songs.length) return;
 		// A queued song that isn't part of the playlist keeps playing; continue from the start
-		await updateSongQueue(Math.max(currentIndex, 0), songs, 'playlist', current.playlistId);
+		await updateSongQueue(0, songs, 'playlist', current.playlistId);
 	}
 }
 
@@ -744,18 +749,47 @@ if (typeof window !== 'undefined') {
 
 // --- Radio ------------------------------------------------------------------------------
 
+/** Skipped this early, the radio plays fewer songs like it (s) */
+const RADIO_SKIP_SECONDS = 30;
+
 /** Plays a song followed by similar songs from the library */
 export async function startRadio(song: MapSet) {
 	const seed = librarySong(song) ?? song;
-	await setSongQueue(0, [seed, ...similarSongs(seed)], 'radio');
+	await setSongQueue(0, [seed, ...radioSongs([seed])], 'radio');
 }
 
-/** At the end of a queue: keep playing songs similar to the last one, unless turned off */
+/** The songs a radio goes on from: its first song, and the last ones up to the current one */
+function radioSeeds(queue: MapSet[], index: number) {
+	const recent = queue.slice(Math.max(1, index - 2), index + 1).reverse();
+	return [queue[0], ...recent].filter(Boolean);
+}
+
+/** Near the end of a radio: more songs like it, after the others (so "back" still works) */
+function topUpRadio() {
+	const { queue, currentIndex, type } = get(songQueue);
+	if (type !== 'radio' || !queue?.length || currentIndex == null) return;
+	if (queue.length - currentIndex - 1 >= RADIO_TOP_UP) return;
+	const more = radioSongs(radioSeeds(queue, currentIndex), queue);
+	if (more.length) songQueue.update((q) => ({ ...q, queue: [...(q.queue ?? []), ...more] }));
+}
+
+/** A radio song skipped right away: the queue with the songs like it moved to the end */
+function radioAfterSkip(current: SongQueue) {
+	const { queue, currentIndex, audio, type } = current;
+	if (type !== 'radio' || !queue || currentIndex == null || !audio) return null;
+	if (audio.currentTime >= RADIO_SKIP_SECONDS) return null;
+	const upcoming = afterSkip(queue.slice(currentIndex + 1), queue[currentIndex]);
+	return [...queue.slice(0, currentIndex + 1), ...upcoming];
+}
+
+/** At the end of a queue: keep playing songs like the last ones, unless turned off */
 async function autoplay(current: SongQueue) {
-	const last = current.queue?.[current.currentIndex];
+	const queue = current.queue ?? [];
+	const last = queue[current.currentIndex];
 	if (get(userSettings).settings?.autoplay === false || !last || !librarySong(last)) return false;
-	// Don't repeat what was just played
-	const next = similarSongs(last, current.queue ?? []);
+	// Like the last few songs, the last one most; nothing that was just played
+	const recent = queue.slice(Math.max(0, current.currentIndex - 2), current.currentIndex + 1);
+	const next = radioSongs([last, ...recent.reverse().slice(1)], queue);
 	if (!next.length) return false;
 	await setSongQueue(0, next, 'radio');
 	showToast(`Autoplay: songs like "${last.title}"`, 'icon-[mingcute--radio-line]');

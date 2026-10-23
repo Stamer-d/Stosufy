@@ -1,6 +1,6 @@
 <script>
 	import SongCover from './SongCover.svelte';
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import {
 		togglePlayback,
 		skipForward,
@@ -12,28 +12,23 @@
 		cycleRepeatMode,
 		hasNext,
 		upNext,
-		queuePanelOpen
+		queuePanelOpen,
+		playbackTime
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
 	import { toggleLyrics } from '#lib/stores/keybinds.ts';
 	import HitsoundMenu from './HitsoundMenu.svelte';
 	import { page } from '$app/state';
-	import {
-		updateUserSettings,
-		userSettings,
-		updateCurrentQueue,
-		updateAppearance
-	} from '#lib/stores/user.ts';
+	import { updateUserSettings, userSettings, updateAppearance } from '#lib/stores/user.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { setVolume, toggleMute, DEFAULT_VOLUME, MAX_VOLUME } from '#lib/stores/mixer.ts';
 	import ModSelect from './ModSelect.svelte';
 	import SleepTimer from './SleepTimer.svelte';
 	import { isFavourite, toggleFavourite } from '#lib/stores/favourites.ts';
 
-	let currentTime = 0;
-	let duration = 0;
-	let updateInterval;
-	let lastUpdateTime = 0;
+	// The position, from the player (twice a second; it also saves it for the next start)
+	$: currentTime = $playbackTime.current;
+	$: duration = $playbackTime.duration;
 	// The volume lives in the settings (see mixer.ts); muted shows as 0
 	$: muted = $userSettings.settings?.muted ?? false;
 	$: volume = muted ? 0 : ($userSettings.settings?.volume ?? DEFAULT_VOLUME);
@@ -56,40 +51,7 @@
 		$songQueue.audio.currentTime = event.detail;
 	}
 
-	async function updateTimeDisplay() {
-		if (!$songQueue?.audio) return;
-		currentTime = $songQueue.audio.currentTime;
-		duration = $songQueue.audio.duration || 0;
-		const timeDifference = Math.abs(currentTime - lastUpdateTime);
-
-		if (timeDifference >= 5 && $songQueue.type === 'playlist') {
-			lastUpdateTime = currentTime;
-			updateCurrentQueue({
-				currentSeconds: currentTime || 0.001,
-				playlistId: $songQueue.playlistId
-			});
-		}
-	}
-
-	// Set up interval for time updates
-	async function setupTimeTracking() {
-		clearInterval(updateInterval);
-
-		if ($songQueue?.audio) {
-			// Regular updates
-			updateInterval = setInterval(async () => {
-				updateTimeDisplay();
-			}, 500);
-		}
-	}
-
-	// Track changes to currentlyPlaying and set up time tracking
-	$: if ($songQueue?.audio) {
-		setupTimeTracking();
-	}
-
 	onDestroy(async () => {
-		clearInterval(updateInterval);
 		if ($currentSong.isPlaying) {
 			stopPlayback();
 		}
@@ -109,7 +71,11 @@
 </script>
 
 {#if $currentSong?.song?.id}
-	<footer class="h-20 shrink-0 grid grid-cols-[1fr_minmax(0,40rem)_1fr] items-center gap-4 px-4">
+	<!-- The song keeps room for its title in narrow windows: the buttons on the right take only
+	     what they need until the window is wide enough for both sides alike -->
+	<footer
+		class="h-20 shrink-0 grid grid-cols-[minmax(13rem,1fr)_minmax(14rem,2fr)_auto] 2xl:grid-cols-[1fr_minmax(0,40rem)_1fr] items-center gap-4 px-4"
+	>
 		<div class="flex items-center gap-3 min-w-0">
 			<SongCover
 				setId={$currentSong.song.id}
@@ -141,7 +107,7 @@
 			{/if}
 		</div>
 
-		<div class="flex flex-col items-center gap-1.5">
+		<div class="w-full max-w-[40rem] mx-auto flex flex-col items-center gap-1.5">
 			<div class="flex items-center gap-4">
 				<button
 					disabled={$songQueue.type != 'playlist'}
@@ -224,7 +190,7 @@
 			</div>
 		</div>
 
-		<div class="flex items-center justify-end gap-2">
+		<div class="flex items-center justify-end gap-1 xl:gap-2">
 			<SleepTimer />
 			<ModSelect />
 			{#if hasVideo}
@@ -268,27 +234,32 @@
 					</span>
 				{/if}
 			</button>
-			<button
-				title={volume === 0 ? 'Unmute' : 'Mute'}
-				aria-label={volume === 0 ? 'Unmute' : 'Mute'}
-				aria-pressed={volume === 0}
-				class="{ICON_BUTTON} text-white/60 hover:text-white"
-				on:click={toggleMute}
-			>
-				<span
-					class="{volume === 0
-						? 'icon-[mingcute--volume-mute-line]'
-						: 'icon-[mingcute--volume-line]'} size-5"
-				></span>
-			</button>
-			<div class="w-28">
-				<Range
-					value={volume}
-					min={0}
-					max={MAX_VOLUME}
-					step={0.001}
-					on:change={(e) => setVolume(e.detail)}
-				/>
+			<!-- In narrow windows the volume opens above the button -->
+			<div class="relative group/volume flex items-center gap-2">
+				<button
+					title={volume === 0 ? 'Unmute' : 'Mute'}
+					aria-label={volume === 0 ? 'Unmute' : 'Mute'}
+					aria-pressed={volume === 0}
+					class="{ICON_BUTTON} text-white/60 hover:text-white"
+					on:click={toggleMute}
+				>
+					<span
+						class="{volume === 0
+							? 'icon-[mingcute--volume-mute-line]'
+							: 'icon-[mingcute--volume-line]'} size-5"
+					></span>
+				</button>
+				<div
+					class="w-28 max-xl:absolute max-xl:bottom-full max-xl:right-0 max-xl:mb-1 max-xl:p-3 max-xl:rounded-lg max-xl:bg-secondary-200 max-xl:shadow-xl max-xl:ring-1 max-xl:ring-white/5 max-xl:invisible max-xl:opacity-0 max-xl:group-hover/volume:visible max-xl:group-hover/volume:opacity-100 max-xl:group-focus-within/volume:visible max-xl:group-focus-within/volume:opacity-100 transition-opacity"
+				>
+					<Range
+						value={volume}
+						min={0}
+						max={MAX_VOLUME}
+						step={0.001}
+						on:change={(e) => setVolume(e.detail)}
+					/>
+				</div>
 			</div>
 		</div>
 	</footer>

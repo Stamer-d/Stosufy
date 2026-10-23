@@ -17,6 +17,8 @@
 	import { showToast } from '#lib/stores/toast.ts';
 
 	const COLORS = { A: '#38bdf8', B: '#fb923c' };
+	const HELP =
+		'Drag the waveforms to scrub, scroll to zoom · right-click a hot cue to clear it · Keys: Q/P play, A/L cue, 1–4/7–0 hot cues, Z/M sync, Space mix, ←→ crossfader';
 	const mixer = djMixer();
 	/** Easy (big decks, one mix button, effect pads) or Pro (all the controls) */
 	const MODES = [
@@ -130,25 +132,42 @@
 		<Titlebar />
 	</div>
 	{#if $dj}
-		<div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 px-3 pb-3">
-			<div class="flex items-center gap-3">
-				<h1 class="text-lg font-black tracking-tight">
+		<!-- (its parts keep their height: in a low window it scrolls instead of squeezing them) -->
+		<div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 px-3 pb-3 [&>*]:shrink-0">
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+				<h1 class="shrink-0 text-lg font-black tracking-tight">
 					<span class="icon-[mingcute--disc-line] size-5 align-[-3px] mr-1"></span>DJ
 				</h1>
-				<span class="text-xs text-white/40">
-					Drag the waveforms to scrub, scroll to zoom · right-click a hot cue to clear it · Keys:
-					Q/P play, A/L cue, 1–4/7–0 hot cues, Z/M sync, Space mix, ←→ crossfader
+				<!-- The tips: in a line when there's room, else behind a ? -->
+				<span class="hidden 2xl:block min-w-0 flex-1 truncate text-xs text-white/40" title={HELP}>
+					{HELP}
 				</span>
-				<div class="ml-auto flex items-center gap-2">
+				<div class="relative group/help 2xl:hidden">
+					<button
+						class="size-7 grid place-items-center rounded-full text-white/50 hover:text-white hover:bg-white/10 cursor-help"
+						aria-label="Tips and keys"
+						aria-describedby="dj-help"
+					>
+						<span class="icon-[mingcute--question-line] size-4"></span>
+					</button>
+					<p
+						id="dj-help"
+						role="tooltip"
+						class="absolute left-0 top-full mt-1 z-30 w-72 p-3 rounded-lg bg-zinc-900 ring-1 ring-white/10 shadow-xl text-xs leading-relaxed text-white/70 invisible opacity-0 group-hover/help:visible group-hover/help:opacity-100 group-focus-within/help:visible group-focus-within/help:opacity-100 transition-opacity"
+					>
+						{HELP}
+					</p>
+				</div>
+				<div class="ml-auto min-w-0 flex flex-wrap items-center justify-end gap-2">
 					{#if auto}
 						<div
-							class="flex items-center gap-2 h-8 pl-3 pr-1 rounded-full text-xs ring-1 {auto.mixing ||
+							class="min-w-0 max-w-full flex items-center gap-2 h-8 pl-3 pr-1 rounded-full text-xs ring-1 {auto.mixing ||
 							(auto.seconds != null && auto.seconds < 15)
 								? 'bg-amber-400/15 ring-amber-300/40 text-amber-100'
 								: 'bg-white/[0.06] ring-white/10 text-white/75'}"
 						>
-							<span class="font-black tracking-wide">AUTO DJ</span>
-							<span class="max-w-[28rem] truncate">
+							<span class="shrink-0 font-black tracking-wide whitespace-nowrap">AUTO DJ</span>
+							<span class="min-w-0 max-w-[28rem] truncate">
 								{#if auto.mixing}
 									Mixing into {auto.song?.title ?? 'the next song'}…
 								{:else if !auto.song}
@@ -162,14 +181,14 @@
 								{/if}
 							</span>
 							<button
-								class="h-6 px-2.5 rounded-full bg-white/10 hover:bg-white/20 font-bold cursor-pointer"
+								class="shrink-0 h-6 px-2.5 rounded-full bg-white/10 hover:bg-white/20 font-bold cursor-pointer"
 								title="Mix by hand: Auto DJ stops mixing on its own"
 								onclick={() => mixer.stopAuto()}>Off</button
 							>
 						</div>
 					{/if}
 					<div
-						class="flex p-1 rounded-full bg-white/[0.06] ring-1 ring-white/10"
+						class="shrink-0 flex p-1 rounded-full bg-white/[0.06] ring-1 ring-white/10"
 						role="group"
 						aria-label="Controls"
 					>
@@ -190,7 +209,7 @@
 					<button
 						title={$dj.recording ? 'Stop recording and save the mix' : 'Record the mix'}
 						aria-pressed={$dj.recording}
-						class="h-8 px-3 rounded-full text-xs font-black cursor-pointer ring-1 transition {$dj.recording
+						class="shrink-0 h-8 px-3 rounded-full text-xs font-black whitespace-nowrap cursor-pointer ring-1 transition {$dj.recording
 							? 'bg-red-500 ring-red-300 text-white'
 							: 'bg-white/[0.06] ring-white/10 text-white/80 hover:text-white'}"
 						onclick={() => {
@@ -207,11 +226,12 @@
 						{$dj.recording ? `REC ${clock($dj.recordedSeconds)}` : 'REC'}
 					</button>
 					<button
-						class="h-8 px-3 rounded-full text-xs font-bold bg-white/[0.06] ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer"
+						class="shrink-0 h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap bg-white/[0.06] ring-1 ring-white/10 text-white/80 hover:text-white cursor-pointer"
+						title="Leave DJ mode"
 						onclick={() => djOpen.set(false)}
 					>
 						<span class="icon-[mingcute--close-line] size-4 align-[-3px]"></span>
-						Leave DJ mode
+						<span class="max-lg:sr-only">Leave DJ mode</span>
 					</button>
 				</div>
 			</div>
@@ -222,8 +242,11 @@
 				<Waveform deck={mixer.decks.B} color={COLORS.B} height={96} />
 			</div>
 
+			<!-- In narrow windows both decks on top, the mixer under them -->
 			{#if pro}
-				<div class="flex gap-2 items-stretch">
+				<div
+					class="grid grid-cols-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 items-stretch"
+				>
 					<Deck
 						deck={mixer.decks.A}
 						other={mixer.decks.B}
@@ -231,7 +254,9 @@
 						color={COLORS.A}
 						side="left"
 					/>
-					<Mixer {mixer} state={$dj} colors={COLORS} />
+					<div class="col-span-2 order-last lg:col-span-1 lg:order-none flex justify-center">
+						<Mixer {mixer} state={$dj} colors={COLORS} />
+					</div>
 					<Deck
 						deck={mixer.decks.B}
 						other={mixer.decks.A}
@@ -241,7 +266,9 @@
 					/>
 				</div>
 			{:else}
-				<div class="flex gap-2 items-stretch">
+				<div
+					class="grid grid-cols-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 items-stretch"
+				>
 					<EasyDeck
 						deck={mixer.decks.A}
 						other={mixer.decks.B}
@@ -249,7 +276,9 @@
 						color={COLORS.A}
 						side="left"
 					/>
-					<EasyMix {mixer} state={$dj} colors={COLORS} />
+					<div class="col-span-2 order-last lg:col-span-1 lg:order-none flex">
+						<EasyMix {mixer} state={$dj} colors={COLORS} />
+					</div>
 					<EasyDeck
 						deck={mixer.decks.B}
 						other={mixer.decks.A}
