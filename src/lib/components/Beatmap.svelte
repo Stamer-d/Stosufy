@@ -1,11 +1,5 @@
 <script>
-	import {
-		songQueue,
-		togglePlayback,
-		currentSong,
-		updateSongQueue,
-		playbackTime
-	} from '#lib/stores/audio.ts';
+	import { songQueue, togglePlayback, currentSong, updateSongQueue } from '#lib/stores/audio.ts';
 	import {
 		downloadBeatmap,
 		deleteSong,
@@ -14,7 +8,7 @@
 		formatSongData,
 		colorFromString
 	} from '#lib/stores/data.ts';
-	import { beatmapStatus } from '#lib/beatmapStatus.ts';
+	import { beatmapStatus, difficultyColor } from '#lib/beatmapStatus.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import MapperLink from './MapperLink.svelte';
 
@@ -24,16 +18,11 @@
 	/** @type {import('#lib/types.ts').MapSet | null} */
 	export let playMap = null;
 
+	$: sortedBeatmaps = sortAndColorDifficulties(map.beatmaps);
 	$: status = beatmapStatus(map.status);
-	$: isCurrent = $currentSong.song?.id == map.id && $songQueue.type != 'playlist';
-	$: isPlaying = isCurrent && $currentSong.isPlaying;
+	$: isPlaying =
+		$currentSong.song?.id == map.id && $currentSong.isPlaying && $songQueue.type != 'playlist';
 	$: download = $downloads[map.id];
-	// How far the preview is (0–1), as a line under the cover
-	$: progress =
-		isCurrent && $playbackTime.duration ? $playbackTime.current / $playbackTime.duration : 0;
-	$: stars = (map.beatmaps ?? []).map((beatmap) => beatmap.difficulty_rating ?? 0);
-	$: lowest = stars.length ? Math.min(...stars) : 0;
-	$: highest = stars.length ? Math.max(...stars) : 0;
 	let coverFailed = false;
 
 	function startDownload(mapData, mapId) {
@@ -57,23 +46,31 @@
 		return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 	}
 
-	function playPreview() {
-		if (isCurrent) togglePlayback();
-		else playMap = map;
+	function sortAndColorDifficulties(beatmaps) {
+		if (!beatmaps) return [];
+		const beatmapsArray = Array.isArray(beatmaps) ? [...beatmaps] : Object.values(beatmaps);
+		return beatmapsArray
+			.sort((a, b) => a.difficulty_rating - b.difficulty_rating)
+			.map((beatmap) => ({
+				...beatmap,
+				difficultyColor: difficultyColor(beatmap.difficulty_rating)
+			}));
 	}
 </script>
 
-<article class="group min-w-0">
+<article
+	class="group relative rounded-lg overflow-hidden bg-secondary-200 hover:bg-secondary-300 transition-colors"
+>
 	<div
-		class="relative aspect-[20/7] overflow-hidden rounded-xl"
-		style="background-color: {colorFromString(map.title ?? '')}"
+		class="relative aspect-[400/140] overflow-hidden"
+		style="background-color: {colorFromString(map.title)}"
 	>
 		{#if !coverFailed}
 			<img
 				src="https://assets.ppy.sh/beatmaps/{map.id}/covers/card@2x.jpg"
 				alt=""
 				loading="lazy"
-				class="size-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
+				class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
 				on:error={() => (coverFailed = true)}
 			/>
 		{:else}
@@ -81,71 +78,67 @@
 				<span class="icon-[mingcute--music-2-fill] size-8 text-white/60"></span>
 			</div>
 		{/if}
-		<div
-			class="absolute inset-0 transition-colors duration-300 {isCurrent
-				? 'bg-black/25'
-				: 'bg-black/0 group-hover:bg-black/25'}"
-		></div>
+
+		<div class="absolute top-2 left-2 right-2 flex items-start justify-between gap-2">
+			<span class="px-1.5 py-0.5 rounded text-[11px] font-bold leading-none {status.badge}">
+				{status.label}
+			</span>
+			<span
+				class="px-1.5 py-0.5 rounded bg-black/60 text-[11px] font-semibold leading-none tabular-nums"
+			>
+				{convertTotalSecondsToTime(map.beatmaps[0].total_length)}
+			</span>
+		</div>
 
 		<button
 			aria-label={isPlaying ? `Pause preview of ${map.title}` : `Play preview of ${map.title}`}
-			class="absolute bottom-3 right-3 size-10 grid place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 cursor-pointer transition duration-200 hover:scale-105 {isCurrent
-				? 'opacity-100'
+			class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {isPlaying
+				? 'opacity-100 translate-y-0'
 				: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
-			on:click={playPreview}
+			on:click={() => {
+				if ($currentSong.song?.id == map.id && $songQueue.type != 'playlist') {
+					togglePlayback();
+				} else {
+					playMap = map;
+				}
+			}}
 		>
 			<span
 				class="{isPlaying ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-5"
 			></span>
 		</button>
-
-		{#if isCurrent}
-			<div class="absolute inset-x-0 bottom-0 h-0.5 bg-white/20">
-				<div class="h-full bg-white" style="width: {progress * 100}%"></div>
-			</div>
-		{/if}
-		{#if download?.isDownloading}
-			<div class="absolute inset-x-0 bottom-0 h-0.5 bg-white/20">
-				<div
-					class="h-full bg-primary-400 transition-[width] duration-200"
-					style="width: {download.progress || 0}%"
-				></div>
-			</div>
-		{/if}
 	</div>
 
-	<div class="mt-2.5 flex items-start gap-2">
+	<div class="p-3 flex gap-3 items-end">
 		<div class="min-w-0 flex-1">
-			<h3
-				class="font-semibold leading-snug truncate {isCurrent ? 'text-primary-500' : ''}"
-				title={map.title}
-			>
-				{map.title}
-			</h3>
+			<h3 class="font-semibold truncate {isPlaying ? 'text-primary-500' : ''}">{map.title}</h3>
 			<p class="text-sm text-secondary-600 truncate">{map.artist}</p>
-			<p class="mt-1 flex items-center gap-1.5 text-xs text-secondary-600 min-w-0">
-				<span class="size-1.5 shrink-0 rounded-full {status.dot}" title={status.label}></span>
+			<div class="mt-2 flex items-center gap-2 text-xs text-secondary-600 min-w-0">
 				<span class="truncate"
-					><MapperLink name={map.creator} id={map.user_id ?? map.creatorId} /></span
+					>by <MapperLink name={map.creator} id={map.user_id ?? map.creatorId} /></span
 				>
-				<span class="shrink-0">·</span>
-				<span class="shrink-0 tabular-nums"
-					>{convertTotalSecondsToTime(map.beatmaps?.[0]?.total_length ?? 0)}</span
-				>
-				{#if stars.length}
-					<span class="shrink-0">·</span>
+				{#if sortedBeatmaps.length}
 					<span
-						class="shrink-0 tabular-nums"
-						title="{stars.length} {stars.length === 1 ? 'difficulty' : 'difficulties'}"
+						class="flex items-center gap-0.5 shrink-0"
+						title="{sortedBeatmaps.length} difficulties"
 					>
-						{lowest.toFixed(1)}{highest - lowest >= 0.05 ? `–${highest.toFixed(1)}` : ''}★
+						{#each sortedBeatmaps.slice(0, 8) as beatmap (beatmap.id)}
+							<span
+								class="w-1.5 h-3 rounded-full ring-1 ring-black/30"
+								style="background-color: {beatmap.difficultyColor}"
+								title="{beatmap.version} ({beatmap.difficulty_rating?.toFixed(2)}★)"
+							></span>
+						{/each}
+						{#if sortedBeatmaps.length > 8}
+							<span class="ml-0.5">+{sortedBeatmaps.length - 8}</span>
+						{/if}
 					</span>
 				{/if}
-			</p>
+			</div>
 		</div>
 
 		{#if isDownloaded}
-			<div class="flex items-center shrink-0 -mr-1">
+			<div class="flex items-center shrink-0">
 				<button
 					title="Delete download"
 					aria-label="Delete download of {map.title}"
@@ -164,18 +157,11 @@
 					<span class="icon-[mingcute--check-circle-fill] size-5"></span>
 				</span>
 			</div>
-		{:else if download?.isDownloading}
-			<span
-				class="h-8 shrink-0 grid place-items-center text-xs font-semibold tabular-nums text-primary-500"
-				title="Downloading"
-			>
-				{Math.round(download.progress || 0)}%
-			</span>
-		{:else}
+		{:else if !download?.isDownloading}
 			<button
 				title="Download"
 				aria-label="Download {map.title}"
-				class="size-8 shrink-0 -mr-1 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer transition"
+				class="size-8 shrink-0 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-400 cursor-pointer transition"
 				on:click={async () => {
 					// Errors are shown as a toast by downloadBeatmap
 					await startDownload(map, map.beatmaps[0].id).catch(() => {});
@@ -183,6 +169,21 @@
 			>
 				<span class="icon-[mingcute--download-2-line] size-5"></span>
 			</button>
+		{:else}
+			<span
+				class="size-8 shrink-0 grid place-items-center text-xs font-semibold tabular-nums text-primary-500"
+			>
+				{Math.round(download.progress || 0)}%
+			</span>
 		{/if}
 	</div>
+
+	{#if download?.isDownloading}
+		<div class="absolute bottom-0 left-0 right-0 h-0.5 bg-secondary-400">
+			<div
+				class="h-full bg-primary-400 transition-all duration-200 ease-out"
+				style="width: {download.progress || 0}%;"
+			></div>
+		</div>
+	{/if}
 </article>
