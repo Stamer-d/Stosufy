@@ -7,10 +7,11 @@
 	 *   value: string,
 	 *   label: string,
 	 *   icon?: string,
+	 *   hideLabel?: boolean,
 	 *   onchange: (value: string) => void
 	 * }}
 	 */
-	let { options, value, label, icon = '', onchange } = $props();
+	let { options, value, label, icon = '', hideLabel = false, onchange } = $props();
 
 	let open = $state(false);
 	let activeIndex = $state(0);
@@ -94,7 +95,9 @@
 		{:else if icon}
 			<span class="{icon} size-4 shrink-0 text-secondary-600"></span>
 		{/if}
-		<span class="text-secondary-600">{label}:</span>
+		{#if !hideLabel}
+			<span class="text-secondary-600">{label}:</span>
+		{/if}
 		<span>{selected.label}</span>
 		<span
 			class="icon-[fa6-solid--chevron-down] size-3 shrink-0 text-secondary-600 transition-transform duration-150 {open

@@ -188,6 +188,8 @@ export interface Settings {
 	/** Show the widgets during autoplay and replays (never while playing yourself) */
 	widgetsInGameplay?: boolean;
 	home?: HomeSettings;
+	/** Playlists that fill themselves by rules (see smartPlaylists.ts) */
+	smartPlaylists?: import('./stores/smartPlaylists').SmartPlaylist[];
 	appearance?: AppearanceSettings;
 	/** Bring every song to the same loudness */
 	normalize?: boolean;
