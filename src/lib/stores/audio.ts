@@ -17,7 +17,7 @@ import { readFile, BaseDirectory } from '@tauri-apps/plugin-fs';
 import { playableBytes } from '../audioDecode';
 import { attach, applyEq, detach, eqSettings } from './equalizer';
 import { showToast } from './toast';
-import { librarySong, similarSongs } from './radio';
+import { librarySong, radioSongs, afterSkip, RADIO_TOP_UP } from './radio';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
 import type {
@@ -456,6 +456,7 @@ async function playAt(index: number, queue: MapSet[], direction: 1 | -1 = 1) {
 		playlistId: playlistId ?? null,
 		skipFailed: direction
 	});
+	if (type === 'radio') topUpRadio();
 }
 
 let isSkipping = false;
@@ -489,7 +490,7 @@ export function skipForward() {
 			if (repeatMode() !== 'all') return;
 			next = 0;
 		}
-		await playAt(next, current.queue);
+		await playAt(next, radioAfterSkip(current) ?? current.queue);
 	});
 }
 
@@ -746,18 +747,47 @@ if (typeof window !== 'undefined') {
 
 // --- Radio ------------------------------------------------------------------------------
 
+/** Skipped this early, the radio plays fewer songs like it (s) */
+const RADIO_SKIP_SECONDS = 30;
+
 /** Plays a song followed by similar songs from the library */
 export async function startRadio(song: MapSet) {
 	const seed = librarySong(song) ?? song;
-	await setSongQueue(0, [seed, ...similarSongs(seed)], 'radio');
+	await setSongQueue(0, [seed, ...radioSongs([seed])], 'radio');
 }
 
-/** At the end of a queue: keep playing songs similar to the last one, unless turned off */
+/** The songs a radio goes on from: its first song, and the last ones up to the current one */
+function radioSeeds(queue: MapSet[], index: number) {
+	const recent = queue.slice(Math.max(1, index - 2), index + 1).reverse();
+	return [queue[0], ...recent].filter(Boolean);
+}
+
+/** Near the end of a radio: more songs like it, after the others (so "back" still works) */
+function topUpRadio() {
+	const { queue, currentIndex, type } = get(songQueue);
+	if (type !== 'radio' || !queue?.length || currentIndex == null) return;
+	if (queue.length - currentIndex - 1 >= RADIO_TOP_UP) return;
+	const more = radioSongs(radioSeeds(queue, currentIndex), queue);
+	if (more.length) songQueue.update((q) => ({ ...q, queue: [...(q.queue ?? []), ...more] }));
+}
+
+/** A radio song skipped right away: the queue with the songs like it moved to the end */
+function radioAfterSkip(current: SongQueue) {
+	const { queue, currentIndex, audio, type } = current;
+	if (type !== 'radio' || !queue || currentIndex == null || !audio) return null;
+	if (audio.currentTime >= RADIO_SKIP_SECONDS) return null;
+	const upcoming = afterSkip(queue.slice(currentIndex + 1), queue[currentIndex]);
+	return [...queue.slice(0, currentIndex + 1), ...upcoming];
+}
+
+/** At the end of a queue: keep playing songs like the last ones, unless turned off */
 async function autoplay(current: SongQueue) {
-	const last = current.queue?.[current.currentIndex];
+	const queue = current.queue ?? [];
+	const last = queue[current.currentIndex];
 	if (get(userSettings).settings?.autoplay === false || !last || !librarySong(last)) return false;
-	// Don't repeat what was just played
-	const next = similarSongs(last, current.queue ?? []);
+	// Like the last few songs, the last one most; nothing that was just played
+	const recent = queue.slice(Math.max(0, current.currentIndex - 2), current.currentIndex + 1);
+	const next = radioSongs([last, ...recent.reverse().slice(1)], queue);
 	if (!next.length) return false;
 	await setSongQueue(0, next, 'radio');
 	showToast(`Autoplay: songs like "${last.title}"`, 'icon-[mingcute--radio-line]');

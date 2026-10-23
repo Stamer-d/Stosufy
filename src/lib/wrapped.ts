@@ -3,6 +3,7 @@
 // facts (the longest streak, the song on repeat, the new finds).
 
 import { counts, type History, type HistorySong } from './stores/history';
+import { artistsOf } from './tracks';
 
 export type Period = 'week' | 'month' | 'year' | 'all';
 
@@ -71,14 +72,6 @@ export interface Recap {
 	skips: number;
 	/** When the history begins (Unix time, s) */
 	since: number | null;
-}
-
-/** The artists of a song: collaborations ("feat.", "vs.", "×") count for each of them */
-export function artistsOf(artist: string) {
-	return artist
-		.split(/\s+(?:feat\.?|ft\.?|featuring|vs\.?|×)\s+/i)
-		.map((name) => name.trim())
-		.filter(Boolean);
 }
 
 const dayOf = (at: number) => {

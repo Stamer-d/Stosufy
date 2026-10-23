@@ -47,7 +47,8 @@
 			focusMode.set(false);
 			djOpen.set(false);
 		}
-		if (from?.url && scroller) scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
+		if (from?.url && scroller)
+			scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
 	});
 	afterNavigate(({ from, to, type }) => {
 		if (!scroller || !to) return;
