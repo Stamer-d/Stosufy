@@ -1,12 +1,19 @@
 <script>
-	import { songQueue, togglePlayback, currentSong, updateSongQueue } from '#lib/stores/audio.ts';
+	import {
+		songQueue,
+		togglePlayback,
+		currentSong,
+		updateSongQueue,
+		playbackTime
+	} from '#lib/stores/audio.ts';
 	import {
 		downloadBeatmap,
 		deleteSong,
 		downloads,
 		mapDataStore,
 		formatSongData,
-		colorFromString
+		colorFromString,
+		colorFromImage
 	} from '#lib/stores/data.ts';
 	import { beatmapStatus, difficultyColor } from '#lib/beatmapStatus.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
@@ -20,10 +27,26 @@
 
 	$: sortedBeatmaps = sortAndColorDifficulties(map.beatmaps);
 	$: status = beatmapStatus(map.status);
-	$: isPlaying =
-		$currentSong.song?.id == map.id && $currentSong.isPlaying && $songQueue.type != 'playlist';
+	$: isCurrent = $currentSong.song?.id == map.id && $songQueue.type != 'playlist';
+	$: isPlaying = isCurrent && $currentSong.isPlaying;
 	$: download = $downloads[map.id];
+	// How far the preview is (0–1), for the ring around the play button
+	$: progress =
+		isCurrent && $playbackTime.duration ? $playbackTime.current / $playbackTime.duration : 0;
 	let coverFailed = false;
+	let avatarFailed = false;
+
+	// The card takes the colour of its cover (a small copy of it, measured once)
+	let tint = colorFromString(map.title ?? '');
+	$: colorFromImage(`https://assets.ppy.sh/beatmaps/${map.id}/covers/list.jpg`).then((color) => {
+		if (color) tint = color;
+	});
+
+	$: stars = sortedBeatmaps.map((beatmap) => beatmap.difficulty_rating ?? 0);
+	$: lowest = stars.length ? Math.min(...stars) : 0;
+	$: highest = stars.length ? Math.max(...stars) : 0;
+
+	const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 
 	function startDownload(mapData, mapId) {
 		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
@@ -56,21 +79,37 @@
 				difficultyColor: difficultyColor(beatmap.difficulty_rating)
 			}));
 	}
+
+	function playPreview() {
+		if (isCurrent) togglePlayback();
+		else playMap = map;
+	}
 </script>
 
 <article
-	class="group relative rounded-lg overflow-hidden bg-secondary-200 hover:bg-secondary-300 transition-colors"
+	class="@container group relative rounded-xl overflow-hidden bg-secondary-200 ring-1 transition duration-300 ease-out hover:-translate-y-1 {isCurrent
+		? 'ring-2'
+		: 'ring-white/5 hover:ring-white/10'}"
+	style="--tint: {tint}; {isCurrent
+		? 'box-shadow: 0 14px 40px -14px var(--tint); --tw-ring-color: color-mix(in srgb, var(--tint) 70%, white)'
+		: ''}"
 >
+	<!-- The glow of its colour on hover -->
 	<div
-		class="relative aspect-[400/140] overflow-hidden"
-		style="background-color: {colorFromString(map.title)}"
+		class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+		style="box-shadow: inset 0 -80px 80px -60px color-mix(in srgb, var(--tint) 55%, transparent)"
+	></div>
+
+	<div
+		class="relative aspect-[400/150] overflow-hidden"
+		style="background-color: {colorFromString(map.title ?? '')}"
 	>
 		{#if !coverFailed}
 			<img
 				src="https://assets.ppy.sh/beatmaps/{map.id}/covers/card@2x.jpg"
 				alt=""
 				loading="lazy"
-				class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+				class="size-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
 				on:error={() => (coverFailed = true)}
 			/>
 		{:else}
@@ -78,60 +117,150 @@
 				<span class="icon-[mingcute--music-2-fill] size-8 text-white/60"></span>
 			</div>
 		{/if}
+		<!-- Dark at the bottom, for the title -->
+		<div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent"></div>
 
-		<div class="absolute top-2 left-2 right-2 flex items-start justify-between gap-2">
-			<span class="px-1.5 py-0.5 rounded text-[11px] font-bold leading-none {status.badge}">
+		<div class="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-2">
+			<span
+				class="flex items-center gap-1.5 h-6 px-2 rounded-full bg-black/45 backdrop-blur-md ring-1 ring-white/10 text-[11px] font-bold"
+			>
+				<span class="size-1.5 rounded-full {status.dot}"></span>
 				{status.label}
 			</span>
-			<span
-				class="px-1.5 py-0.5 rounded bg-black/60 text-[11px] font-semibold leading-none tabular-nums"
-			>
-				{convertTotalSecondsToTime(map.beatmaps[0].total_length)}
+			<span class="flex items-center gap-1">
+				{#if map.video}
+					<span
+						class="h-6 w-7 grid place-items-center rounded-full bg-black/45 backdrop-blur-md ring-1 ring-white/10"
+						title="Has a video"
+					>
+						<span class="icon-[mingcute--video-line] size-3.5"></span>
+					</span>
+				{/if}
+				{#if map.storyboard}
+					<span
+						class="h-6 w-7 grid place-items-center rounded-full bg-black/45 backdrop-blur-md ring-1 ring-white/10"
+						title="Has a storyboard"
+					>
+						<span class="icon-[mingcute--pic-line] size-3.5"></span>
+					</span>
+				{/if}
+				<span
+					class="h-6 px-2 grid place-items-center rounded-full bg-black/45 backdrop-blur-md ring-1 ring-white/10 text-[11px] font-semibold tabular-nums"
+				>
+					{convertTotalSecondsToTime(map.beatmaps?.[0]?.total_length ?? 0)}
+				</span>
 			</span>
 		</div>
 
+		<!-- Title and artist on the cover -->
+		<div class="absolute left-3 right-16 bottom-2.5 min-w-0">
+			{#if map.source}
+				<p
+					class="text-[11px] font-bold uppercase tracking-wide text-white/60 truncate"
+					title={map.source}
+				>
+					{map.source}
+				</p>
+			{/if}
+			<h3
+				class="flex items-center gap-1.5 text-lg font-extrabold leading-tight drop-shadow-md {isCurrent
+					? 'text-white'
+					: ''}"
+			>
+				{#if isPlaying}
+					<span
+						class="icon-[svg-spinners--bars-scale-middle] size-4 shrink-0"
+						style="color: var(--tint); filter: brightness(1.8) saturate(1.4)"
+					></span>
+				{/if}
+				<span class="truncate">{map.title}</span>
+			</h3>
+			<p class="text-sm text-white/75 truncate drop-shadow">{map.artist}</p>
+		</div>
+
+		<!-- Play: always there; a ring shows how far the preview is -->
 		<button
 			aria-label={isPlaying ? `Pause preview of ${map.title}` : `Play preview of ${map.title}`}
-			class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {isPlaying
-				? 'opacity-100 translate-y-0'
-				: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
-			on:click={() => {
-				if ($currentSong.song?.id == map.id && $songQueue.type != 'playlist') {
-					togglePlayback();
-				} else {
-					playMap = map;
-				}
-			}}
+			class="absolute bottom-2.5 right-2.5 size-11 grid place-items-center rounded-full cursor-pointer transition duration-200 hover:scale-110 {isCurrent
+				? 'bg-primary-300 text-white shadow-lg shadow-black/40'
+				: 'bg-black/40 backdrop-blur-md ring-1 ring-white/20 text-white group-hover:bg-primary-300 group-hover:ring-0 group-hover:shadow-lg group-hover:shadow-black/40'}"
+			on:click={playPreview}
 		>
+			{#if isCurrent}
+				<span
+					class="absolute -inset-1 rounded-full"
+					style="background: conic-gradient(white {progress *
+						360}deg, rgb(255 255 255 / 0.15) 0); mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 2.5px))"
+				></span>
+			{/if}
 			<span
 				class="{isPlaying ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-5"
 			></span>
 		</button>
 	</div>
 
-	<div class="p-3 flex gap-3 items-end">
-		<div class="min-w-0 flex-1">
-			<h3 class="font-semibold truncate {isPlaying ? 'text-primary-500' : ''}">{map.title}</h3>
-			<p class="text-sm text-secondary-600 truncate">{map.artist}</p>
-			<div class="mt-2 flex items-center gap-2 text-xs text-secondary-600 min-w-0">
+	<!-- Who mapped it, how popular it is, its difficulties, the download -->
+	<div
+		class="relative px-3 py-2.5 flex items-center gap-3"
+		style="background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 22%, transparent), transparent)"
+	>
+		<div class="min-w-0 flex-1 flex flex-col gap-1.5">
+			<div class="flex items-center gap-2 min-w-0 text-xs text-secondary-600">
+				{#if map.user_id && !avatarFailed}
+					<img
+						src="https://a.ppy.sh/{map.user_id}"
+						alt=""
+						loading="lazy"
+						class="size-5 rounded-full shrink-0 bg-white/10"
+						on:error={() => (avatarFailed = true)}
+					/>
+				{/if}
 				<span class="truncate"
 					>by <MapperLink name={map.creator} id={map.user_id ?? map.creatorId} /></span
 				>
+			</div>
+			<div
+				class="flex items-center gap-3 text-xs text-secondary-600 tabular-nums whitespace-nowrap"
+			>
+				{#if map.play_count != null}
+					<span class="flex items-center gap-1" title="{map.play_count.toLocaleString()} plays">
+						<span class="icon-[mingcute--play-circle-line] size-3.5"></span>
+						{compact.format(map.play_count)}
+					</span>
+				{/if}
+				{#if map.favourite_count != null}
+					<span
+						class="flex items-center gap-1"
+						title="{map.favourite_count.toLocaleString()} favourites"
+					>
+						<span class="icon-[mingcute--heart-line] size-3.5"></span>
+						{compact.format(map.favourite_count)}
+					</span>
+				{/if}
+				{#if map.bpm}
+					<span class="hidden @[24rem]:flex items-center gap-1" title="Tempo">
+						<span class="icon-[mingcute--music-2-line] size-3.5"></span>
+						{Math.round(map.bpm)} BPM
+					</span>
+				{/if}
 				{#if sortedBeatmaps.length}
 					<span
-						class="flex items-center gap-0.5 shrink-0"
-						title="{sortedBeatmaps.length} difficulties"
+						class="flex items-center gap-1.5 h-5 pl-1.5 pr-2 rounded-full bg-black/30 ring-1 ring-white/5"
+						title={sortedBeatmaps
+							.map((b) => `${b.version} (${b.difficulty_rating?.toFixed(2)}★)`)
+							.join('\n')}
 					>
-						{#each sortedBeatmaps.slice(0, 8) as beatmap (beatmap.id)}
-							<span
-								class="w-1.5 h-3 rounded-full ring-1 ring-black/30"
-								style="background-color: {beatmap.difficultyColor}"
-								title="{beatmap.version} ({beatmap.difficulty_rating?.toFixed(2)}★)"
-							></span>
-						{/each}
-						{#if sortedBeatmaps.length > 8}
-							<span class="ml-0.5">+{sortedBeatmaps.length - 8}</span>
-						{/if}
+						<span class="flex items-center gap-0.5">
+							{#each sortedBeatmaps.slice(0, 6) as beatmap (beatmap.id)}
+								<span
+									class="size-1.5 rounded-full"
+									style="background-color: {beatmap.difficultyColor}"
+								></span>
+							{/each}
+						</span>
+						<span>
+							{lowest.toFixed(1)}{highest - lowest >= 0.05 ? `–${highest.toFixed(1)}` : ''}★
+						</span>
 					</span>
 				{/if}
 			</div>
@@ -161,29 +290,27 @@
 			<button
 				title="Download"
 				aria-label="Download {map.title}"
-				class="size-8 shrink-0 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-400 cursor-pointer transition"
+				class="size-9 shrink-0 grid place-items-center rounded-full bg-white/5 text-secondary-600 ring-1 ring-white/5 hover:text-white hover:bg-primary-300 hover:ring-0 cursor-pointer transition"
 				on:click={async () => {
 					// Errors are shown as a toast by downloadBeatmap
 					await startDownload(map, map.beatmaps[0].id).catch(() => {});
 				}}
 			>
-				<span class="icon-[mingcute--download-2-line] size-5"></span>
+				<span class="icon-[mingcute--download-2-line] size-[18px]"></span>
 			</button>
 		{:else}
+			<!-- How far the download is, as a ring -->
 			<span
-				class="size-8 shrink-0 grid place-items-center text-xs font-semibold tabular-nums text-primary-500"
+				class="relative size-9 shrink-0 grid place-items-center text-[10px] font-bold tabular-nums text-primary-500"
+				title="Downloading"
 			>
-				{Math.round(download.progress || 0)}%
+				<span
+					class="absolute inset-0 rounded-full"
+					style="background: conic-gradient(var(--color-primary-400) {(download.progress || 0) *
+						3.6}deg, rgb(255 255 255 / 0.08) 0); mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 2.5px))"
+				></span>
+				{Math.round(download.progress || 0)}
 			</span>
 		{/if}
 	</div>
-
-	{#if download?.isDownloading}
-		<div class="absolute bottom-0 left-0 right-0 h-0.5 bg-secondary-400">
-			<div
-				class="h-full bg-primary-400 transition-all duration-200 ease-out"
-				style="width: {download.progress || 0}%;"
-			></div>
-		</div>
-	{/if}
 </article>
