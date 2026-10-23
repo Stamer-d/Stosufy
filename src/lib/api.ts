@@ -395,3 +395,63 @@ export async function setFavourite(
 		{ setId, mapId, favourite }
 	);
 }
+
+// --- Listening history ---------------------------------------------------------------------
+
+/** A play as the server keeps it: the song's key, when (Unix time, s), heard and length (s) */
+export type ServerPlay = [songKey: string, at: number, heard: number, length: number];
+
+/** Uploads plays (the server keeps each once) with the songs they're of; returns how many were new */
+export async function addPlays(
+	token: string,
+	plays: ServerPlay[],
+	songs: Record<string, unknown>
+): Promise<number> {
+	const data = await graphql<any>(
+		token,
+		'mutation ($plays: [StosufyPlayInput!]!, $songs: JSON) { addStosufyPlays(plays: $plays, songs: $songs) }',
+		{
+			plays: plays.map(([songKey, at, heard, length]) => ({ songKey, at, heard, length })),
+			songs
+		}
+	);
+	return data.addStosufyPlays;
+}
+
+/** The plays the server got after the cursor (a page; `more` if there are others after it) */
+export async function getPlays(
+	token: string,
+	after: number
+): Promise<{ plays: ServerPlay[]; songs: Record<string, any>; cursor: number; more: boolean }> {
+	const data = await graphql<any>(
+		token,
+		`
+			query ($after: Float) {
+				getStosufyPlays(after: $after) {
+					plays {
+						songKey
+						at
+						heard
+						length
+					}
+					songs
+					cursor
+					more
+				}
+			}
+		`,
+		{ after }
+	);
+	const page = data.getStosufyPlays;
+	return {
+		plays: page.plays.map((p: any) => [p.songKey, p.at, p.heard, p.length]),
+		songs: page.songs ?? {},
+		cursor: page.cursor,
+		more: page.more
+	};
+}
+
+/** Deletes the user's listening history on the server */
+export async function clearPlays(token: string) {
+	await graphql(token, 'mutation { clearStosufyHistory }');
+}

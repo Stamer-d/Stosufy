@@ -1,5 +1,6 @@
-// Listening history: which songs were heard, when and for how long, kept on this device.
-// Wrapped and the radio are made from it. A song counts as played once it was heard for
+// Listening history: which songs were heard, when and for how long. Wrapped and the radio are
+// made from it. It's kept on this device and synced with the account (the Stamer API), so
+// every device knows what was heard on the others. A song counts as played once it was heard for
 // 30 seconds (or half of it, if it's shorter than a minute); one left before that is kept
 // as a skip (the radio learns from those). What it was heard for counts in real time, so
 // pauses, seeking and speed mods don't.
@@ -7,6 +8,9 @@
 import { get, writable } from 'svelte/store';
 import { load } from '@tauri-apps/plugin-store';
 import { songQueue, currentSong } from './audio';
+import { keyStore } from './auth';
+import { offline } from './network';
+import * as api from '../api';
 import type { MapSet } from '../types';
 
 /** What the history keeps of a song (the songs of a play are kept once, by key) */
@@ -45,6 +49,12 @@ const SHORTEST = 30;
 const KEPT_AFTER = 5;
 const FILE = 'history.json';
 const SAVE_AFTER = 5000;
+/** How often the history is synced while the app runs (ms) */
+const SYNC_EVERY = 5 * 60 * 1000;
+/** The server takes this many plays at a time */
+const UPLOAD_BATCH = 2000;
+/** Closing or logging out waits this long for the upload at most (ms) */
+const FLUSH_WAIT = 3000;
 
 export const songKey = (song: { id?: number | string; setId?: number | string; track?: number }) =>
 	`${song.id ?? song.setId}:${song.track ?? 0}`;
@@ -72,18 +82,25 @@ function historySong(song: MapSet): HistorySong {
 
 let storePromise: ReturnType<typeof load> | null = null;
 const store = () => (storePromise ??= load(FILE));
-let loaded = false;
+let loaded: Promise<void> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** Plays not uploaded yet */
+let pending: Play[] = [];
+/** Where the next pull from the server goes on from */
+let cursor = 0;
 
 async function save() {
 	if (saveTimer) clearTimeout(saveTimer);
 	saveTimer = null;
 	if (!loaded) return;
+	await loaded;
 	try {
 		const data = await store();
 		const { songs, plays } = get(history);
 		await data.set('songs', songs);
 		await data.set('plays', plays);
+		await data.set('pending', pending);
+		await data.set('cursor', cursor);
 		await data.save();
 	} catch (error) {
 		console.error('Could not save the listening history:', error);
@@ -100,6 +117,10 @@ async function loadHistory() {
 		const data = await store();
 		const songs = (await data.get<History['songs']>('songs')) ?? {};
 		const plays = (await data.get<Play[]>('plays')) ?? [];
+		// (kept before the history was synced: all of it is still to be uploaded)
+		const stored = await data.get<Play[]>('pending');
+		pending = [...(stored ?? plays), ...pending];
+		cursor = (await data.get<number>('cursor')) ?? 0;
 		// Plays counted before the file was read come after the saved ones
 		history.update((now) => ({
 			songs: { ...songs, ...now.songs },
@@ -108,13 +129,14 @@ async function loadHistory() {
 	} catch (error) {
 		console.error('Could not read the listening history:', error);
 	}
-	loaded = true;
 }
 
-/** Forgets the history (logging out: it's the account's) */
+/** Forgets the history on this device (logging out: the account keeps it) */
 export async function clearHistory() {
 	history.set({ songs: {}, plays: [] });
 	session = null;
+	pending = [];
+	cursor = 0;
 	try {
 		const data = await store();
 		await data.clear();
@@ -158,10 +180,12 @@ function begin(audio: HTMLAudioElement, song: MapSet): Session {
 function finish(done: Session) {
 	if (done.length < SHORTEST || done.heard < KEPT_AFTER) return;
 	const key = songKey(done.song);
+	const play: Play = [key, done.at, Math.round(done.heard), Math.round(done.length)];
 	history.update(({ songs, plays }) => ({
 		songs: { ...songs, [key]: historySong(done.song) },
-		plays: [...plays, [key, done.at, Math.round(done.heard), Math.round(done.length)]]
+		plays: [...plays, play]
 	}));
+	pending.push(play);
 	saveLater();
 }
 
@@ -195,18 +219,87 @@ function check() {
 
 const sameSongKey = (a: MapSet | null, b: MapSet | null) => !!a && !!b && songKey(a) === songKey(b);
 
-/** Counts the song that plays now and saves (the app is closing) */
+/** Counts the song that plays now, saves and uploads (the app is closing, or logging out) */
 export async function flushHistory() {
 	if (session) {
 		finish(session);
 		session = null;
 	}
 	await save();
+	// (not for long: closing waits for it)
+	await Promise.race([syncHistory(), new Promise((resolve) => setTimeout(resolve, FLUSH_WAIT))]);
+}
+
+// --- Syncing -------------------------------------------------------------------------------
+
+const playId = ([key, at]: Play) => `${key}@${at}`;
+let syncing: Promise<void> | null = null;
+
+/** Uploads the plays not uploaded yet, then gets the ones the other devices uploaded */
+export function syncHistory() {
+	syncing ??= sync().finally(() => (syncing = null));
+	return syncing;
+}
+
+async function sync() {
+	await loaded;
+	const token = get(keyStore).access_token;
+	if (!token || get(offline)) return;
+	try {
+		while (pending.length) {
+			const batch = pending.slice(0, UPLOAD_BATCH);
+			const { songs } = get(history);
+			const batchSongs = Object.fromEntries(
+				batch.map(([key]) => [key, songs[key]]).filter(([, song]) => song)
+			);
+			await api.addPlays(token, batch, batchSongs);
+			// (plays counted while it uploaded stay)
+			pending = pending.filter((play) => !batch.includes(play));
+		}
+		let more = true;
+		while (more) {
+			const page = await api.getPlays(token, cursor);
+			addFromServer(page.plays, page.songs);
+			cursor = page.cursor;
+			more = page.more;
+		}
+	} catch (error) {
+		// Next time (offline, or the API is down)
+		console.warn('Could not sync the listening history:', error);
+	}
+	await save();
+}
+
+/** Plays from the server: the ones this device doesn't have yet, in time order */
+function addFromServer(plays: Play[], songs: Record<string, HistorySong>) {
+	history.update((now) => {
+		const known = new Set(now.plays.map(playId));
+		const added = plays.filter((play) => !known.has(playId(play)));
+		const nextSongs = { ...songs, ...now.songs };
+		if (!added.length) return { ...now, songs: nextSongs };
+		const all = [...now.plays, ...added].sort((a, b) => a[1] - b[1]);
+		return { songs: nextSongs, plays: all };
+	});
+}
+
+/** Deletes the history: on this device and on the account (every device's, from now on) */
+export async function deleteHistory() {
+	const token = get(keyStore).access_token;
+	if (!token) throw new Error('Not logged in');
+	await api.clearPlays(token);
+	const last = cursor;
+	await clearHistory();
+	// (the plays deleted on the server don't come back)
+	cursor = last;
+	await save();
 }
 
 if (typeof window !== 'undefined') {
-	loadHistory();
+	loaded = loadHistory();
 	setInterval(check, 1000);
+	// Once the login is there, and then every few minutes
+	setTimeout(syncHistory, 5000);
+	setInterval(syncHistory, SYNC_EVERY);
 }
 
 // --- Reading -----------------------------------------------------------------------------------

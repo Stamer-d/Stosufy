@@ -1,6 +1,6 @@
 <script>
 	// Wrapped: the user's listening, for the last week, month, this year or all of it
-	import { history } from '#lib/stores/history.ts';
+	import { history, deleteHistory } from '#lib/stores/history.ts';
 	import { recap, PERIODS } from '#lib/wrapped.ts';
 	import { setSongQueue, currentSong } from '#lib/stores/audio.ts';
 	import { librarySong } from '#lib/stores/radio.ts';
@@ -57,6 +57,27 @@
 			return;
 		}
 		await setSongQueue(0, [entry], 'playlist');
+	}
+
+	// Deleting the history: a second click to be sure
+	let confirmDelete = $state(false);
+	let deleting = $state(false);
+	async function removeHistory() {
+		if (!confirmDelete) {
+			confirmDelete = true;
+			return;
+		}
+		deleting = true;
+		try {
+			await deleteHistory();
+			showToast('Your listening history is deleted', 'icon-[mingcute--delete-2-line]');
+		} catch (error) {
+			console.error('Could not delete the listening history:', error);
+			showToast("Couldn't delete your listening history", 'icon-[mingcute--warning-line]');
+		} finally {
+			deleting = false;
+			confirmDelete = false;
+		}
 	}
 
 	const minutes = (seconds) => Math.round(seconds / 60).toLocaleString();
@@ -374,13 +395,25 @@
 					</div>
 				</div>
 			</section>
+		</div>
+	{/if}
 
-			{#if data.since}
-				<p class="text-xs text-secondary-600">
-					Counted on this device since {day(new Date(data.since * 1000), true)}. A song counts once
-					you've heard it for 30 seconds.
-				</p>
-			{/if}
+	{#if data.since}
+		<div class="mt-10 px-8 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-secondary-600">
+			<p>
+				Counted since {day(new Date(data.since * 1000), true)}, on all your devices. A song counts
+				once you've heard it for 30 seconds.
+			</p>
+			<button
+				class="underline underline-offset-2 cursor-pointer transition disabled:opacity-50 {confirmDelete
+					? 'text-red-400 hover:text-red-300'
+					: 'hover:text-white'}"
+				disabled={deleting}
+				onclick={removeHistory}
+				onblur={() => (confirmDelete = false)}
+			>
+				{confirmDelete ? 'Click again to delete it everywhere' : 'Delete my listening history'}
+			</button>
 		</div>
 	{/if}
 </div>
