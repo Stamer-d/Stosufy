@@ -754,7 +754,7 @@
 					{/each}
 				</div>
 				{#if beatmapLists[beatmapTab]?.items.length}
-					<div class="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-4">
+					<div class="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-x-5 gap-y-7">
 						{#each beatmapLists[beatmapTab].items as set (set.id)}
 							<Beatmap bind:playMap map={set} isDownloaded={isDownloaded(set.id)} />
 						{/each}

@@ -559,7 +559,7 @@
 			</div>
 		{:else if osuMapsSearch}
 			<div
-				class="grid xl:grid-cols-3 md:grid-cols-2 gap-4 grid-cols-1 transition-opacity {searching
+				class="grid xl:grid-cols-3 md:grid-cols-2 gap-x-5 gap-y-7 grid-cols-1 transition-opacity {searching
 					? 'opacity-50'
 					: ''}"
 			>
