@@ -219,6 +219,8 @@ export interface Settings {
 	hitsoundOffset?: number;
 	/** The osu! Skins folder, if not the default one (per device) */
 	skinsFolder?: string | null;
+	/** The osu! (stable) folder its songs and skins come from (see osuFolder.ts) */
+	osuFolder?: string | null;
 	/** Play Nightcore's drum beat with the NC mod (default on) */
 	nightcoreBeat?: boolean;
 	/** Show the song's gameplay (like autoplay) on the desktop home page */

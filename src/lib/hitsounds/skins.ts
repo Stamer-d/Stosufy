@@ -2,13 +2,13 @@
 // skins imported from .osk files (only their hitsounds are kept, in Stosufy's own folder)
 // and the skins of an osu! installation.
 
-import { get, writable } from 'svelte/store';
+import { writable } from 'svelte/store';
+import { osuSkinsFolder } from '../stores/osuFolder';
 import JSZip from 'jszip';
 import { readDir, readFile, writeFile, mkdir, exists, remove } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
 import { fetch } from '@tauri-apps/plugin-http';
 import { open } from '@tauri-apps/plugin-dialog';
-import { userSettings } from '../stores/user';
 
 /** The setting for the simple built-in sounds */
 export const BUILTIN = 'builtin';
@@ -38,16 +38,9 @@ export async function stosufySkinsDir() {
 	return path.join(await path.homeDir(), 'Stosufy', 'Skins');
 }
 
-/** The osu! Skins folder: chosen in the settings, else the default osu! one */
-export async function osuSkinsDir(): Promise<string | null> {
-	const chosen = get(userSettings).settings?.skinsFolder;
-	if (chosen) return chosen;
-	try {
-		const dir = await path.join(await path.localDataDir(), 'osu!', 'Skins');
-		return (await exists(dir)) ? dir : null;
-	} catch {
-		return null;
-	}
+/** The osu! Skins folder: the one in the osu! folder */
+export function osuSkinsDir(): Promise<string | null> {
+	return osuSkinsFolder();
 }
 
 async function folders(dir: string | null) {

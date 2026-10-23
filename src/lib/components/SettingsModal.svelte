@@ -21,6 +21,7 @@
 		pickOsuSongsFolder,
 		defaultOsuSongsFolder
 	} from '#lib/stores/osuImport.ts';
+	import { osuFolder as findOsuFolder } from '#lib/stores/osuFolder.ts';
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
 	import { keyStore, sessionKeyNeeded } from '#lib/stores/auth.ts';
 	import VisibilityPicker from './VisibilityPicker.svelte';
@@ -28,8 +29,14 @@
 	import HitsoundSettings from './HitsoundSettings.svelte';
 	import EqualizerSettings from './EqualizerSettings.svelte';
 
+	// The osu! folder (chosen, or found where osu! usually is): its songs and skins
+	let osuRoot = $state(null);
 	let osuFolder = $state(null);
-	defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
+	$effect(() => {
+		void $userSettings.settings?.osuFolder;
+		findOsuFolder().then((folder) => (osuRoot = folder));
+		defaultOsuSongsFolder().then((folder) => (osuFolder = folder));
+	});
 
 	async function chooseOsuFolder() {
 		const folder = await pickOsuSongsFolder();
@@ -449,10 +456,11 @@
 								{:else if $osuImport.state === 'error'}
 									<span class="text-red-400">{$osuImport.message}</span>
 								{:else if osuFolder}
-									Plays the songs from <span class="text-white/80">{osuFolder}</span> without copying
-									them.
+									Your osu! folder <span class="text-white/80">{osuRoot}</span>: its songs play from
+									there (nothing is copied), its skins are in the hitsound settings.
 								{:else}
-									Pick your osu! Songs folder. The songs play from there, nothing is copied.
+									Pick your osu! folder (the one with osu!.exe). Its songs play from there, nothing
+									is copied, and its skins are there for the hitsounds.
 								{/if}
 							</span>
 						</span>
@@ -466,7 +474,7 @@
 									<Button type="ghost" on:click={chooseOsuFolder}>Other folder</Button>
 									<Button type="normal" on:click={() => importOsuFolder(osuFolder)}>Import</Button>
 								{:else}
-									<Button type="normal" on:click={chooseOsuFolder}>Choose folder</Button>
+									<Button type="normal" on:click={chooseOsuFolder}>Choose osu! folder</Button>
 								{/if}
 							</div>
 						{/if}
