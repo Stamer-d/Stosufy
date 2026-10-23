@@ -9,6 +9,8 @@
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
 	import MapperLink from '#lib/components/MapperLink.svelte';
 	import Triangles from '#lib/components/Triangles.svelte';
+	import WrappedStory from '#lib/components/WrappedStory.svelte';
+	import { user } from '#lib/stores/user.ts';
 
 	const PERIOD_KEY = 'wrappedPeriod';
 	let period = $state(readPeriod());
@@ -33,6 +35,8 @@
 	}
 
 	let data = $derived(recap($history, period));
+	/** The story that's open: from the start, or at the picture to share */
+	let story = $state(null);
 	let top = $derived(data.topSongs[0] ?? null);
 	let periodLabel = $derived(PERIODS.find((p) => p.id === period)?.label ?? '');
 
@@ -163,6 +167,22 @@
 							<p class="text-sm text-white/70">{label}</p>
 						</div>
 					{/each}
+					<div class="ml-auto flex gap-2">
+						<button
+							class="flex items-center gap-2 px-5 h-11 rounded-full bg-white text-black font-bold cursor-pointer hover:bg-white/90 transition"
+							onclick={() => (story = 'story')}
+						>
+							<span class="icon-[mingcute--play-circle-line] size-5"></span>
+							Play your story
+						</button>
+						<button
+							class="flex items-center gap-2 px-5 h-11 rounded-full bg-white/15 font-bold cursor-pointer hover:bg-white/25 transition"
+							onclick={() => (story = 'share')}
+						>
+							<span class="icon-[mingcute--share-forward-line] size-5"></span>
+							Share
+						</button>
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -417,3 +437,13 @@
 		</div>
 	{/if}
 </div>
+
+{#if story}
+	<WrappedStory
+		recap={data}
+		period={periodLabel}
+		username={$user?.username ?? ''}
+		share={story === 'share'}
+		onclose={() => (story = null)}
+	/>
+{/if}
