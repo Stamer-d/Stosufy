@@ -82,7 +82,8 @@
 
 {#if url}
 	<!-- The filter keeps it in the page's own drawing (not a separate video overlay, which
-	     some webviews put in the wrong place) -->
+	     some webviews put in the wrong place). A class, not a style: it adds to the filters
+	     of the class given (the background's blur), a style would replace them -->
 	<!-- svelte-ignore a11y_media_has_caption -->
 	<video
 		bind:this={video}
@@ -90,8 +91,7 @@
 		muted
 		playsinline
 		preload="auto"
-		style="filter: saturate(1.001)"
-		class="absolute inset-0 size-full object-cover transition-opacity duration-500 {running
+		class="absolute inset-0 size-full object-cover saturate-[1.001] transition-opacity duration-500 {running
 			? 'opacity-100'
 			: 'opacity-0'} {className}"
 		onloadedmetadata={sync}
