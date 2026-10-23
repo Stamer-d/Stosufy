@@ -121,11 +121,24 @@ function flow(previous: Features | null, next: Features) {
 	return score;
 }
 
+export interface RadioOptions {
+	/** How many songs (40 by default) */
+	length?: number;
+	/** Random numbers (0–1): a seeded one gives the same radio again (the daily mixes) */
+	random?: () => number;
+	/** Only songs like this (the daily mixes' themes) */
+	only?: (song: MapSet) => boolean;
+}
+
 /**
  * Songs of the library for a radio from `seeds` (the first one leads, the others count less),
  * without the excluded ones, in an order that flows from the last seed on
  */
-export function radioSongs(seeds: MapSet[], exclude: MapSet[] = []): MapSet[] {
+export function radioSongs(
+	seeds: MapSet[],
+	exclude: MapSet[] = [],
+	{ length = RADIO_LENGTH, random = Math.random, only }: RadioOptions = {}
+): MapSet[] {
 	if (!seeds.length) return [];
 	const seedFeatures = seeds.map(featuresOf);
 	const weights = seeds.map((_, i) => (i === 0 ? 1 : 0.6));
@@ -136,7 +149,7 @@ export function radioSongs(seeds: MapSet[], exclude: MapSet[] = []): MapSet[] {
 	const skipped = [...seeds, ...exclude];
 
 	const pool = formatSongData(get(mapDataStore))
-		.filter((song) => !skipped.some((other) => sameSong(other, song)))
+		.filter((song) => !skipped.some((other) => sameSong(other, song)) && (!only || only(song)))
 		.map((song) => {
 			const features = featuresOf(song);
 			const alike =
@@ -151,11 +164,11 @@ export function radioSongs(seeds: MapSet[], exclude: MapSet[] = []): MapSet[] {
 	const order: MapSet[] = [];
 	const artistCount = new Map<string, number>();
 	let previous = seedFeatures.at(-1) ?? null;
-	while (order.length < RADIO_LENGTH && pool.length) {
+	while (order.length < length && pool.length) {
 		let best = 0;
 		let bestScore = -Infinity;
 		pool.forEach(({ features, score }, i) => {
-			let value = score + flow(previous, features) + Math.random() * 1.2;
+			let value = score + flow(previous, features) + random() * 1.2;
 			if (previous && sharesAny(previous.artists, features.artists)) value -= 3;
 			for (const artist of features.artists) value -= (artistCount.get(artist) ?? 0) * 1;
 			if (value > bestScore) {

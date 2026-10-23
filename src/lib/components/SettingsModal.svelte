@@ -11,7 +11,7 @@
 		updateUserSettings,
 		updateHomeSettings,
 		updateAppearance,
-		DEFAULT_HOME,
+		homeSettings,
 		DEFAULT_APPEARANCE
 	} from '#lib/stores/user.ts';
 	import { mapDataStore, videoFetch, fetchMissingVideos } from '#lib/stores/data.ts';
@@ -55,7 +55,8 @@
 	const SECTION_LABELS = {
 		hero: 'Featured banner (classic)',
 		playlists: 'Your playlists',
-		recent: 'Recently downloaded',
+		recent: 'Recently played',
+		mixes: 'Made for you',
 		discover: 'Discover beatmaps'
 	};
 	/** @type {{ value: import('#lib/types.ts').HomeSettings['layout'], label: string, description: string, icon: string }[]} */
@@ -89,7 +90,7 @@
 		{ value: 'orange', label: 'Orange', color: 'oklch(0.66 0.17 50)' }
 	];
 
-	let home = $derived({ ...DEFAULT_HOME, ...$userSettings.settings?.home });
+	let home = $derived(homeSettings($userSettings.settings?.home));
 	let appearance = $derived({ ...DEFAULT_APPEARANCE, ...$userSettings.settings?.appearance });
 	let pinnedSong = $derived(home.pinnedSetId ? $mapDataStore[home.pinnedSetId] : null);
 

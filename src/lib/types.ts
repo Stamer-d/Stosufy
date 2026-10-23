@@ -135,7 +135,7 @@ export interface SearchFilters {
 	language?: string;
 }
 
-export type HomeSectionId = 'hero' | 'playlists' | 'recent' | 'discover';
+export type HomeSectionId = 'hero' | 'playlists' | 'recent' | 'mixes' | 'discover';
 
 export interface HomeSettings {
 	/** "desktop": wallpaper with widgets, "classic": banner and lists */

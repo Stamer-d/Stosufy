@@ -587,6 +587,8 @@ export async function shuffleQueue() {
 		await updateSongQueue(0, [song, ...shuffled(rest)], current.type, current.playlistId);
 	} else {
 		const songs = get(playlistSongsCache)[current.playlistId]?.songs || [];
+		// Not a playlist of the library (a mix, a friend's song): the order stays as it is
+		if (!songs.length) return;
 		// A queued song that isn't part of the playlist keeps playing; continue from the start
 		await updateSongQueue(0, songs, 'playlist', current.playlistId);
 	}

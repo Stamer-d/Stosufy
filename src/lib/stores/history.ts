@@ -84,6 +84,8 @@ let storePromise: ReturnType<typeof load> | null = null;
 const store = () => (storePromise ??= load(FILE));
 let loaded: Promise<void> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** Resolves once the saved history is read */
+export const historyLoaded = () => loaded ?? Promise.resolve();
 /** Plays not uploaded yet */
 let pending: Play[] = [];
 /** Where the next pull from the server goes on from */

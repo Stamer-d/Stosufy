@@ -136,6 +136,7 @@ export const DEFAULT_HOME: HomeSettings = {
 		{ id: 'hero', visible: true },
 		{ id: 'playlists', visible: true },
 		{ id: 'recent', visible: true },
+		{ id: 'mixes', visible: true },
 		{ id: 'discover', visible: true }
 	],
 	heroBackground: 'current',
@@ -151,10 +152,26 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
 	focusLyrics: true
 };
 
+/**
+ * The home settings, with the sections added since they were saved (where they are by
+ * default: after the section before them)
+ */
+export function homeSettings(saved: Partial<HomeSettings> | undefined): HomeSettings {
+	const home = { ...DEFAULT_HOME, ...saved };
+	const sections = [...home.sections];
+	DEFAULT_HOME.sections.forEach((section, i) => {
+		if (sections.some((s) => s.id === section.id)) return;
+		const before = DEFAULT_HOME.sections[i - 1];
+		const at = before ? sections.findIndex((s) => s.id === before.id) + 1 : 0;
+		sections.splice(at, 0, { ...section });
+	});
+	return { ...home, sections };
+}
+
 export function updateHomeSettings(change: Partial<HomeSettings>) {
 	userSettings.update((u) => ({
 		...u,
-		settings: { ...u.settings, home: { ...DEFAULT_HOME, ...u.settings.home, ...change } }
+		settings: { ...u.settings, home: { ...homeSettings(u.settings.home), ...change } }
 	}));
 }
 
