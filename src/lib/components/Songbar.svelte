@@ -1,6 +1,6 @@
 <script>
 	import SongCover from './SongCover.svelte';
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import {
 		togglePlayback,
 		skipForward,
@@ -12,28 +12,23 @@
 		cycleRepeatMode,
 		hasNext,
 		upNext,
-		queuePanelOpen
+		queuePanelOpen,
+		playbackTime
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
 	import { toggleLyrics } from '#lib/stores/keybinds.ts';
 	import HitsoundMenu from './HitsoundMenu.svelte';
 	import { page } from '$app/state';
-	import {
-		updateUserSettings,
-		userSettings,
-		updateCurrentQueue,
-		updateAppearance
-	} from '#lib/stores/user.ts';
+	import { updateUserSettings, userSettings, updateAppearance } from '#lib/stores/user.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { setVolume, toggleMute, DEFAULT_VOLUME, MAX_VOLUME } from '#lib/stores/mixer.ts';
 	import ModSelect from './ModSelect.svelte';
 	import SleepTimer from './SleepTimer.svelte';
 	import { isFavourite, toggleFavourite } from '#lib/stores/favourites.ts';
 
-	let currentTime = 0;
-	let duration = 0;
-	let updateInterval;
-	let lastUpdateTime = 0;
+	// The position, from the player (twice a second; it also saves it for the next start)
+	$: currentTime = $playbackTime.current;
+	$: duration = $playbackTime.duration;
 	// The volume lives in the settings (see mixer.ts); muted shows as 0
 	$: muted = $userSettings.settings?.muted ?? false;
 	$: volume = muted ? 0 : ($userSettings.settings?.volume ?? DEFAULT_VOLUME);
@@ -56,40 +51,7 @@
 		$songQueue.audio.currentTime = event.detail;
 	}
 
-	async function updateTimeDisplay() {
-		if (!$songQueue?.audio) return;
-		currentTime = $songQueue.audio.currentTime;
-		duration = $songQueue.audio.duration || 0;
-		const timeDifference = Math.abs(currentTime - lastUpdateTime);
-
-		if (timeDifference >= 5 && $songQueue.type === 'playlist') {
-			lastUpdateTime = currentTime;
-			updateCurrentQueue({
-				currentSeconds: currentTime || 0.001,
-				playlistId: $songQueue.playlistId
-			});
-		}
-	}
-
-	// Set up interval for time updates
-	async function setupTimeTracking() {
-		clearInterval(updateInterval);
-
-		if ($songQueue?.audio) {
-			// Regular updates
-			updateInterval = setInterval(async () => {
-				updateTimeDisplay();
-			}, 500);
-		}
-	}
-
-	// Track changes to currentlyPlaying and set up time tracking
-	$: if ($songQueue?.audio) {
-		setupTimeTracking();
-	}
-
 	onDestroy(async () => {
-		clearInterval(updateInterval);
 		if ($currentSong.isPlaying) {
 			stopPlayback();
 		}
