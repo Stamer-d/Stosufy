@@ -51,6 +51,11 @@
 	let widgetsInGameplay = $derived($userSettings.settings?.widgetsInGameplay ?? true);
 	const toggleGameplay = () => updateUserSettings({ gameplay: !gameplayOn });
 	let widgetStoreOpen = $state(false);
+	// The widgets make way when you play yourself (unless they're being edited)
+	let widgetsShown = $derived(
+		!$focusMode &&
+			(!gameplayOn || !$currentSong.song || editingWidgets || (widgetsInGameplay && !$playingLive))
+	);
 
 	// The desktop controls only show while the mouse moves over the desktop, like on macOS,
 	// so they don't sit on top of the widgets
@@ -697,11 +702,11 @@
 				<div class="absolute inset-0 bg-black/45"></div>
 				<!-- (playing it yourself, it fills the window instead: PlayOverlay) -->
 				{#if !$playingLive && !$focusMode}
-					<Gameplay class="absolute inset-0" />
+					<!-- (its label would be under the widgets) -->
+					<Gameplay class="absolute inset-0" hideLabel={widgetsShown} />
 				{/if}
 			{/if}
-			<!-- The widgets make way when you play yourself (unless they're being edited) -->
-			{#if !$focusMode && (!gameplayOn || !$currentSong.song || editingWidgets || (widgetsInGameplay && !$playingLive))}
+			{#if widgetsShown}
 				<DesktopCanvas editing={editingWidgets} />
 			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->

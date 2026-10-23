@@ -37,7 +37,12 @@
 		difficultyChosen
 	} from '#lib/gameplay/play.ts';
 
-	let { class: className = '' } = $props();
+	/**
+	 * `hideLabel`: without "Autoplay" (or whose replay it is) at the top left, where the
+	 * desktop's widgets are (the gameplay button says it there)
+	 * @type {{ class?: string, hideLabel?: boolean }}
+	 */
+	let { class: className = '', hideLabel = false } = $props();
 
 	let canvas = $state();
 	let renderer = null;
@@ -362,6 +367,7 @@
 					if (target !== skipTo) skipTo = target;
 				} else if (skipTo !== null) skipTo = null;
 				view.finished = audio.ended;
+				view.hideLabel = hideLabel;
 				renderer.draw(time, view);
 			} catch (error) {
 				if (!reported) console.error('Could not draw the gameplay:', error);

@@ -48,6 +48,8 @@ export interface PlayView {
 	judge: Judge;
 	/** Shown at the top: "Autoplay", who's replay it is, … */
 	label: string;
+	/** Without the label at the top (something else is there, like the desktop's widgets) */
+	hideLabel?: boolean;
 	/** Show the results at the end */
 	results: boolean;
 	/** The song is over: show the results now */
@@ -1114,7 +1116,7 @@ export function createGameplayRenderer(
 			);
 		}
 		// Who plays, top left
-		if (view.label) {
+		if (view.label && !view.hideLabel) {
 			ctx.save();
 			ctx.font = `600 ${Math.round(15 * unit)}px sans-serif`;
 			ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
