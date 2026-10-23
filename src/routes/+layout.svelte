@@ -13,6 +13,7 @@
 	import { startTokenRefresh } from '#lib/stores/auth.ts';
 	import { flushMapData } from '#lib/stores/data.ts';
 	import { flushHistory } from '#lib/stores/history.ts';
+	import { startMediaSession } from '#lib/stores/mediaSession.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
@@ -107,6 +108,8 @@
 	}
 
 	onMount(async () => {
+		// The song in the system's media controls (Windows' overlay, the lock screen)
+		startMediaSession();
 		startBeatEffects();
 		startKeybinds();
 		startSettingsSync();
