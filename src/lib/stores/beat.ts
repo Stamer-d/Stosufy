@@ -11,6 +11,7 @@ import { mapDataStore } from './data';
 import { loadTiming } from './mods';
 import { userSettings } from './user';
 import { heardTime } from './equalizer';
+import { isStreamed } from './stream';
 import { parseKiai, parseTimingPoints, type KiaiSection, type TimingPoint } from '../osuFile';
 
 /** How sharply the pulse falls off after a beat; higher is snappier */
@@ -61,7 +62,9 @@ function currentTiming(): Timing | null {
 		return timing?.length ? { timing, kiai: map?.kiai ?? [], offset: 0 } : null;
 	}
 	if (!/^\d+$/.test(mapId)) return null;
-	return previewTimingFor(mapId);
+	const timing = previewTimingFor(mapId);
+	// Streamed: the whole song, from its start (not from the preview point)
+	return timing && isStreamed(song) ? { ...timing, offset: 0 } : timing;
 }
 
 function pointAt(points: TimingPoint[], time: number) {

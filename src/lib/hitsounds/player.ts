@@ -17,6 +17,7 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { currentSong, songQueue } from '../stores/audio';
 import { userSettings, updateUserSettings } from '../stores/user';
 import { mapDataStore } from '../stores/data';
+import { isStreamed } from '../stores/stream';
 import { parseHitsounds, type HitSample, type HitsoundEvent } from './chart';
 import { builtinSample } from './builtin';
 import { decodeAudio } from '../audioDecode';
@@ -397,7 +398,7 @@ async function load() {
 	}
 	const stored = get(mapDataStore)[song.id] as StoredMapSet | undefined;
 	// Previews are a cut of the song: the hitsounds wouldn't line up
-	if (queue.type === 'preview' && !song.queued && !stored) {
+	if (queue.type === 'preview' && !song.queued && !stored && !isStreamed(song)) {
 		chart = null;
 		loadingKey = key;
 		hitsoundStatus.set({ state: 'unavailable', message: 'Not for previews' });

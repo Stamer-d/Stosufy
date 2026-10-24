@@ -20,6 +20,15 @@ import { showToast } from './toast';
 import { librarySong, radioSongs, afterSkip, RADIO_TOP_UP } from './radio';
 import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
+import {
+	isStreamed,
+	markStreamed,
+	prefetchStream,
+	streamAudio,
+	streamedLoudness,
+	streamingOn,
+	streamMapId
+} from './stream';
 import type {
 	CurrentSong,
 	MapSet,
@@ -87,7 +96,10 @@ function normalize(
 	const setId = String(song.id);
 	const stored = get(mapDataStore)[setId];
 	const audioFile = stored?.beatmaps?.[mapId]?.audioFile;
-	if (!stored || !audioFile) return;
+	if (!stored || !audioFile) {
+		if (isStreamed(song)) normalizeStreamed(audio, String(mapId), file);
+		return;
+	}
 	// Measured per audio file: sets can contain several songs
 	const known = Object.values(stored.beatmaps).find(
 		(map) => map.audioFile === audioFile && map.loudness != null
@@ -109,6 +121,22 @@ function normalize(
 				if (map.audioFile === audioFile) map.loudness = loudness;
 		}
 		await saveMapData();
+		rampGain(audio, gainFor(loudness));
+	});
+}
+
+/** A streamed song: measured once a session (it isn't in the library to keep it in) */
+function normalizeStreamed(audio: HTMLAudioElement, mapId: string, file: Uint8Array) {
+	const known = streamedLoudness.get(mapId);
+	if (known != null) {
+		setGain(audio, gainFor(known));
+		return;
+	}
+	measurements = measurements.then(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 4000));
+		const loudness = await measureLoudness(file);
+		if (loudness == null) return;
+		streamedLoudness.set(mapId, loudness);
 		rampGain(audio, gainFor(loudness));
 	});
 }
@@ -148,7 +176,15 @@ async function createAudio(song: MapSet, type: QueueType, currentSeconds = 0) {
 	let audio: HTMLAudioElement;
 	const mapId = localMapId(song);
 	const silent = fadeInNext || smoothIn;
-	if (type == 'preview' && !song.queued && mapId == null) {
+	// Not downloaded and streaming is on: the whole song from the mirror (else as before)
+	const streamId = mapId == null && streamingOn() ? streamMapId(song) : null;
+	const streamedBytes = streamId != null ? await streamAudio(streamId).catch(() => null) : null;
+	markStreamed(song, !!streamedBytes);
+	if (streamedBytes) {
+		audio = new Audio(URL.createObjectURL(new Blob([await playableBytes(streamedBytes)])));
+		track(audio, silent ? 0 : 1);
+		normalize(audio, song, streamId!, streamedBytes);
+	} else if (type == 'preview' && !song.queued && mapId == null) {
 		audio = new Audio(`${song.preview_url}`);
 		track(audio, silent ? 0 : 1);
 	} else {
@@ -298,6 +334,9 @@ async function loadSong(index: number, queue: MapSet[], options: LoadOptions): P
 	}
 	if (generation !== loadGeneration) return discard(audio);
 	songQueue.set({ currentIndex: index, audio, queue, type, playlistId });
+	// The next song, streamed ahead, so it starts right away (and crossfades in time)
+	const next = queue[index + 1];
+	if (next && localMapId(next) == null) prefetchStream(next);
 	currentSong.set({ song: queue[index], isPlaying: false });
 	updateCurrentQueue({
 		index,
@@ -651,9 +690,11 @@ if (typeof window !== 'undefined') {
 		if (locked(true)) return;
 		// The sleep timer stops at the end of this song: no next song to fade into
 		if (get(sleepTimer).endOfSong) return;
-		// Previews are only short clips; downloaded songs play in full, also in the search
+		// Previews are only short clips; downloaded and streamed songs play in full, also in
+		// the search
 		const song = current.queue?.[current.currentIndex];
-		if (current.type === 'preview' && (!song || localMapId(song) == null)) return;
+		if (current.type === 'preview' && (!song || (localMapId(song) == null && !isStreamed(song))))
+			return;
 		if (!Number.isFinite(audio.duration)) return;
 		if (repeatMode() === 'one' || !hasNext(current, get(upNext), repeatMode())) return;
 		// Remaining time in real seconds, so speed mods are taken into account
