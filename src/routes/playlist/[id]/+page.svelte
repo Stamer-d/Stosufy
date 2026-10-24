@@ -1,6 +1,7 @@
 <script>
 	import { showToast } from '#lib/stores/toast.ts';
 	import { offline } from '#lib/stores/network.ts';
+	import { cancelHoverPrefetch, prefetchOnHover } from '#lib/stores/stream.ts';
 	import { onDestroy } from 'svelte';
 	import { sameSong, songKey } from '#lib/tracks.ts';
 	import SongCover from '#lib/components/SongCover.svelte';
@@ -194,6 +195,8 @@
 
 	$: isPlayingThis = $songQueue.playlistId == playlistId && $currentSong?.isPlaying;
 	$: shuffleOn = $userSettings.settings?.shuffle || false;
+	// With streaming on, songs that aren't downloaded play too (from the mirror)
+	$: streamable = ($userSettings.settings?.stream ?? false) && !$offline;
 	$: isCurrent = (song) =>
 		sameSong($currentSong?.song, song) && $songQueue.playlistId == playlistId;
 
@@ -648,12 +651,13 @@
 					{@const current = isCurrent(song)}
 					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}
 					{@const download = $downloads[song.id]}
+					{@const playable = downloaded || streamable}
 					{@const liked = $isFavourite(song)}
-					<ContextMenu disabled={!downloaded}>
+					<ContextMenu disabled={!playable}>
 						<div
 							role="button"
 							tabindex="0"
-							aria-label={downloaded ? `Play ${song.title}` : `Download ${song.title}`}
+							aria-label={playable ? `Play ${song.title}` : `Download ${song.title}`}
 							draggable={canReorder}
 							title={canReorder ? 'Drag to change the order' : undefined}
 							on:dragstart={(e) => {
@@ -667,8 +671,10 @@
 							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] items-center gap-4 px-4 h-14 rounded-md cursor-pointer transition-colors {current
 								? 'bg-white/[0.08]'
 								: 'hover:bg-white/[0.06]'} {dragFrom === index ? 'opacity-40' : ''}"
+							on:mouseenter={() => prefetchOnHover(song, downloaded)}
+							on:mouseleave={cancelHoverPrefetch}
 							on:click={async () => {
-								if (downloaded) {
+								if (playable) {
 									await playSong(index, song);
 								} else if (!download?.isDownloading) {
 									await startDownload(song, song.beatmaps[0].id);
@@ -695,7 +701,7 @@
 							<div
 								class="relative h-5 flex items-center justify-end text-secondary-600 tabular-nums"
 							>
-								{#if !downloaded}
+								{#if !playable}
 									<span class="group-hover:opacity-0 {download?.isDownloading ? 'opacity-0' : ''}">
 										{index + 1}
 									</span>
@@ -726,7 +732,7 @@
 								{/if}
 							</div>
 
-							<div class="flex items-center gap-3 min-w-0 {downloaded ? '' : 'opacity-50'}">
+							<div class="flex items-center gap-3 min-w-0 {playable ? '' : 'opacity-50'}">
 								<SongCover
 									setId={song.id}
 									track={song.track}
@@ -742,8 +748,36 @@
 								</div>
 							</div>
 
-							<span class="text-sm text-secondary-600 truncate">
-								{getDateString(song?.created_at || song?.songInfo?.created_at)}
+							<span class="flex items-center gap-2 min-w-0 text-sm text-secondary-600">
+								{#if !downloaded && streamable}
+									<!-- Streamed: the cloud, and on hover a button to download it after all -->
+									<button
+										title={download?.isDownloading
+											? `Downloading… ${Math.round(download.progress || 0)}%`
+											: 'Streams from the mirror. Download it to keep it'}
+										aria-label="Download {song.title}"
+										class="relative shrink-0 size-7 grid place-items-center rounded-full hover:bg-white/10 hover:text-white cursor-pointer transition"
+										disabled={download?.isDownloading}
+										on:click={async (e) => {
+											e.stopPropagation();
+											await startDownload(song, song.beatmaps[0].id);
+										}}
+									>
+										{#if download?.isDownloading}
+											<span class="text-[10px] font-bold text-primary-500 tabular-nums"
+												>{Math.round(download.progress || 0)}</span
+											>
+										{:else}
+											<span class="icon-[mingcute--cloud-line] size-4 group-hover:opacity-0"></span>
+											<span
+												class="icon-[mingcute--download-2-line] absolute size-4 opacity-0 group-hover:opacity-100"
+											></span>
+										{/if}
+									</button>
+								{/if}
+								<span class="truncate"
+									>{getDateString(song?.created_at || song?.songInfo?.created_at)}</span
+								>
 							</span>
 
 							<button
