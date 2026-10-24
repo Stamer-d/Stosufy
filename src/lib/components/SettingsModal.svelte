@@ -420,6 +420,15 @@
 					</div>
 				</section>
 				<section>
+					{@render heading('Streaming')}
+					{@render toggle(
+						'Stream songs that aren’t downloaded',
+						'Plays them in full right away, from the beatmap mirror catboy.best (only the song, no osu! session key needed), instead of a short preview or a download. Gameplay, hitsounds and the beat work too, only without the beatmap video.',
+						$userSettings.settings?.stream ?? false,
+						(checked) => updateUserSettings({ stream: checked })
+					)}
+				</section>
+				<section>
 					{@render heading('Equalizer')}
 					<EqualizerSettings />
 				</section>

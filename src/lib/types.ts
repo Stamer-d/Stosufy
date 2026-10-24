@@ -195,6 +195,8 @@ export interface Settings {
 	normalize?: boolean;
 	/** Seconds the end of a song and the start of the next overlap; 0 turns crossfade off */
 	crossfade?: number;
+	/** Songs that aren't downloaded play in full from a beatmap mirror (see stores/stream.ts) */
+	stream?: boolean;
 	/** The equalizer: on, the ten bands' gains (dB) and the preset they came from */
 	equalizer?: { on: boolean; gains: number[]; preset: string | null };
 	/** Speed mod applied to the playback, like in osu! */
