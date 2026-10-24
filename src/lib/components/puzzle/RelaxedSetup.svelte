@@ -3,28 +3,41 @@
 	import { formatSongData, mapDataStore } from '#lib/stores/data.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 	import {
+		MODES,
 		PIECE_COUNTS,
+		dropRelaxed,
 		formatTime,
 		gridFor,
-		loadRelaxedSave,
+		loadRelaxedSaves,
 		ownPicture
 	} from '#lib/puzzle/puzzle.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
 	import SongCover from '#lib/components/SongCover.svelte';
 
 	/**
-	 * Setting up a relaxed puzzle: any picture (a song's background or one of your own), as many
-	 * pieces as you like. A puzzle left unfinished can be picked up again.
-	 * @type {{ busy?: boolean, onstart: (setup: { picture: import('#lib/puzzle/puzzle.ts').PuzzlePicture, pieces: number, ghost: boolean, outlines: boolean }) => void, onresume: (save: import('#lib/puzzle/puzzle.ts').RelaxedSave) => void }}
+	 * Setting up a relaxed puzzle: any picture (a song's background or one of your own), any of
+	 * the three kinds, as many pieces as you like. Puzzles left unfinished wait here.
+	 * @type {{ busy?: boolean, onstart: (setup: { picture: import('#lib/puzzle/puzzle.ts').PuzzlePicture, mode: import('#lib/puzzle/puzzle.ts').PuzzleMode, pieces: number, ghost: boolean, outlines: boolean }) => void, onresume: (save: import('#lib/puzzle/puzzle.ts').RelaxedSave) => void }}
 	 */
 	let { busy = false, onstart, onresume } = $props();
 
 	const SETTINGS_KEY = 'puzzleRelaxedSettings';
 	let options = $state(readOptions());
 	function readOptions() {
-		const fallback = { pieces: 100, ghost: false, outlines: true };
+		const fallback = {
+			mode: 'jigsaw',
+			pieces: { jigsaw: 100, slide: 12, spin: 48 },
+			ghost: false,
+			outlines: true
+		};
 		try {
-			return { ...fallback, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+			const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
+			// (the pieces were one number when there was only the jigsaw)
+			const pieces =
+				typeof saved.pieces === 'object'
+					? { ...fallback.pieces, ...saved.pieces }
+					: { ...fallback.pieces, jigsaw: saved.pieces ?? fallback.pieces.jigsaw };
+			return { ...fallback, ...saved, pieces };
 		} catch {
 			return fallback;
 		}
@@ -38,8 +51,16 @@
 		}
 	});
 
-	const save = loadRelaxedSave();
-	let savedDone = $derived(save ? save.pieces.filter((piece) => piece.placed).length : 0);
+	let saves = $state(loadRelaxedSaves());
+	/** How far along a save is (older ones only know their pieces) */
+	const doneOf = (save) =>
+		save.progress ??
+		(save.pieces ? save.pieces.filter((piece) => piece.placed).length / save.pieces.length : 0);
+	function forget(save) {
+		dropRelaxed(save.id);
+		saves = loadRelaxedSaves();
+	}
+	const modeOf = (id) => MODES.find((mode) => mode.id === (id ?? 'jigsaw'));
 
 	let library = $derived(formatSongData($mapDataStore));
 	/** @type {import('#lib/puzzle/puzzle.ts').PuzzlePicture | null} */
@@ -98,36 +119,68 @@
 </script>
 
 <div class="flex flex-col gap-8">
-	{#if save}
-		<!-- The puzzle left unfinished -->
-		<section class="relative h-40 rounded-xl overflow-hidden">
-			{#if save.picture.image}
-				<img src={save.picture.image} alt="" class="absolute inset-0 size-full object-cover" />
-			{:else}
-				<BeatmapBackground
-					setId={save.picture.setId}
-					mapId={save.picture.mapId}
-					title={save.picture.title}
-					class="absolute inset-0"
-				/>
-			{/if}
-			<div class="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/10"></div>
-			<div class="relative h-full flex items-end justify-between gap-6 p-6">
-				<div class="min-w-0">
-					<p class="text-xs font-bold uppercase tracking-wide text-primary-400">Keep going</p>
-					<p class="mt-1 text-2xl font-extrabold leading-tight truncate">{save.picture.title}</p>
-					<p class="text-sm text-white/75">
-						{savedDone} of {save.pieces.length} pieces in place · {formatTime(save.time)}
-					</p>
-				</div>
-				<button
-					class="shrink-0 flex items-center gap-2 px-5 h-11 rounded-full bg-primary-300 hover:bg-primary-400 font-semibold cursor-pointer transition shadow-lg shadow-black/40 disabled:opacity-50"
-					disabled={busy}
-					onclick={() => onresume(save)}
+	{#if saves.length}
+		<!-- The puzzles left unfinished -->
+		<section class="flex flex-col gap-3">
+			<h2 class="text-xl font-bold">
+				Keep going <span class="text-secondary-600 font-semibold text-base"
+					>· {saves.length} unfinished</span
 				>
-					<span class="icon-[mingcute--play-fill] size-5"></span>
-					Go on
-				</button>
+			</h2>
+			<div class="grid gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
+				{#each saves as save (save.id)}
+					<div class="relative group">
+						<button
+							class="block w-full relative aspect-video rounded-xl overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition disabled:opacity-50"
+							title="Go on with it"
+							disabled={busy}
+							onclick={() => onresume(save)}
+						>
+							{#if save.picture.image}
+								<img
+									src={save.picture.image}
+									alt=""
+									class="absolute inset-0 size-full object-cover"
+								/>
+							{:else}
+								<BeatmapBackground
+									setId={save.picture.setId}
+									mapId={save.picture.mapId}
+									title={save.picture.title}
+									class="absolute inset-0"
+								/>
+							{/if}
+							<div
+								class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent"
+							></div>
+							<span
+								class="absolute top-2 left-2 grid place-items-center size-9 rounded-full bg-primary-300 shadow-lg opacity-0 group-hover:opacity-100 transition"
+							>
+								<span class="icon-[mingcute--play-fill] size-4"></span>
+							</span>
+							<div class="absolute bottom-0 inset-x-0 p-3 min-w-0">
+								<p class="font-bold truncate">{save.picture.title}</p>
+								<p class="flex items-center gap-1.5 text-xs text-white/70">
+									<span class="{modeOf(save.mode)?.icon} size-3.5"></span>
+									{save.cols * save.rows} · {Math.round(doneOf(save) * 100)}% · {formatTime(
+										save.time
+									)}
+								</p>
+								<div class="mt-2 h-1 rounded-full bg-white/15 overflow-hidden">
+									<div class="h-full bg-primary-400" style="width: {doneOf(save) * 100}%"></div>
+								</div>
+							</div>
+						</button>
+						<button
+							class="absolute top-2 right-2 grid place-items-center size-7 rounded-full bg-black/60 hover:bg-red-500 cursor-pointer transition opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+							title="Throw it away"
+							aria-label="Throw away {save.picture.title}"
+							onclick={() => forget(save)}
+						>
+							<span class="icon-[mingcute--delete-2-line] size-4"></span>
+						</button>
+					</div>
+				{/each}
 			</div>
 		</section>
 	{/if}
@@ -177,41 +230,43 @@
 				/>
 			</div>
 			{#if matches.length}
-				<div
-					class="max-h-[22rem] overflow-y-auto pr-1 grid gap-2 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))]"
-				>
-					{#each matches.slice(0, shown) as song (song.id)}
-						<button
-							class="group relative aspect-square rounded-lg overflow-hidden cursor-pointer ring-2 transition {isPicked(
-								song
-							)
-								? 'ring-primary-400'
-								: 'ring-transparent hover:ring-white/30'}"
-							title="{song.title} – {song.artist}"
-							onclick={() => (picture = fromSong(song))}
-						>
-							<SongCover
-								setId={song.id}
-								track={song.track}
-								title={song.title}
-								class="size-full"
-								lazy
-							/>
-							{#if isPicked(song)}
-								<span
-									class="absolute top-1 right-1 grid place-items-center size-5 rounded-full bg-primary-400"
-								>
-									<span class="icon-[mingcute--check-line] size-3.5"></span>
-								</span>
-							{/if}
-						</button>
-					{/each}
-					{#if matches.length > shown}
-						<button
-							class="aspect-square rounded-lg bg-secondary-200 hover:bg-secondary-300 text-xs font-semibold text-secondary-600 cursor-pointer transition"
-							onclick={() => (shown += 96)}>{matches.length - shown} more</button
-						>
-					{/if}
+				<!-- The scrolling and the grid apart: a grid that's also limited in height squeezes
+				     its rows, and the covers overlap -->
+				<div class="max-h-[22rem] overflow-y-auto pr-1">
+					<div class="grid gap-2 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))]">
+						{#each matches.slice(0, shown) as song (song.id)}
+							<button
+								class="block w-full relative aspect-square rounded-lg overflow-hidden cursor-pointer ring-2 transition {isPicked(
+									song
+								)
+									? 'ring-primary-400'
+									: 'ring-transparent hover:ring-white/30'}"
+								title="{song.title} – {song.artist}"
+								onclick={() => (picture = fromSong(song))}
+							>
+								<SongCover
+									setId={song.id}
+									track={song.track}
+									title={song.title}
+									class="size-full"
+									lazy
+								/>
+								{#if isPicked(song)}
+									<span
+										class="absolute top-1 right-1 grid place-items-center size-5 rounded-full bg-primary-400"
+									>
+										<span class="icon-[mingcute--check-line] size-3.5"></span>
+									</span>
+								{/if}
+							</button>
+						{/each}
+						{#if matches.length > shown}
+							<button
+								class="block w-full aspect-square rounded-lg bg-secondary-200 hover:bg-secondary-300 text-xs font-semibold text-secondary-600 cursor-pointer transition"
+								onclick={() => (shown += 96)}>{Math.min(96, matches.length - shown)} more</button
+							>
+						{/if}
+					</div>
 				</div>
 			{:else if library.length}
 				<p class="text-secondary-600 text-sm">No song matches that.</p>
@@ -245,15 +300,33 @@
 			{/if}
 
 			<div class="flex flex-col gap-2">
-				<h2 class="text-xl font-bold">Pieces</h2>
-				<div class="flex flex-wrap gap-2">
-					{#each PIECE_COUNTS as count (count)}
+				<h2 class="text-xl font-bold">Kind</h2>
+				<div class="grid grid-cols-3 gap-2">
+					{#each MODES as mode (mode.id)}
 						<button
-							class="px-4 h-9 rounded-full text-sm font-bold tabular-nums cursor-pointer transition {options.pieces ===
-							count
+							class="flex flex-col items-start gap-1 p-3 rounded-xl text-left cursor-pointer ring-1 transition {options.mode ===
+							mode.id
+								? 'bg-primary-300/20 ring-primary-400'
+								: 'bg-secondary-200 ring-white/5 hover:bg-secondary-300'}"
+							onclick={() => (options.mode = mode.id)}
+						>
+							<span class="{mode.icon} size-6"></span>
+							<span class="font-bold">{mode.label}</span>
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<div class="flex flex-col gap-2">
+				<h2 class="text-xl font-bold">{options.mode === 'jigsaw' ? 'Pieces' : 'Tiles'}</h2>
+				<div class="flex flex-wrap gap-2">
+					{#each PIECE_COUNTS[options.mode] as count (count)}
+						<button
+							class="px-4 h-9 rounded-full text-sm font-bold tabular-nums cursor-pointer transition {options
+								.pieces[options.mode] === count
 								? 'bg-primary-300 text-white'
 								: 'bg-secondary-200 hover:bg-secondary-300'}"
-							onclick={() => (options.pieces = count)}>{actualCount(count)}</button
+							onclick={() => (options.pieces[options.mode] = count)}>{actualCount(count)}</button
 						>
 					{/each}
 				</div>
@@ -267,29 +340,50 @@
 						class="accent-primary-400 size-4"
 					/>
 					<span
-						><span class="font-semibold">Outlines on the board</span>
-						<span class="text-secondary-600">· where the pieces go</span></span
+						><span class="font-semibold"
+							>{options.mode === 'jigsaw' ? 'Outlines on the board' : 'Light up what’s right'}</span
+						>
+						<span class="text-secondary-600"
+							>· {options.mode === 'jigsaw'
+								? 'where the pieces go'
+								: 'tiles in their place glow'}</span
+						></span
 					>
 				</label>
 				<label class="flex items-center gap-3 cursor-pointer w-fit">
 					<input type="checkbox" bind:checked={options.ghost} class="accent-primary-400 size-4" />
 					<span
-						><span class="font-semibold">The picture on the board</span>
-						<span class="text-secondary-600">· faintly, to puzzle onto</span></span
+						><span class="font-semibold"
+							>{options.mode === 'jigsaw'
+								? 'The picture on the board'
+								: options.mode === 'slide'
+									? 'Numbers on the tiles'
+									: 'Arrows pointing up'}</span
+						>
+						<span class="text-secondary-600"
+							>· {options.mode === 'jigsaw' ? 'faintly, to puzzle onto' : 'a little help'}</span
+						></span
 					>
 				</label>
 			</div>
 
 			<p class="text-sm text-secondary-600">
 				No time limit, nothing to score: your music keeps playing (or your library starts on
-				shuffle), and the puzzle is kept when you leave.
-				{#if save}Starting a new one replaces the unfinished one.{/if}
+				shuffle). Leave whenever you like: the puzzle waits above, with the others you haven't
+				finished.
 			</p>
 
 			<button
 				class="self-start flex items-center gap-2 px-6 h-12 rounded-full bg-primary-300 hover:bg-primary-400 font-bold cursor-pointer transition shadow-lg shadow-black/30 disabled:opacity-50 disabled:pointer-events-none"
 				disabled={!picture || busy}
-				onclick={() => onstart({ picture, ...options })}
+				onclick={() =>
+					onstart({
+						picture,
+						mode: options.mode,
+						pieces: options.pieces[options.mode],
+						ghost: options.ghost,
+						outlines: options.outlines
+					})}
 			>
 				{#if busy}
 					<span class="icon-[line-md--loading-loop] size-5"></span>Cutting it up…

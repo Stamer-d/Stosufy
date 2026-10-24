@@ -289,7 +289,7 @@ export function judgeBeat(): {
 	const beat = beatNow();
 	if (!beat) return { judgement: 300, offset: null, kiai: false, free: true };
 	const off = Math.abs(beat.offset) / beat.beatLength;
-	const judgement: Judgement = off <= 0.15 ? 300 : off <= 0.28 ? 100 : 50;
+	const judgement: Judgement = off <= 0.2 ? 300 : off <= 0.33 ? 100 : 50;
 	return { judgement, offset: beat.offset, kiai: beat.kiai, free: false };
 }
 
@@ -383,11 +383,12 @@ export function gradeOf(score: Score, mods: PuzzleMod[]) {
 function gradeFromAccuracy(score: Score, mods: PuzzleMod[]) {
 	const silver = mods.includes('HD') || mods.includes('FL');
 	const acc = accuracy(score);
-	if (acc >= 0.9999) return silver ? 'SSH' : 'SS';
-	if (acc >= 0.95) return silver ? 'SH' : 'S';
-	if (acc >= 0.9) return 'A';
-	if (acc >= 0.75) return 'B';
-	if (acc >= 0.62) return 'C';
+	// An SS allows a 100 or two, but no miss
+	if (acc >= 0.98 && !score.counts[0]) return silver ? 'SSH' : 'SS';
+	if (acc >= 0.93) return silver ? 'SH' : 'S';
+	if (acc >= 0.85) return 'A';
+	if (acc >= 0.72) return 'B';
+	if (acc >= 0.6) return 'C';
 	return 'D';
 }
 
@@ -596,7 +597,11 @@ export async function ownPicture(file: Blob, maxSize = 2000, quality = 0.88) {
 // --- The relaxed puzzle: a jigsaw like on a table, kept to go on later ---------------------------
 
 /** How many pieces a relaxed puzzle can have (about; the picture's shape decides) */
-export const PIECE_COUNTS = [24, 48, 100, 150, 200, 300];
+export const PIECE_COUNTS: Record<PuzzleMode, number[]> = {
+	jigsaw: [24, 48, 100, 150, 200, 300],
+	slide: [6, 12, 20, 30, 48, 70],
+	spin: [24, 48, 100, 150, 200, 300]
+};
 
 /** A picture to puzzle: a beatmap's background, or one of the user's own (`image`) */
 export interface PuzzlePicture {
@@ -609,14 +614,23 @@ export interface PuzzlePicture {
 }
 
 export interface RelaxedSave {
+	/** Several can wait at once: each its own */
+	id: string;
+	/** Older saves were all jigsaws */
+	mode?: PuzzleMode;
 	picture: PuzzlePicture;
 	cols: number;
 	rows: number;
 	seed: number;
-	/** Picture faint on the board, outlines on the board */
+	/** Help on the board (the picture faintly, numbers, arrows), and the outlines */
 	ghost: boolean;
 	outlines: boolean;
-	pieces: SavedPiece[];
+	/** The jigsaw's pieces */
+	pieces?: SavedPiece[];
+	/** The sliding puzzle's tiles (their cells) or the spinning one's (their turns) */
+	tiles?: number[];
+	/** How far along it is (0–1) */
+	progress?: number;
 	/** Time spent on it so far (ms) */
 	time: number;
 	at: number;
@@ -624,6 +638,7 @@ export interface RelaxedSave {
 
 export interface RelaxedRecord {
 	picture: PuzzlePicture;
+	mode?: PuzzleMode;
 	pieces: number;
 	time: number;
 	at: number;
@@ -634,21 +649,53 @@ export interface RelaxedRecord {
 	aspect?: number;
 }
 
-const RELAXED_SAVE_KEY = 'puzzleRelaxedSave';
+const RELAXED_SAVES_KEY = 'puzzleRelaxedSaves';
+/** Where the one unfinished puzzle was kept before there could be several */
+const OLD_SAVE_KEY = 'puzzleRelaxedSave';
 const RELAXED_DONE_KEY = 'puzzleRelaxedDone';
+/** How many unfinished puzzles are kept (the oldest goes) */
+const MAX_SAVES = 12;
 
-export const loadRelaxedSave = () => read<RelaxedSave | null>(RELAXED_SAVE_KEY, null);
+export const newSaveId = () => Math.random().toString(36).slice(2, 10);
 
-export function saveRelaxed(save: RelaxedSave | null) {
-	if (!save) {
+/** The unfinished relaxed puzzles, the last played first */
+export function loadRelaxedSaves(): RelaxedSave[] {
+	const saves = read<RelaxedSave[]>(RELAXED_SAVES_KEY, []);
+	const old = read<RelaxedSave | null>(OLD_SAVE_KEY, null);
+	if (old) {
+		saves.push({ ...old, id: old.id ?? newSaveId(), mode: 'jigsaw' });
+		write(RELAXED_SAVES_KEY, saves);
 		try {
-			localStorage.removeItem(RELAXED_SAVE_KEY);
+			localStorage.removeItem(OLD_SAVE_KEY);
 		} catch {
-			// (nothing kept anyway)
+			// (it's moved anyway)
 		}
-		return;
 	}
-	write(RELAXED_SAVE_KEY, save);
+	return saves.sort((a, b) => b.at - a.at);
+}
+
+/** Keeps an unfinished puzzle; false if there was no room for it (a big picture of your own) */
+export function keepRelaxed(save: RelaxedSave) {
+	const others = loadRelaxedSaves().filter((other) => other.id !== save.id);
+	const saves = [save, ...others].slice(0, MAX_SAVES);
+	// Out of room: the oldest others make way
+	while (saves.length) {
+		try {
+			localStorage.setItem(RELAXED_SAVES_KEY, JSON.stringify(saves));
+			return true;
+		} catch {
+			if (saves.length === 1) return false;
+			saves.pop();
+		}
+	}
+	return false;
+}
+
+export function dropRelaxed(id: string) {
+	write(
+		RELAXED_SAVES_KEY,
+		loadRelaxedSaves().filter((save) => save.id !== id)
+	);
 }
 
 export const loadRelaxedDone = () => read<RelaxedRecord[]>(RELAXED_DONE_KEY, []);
