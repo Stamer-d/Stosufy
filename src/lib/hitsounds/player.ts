@@ -231,6 +231,52 @@ async function resolveExtra(
 	return builtinExtra(audioContext(), name);
 }
 
+// --- Sounds outside of a map (the puzzle) ---------------------------------------------------
+
+/** The sounds of the chosen skin by name, once per skin */
+const skinSounds = new Map<string, Promise<AudioBuffer | null | undefined>>();
+
+/**
+ * Plays a sound of the chosen osu! skin right away, else the osu! default one, else the
+ * built-in one: "hitnormal" etc. in a sample set, or the combo break. Doesn't download the
+ * default skin for it; the hitsound volume counts.
+ */
+export function playSkinSound(
+	sound: HitSample['sound'] | 'combobreak',
+	set: HitSample['set'] = 'normal',
+	volume = 1
+) {
+	const { skin, volume: hitsoundVolume } = settings();
+	const key = `${skin}:${set}:${sound}`;
+	if (!skinSounds.has(key)) {
+		skinSounds.set(
+			key,
+			(async () => {
+				const [skinSamples, defaultSamples] = await Promise.all([
+					skinFolder(skin).then(folder),
+					skin && skin !== BUILTIN ? skinFolder(null).then(folder) : null
+				]);
+				if (sound === 'combobreak')
+					return resolveExtra('combobreak', skinSamples, defaultSamples, skin === BUILTIN);
+				return resolve({ set, sound, index: 0 }, null, skinSamples, defaultSamples);
+			})().catch(() =>
+				builtinSample(audioContext(), set, sound === 'combobreak' ? 'normal' : sound)
+			)
+		);
+	}
+	skinSounds.get(key)!.then((buffer) => {
+		if (!buffer) return;
+		const ctx = audioContext();
+		if (ctx.state === 'suspended') ctx.resume();
+		const source = ctx.createBufferSource();
+		source.buffer = buffer;
+		const gain = ctx.createGain();
+		gain.gain.value = volume * hitsoundVolume;
+		source.connect(gain).connect(master!);
+		source.start();
+	});
+}
+
 /** The index of the event nearest to a time */
 function nearestEvent<T extends { time: number }>(events: T[], time: number) {
 	let low = 0;
@@ -748,6 +794,7 @@ export function forgetSkinFolders() {
 	folders.clear();
 	folderErrors.clear();
 	buffers.clear();
+	skinSounds.clear();
 	loadingKey = null;
 	load();
 }

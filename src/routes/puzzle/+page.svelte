@@ -1,0 +1,1003 @@
+<script>
+	// The puzzle, in two ways: rhythm (a song's background to put back together while the
+	// song plays, muffled until the picture is whole, moves judged on the beat like hits in
+	// osu!) and relaxed (any picture, any number of pieces, no time and no score).
+	import { onMount } from 'svelte';
+	import { fly, fade, scale } from 'svelte/transition';
+	import { backOut } from 'svelte/easing';
+	import { currentSong, setSongQueue, togglePlayback } from '#lib/stores/audio.ts';
+	import { formatSongData, mapDataStore } from '#lib/stores/data.ts';
+	import { setMuffle } from '#lib/stores/equalizer.ts';
+	import { playSkinSound } from '#lib/hitsounds/player.ts';
+	import { librarySong } from '#lib/stores/radio.ts';
+	import { showToast } from '#lib/stores/toast.ts';
+	import { sameSong } from '#lib/tracks.ts';
+	import {
+		DIFFICULTIES,
+		GRADE_COLORS,
+		JUDGEMENT_COLORS,
+		MODES,
+		MODS,
+		accuracy,
+		addJudgement,
+		dailyPuzzle,
+		formatTime,
+		gradeOf,
+		gridFor,
+		hashString,
+		loadBackground,
+		loadDaily,
+		loadImage,
+		loadRelaxedDone,
+		loadRecords,
+		newScore,
+		pieceCount,
+		puzzleSongs,
+		saveRecord,
+		scoreMultiplier,
+		solveDaily
+	} from '#lib/puzzle/puzzle.ts';
+	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
+	import SongCover from '#lib/components/SongCover.svelte';
+	import Triangles from '#lib/components/Triangles.svelte';
+	import Jigsaw from '#lib/components/puzzle/Jigsaw.svelte';
+	import SlidePuzzle from '#lib/components/puzzle/SlidePuzzle.svelte';
+	import SpinPuzzle from '#lib/components/puzzle/SpinPuzzle.svelte';
+	import PuzzleResults from '#lib/components/puzzle/PuzzleResults.svelte';
+	import RelaxedSetup from '#lib/components/puzzle/RelaxedSetup.svelte';
+	import RelaxedPuzzle from '#lib/components/puzzle/RelaxedPuzzle.svelte';
+
+	const PUZZLES = { jigsaw: Jigsaw, slide: SlidePuzzle, spin: SpinPuzzle };
+
+	// --- The choices, remembered ------------------------------------------------------------
+
+	const SETTINGS_KEY = 'puzzleSettings';
+	let choice = $state(readSettings());
+	function readSettings() {
+		const fallback = { style: 'rhythm', mode: 'jigsaw', difficulty: 1, mods: [], muffle: true };
+		try {
+			return { ...fallback, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+		} catch {
+			return fallback;
+		}
+	}
+	$effect(() => {
+		const saved = JSON.stringify(choice);
+		try {
+			localStorage.setItem(SETTINGS_KEY, saved);
+		} catch {
+			// (not remembered)
+		}
+	});
+	function toggleMod(id) {
+		const mods = choice.mods.includes(id)
+			? choice.mods.filter((mod) => mod !== id)
+			: [...choice.mods, id];
+		choice.mods = mods.filter(
+			(mod) => !(id === 'EZ' && mod === 'HD') && !(id === 'HD' && mod === 'EZ')
+		);
+	}
+	/** The mods that count for a mode (Spun is only for the jigsaw) */
+	const modsFor = (mode, mods) =>
+		mods.filter((id) => MODS.find((mod) => mod.id === id)?.modes?.includes(mode) ?? true);
+
+	// --- The song --------------------------------------------------------------------------
+
+	let library = $derived(formatSongData($mapDataStore));
+	let chosen = $state(null);
+	// The song playing, else (once the library is there) a random one
+	$effect(() => {
+		if (!chosen) chosen = $currentSong.song ?? (library.length ? randomSong() : null);
+	});
+	function randomSong(except = null) {
+		const songs = puzzleSongs().filter((song) => !sameSong(song, except));
+		return songs.length ? songs[Math.floor(Math.random() * songs.length)] : null;
+	}
+
+	let query = $state('');
+	let matches = $derived.by(() => {
+		const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+		if (!words.length) return [];
+		return library
+			.filter((song) => {
+				const text = [song.title, song.artist, song.songSource, song.creator]
+					.join(' ')
+					.toLowerCase();
+				return words.every((word) => text.includes(word));
+			})
+			.slice(0, 30);
+	});
+
+	// (again once the library is loaded)
+	let daily = $derived.by(() => {
+		void $mapDataStore;
+		return dailyPuzzle();
+	});
+	let dailyState = $state(loadDaily());
+	let records = $state(loadRecords());
+	/** Today's puzzle once it's solved: its best grade */
+	let dailyDone = $derived(dailyState.day === daily.day ? dailyState : null);
+	/** Solved pictures, the best of each song first by when */
+	let gallery = $derived.by(() => {
+		const bySong = new Map();
+		for (const record of Object.values(records)) {
+			const kept = bySong.get(record.setId);
+			if (!kept || record.score > kept.score) bySong.set(record.setId, record);
+		}
+		return [...bySong.values()].sort((a, b) => b.at - a.at);
+	});
+
+	// --- Playing ----------------------------------------------------------------------------
+
+	/** 'menu', 'loading', 'play', 'results' or 'relaxed' */
+	let view = $state('menu');
+	let game = $state(null);
+	let score = $state(newScore());
+	let progress = $state(0);
+	let moves = $state(0);
+	let startedAt = $state(0);
+	let now = $state(Date.now());
+	let solvedAt = $state(0);
+	let result = $state(null);
+	let peeking = $state(false);
+	let popups = $state([]);
+	let pointer = $state({ x: -1000, y: -1000 });
+	let lastKiai = $state(false);
+
+	/** The first of a song's backgrounds that loads, and its shape */
+	const loadPicture = (song) => loadBackground(song.id, song.beatmaps?.[0]?.id);
+
+	/**
+	 * Starts a puzzle of a song: it plays (with more of the library after it, so the music
+	 * goes on), and its background is cut up
+	 */
+	async function start(song, options = choice, isDaily = false) {
+		if (!song) return;
+		view = 'loading';
+		let picture = null;
+		try {
+			const playing = $currentSong.song;
+			if (!sameSong(playing, song)) {
+				const more = puzzleSongs()
+					.filter((other) => !sameSong(other, song))
+					.sort(() => Math.random() - 0.5)
+					.slice(0, 40);
+				await setSongQueue(0, [song, ...more], 'playlist');
+			} else if (!$currentSong.isPlaying) togglePlayback();
+			picture = await loadPicture(song);
+		} catch (error) {
+			console.error('Could not start the puzzle:', error);
+		}
+		if (!picture) {
+			showToast("Couldn't load this song's background", 'icon-[mingcute--pic-line]');
+			view = 'menu';
+			return;
+		}
+		const mods = modsFor(options.mode, options.mods);
+		const pieces = DIFFICULTIES[options.difficulty].pieces[options.mode];
+		game = {
+			song,
+			...picture,
+			...gridFor(pieces, picture.aspect),
+			mode: options.mode,
+			difficulty: options.difficulty,
+			mods,
+			muffle: options.muffle,
+			daily: isDaily ? daily.day : null,
+			seed: isDaily ? daily.seed : hashString(`${song.id}:${Date.now()}`),
+			key: Date.now()
+		};
+		chosen = song;
+		score = newScore();
+		progress = 0;
+		moves = 0;
+		solvedAt = 0;
+		popups = [];
+		startedAt = Date.now();
+		view = 'play';
+	}
+
+	function playDaily() {
+		if (!daily.song) return;
+		start(
+			daily.song,
+			{ mode: daily.mode, difficulty: daily.difficulty, mods: [], muffle: choice.muffle },
+			true
+		);
+	}
+
+	const retry = () =>
+		game &&
+		start(
+			game.song,
+			{ mode: game.mode, difficulty: game.difficulty, mods: game.mods, muffle: game.muffle },
+			!!game.daily
+		);
+	const next = () =>
+		game &&
+		start(randomSong(game.song), {
+			mode: game.mode,
+			difficulty: game.difficulty,
+			mods: game.mods,
+			muffle: game.muffle
+		});
+	function toMenu() {
+		view = 'menu';
+		peeking = false;
+		records = loadRecords();
+		dailyState = loadDaily();
+		relaxedDone = loadRelaxedDone();
+	}
+
+	// --- Relaxed: any picture, any number of pieces, the music just plays on ----------------
+
+	let relaxedGame = $state(null);
+	let relaxedDone = $state(loadRelaxedDone());
+
+	/** Music to puzzle to: what plays goes on, else the whole library on shuffle */
+	async function keepMusicGoing() {
+		if (!$currentSong.song) {
+			const songs = puzzleSongs(false).sort(() => Math.random() - 0.5);
+			if (songs.length) await setSongQueue(0, songs.slice(0, 200), 'playlist');
+		} else if (!$currentSong.isPlaying) togglePlayback();
+	}
+
+	const pictureOf = (picture) =>
+		picture.image ? loadImage([picture.image]) : loadBackground(picture.setId, picture.mapId);
+
+	/** Opens a relaxed puzzle: a new one (`setup`) or one left unfinished (`save`) */
+	async function openRelaxed(setup, save = null) {
+		const picture = save?.picture ?? setup.picture;
+		view = 'loading';
+		let loaded = null;
+		try {
+			keepMusicGoing().catch((error) => console.error('Could not start the music:', error));
+			loaded = await pictureOf(picture);
+		} catch (error) {
+			console.error('Could not open the puzzle:', error);
+		}
+		if (!loaded) {
+			showToast("Couldn't load this picture", 'icon-[mingcute--pic-line]');
+			view = 'menu';
+			return;
+		}
+		const grid = save ? { cols: save.cols, rows: save.rows } : gridFor(setup.pieces, loaded.aspect);
+		relaxedGame = {
+			picture,
+			...loaded,
+			...grid,
+			seed: save?.seed ?? Math.floor(Math.random() * 2 ** 32),
+			ghost: save?.ghost ?? setup.ghost,
+			outlines: save?.outlines ?? setup.outlines,
+			saved: save?.pieces ?? null,
+			time: save?.time ?? 0
+		};
+		view = 'relaxed';
+	}
+
+	let popupId = 0;
+	function act(action) {
+		if (solvedAt) return;
+		moves++;
+		const combo = score.combo;
+		score = addJudgement(
+			score,
+			action.judgement,
+			game.difficulty,
+			scoreMultiplier(game.mods),
+			action.kiai
+		);
+		lastKiai = !!action.kiai;
+		if (!action.judgement) {
+			if (combo >= 5) playSkinSound('combobreak');
+		} else {
+			playSkinSound('normal', 'normal', action.judgement === 300 ? 1 : 0.7);
+			if (action.home) playSkinSound(game.mode === 'jigsaw' ? 'clap' : 'whistle', 'normal', 0.8);
+			if (score.combo % 25 === 0) playSkinSound('finish', 'normal', 0.8);
+		}
+		const id = ++popupId;
+		popups = [
+			...popups.slice(-12),
+			{ id, judgement: action.judgement, kiai: action.kiai, x: action.x, y: action.y }
+		];
+		setTimeout(() => (popups = popups.filter((popup) => popup.id !== id)), 700);
+	}
+
+	function solved() {
+		solvedAt = Date.now();
+		peeking = false;
+		playSkinSound('finish', 'normal', 1);
+		playSkinSound('clap', 'normal', 1);
+		const song = game.song;
+		const record = {
+			setId: song.id,
+			mapId: song.beatmaps?.[0]?.id ?? null,
+			title: song.title ?? '',
+			artist: song.artist ?? '',
+			mode: game.mode,
+			difficulty: game.difficulty,
+			mods: game.mods,
+			score: score.score,
+			accuracy: accuracy(score),
+			maxCombo: score.maxCombo,
+			grade: gradeOf(score, game.mods),
+			time: solvedAt - startedAt,
+			moves,
+			at: solvedAt,
+			daily: game.daily
+		};
+		const saved = saveRecord(record);
+		const streak = game.daily ? solveDaily(record.grade) : null;
+		const counts = { ...score.counts };
+		const key = game.key;
+		// A moment to see the whole picture (and hear the music open up) first
+		setTimeout(() => {
+			if (game?.key !== key || view !== 'play') return;
+			result = { record, counts, ...saved, daily: streak };
+			view = 'results';
+		}, 1800);
+	}
+
+	// The music: muffled as if through a wall, opening up with each piece; whole at the end
+	$effect(() => {
+		if (view === 'play' && game?.muffle && !solvedAt) setMuffle(1 - progress * 0.8, 0.4);
+		else setMuffle(0, solvedAt ? 1.5 : 0.3);
+	});
+
+	onMount(() => {
+		const timer = setInterval(() => (now = Date.now()), 250);
+		const onKey = (event) => {
+			if (view !== 'play' || event.target instanceof HTMLInputElement) return;
+			if (event.key === 'Escape') toMenu();
+			if (event.key.toLowerCase() === 'q' && !event.repeat) startPeek();
+		};
+		const onKeyUp = (event) => {
+			if (event.key.toLowerCase() === 'q') peeking = false;
+		};
+		window.addEventListener('keydown', onKey);
+		window.addEventListener('keyup', onKeyUp);
+		return () => {
+			clearInterval(timer);
+			window.removeEventListener('keydown', onKey);
+			window.removeEventListener('keyup', onKeyUp);
+			setMuffle(0);
+		};
+	});
+
+	/** A look at the whole picture: not with Hidden, and it costs the combo */
+	function startPeek() {
+		if (!game || game.mods.includes('HD') || solvedAt) return;
+		peeking = true;
+		if (score.combo) score = { ...score, combo: 0 };
+	}
+
+	let flashlight = $derived(
+		view === 'play' && game?.mods.includes('FL') && !solvedAt
+			? score.combo < 10
+				? 230
+				: score.combo < 25
+					? 180
+					: 140
+			: 0
+	);
+	let elapsed = $derived(view === 'play' ? (solvedAt || now) - startedAt : 0);
+	let Puzzle = $derived(game ? PUZZLES[game.mode] : null);
+	const modeOf = (id) => MODES.find((mode) => mode.id === id);
+	const gradeText = (g) => g.replace('H', '');
+</script>
+
+{#if view === 'menu' || view === 'loading'}
+	<div class="pb-12">
+		<!-- Header -->
+		<div class="relative overflow-hidden">
+			<div
+				class="absolute inset-0 bg-gradient-to-br from-primary-400/70 via-primary-700/40 to-secondary-200"
+			></div>
+			<Triangles count={24} seed={11} />
+			<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/40 to-transparent"></div>
+			<div class="relative px-8 pt-10 pb-6">
+				<p class="text-sm font-bold uppercase tracking-wide text-white/70">Stosufy</p>
+				<h1 class="flex items-center gap-3 text-5xl font-extrabold tracking-tight">
+					<span class="icon-[ri--puzzle-2-line] size-11"></span>Puzzle
+				</h1>
+				<p class="mt-2 max-w-2xl text-white/80">
+					{#if choice.style === 'relaxed'}
+						Just puzzling: pick any picture and how many pieces, and put it together while your
+						music plays. No time limit, no score, and it waits for you when you leave.
+					{:else}
+						Put the backgrounds of your songs back together while they play. The music stays muffled
+						until the picture is whole, and every move counts like a hit in osu!: on the beat it's a
+						300, in kiai time it's worth double.
+					{/if}
+				</p>
+				<div
+					class="mt-5 inline-flex gap-1 p-1 rounded-full bg-black/30 backdrop-blur ring-1 ring-white/10"
+					role="tablist"
+				>
+					{#each [['rhythm', 'Rhythm', 'icon-[mingcute--music-2-line]'], ['relaxed', 'Relaxed', 'icon-[ri--puzzle-2-line]']] as [id, label, icon] (id)}
+						<button
+							role="tab"
+							aria-selected={choice.style === id}
+							class="flex items-center gap-2 px-4 h-9 rounded-full text-sm font-semibold cursor-pointer transition {choice.style ===
+							id
+								? 'bg-white text-black'
+								: 'text-white/80 hover:text-white hover:bg-white/10'}"
+							onclick={() => (choice.style = id)}
+						>
+							<span class="{icon} size-4"></span>{label}
+						</button>
+					{/each}
+				</div>
+			</div>
+		</div>
+
+		<div class="px-8 flex flex-col gap-10">
+			{#if choice.style === 'relaxed'}
+				<RelaxedSetup
+					busy={view === 'loading'}
+					onstart={(setup) => openRelaxed(setup)}
+					onresume={(save) => openRelaxed(null, save)}
+				/>
+			{:else}
+				<!-- Today's puzzle -->
+				{#if daily.song}
+					<section class="relative h-52 rounded-xl overflow-hidden">
+						<BeatmapBackground
+							setId={daily.song.id}
+							mapId={daily.song.beatmaps?.[0]?.id}
+							title={daily.song.title}
+							class="absolute inset-0"
+							imageClass={dailyDone ? '' : 'blur-md scale-110'}
+						/>
+						<div
+							class="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/10"
+						></div>
+						<div class="relative h-full flex items-end justify-between gap-6 p-6">
+							<div class="min-w-0">
+								<p
+									class="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-primary-400"
+								>
+									<span class="icon-[mingcute--calendar-day-line] size-4"></span>Daily puzzle
+								</p>
+								<p class="mt-1 text-3xl font-extrabold leading-tight truncate">
+									{dailyDone ? daily.song.title : '???'}
+								</p>
+								<p class="text-white/80 truncate">
+									{dailyDone ? daily.song.artist : 'A song from your library, the same one all day'}
+								</p>
+								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold">
+									<span class="flex items-center gap-1 px-2 py-1 rounded-full bg-white/15">
+										<span class="{modeOf(daily.mode)?.icon} size-3.5"></span>{modeOf(daily.mode)
+											?.label}
+									</span>
+									<span
+										class="px-2 py-1 rounded-full text-black"
+										style="background-color: {DIFFICULTIES[daily.difficulty].color}"
+										>{DIFFICULTIES[daily.difficulty].label}</span
+									>
+									{#if dailyState.streak}
+										<span
+											class="flex items-center gap-1 px-2 py-1 rounded-full bg-orange-400/20 text-orange-200"
+										>
+											<span class="icon-[mingcute--fire-line] size-3.5"></span>{dailyState.streak}
+											{dailyState.streak === 1 ? 'day' : 'days'}
+										</span>
+									{/if}
+								</div>
+							</div>
+							<div class="shrink-0 flex items-center gap-4">
+								{#if dailyDone}
+									<span
+										class="text-6xl font-black italic"
+										style="color: {GRADE_COLORS[dailyDone.grade]}"
+										>{gradeText(dailyDone.grade)}</span
+									>
+								{/if}
+								<button
+									class="flex items-center gap-2 px-5 h-11 rounded-full bg-primary-300 hover:bg-primary-400 font-semibold cursor-pointer transition shadow-lg shadow-black/40 disabled:opacity-50"
+									disabled={view === 'loading'}
+									onclick={playDaily}
+								>
+									<span class="icon-[mingcute--play-fill] size-5"></span>
+									{dailyDone ? 'Play again' : 'Play'}
+								</button>
+							</div>
+						</div>
+					</section>
+				{/if}
+
+				<!-- A puzzle of your own -->
+				<section class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+					<div class="flex flex-col gap-3 min-w-0">
+						<h2 class="text-xl font-bold">The song</h2>
+						{#if chosen}
+							<div class="relative h-36 rounded-xl overflow-hidden">
+								<BeatmapBackground
+									setId={chosen.id}
+									mapId={chosen.beatmaps?.[0]?.id}
+									title={chosen.title}
+									class="absolute inset-0"
+								/>
+								<div class="absolute inset-0 bg-gradient-to-t from-black/85 to-black/10"></div>
+								<div class="absolute bottom-0 inset-x-0 p-4 min-w-0">
+									<p class="text-lg font-extrabold truncate">{chosen.title}</p>
+									<p class="text-sm text-white/75 truncate">
+										{chosen.artist}{chosen.songSource ? ` · ${chosen.songSource}` : ''}
+									</p>
+								</div>
+							</div>
+						{:else}
+							<p class="text-secondary-600">
+								Download a few songs first: the puzzles are made from their backgrounds.
+							</p>
+						{/if}
+						<div class="flex flex-wrap gap-2">
+							<button
+								class="flex items-center gap-2 px-4 h-9 rounded-full bg-secondary-200 hover:bg-secondary-300 text-sm font-semibold cursor-pointer transition disabled:opacity-40 disabled:pointer-events-none"
+								disabled={!$currentSong.song}
+								onclick={() => (chosen = $currentSong.song)}
+							>
+								<span class="icon-[mingcute--music-2-line] size-4"></span>Now playing
+							</button>
+							<button
+								class="flex items-center gap-2 px-4 h-9 rounded-full bg-secondary-200 hover:bg-secondary-300 text-sm font-semibold cursor-pointer transition disabled:opacity-40 disabled:pointer-events-none"
+								disabled={!library.length}
+								onclick={() => (chosen = randomSong(chosen))}
+							>
+								<span class="icon-[mingcute--shuffle-2-line] size-4"></span>Random anime song
+							</button>
+						</div>
+						<div class="relative">
+							<span
+								class="absolute left-3 top-1/2 -translate-y-1/2 icon-[mingcute--search-line] size-4 text-secondary-600"
+							></span>
+							<input
+								bind:value={query}
+								placeholder="Search your songs: title, artist, anime…"
+								class="w-full h-10 pl-9 pr-3 rounded-lg bg-secondary-200 ring-1 ring-white/5 focus:ring-primary-400 outline-none text-sm"
+							/>
+						</div>
+						{#if matches.length}
+							<div
+								class="max-h-64 overflow-y-auto rounded-lg bg-secondary-100/60 ring-1 ring-white/5"
+							>
+								{#each matches as song (`${song.id}:${song.track ?? 0}`)}
+									<button
+										class="w-full flex items-center gap-3 px-3 py-2 text-left cursor-pointer hover:bg-secondary-300 transition {sameSong(
+											song,
+											chosen
+										)
+											? 'bg-secondary-300'
+											: ''}"
+										onclick={() => {
+											chosen = song;
+											query = '';
+										}}
+									>
+										<SongCover
+											setId={song.id}
+											track={song.track}
+											title={song.title}
+											class="size-9 rounded shrink-0"
+											lazy
+										/>
+										<span class="min-w-0">
+											<span class="block text-sm font-semibold truncate">{song.title}</span>
+											<span class="block text-xs text-secondary-600 truncate"
+												>{song.artist}{song.songSource ? ` · ${song.songSource}` : ''}</span
+											>
+										</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<div class="flex flex-col gap-5 min-w-0">
+						<div class="flex flex-col gap-2">
+							<h2 class="text-xl font-bold">Mode</h2>
+							<div class="grid grid-cols-3 gap-2">
+								{#each MODES as mode (mode.id)}
+									<button
+										class="flex flex-col items-start gap-1 p-3 rounded-xl text-left cursor-pointer ring-1 transition {choice.mode ===
+										mode.id
+											? 'bg-primary-300/20 ring-primary-400'
+											: 'bg-secondary-200 ring-white/5 hover:bg-secondary-300'}"
+										onclick={() => (choice.mode = mode.id)}
+									>
+										<span class="{mode.icon} size-6"></span>
+										<span class="font-bold">{mode.label}</span>
+										<span class="text-xs text-secondary-600 leading-snug">{mode.hint}</span>
+									</button>
+								{/each}
+							</div>
+						</div>
+
+						<div class="flex flex-col gap-2">
+							<h2 class="text-xl font-bold">Difficulty</h2>
+							<div class="flex flex-wrap gap-2">
+								{#each DIFFICULTIES as difficulty, index (difficulty.label)}
+									<button
+										class="px-4 h-9 rounded-full text-sm font-bold cursor-pointer transition ring-2 {choice.difficulty ===
+										index
+											? 'text-black'
+											: 'bg-secondary-200 hover:bg-secondary-300 ring-transparent'}"
+										style={choice.difficulty === index
+											? `background-color: ${difficulty.color}; --tw-ring-color: ${difficulty.color}`
+											: `color: ${difficulty.color}`}
+										onclick={() => (choice.difficulty = index)}
+									>
+										{difficulty.label}
+										<span class="opacity-70 font-semibold">· {pieceCount(index, choice.mode)}</span>
+									</button>
+								{/each}
+							</div>
+						</div>
+
+						<div class="flex flex-col gap-2">
+							<h2 class="text-xl font-bold">Mods</h2>
+							<div class="flex flex-wrap gap-2">
+								{#each MODS as mod (mod.id)}
+									{@const on = choice.mods.includes(mod.id)}
+									{@const usable = !mod.modes || mod.modes.includes(choice.mode)}
+									<button
+										title="{mod.hint} (score ×{mod.multiplier})"
+										class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold cursor-pointer transition disabled:opacity-35 disabled:pointer-events-none {on
+											? 'bg-white text-black'
+											: 'bg-secondary-200 hover:bg-secondary-300'}"
+										disabled={!usable}
+										onclick={() => toggleMod(mod.id)}
+									>
+										<span class="font-extrabold">{mod.id}</span>
+										<span class="opacity-70">{mod.label}</span>
+									</button>
+								{/each}
+							</div>
+							<label class="mt-1 flex items-center gap-3 text-sm cursor-pointer w-fit">
+								<input
+									type="checkbox"
+									bind:checked={choice.muffle}
+									class="accent-primary-400 size-4"
+								/>
+								<span>
+									<span class="font-semibold">Muffled music</span>
+									<span class="text-secondary-600">· opens up as the picture comes together</span>
+								</span>
+							</label>
+						</div>
+
+						<button
+							class="self-start flex items-center gap-2 px-6 h-12 rounded-full bg-primary-300 hover:bg-primary-400 font-bold cursor-pointer transition shadow-lg shadow-black/30 disabled:opacity-50 disabled:pointer-events-none"
+							disabled={!chosen || view === 'loading'}
+							onclick={() => start(chosen)}
+						>
+							{#if view === 'loading'}
+								<span class="icon-[line-md--loading-loop] size-5"></span>Cutting it up…
+							{:else}
+								<span class="icon-[ri--puzzle-2-line] size-5"></span>Start the puzzle
+							{/if}
+						</button>
+					</div>
+				</section>
+			{/if}
+
+			<!-- Solved puzzles -->
+			{#if choice.style === 'relaxed'}
+				<section class="flex flex-col gap-3">
+					<h2 class="text-xl font-bold">
+						Your puzzles <span class="text-secondary-600 font-semibold text-base"
+							>· {relaxedDone.length} done</span
+						>
+					</h2>
+					{#if relaxedDone.length}
+						<div class="grid gap-3 grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]">
+							{#each relaxedDone as record (record.at)}
+								<button
+									class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
+									title="Puzzle it again"
+									onclick={() =>
+										openRelaxed({
+											picture: record.picture,
+											pieces: record.pieces,
+											ghost: false,
+											outlines: true
+										})}
+									disabled={!record.picture.image && record.picture.setId == null}
+								>
+									{#if record.picture.image}
+										<img
+											src={record.picture.image}
+											alt=""
+											class="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105"
+										/>
+									{:else}
+										<BeatmapBackground
+											setId={record.picture.setId}
+											mapId={record.picture.mapId}
+											title={record.picture.title}
+											class="absolute inset-0 transition-transform duration-300 group-hover:scale-105"
+										/>
+									{/if}
+									<div
+										class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
+									></div>
+									<span
+										class="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-xs font-bold"
+									>
+										<span class="icon-[ri--puzzle-2-line] size-3.5"></span>{record.pieces}
+									</span>
+									<div class="absolute bottom-0 inset-x-0 p-2.5 min-w-0">
+										<p class="text-sm font-bold truncate">{record.picture.title}</p>
+										<p class="text-xs text-white/70">
+											{formatTime(record.time)} · {new Date(record.at).toLocaleDateString()}
+										</p>
+									</div>
+								</button>
+							{/each}
+						</div>
+					{:else}
+						<p class="text-secondary-600">Every puzzle you finish hangs here.</p>
+					{/if}
+				</section>
+			{:else}
+				<section class="flex flex-col gap-3">
+					<h2 class="text-xl font-bold">
+						Your gallery <span class="text-secondary-600 font-semibold text-base"
+							>· {gallery.length} {gallery.length === 1 ? 'picture' : 'pictures'}</span
+						>
+					</h2>
+					{#if gallery.length}
+						<div class="grid gap-3 grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]">
+							{#each gallery as record (record.setId)}
+								<button
+									class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
+									title="Puzzle it again"
+									onclick={() => {
+										const song = librarySong({ id: record.setId, beatmaps: [] });
+										if (!song) {
+											showToast(
+												`"${record.title}" isn’t downloaded anymore`,
+												'icon-[mingcute--download-2-line]'
+											);
+											return;
+										}
+										chosen = song;
+										choice.mode = record.mode;
+										choice.difficulty = record.difficulty;
+										document
+											.querySelector('[data-scroll-container]')
+											?.scrollTo({ top: 0, behavior: 'smooth' });
+									}}
+								>
+									<BeatmapBackground
+										setId={record.setId}
+										mapId={record.mapId}
+										title={record.title}
+										class="absolute inset-0 transition-transform duration-300 group-hover:scale-105"
+									/>
+									<div
+										class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
+									></div>
+									<span
+										class="absolute top-1.5 right-2.5 text-3xl font-black italic drop-shadow-[0_2px_6px_black]"
+										style="color: {GRADE_COLORS[record.grade]}">{gradeText(record.grade)}</span
+									>
+									<div class="absolute bottom-0 inset-x-0 p-2.5 min-w-0">
+										<p class="text-sm font-bold truncate">{record.title}</p>
+										<p class="flex items-center gap-1.5 text-xs text-white/70">
+											<span class="{modeOf(record.mode)?.icon} size-3.5"></span>
+											<span style="color: {DIFFICULTIES[record.difficulty].color}"
+												>{DIFFICULTIES[record.difficulty].label}</span
+											>
+											· {record.score.toLocaleString()}
+										</p>
+									</div>
+								</button>
+							{/each}
+						</div>
+					{:else}
+						<p class="text-secondary-600">
+							Every picture you put back together hangs here, with your best grade.
+						</p>
+					{/if}
+				</section>
+			{/if}
+		</div>
+	</div>
+{:else if view === 'play' && game && Puzzle}
+	<div class="relative h-full flex flex-col overflow-hidden">
+		<!-- The picture behind it all, dark and blurred -->
+		<div class="absolute inset-0 overflow-hidden pointer-events-none">
+			<img src={game.url} alt="" class="size-full object-cover blur-2xl scale-110 opacity-25" />
+		</div>
+
+		<!-- What's going on: the song, the score, combo and accuracy -->
+		<div class="relative z-10 flex items-center gap-4 px-5 py-3 bg-black/30 backdrop-blur">
+			{#if !game.mods.includes('HD')}
+				<img
+					src={game.url}
+					alt="What it should look like"
+					class="h-14 aspect-video object-cover rounded ring-1 ring-white/15 shadow"
+				/>
+			{/if}
+			<div class="min-w-0 flex-1">
+				<p class="font-bold truncate">
+					{game.daily && !solvedAt ? 'Daily puzzle' : game.song.title}
+				</p>
+				<p class="text-xs text-white/60 flex items-center gap-1.5">
+					<span class="{modeOf(game.mode)?.icon} size-3.5"></span>
+					<span style="color: {DIFFICULTIES[game.difficulty].color}"
+						>{DIFFICULTIES[game.difficulty].label}</span
+					>
+					{#each game.mods as mod (mod)}<span class="font-extrabold text-white/80">{mod}</span
+						>{/each}
+					· {formatTime(elapsed)} · {moves} moves
+				</p>
+			</div>
+			{#if !$currentSong.isPlaying && !solvedAt}
+				<!-- Without music there's no beat: every move is a 100 -->
+				<button
+					class="flex items-center gap-2 px-3 h-8 rounded-full bg-amber-400/15 ring-1 ring-amber-300/30 text-xs font-semibold text-amber-100 cursor-pointer hover:bg-amber-400/25 transition"
+					onclick={togglePlayback}
+				>
+					<span class="icon-[mingcute--play-fill] size-4 text-amber-300"></span>
+					Music paused: no beat, every move is a 100
+				</button>
+			{/if}
+			<!-- The beat, to move on it -->
+			<span
+				class="beat-logo size-5 rounded-full ring-2 {lastKiai
+					? 'ring-amber-300 bg-amber-300/40'
+					: 'ring-primary-400 bg-primary-400/30'}"
+				title="The beat: move on it for 300s"
+			></span>
+			<div class="text-right">
+				<p class="text-2xl font-extrabold tabular-nums leading-none">
+					{score.score.toLocaleString().padStart(8, '0')}
+				</p>
+				<p class="text-sm tabular-nums text-white/70">
+					{(accuracy(score) * 100).toFixed(2)}%
+				</p>
+			</div>
+			<div class="flex items-center gap-1">
+				<button
+					title={game.mods.includes('HD')
+						? 'No peeking with Hidden'
+						: 'Hold to see the whole picture (Q); costs your combo'}
+					aria-label="Peek"
+					class="size-9 grid place-items-center rounded-full hover:bg-white/15 cursor-pointer transition disabled:opacity-30 disabled:pointer-events-none"
+					disabled={game.mods.includes('HD')}
+					onpointerdown={startPeek}
+					onpointerup={() => (peeking = false)}
+					onpointerleave={() => (peeking = false)}
+				>
+					<span class="icon-[mingcute--eye-line] size-5"></span>
+				</button>
+				<button
+					title="Start over"
+					aria-label="Start over"
+					class="size-9 grid place-items-center rounded-full hover:bg-white/15 cursor-pointer transition"
+					onclick={retry}
+				>
+					<span class="icon-[mingcute--refresh-2-line] size-5"></span>
+				</button>
+				<button
+					title="Leave (Esc)"
+					aria-label="Leave the puzzle"
+					class="size-9 grid place-items-center rounded-full hover:bg-white/15 cursor-pointer transition"
+					onclick={toMenu}
+				>
+					<span class="icon-[mingcute--close-line] size-5"></span>
+				</button>
+			</div>
+		</div>
+		<!-- How much is done -->
+		<div class="relative z-10 h-1 bg-white/10">
+			<div
+				class="h-full bg-primary-400 transition-[width] duration-300 shadow-[0_0_8px] shadow-primary-400"
+				style="width: {progress * 100}%"
+			></div>
+		</div>
+
+		<div
+			class="relative flex-1 min-h-0"
+			role="application"
+			onpointermove={(event) => {
+				const rect = event.currentTarget.getBoundingClientRect();
+				pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+			}}
+		>
+			{#key game.key}
+				<Puzzle
+					url={game.url}
+					aspect={game.aspect}
+					cols={game.cols}
+					rows={game.rows}
+					seed={game.seed}
+					mods={game.mods}
+					{peeking}
+					onaction={act}
+					onprogress={(fraction) => (progress = fraction)}
+					onsolved={solved}
+				/>
+			{/key}
+
+			<!-- The combo, bottom left like in osu! -->
+			{#if score.combo > 1}
+				{#key score.combo}
+					<p
+						class="absolute left-5 bottom-3 z-[100005] text-5xl font-extrabold tabular-nums pointer-events-none drop-shadow-[0_2px_8px_black]"
+						in:scale={{ start: 1.25, duration: 160 }}
+					>
+						{score.combo}x
+					</p>
+				{/key}
+			{/if}
+
+			<!-- Flashlight: only around the cursor, smaller the higher the combo -->
+			{#if flashlight}
+				<div
+					class="absolute inset-0 z-[100003] pointer-events-none"
+					style="background: radial-gradient(circle {flashlight}px at {pointer.x}px {pointer.y}px, transparent 55%, rgba(0,0,0,0.97) 100%)"
+				></div>
+			{/if}
+
+			{#if solvedAt}
+				<div
+					class="absolute inset-0 z-[100002] grid place-items-center pointer-events-none"
+					in:fade={{ duration: 200 }}
+				>
+					<p
+						class="text-7xl font-black italic tracking-tight drop-shadow-[0_4px_30px_rgba(0,0,0,0.8)]"
+						in:scale={{ start: 0.4, duration: 600, easing: backOut }}
+					>
+						Solved!
+					</p>
+				</div>
+			{/if}
+		</div>
+	</div>
+
+	<!-- The judgements where they happened -->
+	{#each popups as popup (popup.id)}
+		<span
+			class="fixed z-[100004] -translate-x-1/2 -translate-y-1/2 pointer-events-none font-black italic text-2xl drop-shadow-[0_2px_6px_black] judgement"
+			style="left: {popup.x}px; top: {popup.y}px; color: {JUDGEMENT_COLORS[popup.judgement]}"
+		>
+			{popup.judgement || '✕'}{#if popup.kiai && popup.judgement}<span
+					class="text-sm align-top text-amber-300"
+				>
+					×2</span
+				>{/if}
+		</span>
+	{/each}
+{:else if view === 'relaxed' && relaxedGame}
+	<RelaxedPuzzle game={relaxedGame} onleave={toMenu} onnew={toMenu} />
+{:else if view === 'results' && result}
+	<div class="h-full" in:fly={{ y: 20, duration: 300 }}>
+		<PuzzleResults {result} onretry={retry} onnext={next} onmenu={toMenu} />
+	</div>
+{/if}
+
+<style>
+	.judgement {
+		animation: judgement 700ms ease-out forwards;
+	}
+	@keyframes judgement {
+		0% {
+			opacity: 0;
+			transform: translate(-50%, -50%) scale(1.6);
+		}
+		15% {
+			opacity: 1;
+			transform: translate(-50%, -50%) scale(1);
+		}
+		70% {
+			opacity: 1;
+		}
+		100% {
+			opacity: 0;
+			transform: translate(-50%, -110%) scale(1);
+		}
+	}
+</style>

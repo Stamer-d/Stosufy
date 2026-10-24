@@ -33,6 +33,14 @@ let context: AudioContext | null = null;
 let input: GainNode | null = null;
 let filters: BiquadFilterNode[] = [];
 let preamp: GainNode | null = null;
+/** A low-pass at the end of the graph: the puzzle muffles the music until it's solved */
+let muffle: BiquadFilterNode | null = null;
+
+/** Above what anyone hears: the low-pass changes nothing */
+const OPEN = 20000;
+/** How muffled the music sounds at its most: as if from the room next door */
+const MUFFLED = 280;
+
 const sources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
 /** Each routed song's own fade (crossfades and switches), on the audio thread */
 const fades = new WeakMap<HTMLMediaElement, GainNode>();
@@ -65,9 +73,13 @@ export function playbackContext() {
 			return filter;
 		});
 		preamp = context.createGain();
+		muffle = context.createBiquadFilter();
+		muffle.type = 'lowpass';
+		muffle.frequency.value = OPEN;
+		muffle.Q.value = 0.7;
 		let node: AudioNode = input;
 		for (const filter of filters) node = node.connect(filter);
-		node.connect(preamp).connect(context.destination);
+		node.connect(preamp).connect(muffle).connect(context.destination);
 		applyEq();
 	}
 	return context;
@@ -137,6 +149,17 @@ export function applyEq() {
 	// Headroom for boosted bands, so they don't clip
 	const boost = on ? Math.max(0, ...gains) : 0;
 	preamp.gain.setTargetAtTime(10 ** (-(boost * 0.6) / 20), now, 0.05);
+}
+
+/**
+ * Muffles the music: 1 sounds like through a wall, 0 is the music as it is. The cut-off
+ * moves on a log scale, so each step opens up about as much as the last.
+ */
+export function setMuffle(amount: number, seconds = 0.25) {
+	if (!context || !muffle) return;
+	const clamped = Math.min(1, Math.max(0, amount));
+	const frequency = clamped <= 0 ? OPEN : OPEN * (MUFFLED / OPEN) ** clamped;
+	muffle.frequency.setTargetAtTime(frequency, context.currentTime, seconds / 3);
 }
 
 /** The output delay of an audio context (s): what's scheduled now is heard this much later */

@@ -55,6 +55,14 @@ yourself.
 - **Play it yourself.** Use mouse and keys with real hit windows and sounds, mods (EZ, HD, HR, HT, DT, NC, RX) and a results screen.
 - **Any difficulty.** Pick which difficulty of the beatmap to show.
 
+### 🧩 Puzzle
+
+Two ways to puzzle:
+
+- **Relaxed.** Just puzzling, with no time limit and no score. Pick any picture (a song's background or one of your own), choose from 28 up to about 300 pieces, and go while your music plays on. Pieces that fit snap together and move as one, "Edges first" sorts the edge pieces out, and an unfinished puzzle waits for you when you leave.
+- **Rhythm.** Put a song's background back together while it plays: a **jigsaw**, a **sliding** puzzle, or tiles to **spin** the right way up, from Easy to Expert. The music sounds like it's coming through a wall and opens up with every piece. Every move is judged on the beat like a hit in osu! (300, 100, 50 or miss) with combo, score, accuracy, a grade and your skin's hitsounds, and kiai time counts double. Mods: Easy, Hidden, Flashlight and Spun. There's a **daily puzzle** with a streak.
+- **Gallery.** Every picture you finish hangs there.
+
 ### 🎛️ DJ mode
 
 - **Two decks** with waveforms, beat grids taken from the beatmap (checked against the audio), sync, key lock, a three-band EQ with kills, filter, loops, hot cues and recording.

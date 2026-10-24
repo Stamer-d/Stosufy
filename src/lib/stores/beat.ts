@@ -10,6 +10,7 @@ import { songQueue, currentSong } from './audio';
 import { mapDataStore } from './data';
 import { loadTiming } from './mods';
 import { userSettings } from './user';
+import { heardTime } from './equalizer';
 import { parseKiai, parseTimingPoints, type KiaiSection, type TimingPoint } from '../osuFile';
 
 /** How sharply the pulse falls off after a beat; higher is snappier */
@@ -70,6 +71,27 @@ function pointAt(points: TimingPoint[], time: number) {
 		point = candidate;
 	}
 	return point;
+}
+
+/**
+ * Where the current song is against its beat as it's heard now: how far from the nearest
+ * beat (ms of the song, negative before it), how long a beat is and whether it's kiai time.
+ * Null while nothing plays or the timing is unknown.
+ */
+export function beatNow(): { offset: number; beatLength: number; kiai: boolean } | null {
+	const audio = get(songQueue).audio;
+	const timing = audio && !audio.paused ? currentTiming() : null;
+	if (!audio || !timing) return null;
+	const time = timing.offset + heardTime(audio);
+	const point = pointAt(timing.timing, time);
+	if (!point || !(point.beatLength > 0)) return null;
+	const sinceBeat =
+		(((time - point.time) % point.beatLength) + point.beatLength) % point.beatLength;
+	return {
+		offset: sinceBeat > point.beatLength / 2 ? sinceBeat - point.beatLength : sinceBeat,
+		beatLength: point.beatLength,
+		kiai: timing.kiai.some((section) => time >= section.start && time < section.end)
+	};
 }
 
 let started = false;
