@@ -22,7 +22,9 @@ import { setRPCActivity } from './discord';
 import { playlistSongsCache } from './playlist';
 import {
 	isStreamed,
+	markPreviewing,
 	markStreamed,
+	mirrorResting,
 	openStream,
 	prefetchStreams,
 	streamedLoudness,
@@ -254,11 +256,20 @@ async function createAudio(song: MapSet, type: QueueType, currentSeconds = 0) {
 	const streamId = mapId == null && streamingOn() ? streamMapId(song) : null;
 	const incoming = streamId != null ? await openStream(streamId).catch(() => null) : null;
 	markStreamed(song, !!incoming);
+	// Streaming is on but the mirror didn't have it (or wants a break): the preview, never a
+	// download nobody asked for (only songs without a preview are still downloaded)
+	const previewInstead = streamId != null && !incoming && !!song.preview_url;
+	markPreviewing(song, previewInstead);
+	if (previewInstead && !mirrorResting())
+		showToast(
+			`Couldn't stream "${song.title}" right now: playing its preview`,
+			'icon-[mingcute--cloud-line]'
+		);
 	if (incoming) {
 		audio = await streamedAudio(incoming);
 		track(audio, silent ? 0 : 1);
 		incoming.bytes.then((bytes) => bytes && normalize(audio, song, streamId!, bytes));
-	} else if (type == 'preview' && !song.queued && mapId == null) {
+	} else if (previewInstead || (type == 'preview' && !song.queued && mapId == null)) {
 		audio = new Audio(`${song.preview_url}`);
 		track(audio, silent ? 0 : 1);
 	} else {
@@ -793,7 +804,7 @@ if (typeof window !== 'undefined') {
 	songQueue.subscribe(({ queue, currentIndex }) => {
 		if (!queue || currentIndex == null) return;
 		prefetchStreams(
-			[...get(upNext), ...queue.slice(currentIndex + 1)].slice(0, 2),
+			[...get(upNext), ...queue.slice(currentIndex + 1)].slice(0, 1),
 			(song) => localMapId(song) != null
 		);
 	});

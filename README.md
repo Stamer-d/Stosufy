@@ -32,7 +32,7 @@ yourself.
 ### 🎧 Music
 
 - **Every osu! song.** Search all beatmaps and stream them, or download them to listen offline. Downloads run in a queue.
-- **Streaming in full** (a setting). Songs that aren't downloaded play in full, in the search and in playlists, without an osu! session key: only the song is fetched, from the beatmap mirror catboy.best. It starts while it's still loading, the next songs in the queue (and the one you point at) load ahead, and the last few stay in memory. Gameplay, hitsounds and the beat work as for downloaded ones.
+- **Streaming in full** (a setting). Songs that aren't downloaded play in full, in the search and in playlists, without an osu! session key: only the song is fetched, from the beatmap mirror catboy.best. It starts while it's still loading, the next song in the queue (and the one you point at) loads ahead, and the last few stay in memory. The mirror's rate limits are kept to; when it can't stream a song, its preview plays instead. Gameplay, hitsounds and the beat work as for downloaded ones.
 - **Your osu! songs.** Import the songs from your osu! folder or profile.
 - **Playback.** Queue, shuffle and repeat, crossfade, speed mods (DT/NC/HT/DC), sleep timer and volume normalisation.
 - **Hitsounds.** Play the map's hitsounds along with the song, using your own skin's sounds.

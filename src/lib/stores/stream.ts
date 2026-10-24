@@ -1,21 +1,99 @@
 // Streaming: the whole song of a beatmap that isn't downloaded, without downloading the set.
 // A beatmap mirror (catboy.best) hands out only a difficulty's audio, without an osu! session
-// key. A song can start playing while it still comes in (see audio.ts), songs about to play
-// are loaded ahead, and the last few stay in memory (not saved), so going back is instant.
+// key. A song can start playing while it still comes in (see audio.ts), the next one is loaded
+// ahead, and the last few stay in memory (not saved), so going back is instant.
+//
+// The mirror limits how much each user asks for (it answers 429 and counts down in
+// X-Ratelimit-Remaining), and bans users of apps that keep asking anyway: requests are spaced
+// out, loading ahead stops when few are left, and a 429 pauses everything as long as it says.
 
 import { get } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
 import { userSettings } from './user';
 import { offline } from './network';
+import { showToast } from './toast';
 import type { MapSet } from '../types';
 
-/** The mirror's main server, and its regions (asked together when the main one fails) */
+/** The mirror's main server, and its regions (asked in turn when the main one fails) */
 const MAIN = 'https://catboy.best';
 const REGIONS = ['https://central.catboy.best', 'https://us.catboy.best', 'https://sg.catboy.best'];
-/** How long a server gets to answer (ms); the song itself then takes as long as it takes */
-const ANSWER_TIMEOUT = 8000;
+/**
+ * How long a server gets to answer (ms): a song nobody asked for in a while it may first have
+ * to fetch itself. The song then takes as long as it takes.
+ */
+const ANSWER_TIMEOUT = 15000;
 /** How many songs stay in memory */
 const KEEP = 10;
+
+// --- Being a good guest: the mirror's limits -------------------------------------------------
+
+/** At most one request a second, and two at a time */
+const GAP = 1000;
+const AT_ONCE = 2;
+/** Below this many requests left, nothing is loaded ahead anymore */
+const SPARE = 5;
+
+let lastRequest = 0;
+let running = 0;
+/** Requests for songs to play right now, waiting for their turn (loading ahead waits for them) */
+let wantedNow = 0;
+/** What the mirror said is left, and until when it asked to be left alone */
+let remaining = Infinity;
+let pausedUntil = 0;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Waits for a request's turn; false if it shouldn't be made at all (the mirror asked for a
+ * pause, or it's only loading ahead and that would use up what's left)
+ */
+async function turn(now: boolean) {
+	if (now) wantedNow++;
+	try {
+		for (;;) {
+			if (Date.now() < pausedUntil) return false;
+			if (!now && (remaining <= SPARE || wantedNow > 0)) return false;
+			const wait = lastRequest + GAP - Date.now();
+			if (wait <= 0 && running < AT_ONCE) {
+				lastRequest = Date.now();
+				running++;
+				return true;
+			}
+			await sleep(Math.max(50, wait));
+		}
+	} finally {
+		if (now) wantedNow--;
+	}
+}
+
+/** The mirror asked for a break (it was said already, once) */
+export const mirrorResting = () => Date.now() < pausedUntil;
+
+/** What a server's answer says about the limits */
+function noteLimits(response: Response) {
+	const left = Number(response.headers.get('x-ratelimit-remaining'));
+	if (response.headers.has('x-ratelimit-remaining') && Number.isFinite(left)) remaining = left;
+	if (response.status !== 429) return;
+	// How long to leave it alone: what it says (seconds, or a time), else a minute
+	const retry = response.headers.get('retry-after') ?? response.headers.get('x-ratelimit-reset');
+	const seconds = Number(retry);
+	const until = !retry
+		? Date.now() + 60000
+		: Number.isFinite(seconds)
+			? seconds > 1e9
+				? seconds * 1000
+				: Date.now() + seconds * 1000
+			: Date.parse(retry) || Date.now() + 60000;
+	const first = Date.now() >= pausedUntil;
+	pausedUntil = Math.max(pausedUntil, Math.min(until, Date.now() + 10 * 60000));
+	remaining = 0;
+	if (first)
+		showToast(
+			'catboy.best wants a short break: previews for now, streaming goes on by itself',
+			'icon-[mingcute--time-line]',
+			6000
+		);
+}
 
 /** Whether songs that aren't downloaded play in full from the mirror */
 export function streamingOn() {
@@ -50,44 +128,52 @@ export interface Incoming {
 	listen(onChunk: (chunk: Uint8Array | null) => void): () => void;
 }
 
-/** A server's answer for a song, if it has it (its body not read yet) */
-async function answer(mirror: string, mapId: string) {
+/** A request is done (its song read, or it failed): the next one may go */
+function done() {
+	running = Math.max(0, running - 1);
+}
+
+/**
+ * A server's answer for a song, if it has it (its body not read yet; `done` is called once
+ * it's read). 'busy' if the mirror asked for a break.
+ */
+async function answer(mirror: string, mapId: string, now: boolean) {
+	if (!(await turn(now))) return 'busy' as const;
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), ANSWER_TIMEOUT);
 	try {
 		const response = await fetch(`${mirror}/preview/audio/${mapId}/full`, {
 			signal: controller.signal
 		});
-		return response.ok && response.body ? response : null;
+		noteLimits(response);
+		if (response.ok && response.body) return response;
+		console.warn(`Could not stream ${mapId} from ${mirror}: HTTP ${response.status}`);
+		response.body?.cancel().catch(() => {});
+		done();
+		return response.status === 429 ? ('busy' as const) : null;
 	} catch (error) {
 		console.warn('Could not stream from', mirror, error);
+		done();
 		return null;
 	} finally {
 		clearTimeout(timer);
 	}
 }
 
-/** The main server's answer, else the region that answers first */
-async function connect(mapId: string) {
-	const main = await answer(MAIN, mapId);
-	if (main) return main;
-	const asked = REGIONS.map((mirror) => answer(mirror, mapId));
-	const winner = await Promise.any(
-		asked.map((answering) =>
-			answering.then((response) => response ?? Promise.reject(new Error('none')))
-		)
-	).catch(() => null);
-	// The others' songs aren't needed
-	for (const answering of asked)
-		answering.then((response) => {
-			if (response && response !== winner) response.body?.cancel().catch(() => {});
-		});
-	return winner;
+/** The main server's answer, else one region's after the other (not after a 429) */
+async function connect(mapId: string, now: boolean) {
+	for (const mirror of [MAIN, ...REGIONS]) {
+		const response = await answer(mirror, mapId, now);
+		if (response === 'busy') return null;
+		if (response) return response;
+	}
+	return null;
 }
 
 /** Reads a song as it comes in; null if it isn't a song */
 async function receive(response: Response): Promise<Incoming | null> {
 	const reader = response.body!.getReader();
+	const finished = done;
 	const chunks: Uint8Array[] = [];
 	const listeners = new Set<(chunk: Uint8Array | null) => void>();
 	// The first bytes say whether it's a song at all
@@ -96,6 +182,7 @@ async function receive(response: Response): Promise<Incoming | null> {
 		const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }));
 		if (done || !value) {
 			reader.cancel().catch(() => {});
+			finished();
 			return null;
 		}
 		chunks.push(value);
@@ -107,6 +194,7 @@ async function receive(response: Response): Promise<Incoming | null> {
 	const format = formatOf(head);
 	if (!format) {
 		reader.cancel().catch(() => {});
+		finished();
 		return null;
 	}
 
@@ -132,8 +220,10 @@ async function receive(response: Response): Promise<Incoming | null> {
 		} catch (error) {
 			console.warn('A streamed song broke off:', error);
 			for (const listener of listeners) listener(null);
+			finished();
 			return null;
 		}
+		finished();
 		incoming.complete = true;
 		for (const listener of listeners) listener(null);
 		const whole = new Uint8Array(size);
@@ -160,14 +250,14 @@ function remember(key: string, loading: Promise<Incoming | null>) {
  * A song from the mirror as it comes in (or already there), or null if no server has it
  * (then the song is played the usual way). Asked for twice, it's fetched once.
  */
-export function openStream(mapId: number | string): Promise<Incoming | null> {
+export function openStream(mapId: number | string, now = true): Promise<Incoming | null> {
 	const key = String(mapId);
 	const known = songs.get(key);
 	if (known) {
 		remember(key, known);
 		return known;
 	}
-	const loading = connect(key)
+	const loading = connect(key, now)
 		.then((response) => (response ? receive(response) : null))
 		.then((incoming) => {
 			// Not found or broken off: asked again next time (the mirror may have it then)
@@ -183,8 +273,8 @@ export function openStream(mapId: number | string): Promise<Incoming | null> {
 }
 
 /** The whole song from the mirror, or null */
-export async function streamAudio(mapId: number | string) {
-	return (await openStream(mapId))?.bytes ?? null;
+export async function streamAudio(mapId: number | string, now = true) {
+	return (await openStream(mapId, now))?.bytes ?? null;
 }
 
 // --- Loading ahead -------------------------------------------------------------------------
@@ -198,7 +288,7 @@ async function loadAhead() {
 	loadingAhead = true;
 	while (ahead.length) {
 		const mapId = ahead.shift()!;
-		await streamAudio(mapId).catch(() => null);
+		await streamAudio(mapId, false).catch(() => null);
 	}
 	loadingAhead = false;
 }
@@ -217,7 +307,7 @@ export function prefetchStreams(
 		.map((song) => String(streamMapId(song) ?? ''))
 		.filter((mapId) => mapId && !songs.has(mapId));
 	if (!wanted.length) return;
-	ahead = [...wanted, ...ahead.filter((mapId) => !wanted.includes(mapId))].slice(0, 6);
+	ahead = [...wanted, ...ahead.filter((mapId) => !wanted.includes(mapId))].slice(0, 2);
 	loadAhead();
 }
 
@@ -228,7 +318,7 @@ export function prefetchOnHover(song: MapSet | null | undefined, downloaded: boo
 	if (!song || downloaded || !streamingOn()) return;
 	const mapId = streamMapId(song);
 	if (mapId == null || songs.has(String(mapId))) return;
-	hoverTimer = setTimeout(() => openStream(mapId).catch(() => null), 250);
+	hoverTimer = setTimeout(() => openStream(mapId, false).catch(() => null), 400);
 }
 
 export function cancelHoverPrefetch() {
@@ -250,6 +340,18 @@ export function markStreamed(song: MapSet, on: boolean) {
 
 export function isStreamed(song: MapSet | null | undefined) {
 	return !!song && streamed.has(String(song.id));
+}
+
+/** The songs that couldn't be streamed and play the osu! preview instead (in any queue) */
+const previewing = new Set<string>();
+
+export function markPreviewing(song: MapSet, on: boolean) {
+	if (on) previewing.add(String(song.id));
+	else previewing.delete(String(song.id));
+}
+
+export function isPreviewing(song: MapSet | null | undefined) {
+	return !!song && previewing.has(String(song.id));
 }
 
 /** Loudness measured of streamed songs (they aren't in the library to keep it) */

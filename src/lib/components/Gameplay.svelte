@@ -12,7 +12,7 @@
 	import { currentSong, songQueue, setPlaybackLock } from '#lib/stores/audio.ts';
 	import { userSettings } from '#lib/stores/user.ts';
 	import { heardTime } from '#lib/stores/equalizer.ts';
-	import { isStreamed } from '#lib/stores/stream.ts';
+	import { isPreviewing, isStreamed } from '#lib/stores/stream.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { keybindsPaused } from '#lib/stores/keybinds.ts';
 	import { beatmapContent, playSoundNow } from '#lib/hitsounds/player.ts';
@@ -123,10 +123,11 @@
 		// Only the song, difficulty, skin and mode rebuild the play (not every queue update)
 		const preview = untrack(
 			() =>
-				$songQueue.type === 'preview' &&
-				!current.queued &&
-				!$mapDataStore[current.id] &&
-				!isStreamed(current)
+				($songQueue.type === 'preview' &&
+					!current.queued &&
+					!$mapDataStore[current.id] &&
+					!isStreamed(current)) ||
+				isPreviewing(current)
 		);
 		if (preview) {
 			message = 'Gameplay shows for downloaded songs';
