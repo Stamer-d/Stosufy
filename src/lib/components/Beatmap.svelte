@@ -1,5 +1,6 @@
 <script>
 	import { songQueue, togglePlayback, currentSong, updateSongQueue } from '#lib/stores/audio.ts';
+	import { cancelHoverPrefetch, prefetchOnHover } from '#lib/stores/stream.ts';
 	import {
 		downloadBeatmap,
 		deleteSong,
@@ -60,6 +61,8 @@
 
 <article
 	class="group relative rounded-lg overflow-hidden bg-secondary-200 hover:bg-secondary-300 transition-colors"
+	on:mouseenter={() => prefetchOnHover(map, isDownloaded)}
+	on:mouseleave={cancelHoverPrefetch}
 >
 	<div
 		class="relative aspect-[400/140] overflow-hidden"

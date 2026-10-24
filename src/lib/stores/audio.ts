@@ -23,11 +23,12 @@ import { playlistSongsCache } from './playlist';
 import {
 	isStreamed,
 	markStreamed,
-	prefetchStream,
-	streamAudio,
+	openStream,
+	prefetchStreams,
 	streamedLoudness,
 	streamingOn,
-	streamMapId
+	streamMapId,
+	type Incoming
 } from './stream';
 import type {
 	CurrentSong,
@@ -171,6 +172,79 @@ function discard(audio: HTMLAudioElement | null | undefined) {
 	if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src);
 }
 
+/**
+ * A streamed song's audio. An MP3 starts playing while it still comes in (fed to a
+ * MediaSource as it arrives); anything else, or one that's already here, plays once whole.
+ * While it comes in, `data-loading` is set on the element (it doesn't know its length yet).
+ */
+async function streamedAudio(incoming: Incoming): Promise<HTMLAudioElement> {
+	const live =
+		!incoming.complete &&
+		incoming.format === 'mp3' &&
+		typeof MediaSource !== 'undefined' &&
+		MediaSource.isTypeSupported('audio/mpeg');
+	if (!live) {
+		const bytes = await incoming.bytes;
+		if (!bytes) throw new Error('The streamed song broke off');
+		return new Audio(URL.createObjectURL(new Blob([await playableBytes(bytes)])));
+	}
+	const source = new MediaSource();
+	const audio = new Audio(URL.createObjectURL(source));
+	audio.dataset.loading = '1';
+	source.addEventListener(
+		'sourceopen',
+		() => {
+			const buffer = source.addSourceBuffer('audio/mpeg');
+			buffer.mode = 'sequence';
+			const pending: Uint8Array[] = [...incoming.chunks];
+			let ended = incoming.complete;
+			const finish = () => {
+				if (source.readyState === 'open') source.endOfStream();
+				delete audio.dataset.loading;
+			};
+			const pump = () => {
+				if (buffer.updating || source.readyState !== 'open') return;
+				if (!pending.length) {
+					if (ended) finish();
+					return;
+				}
+				// What came in since, in one go
+				const size = pending.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+				const joined = new Uint8Array(size);
+				let at = 0;
+				for (const chunk of pending) {
+					joined.set(chunk, at);
+					at += chunk.byteLength;
+				}
+				try {
+					buffer.appendBuffer(joined);
+					pending.length = 0;
+				} catch (error) {
+					// The buffer is full (a very long song): what's been played makes room
+					if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+						if (audio.currentTime > 20) buffer.remove(0, audio.currentTime - 10);
+						else setTimeout(pump, 1000);
+						return;
+					}
+					console.error('Could not stream the song further:', error);
+					ended = true;
+					pending.length = 0;
+					finish();
+				}
+			};
+			buffer.addEventListener('updateend', pump);
+			incoming.listen((chunk) => {
+				if (chunk) pending.push(chunk);
+				else ended = true;
+				pump();
+			});
+			pump();
+		},
+		{ once: true }
+	);
+	return audio;
+}
+
 /** The song's audio, loaded up to `currentSeconds` and ready to play */
 async function createAudio(song: MapSet, type: QueueType, currentSeconds = 0) {
 	let audio: HTMLAudioElement;
@@ -178,12 +252,12 @@ async function createAudio(song: MapSet, type: QueueType, currentSeconds = 0) {
 	const silent = fadeInNext || smoothIn;
 	// Not downloaded and streaming is on: the whole song from the mirror (else as before)
 	const streamId = mapId == null && streamingOn() ? streamMapId(song) : null;
-	const streamedBytes = streamId != null ? await streamAudio(streamId).catch(() => null) : null;
-	markStreamed(song, !!streamedBytes);
-	if (streamedBytes) {
-		audio = new Audio(URL.createObjectURL(new Blob([await playableBytes(streamedBytes)])));
+	const incoming = streamId != null ? await openStream(streamId).catch(() => null) : null;
+	markStreamed(song, !!incoming);
+	if (incoming) {
+		audio = await streamedAudio(incoming);
 		track(audio, silent ? 0 : 1);
-		normalize(audio, song, streamId!, streamedBytes);
+		incoming.bytes.then((bytes) => bytes && normalize(audio, song, streamId!, bytes));
 	} else if (type == 'preview' && !song.queued && mapId == null) {
 		audio = new Audio(`${song.preview_url}`);
 		track(audio, silent ? 0 : 1);
@@ -334,9 +408,6 @@ async function loadSong(index: number, queue: MapSet[], options: LoadOptions): P
 	}
 	if (generation !== loadGeneration) return discard(audio);
 	songQueue.set({ currentIndex: index, audio, queue, type, playlistId });
-	// The next song, streamed ahead, so it starts right away (and crossfades in time)
-	const next = queue[index + 1];
-	if (next && localMapId(next) == null) prefetchStream(next);
 	currentSong.set({ song: queue[index], isPlaying: false });
 	updateCurrentQueue({
 		index,
@@ -695,7 +766,8 @@ if (typeof window !== 'undefined') {
 		const song = current.queue?.[current.currentIndex];
 		if (current.type === 'preview' && (!song || (localMapId(song) == null && !isStreamed(song))))
 			return;
-		if (!Number.isFinite(audio.duration)) return;
+		// Still streaming in: its length isn't known yet
+		if (!Number.isFinite(audio.duration) || audio.dataset.loading) return;
 		if (repeatMode() === 'one' || !hasNext(current, get(upNext), repeatMode())) return;
 		// Remaining time in real seconds, so speed mods are taken into account
 		const length = audio.duration / audio.playbackRate;
@@ -714,6 +786,16 @@ if (typeof window !== 'undefined') {
 			release(other);
 			known.delete(other);
 		}
+	});
+
+	// The songs about to play, streamed ahead (the ones queued by hand first), so they start
+	// right away and crossfade in time
+	songQueue.subscribe(({ queue, currentIndex }) => {
+		if (!queue || currentIndex == null) return;
+		prefetchStreams(
+			[...get(upNext), ...queue.slice(currentIndex + 1)].slice(0, 2),
+			(song) => localMapId(song) != null
+		);
 	});
 
 	// The equalizer: songs go through it once it's on (and stay, flat it changes nothing)
