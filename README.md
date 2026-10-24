@@ -57,11 +57,11 @@ yourself.
 
 ### 🧩 Puzzle
 
-- **Your backgrounds as puzzles.** Put a song's background back together while it plays: a **jigsaw** with real pieces, a **sliding** puzzle, or tiles to **spin** the right way up. Five difficulties from Easy to Expert.
-- **Muffled until it's whole.** The music sounds like it's coming through a wall and opens up with every piece, until the full song comes back when the picture is done.
-- **Played on the beat.** Every move is judged like a hit in osu!: 300, 100, 50 or a miss, with combo, score, accuracy, a grade at the end and your skin's hitsounds. Kiai time counts double.
-- **Mods.** Easy, Hidden, Flashlight (smaller the higher your combo) and Spun (the pieces come turned).
-- **Daily puzzle** from your library (anime songs first), with a streak, and a **gallery** of every picture you've solved.
+Two ways to puzzle:
+
+- **Relaxed.** Just puzzling, with no time limit and no score. Pick any picture (a song's background or one of your own), choose from 28 up to about 300 pieces, and go while your music plays on. Pieces that fit snap together and move as one, "Edges first" sorts the edge pieces out, and an unfinished puzzle waits for you when you leave.
+- **Rhythm.** Put a song's background back together while it plays: a **jigsaw**, a **sliding** puzzle, or tiles to **spin** the right way up, from Easy to Expert. The music sounds like it's coming through a wall and opens up with every piece. Every move is judged on the beat like a hit in osu! (300, 100, 50 or miss) with combo, score, accuracy, a grade and your skin's hitsounds, and kiai time counts double. Mods: Easy, Hidden, Flashlight and Spun. There's a **daily puzzle** with a streak.
+- **Gallery.** Every picture you finish hangs there.
 
 ### 🎛️ DJ mode
 

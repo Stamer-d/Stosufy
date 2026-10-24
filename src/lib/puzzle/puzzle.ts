@@ -4,7 +4,7 @@
 
 import { get } from 'svelte/store';
 import { beatNow } from '../stores/beat';
-import { formatSongData, mapDataStore } from '../stores/data';
+import { backgroundUrls, formatSongData, mapDataStore } from '../stores/data';
 import type { MapSet } from '../types';
 
 export type PuzzleMode = 'jigsaw' | 'slide' | 'spin';
@@ -266,6 +266,15 @@ export function judgeBeat(missOffBeat: boolean): {
 	return { judgement, offset: beat.offset, kiai: beat.kiai };
 }
 
+/** A jigsaw piece as kept to go on later: where it lies, and the pieces it's joined to */
+export interface SavedPiece {
+	x: number;
+	y: number;
+	placed: boolean;
+	z: number;
+	g: number;
+}
+
 /** What a puzzle tells the page about a move */
 export interface PuzzleAction {
 	judgement: Judgement;
@@ -491,4 +500,107 @@ export function solveDaily(grade: string): DailyState {
 export function formatTime(ms: number) {
 	const seconds = Math.floor(ms / 1000);
 	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+// --- Pictures ------------------------------------------------------------------------------------
+
+/** The first of a picture's addresses that loads, and its shape (width / height) */
+export async function loadImage(urls: string[]) {
+	for (const url of urls) {
+		const image = new Image();
+		image.src = url;
+		try {
+			await image.decode();
+			if (image.naturalWidth && image.naturalHeight)
+				return { url, aspect: image.naturalWidth / image.naturalHeight };
+		} catch {
+			// Missing: the next one
+		}
+	}
+	return null;
+}
+
+/** A beatmap's background to puzzle: the first that loads */
+export async function loadBackground(setId: number | string, mapId?: number | string | null) {
+	return loadImage(await backgroundUrls(setId, mapId ?? undefined));
+}
+
+/** A picture of the user's own, made small enough to keep (a JPEG data URL) */
+export async function ownPicture(file: Blob, maxSize = 2000, quality = 0.88) {
+	const bitmap = await createImageBitmap(file);
+	const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+	const canvas = document.createElement('canvas');
+	canvas.width = Math.round(bitmap.width * scale);
+	canvas.height = Math.round(bitmap.height * scale);
+	canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+	bitmap.close();
+	return { url: canvas.toDataURL('image/jpeg', quality), aspect: canvas.width / canvas.height };
+}
+
+// --- The relaxed puzzle: a jigsaw like on a table, kept to go on later ---------------------------
+
+/** How many pieces a relaxed puzzle can have (about; the picture's shape decides) */
+export const PIECE_COUNTS = [24, 48, 100, 150, 200, 300];
+
+/** A picture to puzzle: a beatmap's background, or one of the user's own (`image`) */
+export interface PuzzlePicture {
+	setId?: number | string | null;
+	mapId?: number | string | null;
+	title: string;
+	artist?: string;
+	/** The user's own picture (a data URL) */
+	image?: string | null;
+}
+
+export interface RelaxedSave {
+	picture: PuzzlePicture;
+	cols: number;
+	rows: number;
+	seed: number;
+	/** Picture faint on the board, outlines on the board */
+	ghost: boolean;
+	outlines: boolean;
+	pieces: SavedPiece[];
+	/** Time spent on it so far (ms) */
+	time: number;
+	at: number;
+}
+
+export interface RelaxedRecord {
+	picture: PuzzlePicture;
+	pieces: number;
+	time: number;
+	at: number;
+}
+
+const RELAXED_SAVE_KEY = 'puzzleRelaxedSave';
+const RELAXED_DONE_KEY = 'puzzleRelaxedDone';
+
+export const loadRelaxedSave = () => read<RelaxedSave | null>(RELAXED_SAVE_KEY, null);
+
+export function saveRelaxed(save: RelaxedSave | null) {
+	if (!save) {
+		try {
+			localStorage.removeItem(RELAXED_SAVE_KEY);
+		} catch {
+			// (nothing kept anyway)
+		}
+		return;
+	}
+	write(RELAXED_SAVE_KEY, save);
+}
+
+export const loadRelaxedDone = () => read<RelaxedRecord[]>(RELAXED_DONE_KEY, []);
+
+/** Keeps a finished relaxed puzzle for the gallery (own pictures as a small copy) */
+export async function finishRelaxed(record: RelaxedRecord) {
+	let picture = record.picture;
+	if (picture.image) {
+		const small = await fetch(picture.image)
+			.then((response) => response.blob())
+			.then((blob) => ownPicture(blob, 360, 0.75))
+			.catch(() => null);
+		picture = { ...picture, image: small?.url ?? null };
+	}
+	write(RELAXED_DONE_KEY, [{ ...record, picture }, ...loadRelaxedDone()].slice(0, 60));
 }
