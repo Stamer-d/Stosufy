@@ -4,7 +4,9 @@
 	/**
 	 * The picture in square tiles, most of them turned: a left click turns a tile right, a
 	 * right click left. Every turn is judged on the beat; turning a tile that was right is a miss.
-	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, onaction: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
+	 * `relaxed`: nothing is judged (`onsnap` hears of each turn instead); `saved` turns the tiles
+	 * back the way `onchange` last told it.
+	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, relaxed?: boolean, saved?: number[] | null, onaction?: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onsnap?: (snap: { x: number, y: number, home: boolean }) => void, onchange?: (tiles: number[]) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
 	 */
 	let {
 		url,
@@ -14,7 +16,11 @@
 		seed,
 		mods,
 		peeking = false,
-		onaction,
+		relaxed = false,
+		saved = null,
+		onaction = () => {},
+		onsnap = () => {},
+		onchange = () => {},
 		onprogress,
 		onsolved
 	} = $props();
@@ -33,6 +39,7 @@
 	let solved = $derived(rightCount === count);
 
 	function start() {
+		if (saved?.length === count) return [...saved];
 		const random = seededRandom(seed);
 		const result = Array.from({ length: count }, () =>
 			random() < 0.85 ? 1 + Math.floor(random() * 3) : 0
@@ -49,6 +56,11 @@
 		const home = upright(turns[index]);
 		lastTurned = index;
 		if (home) pop(index);
+		if (relaxed) {
+			onsnap({ x: event.clientX, y: event.clientY, home });
+			onchange([...turns]);
+			return;
+		}
 		const beat = judgeBeat();
 		onaction({
 			judgement: wasRight ? 0 : beat.judgement,

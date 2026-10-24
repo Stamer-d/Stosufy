@@ -29,6 +29,7 @@
 		loadDaily,
 		loadImage,
 		loadRelaxedDone,
+		newSaveId,
 		loadRecords,
 		newScore,
 		pieceCount,
@@ -47,6 +48,8 @@
 	import RelaxedSetup from '#lib/components/puzzle/RelaxedSetup.svelte';
 	import RelaxedPuzzle from '#lib/components/puzzle/RelaxedPuzzle.svelte';
 	import Bursts from '#lib/components/puzzle/Bursts.svelte';
+	import PuzzleTable from '#lib/components/puzzle/PuzzleTable.svelte';
+	import PuzzleOptions from '#lib/components/puzzle/PuzzleOptions.svelte';
 	import Puzzle3D from '#lib/components/puzzle/Puzzle3D.svelte';
 	import { beatNow } from '#lib/stores/beat.ts';
 	import {
@@ -273,14 +276,17 @@
 			return;
 		}
 		const grid = save ? { cols: save.cols, rows: save.rows } : gridFor(setup.pieces, loaded.aspect);
+		const mode = save ? (save.mode ?? 'jigsaw') : (setup.mode ?? 'jigsaw');
 		relaxedGame = {
+			id: save?.id ?? newSaveId(),
+			mode,
 			picture,
 			...loaded,
 			...grid,
 			seed: save?.seed ?? Math.floor(Math.random() * 2 ** 32),
 			ghost: save?.ghost ?? setup.ghost,
 			outlines: save?.outlines ?? setup.outlines,
-			saved: save?.pieces ?? null,
+			saved: (mode === 'jigsaw' ? save?.pieces : save?.tiles) ?? null,
 			time: save?.time ?? 0
 		};
 		view = 'relaxed';
@@ -804,11 +810,12 @@
 							{#each relaxedDone as record (record.at)}
 								<div class="relative group">
 									<button
-										class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
+										class="block w-full relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
 										title="Puzzle it again"
 										onclick={() =>
 											openRelaxed({
 												picture: record.picture,
+												mode: record.mode ?? 'jigsaw',
 												pieces: record.pieces,
 												ghost: false,
 												outlines: true
@@ -845,7 +852,12 @@
 										</div>
 									</button>
 									{@render view3dButton(() =>
-										view3d(record, 'jigsaw', record.picture, record.pieces)
+										view3d(
+											record,
+											(record.mode ?? 'jigsaw') === 'jigsaw' ? 'jigsaw' : 'tiles',
+											record.picture,
+											record.pieces
+										)
 									)}
 								</div>
 							{/each}
@@ -866,7 +878,7 @@
 							{#each gallery as record (record.setId)}
 								<div class="relative group">
 									<button
-										class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
+										class="block w-full relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
 										title="Puzzle it again"
 										onclick={() => {
 											const song = librarySong({ id: record.setId, beatmaps: [] });
@@ -932,12 +944,10 @@
 {:else if view === 'play' && game && Puzzle}
 	<div class="relative h-full flex flex-col overflow-hidden">
 		<!-- The picture behind it all, dark and blurred -->
-		<div class="absolute inset-0 overflow-hidden pointer-events-none">
-			<img src={game.url} alt="" class="size-full object-cover blur-2xl scale-110 opacity-25" />
-		</div>
+		<PuzzleTable url={game.url} />
 
 		<!-- What's going on: the song, the score, combo and accuracy -->
-		<div class="relative z-10 flex items-center gap-4 px-5 py-3 bg-black/30 backdrop-blur">
+		<div class="relative z-[100040] flex items-center gap-4 px-5 py-3 bg-black/30 backdrop-blur">
 			{#if !game.mods.includes('HD')}
 				<img
 					src={game.url}
@@ -985,6 +995,7 @@
 				</p>
 			</div>
 			<div class="flex items-center gap-1">
+				<PuzzleOptions onvolume={(next) => (volume = next)} />
 				<button
 					title={game.mods.includes('HD')
 						? 'No peeking with Hidden'

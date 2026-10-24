@@ -1,18 +1,28 @@
 <script>
 	import { onMount } from 'svelte';
 	import { fly } from 'svelte/transition';
-	import { finishRelaxed, formatTime, saveRelaxed } from '#lib/puzzle/puzzle.ts';
-	import { finishSound, joinSound, snapSound } from '#lib/puzzle/sounds.ts';
+	import { dropRelaxed, finishRelaxed, formatTime, keepRelaxed } from '#lib/puzzle/puzzle.ts';
+	import { finishSound, joinSound, landSound, snapSound } from '#lib/puzzle/sounds.ts';
+	import { showToast } from '#lib/stores/toast.ts';
 	import Jigsaw from '#lib/components/puzzle/Jigsaw.svelte';
+	import SlidePuzzle from '#lib/components/puzzle/SlidePuzzle.svelte';
+	import SpinPuzzle from '#lib/components/puzzle/SpinPuzzle.svelte';
 	import Bursts from '#lib/components/puzzle/Bursts.svelte';
+	import PuzzleTable from '#lib/components/puzzle/PuzzleTable.svelte';
+	import PuzzleOptions from '#lib/components/puzzle/PuzzleOptions.svelte';
 	import Puzzle3D from '#lib/components/puzzle/Puzzle3D.svelte';
 
 	/**
-	 * A relaxed jigsaw: no time limit and no score, the music just plays on. Pieces that fit
-	 * join together; the puzzle is kept as it goes, to go on with later.
-	 * @type {{ game: { picture: import('#lib/puzzle/puzzle.ts').PuzzlePicture, url: string, aspect: number, cols: number, rows: number, seed: number, ghost: boolean, outlines: boolean, saved: import('#lib/puzzle/puzzle.ts').SavedPiece[] | null, time: number }, onleave: () => void, onnew: () => void }}
+	 * A relaxed puzzle (jigsaw, sliding or spinning): no time limit and no score, the music
+	 * just plays on. Jigsaw pieces that fit join together. The puzzle is kept as it goes, to go
+	 * on with later (several can wait at once).
+	 * @type {{ game: { id: string, mode: import('#lib/puzzle/puzzle.ts').PuzzleMode, picture: import('#lib/puzzle/puzzle.ts').PuzzlePicture, url: string, aspect: number, cols: number, rows: number, seed: number, ghost: boolean, outlines: boolean, saved: any[] | null, time: number }, onleave: () => void, onnew: () => void }}
 	 */
 	let { game, onleave, onnew } = $props();
+
+	const PUZZLES = { jigsaw: Jigsaw, slide: SlidePuzzle, spin: SpinPuzzle };
+	let Puzzle = $derived(PUZZLES[game.mode] ?? Jigsaw);
+	let isJigsaw = $derived(game.mode === 'jigsaw');
 
 	let total = $derived(game.cols * game.rows);
 	let progress = $state(0);
@@ -20,7 +30,7 @@
 	let peeking = $state(false);
 	let done = $state(false);
 	let showDone = $state(false);
-	let jigsaw = $state();
+	let puzzle = $state();
 	let bursts = $state();
 	let showing3d = $state(false);
 
@@ -33,30 +43,47 @@
 	let mods = $derived([...(game.ghost ? ['EZ'] : []), ...(game.outlines ? [] : ['HD'])]);
 
 	// Kept a moment after each move (and when leaving)
-	let pieces = null;
+	/** The puzzle as it is now, to keep */
+	let current = null;
 	let saveTimer;
+	let warned = false;
 	function keep() {
 		clearTimeout(saveTimer);
-		if (done || !pieces) return;
-		saveRelaxed({
+		if (done || !current) return;
+		const kept = keepRelaxed({
+			id: game.id,
+			mode: game.mode,
 			picture: game.picture,
 			cols: game.cols,
 			rows: game.rows,
 			seed: game.seed,
 			ghost: game.ghost,
 			outlines: game.outlines,
-			pieces,
+			...(isJigsaw ? { pieces: current } : { tiles: current }),
+			progress,
 			time: game.time + (Date.now() - openedAt),
 			at: Date.now()
 		});
+		if (!kept && !warned) {
+			warned = true;
+			showToast(
+				"This puzzle can't be kept: the picture is too big",
+				'icon-[mingcute--warning-line]'
+			);
+		}
 	}
 	function changed(next) {
-		pieces = next;
+		current = next;
 		clearTimeout(saveTimer);
 		saveTimer = setTimeout(keep, 800);
 	}
 
-	function snapped({ home, x, y, size }) {
+	function snapped({ home, x, y, size = 1 }) {
+		// A tile slid or turned: a light knock, and where it belongs a snap
+		if (!isJigsaw && !home) {
+			landSound(0.9 + Math.random() * 0.3);
+			return;
+		}
 		if (home) {
 			snapSound(progress, Math.min(1, 0.6 + size / 10));
 			bursts?.burst(x, y, { power: Math.min(1, 0.5 + size / 12) });
@@ -72,8 +99,9 @@
 		doneTime = game.time + (Date.now() - openedAt);
 		peeking = false;
 		clearTimeout(saveTimer);
-		saveRelaxed(null);
+		dropRelaxed(game.id);
 		finishRelaxed({
+			mode: game.mode,
 			picture: game.picture,
 			pieces: total,
 			time: doneTime,
@@ -86,7 +114,7 @@
 		finishSound();
 		// The wave runs through the picture, then the confetti, then the card
 		setTimeout(() => {
-			const rect = jigsaw?.boardRect();
+			const rect = puzzle?.boardRect();
 			if (rect) bursts?.confetti(rect, 160);
 		}, 700);
 		setTimeout(() => (showDone = true), 2300);
@@ -120,11 +148,9 @@
 
 <div class="relative h-full flex flex-col overflow-hidden">
 	<!-- The picture behind it all, dark and blurred -->
-	<div class="absolute inset-0 overflow-hidden pointer-events-none">
-		<img src={game.url} alt="" class="size-full object-cover blur-2xl scale-110 opacity-25" />
-	</div>
+	<PuzzleTable url={game.url} />
 
-	<div class="relative z-10 flex items-center gap-4 px-5 py-3 bg-black/30 backdrop-blur">
+	<div class="relative z-[100040] flex items-center gap-4 px-5 py-3 bg-black/30 backdrop-blur">
 		<img
 			src={game.url}
 			alt="What it should look like"
@@ -133,18 +159,22 @@
 		<div class="min-w-0 flex-1">
 			<p class="font-bold truncate">{game.picture.title}</p>
 			<p class="text-xs text-white/60 tabular-nums">
-				{placed} of {total} pieces · {formatTime(time)}
+				{placed} of {total}
+				{isJigsaw ? 'pieces' : 'tiles'} in place · {formatTime(time)}
 			</p>
 		</div>
 		<div class="flex items-center gap-1">
-			<button
-				title="Edge pieces to the left, the rest to the right"
-				class="flex items-center gap-2 px-3 h-9 rounded-full hover:bg-white/15 text-sm font-semibold cursor-pointer transition disabled:opacity-30 disabled:pointer-events-none"
-				disabled={done}
-				onclick={() => jigsaw?.sortEdges()}
-			>
-				<span class="icon-[mingcute--classify-2-line] size-5"></span>Edges first
-			</button>
+			<PuzzleOptions />
+			{#if isJigsaw}
+				<button
+					title="Edge pieces to the left, the rest to the right"
+					class="flex items-center gap-2 px-3 h-9 rounded-full hover:bg-white/15 text-sm font-semibold cursor-pointer transition disabled:opacity-30 disabled:pointer-events-none"
+					disabled={done}
+					onclick={() => puzzle?.sortEdges()}
+				>
+					<span class="icon-[mingcute--classify-2-line] size-5"></span>Edges first
+				</button>
+			{/if}
 			<button
 				title="Hold to see the whole picture (Q)"
 				aria-label="Peek"
@@ -157,12 +187,13 @@
 				<span class="icon-[mingcute--eye-line] size-5"></span>
 			</button>
 			<button
-				title="Leave (Esc): the puzzle is kept"
-				aria-label="Leave the puzzle"
-				class="size-9 grid place-items-center rounded-full hover:bg-white/15 cursor-pointer transition"
+				title="Leave (Esc): the puzzle is kept, go on with it any time"
+				class="ml-1 flex items-center gap-2 px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold cursor-pointer transition"
 				onclick={leave}
 			>
-				<span class="icon-[mingcute--close-line] size-5"></span>
+				<span class="icon-[mingcute--pause-circle-line] size-5"></span>{done
+					? 'Back'
+					: 'Save & leave'}
 			</button>
 		</div>
 	</div>
@@ -174,8 +205,8 @@
 	</div>
 
 	<div class="relative flex-1 min-h-0">
-		<Jigsaw
-			bind:this={jigsaw}
+		<Puzzle
+			bind:this={puzzle}
 			url={game.url}
 			aspect={game.aspect}
 			cols={game.cols}
@@ -247,7 +278,7 @@
 			cols: game.cols,
 			rows: game.rows,
 			seed: game.seed,
-			shape: 'jigsaw',
+			shape: isJigsaw ? 'jigsaw' : 'tiles',
 			title: game.picture.title
 		}}
 		onclose={() => (showing3d = false)}

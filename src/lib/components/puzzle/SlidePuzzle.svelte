@@ -6,7 +6,9 @@
 	 * A sliding puzzle: the tiles of the picture with one gap; a tile in the gap's row or column
 	 * slides towards it (with the ones between). Every move is judged on the beat; too far off
 	 * it is a miss. The last tile comes in once the rest is in place.
-	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, onaction: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
+	 * `relaxed`: nothing is judged (`onsnap` hears of each move instead); `saved` puts the tiles
+	 * back the way `onchange` last told it.
+	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, relaxed?: boolean, saved?: number[] | null, onaction?: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onsnap?: (snap: { x: number, y: number, home: boolean }) => void, onchange?: (tiles: number[]) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
 	 */
 	let {
 		url,
@@ -16,7 +18,11 @@
 		seed,
 		mods,
 		peeking = false,
-		onaction,
+		relaxed = false,
+		saved = null,
+		onaction = () => {},
+		onsnap = () => {},
+		onchange = () => {},
 		onprogress,
 		onsolved
 	} = $props();
@@ -36,6 +42,8 @@
 
 	/** From the solved picture, random slides: always solvable */
 	function shuffled() {
+		// Where it was left (if it's a whole set of cells, one each)
+		if (saved?.length === count && new Set(saved).size === count) return [...saved];
 		const random = seededRandom(seed);
 		const at = [...Array(count).keys()];
 		let previous = -1;
@@ -83,6 +91,11 @@
 		}
 		lastMoved = gap;
 		cells[gapTile] = cell;
+		if (relaxed) {
+			onsnap({ x, y, home });
+			onchange([...cells]);
+			return;
+		}
 		const { judgement, kiai, free } = judgeBeat();
 		onaction({ judgement, kiai, free, home, x, y });
 	}
