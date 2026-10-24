@@ -21,6 +21,10 @@ export default defineConfig({
 	optimizeDeps: {
 		exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
 	},
+	build: {
+		// three.js (the puzzle's 3D view) is one chunk of ~600 kB, loaded only when it opens
+		chunkSizeWarningLimit: 700
+	},
 	worker: {
 		format: 'es',
 		plugins: () => [],

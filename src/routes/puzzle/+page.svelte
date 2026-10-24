@@ -46,6 +46,17 @@
 	import PuzzleResults from '#lib/components/puzzle/PuzzleResults.svelte';
 	import RelaxedSetup from '#lib/components/puzzle/RelaxedSetup.svelte';
 	import RelaxedPuzzle from '#lib/components/puzzle/RelaxedPuzzle.svelte';
+	import Bursts from '#lib/components/puzzle/Bursts.svelte';
+	import Puzzle3D from '#lib/components/puzzle/Puzzle3D.svelte';
+	import { beatNow } from '#lib/stores/beat.ts';
+	import {
+		finishSound,
+		missSound,
+		puzzleVolume,
+		setPuzzleVolume,
+		snapSound,
+		sparkleSound
+	} from '#lib/puzzle/sounds.ts';
 
 	const PUZZLES = { jigsaw: Jigsaw, slide: SlidePuzzle, spin: SpinPuzzle };
 
@@ -276,6 +287,12 @@
 	}
 
 	let popupId = 0;
+	let bursts = $state();
+	let puzzle = $state();
+	/** The puzzle shown in 3D, if one is */
+	let shown3d = $state(null);
+	let volume = $state(puzzleVolume());
+
 	function act(action) {
 		if (solvedAt) return;
 		moves++;
@@ -285,15 +302,33 @@
 			action.judgement,
 			game.difficulty,
 			scoreMultiplier(game.mods),
-			action.kiai
+			action.kiai,
+			action.free
 		);
 		lastKiai = !!action.kiai;
+		// The skin's sounds like a hit in osu!, and the puzzle's own on top
+		const loud = 1.6 * volume;
 		if (!action.judgement) {
-			if (combo >= 5) playSkinSound('combobreak');
+			missSound();
+			if (combo >= 5) playSkinSound('combobreak', 'normal', loud);
+			bursts?.burst(action.x, action.y, { power: 0.2, color: JUDGEMENT_COLORS[0] });
 		} else {
-			playSkinSound('normal', 'normal', action.judgement === 300 ? 1 : 0.7);
-			if (action.home) playSkinSound(game.mode === 'jigsaw' ? 'clap' : 'whistle', 'normal', 0.8);
-			if (score.combo % 25 === 0) playSkinSound('finish', 'normal', 0.8);
+			const strength = action.judgement === 300 ? 1 : action.judgement === 100 ? 0.6 : 0.3;
+			playSkinSound('normal', 'normal', loud * (0.6 + strength * 0.4));
+			if (action.home) {
+				snapSound(Math.min(1, score.combo / 40), strength);
+				if (game.mode === 'jigsaw') playSkinSound('clap', 'normal', loud * 0.8);
+			}
+			if (score.combo % 10 === 0) {
+				sparkleSound();
+				playSkinSound('finish', 'normal', loud * 0.8);
+			}
+			bursts?.burst(action.x, action.y, {
+				power: strength * (action.home ? 1 : 0.5),
+				color: action.kiai ? '#ffd84d' : null
+			});
+			if (action.judgement === 300 && action.home)
+				bursts?.ring(action.x, action.y, { color: JUDGEMENT_COLORS[300] });
 		}
 		const id = ++popupId;
 		popups = [
@@ -303,11 +338,61 @@
 		setTimeout(() => (popups = popups.filter((popup) => popup.id !== id)), 700);
 	}
 
+	/**
+	 * Shows a finished puzzle in 3D, cut like it was: from a record (with its picture, or the
+	 * one given); older records without the cut get one like it
+	 */
+	async function view3d(record, shape, picture = null, pieces = 40) {
+		const loaded =
+			result?.record === record && result.url
+				? { url: result.url, aspect: record.aspect }
+				: await pictureOf(
+						picture ?? record.picture ?? { setId: record.setId, mapId: record.mapId }
+					);
+		if (!loaded) {
+			showToast("Couldn't load this picture", 'icon-[mingcute--pic-line]');
+			return;
+		}
+		const aspect = record.aspect ?? loaded.aspect;
+		shown3d = {
+			url: loaded.url,
+			aspect,
+			...(record.cols ? { cols: record.cols, rows: record.rows } : gridFor(pieces, aspect)),
+			seed: record.seed ?? hashString(String(record.at)),
+			shape,
+			title: record.title ?? record.picture?.title
+		};
+	}
+
+	// The approach circle: closes in on each beat (drawn every frame, without re-rendering)
+	let approach = $state();
+	$effect(() => {
+		if (view !== 'play' || !approach) return;
+		const element = approach;
+		let frame = requestAnimationFrame(function draw() {
+			frame = requestAnimationFrame(draw);
+			const beat = solvedAt ? null : beatNow();
+			if (!beat) {
+				element.style.opacity = '0';
+				return;
+			}
+			const since = beat.offset >= 0 ? beat.offset : beat.offset + beat.beatLength;
+			const p = since / beat.beatLength;
+			element.style.transform = `scale(${1 + (1 - p) * 1.6})`;
+			element.style.opacity = String(0.15 + p * 0.65);
+		});
+		return () => cancelAnimationFrame(frame);
+	});
+
 	function solved() {
 		solvedAt = Date.now();
 		peeking = false;
-		playSkinSound('finish', 'normal', 1);
-		playSkinSound('clap', 'normal', 1);
+		finishSound();
+		playSkinSound('finish', 'normal', 1.6 * volume);
+		setTimeout(() => {
+			const rect = puzzle?.boardRect();
+			if (rect) bursts?.confetti(rect, 160);
+		}, 700);
 		const song = game.song;
 		const record = {
 			setId: song.id,
@@ -324,18 +409,22 @@
 			time: solvedAt - startedAt,
 			moves,
 			at: solvedAt,
-			daily: game.daily
+			daily: game.daily,
+			seed: game.seed,
+			cols: game.cols,
+			rows: game.rows,
+			aspect: game.aspect
 		};
 		const saved = saveRecord(record);
 		const streak = game.daily ? solveDaily(record.grade) : null;
-		const counts = { ...score.counts };
+		const counts = { ...score.counts, free: score.free };
 		const key = game.key;
 		// A moment to see the whole picture (and hear the music open up) first
 		setTimeout(() => {
 			if (game?.key !== key || view !== 'play') return;
-			result = { record, counts, ...saved, daily: streak };
+			result = { record, counts, ...saved, daily: streak, url: game.url };
 			view = 'results';
-		}, 1800);
+		}, 2800);
 	}
 
 	// The music: muffled as if through a wall, opening up with each piece; whole at the end
@@ -410,23 +499,44 @@
 						300, in kiai time it's worth double.
 					{/if}
 				</p>
-				<div
-					class="mt-5 inline-flex gap-1 p-1 rounded-full bg-black/30 backdrop-blur ring-1 ring-white/10"
-					role="tablist"
-				>
-					{#each [['rhythm', 'Rhythm', 'icon-[mingcute--music-2-line]'], ['relaxed', 'Relaxed', 'icon-[ri--puzzle-2-line]']] as [id, label, icon] (id)}
-						<button
-							role="tab"
-							aria-selected={choice.style === id}
-							class="flex items-center gap-2 px-4 h-9 rounded-full text-sm font-semibold cursor-pointer transition {choice.style ===
-							id
-								? 'bg-white text-black'
-								: 'text-white/80 hover:text-white hover:bg-white/10'}"
-							onclick={() => (choice.style = id)}
-						>
-							<span class="{icon} size-4"></span>{label}
-						</button>
-					{/each}
+				<div class="mt-5 flex flex-wrap items-center gap-4">
+					<div
+						class="inline-flex gap-1 p-1 rounded-full bg-black/30 backdrop-blur ring-1 ring-white/10"
+						role="tablist"
+					>
+						{#each [['rhythm', 'Rhythm', 'icon-[mingcute--music-2-line]'], ['relaxed', 'Relaxed', 'icon-[ri--puzzle-2-line]']] as [id, label, icon] (id)}
+							<button
+								role="tab"
+								aria-selected={choice.style === id}
+								class="flex items-center gap-2 px-4 h-9 rounded-full text-sm font-semibold cursor-pointer transition {choice.style ===
+								id
+									? 'bg-white text-black'
+									: 'text-white/80 hover:text-white hover:bg-white/10'}"
+								onclick={() => (choice.style = id)}
+							>
+								<span class="{icon} size-4"></span>{label}
+							</button>
+						{/each}
+					</div>
+					<label
+						class="flex items-center gap-2 px-3 h-11 rounded-full bg-black/30 backdrop-blur ring-1 ring-white/10 text-sm"
+						title="How loud the puzzle's sounds are"
+					>
+						<span class="icon-[mingcute--volume-line] size-4 text-white/80"></span>
+						<span class="text-white/80 font-semibold">Sounds</span>
+						<input
+							type="range"
+							min="0"
+							max="1.5"
+							step="0.05"
+							bind:value={volume}
+							onchange={() => {
+								setPuzzleVolume(volume);
+								snapSound(0.6);
+							}}
+							class="w-28 accent-primary-400"
+						/>
+					</label>
 				</div>
 			</div>
 		</div>
@@ -692,47 +802,52 @@
 					{#if relaxedDone.length}
 						<div class="grid gap-3 grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]">
 							{#each relaxedDone as record (record.at)}
-								<button
-									class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
-									title="Puzzle it again"
-									onclick={() =>
-										openRelaxed({
-											picture: record.picture,
-											pieces: record.pieces,
-											ghost: false,
-											outlines: true
-										})}
-									disabled={!record.picture.image && record.picture.setId == null}
-								>
-									{#if record.picture.image}
-										<img
-											src={record.picture.image}
-											alt=""
-											class="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105"
-										/>
-									{:else}
-										<BeatmapBackground
-											setId={record.picture.setId}
-											mapId={record.picture.mapId}
-											title={record.picture.title}
-											class="absolute inset-0 transition-transform duration-300 group-hover:scale-105"
-										/>
-									{/if}
-									<div
-										class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
-									></div>
-									<span
-										class="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-xs font-bold"
+								<div class="relative group">
+									<button
+										class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
+										title="Puzzle it again"
+										onclick={() =>
+											openRelaxed({
+												picture: record.picture,
+												pieces: record.pieces,
+												ghost: false,
+												outlines: true
+											})}
+										disabled={!record.picture.image && record.picture.setId == null}
 									>
-										<span class="icon-[ri--puzzle-2-line] size-3.5"></span>{record.pieces}
-									</span>
-									<div class="absolute bottom-0 inset-x-0 p-2.5 min-w-0">
-										<p class="text-sm font-bold truncate">{record.picture.title}</p>
-										<p class="text-xs text-white/70">
-											{formatTime(record.time)} · {new Date(record.at).toLocaleDateString()}
-										</p>
-									</div>
-								</button>
+										{#if record.picture.image}
+											<img
+												src={record.picture.image}
+												alt=""
+												class="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105"
+											/>
+										{:else}
+											<BeatmapBackground
+												setId={record.picture.setId}
+												mapId={record.picture.mapId}
+												title={record.picture.title}
+												class="absolute inset-0 transition-transform duration-300 group-hover:scale-105"
+											/>
+										{/if}
+										<div
+											class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
+										></div>
+										<span
+											class="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-xs font-bold"
+										>
+											<span class="icon-[ri--puzzle-2-line] size-3.5"></span>{record.pieces}
+										</span>
+										<div class="absolute bottom-0 inset-x-0 p-2.5 min-w-0">
+											<p class="text-sm font-bold truncate">{record.picture.title}</p>
+											<p class="text-xs text-white/70">
+												{formatTime(record.time)} · {new Date(record.at).toLocaleDateString()}
+											</p>
+										</div>
+									</button>
+									{@render view3dButton(() =>
+										view3d(record, 'jigsaw', record.picture, record.pieces)
+									)}
+								</div>
 							{/each}
 						</div>
 					{:else}
@@ -749,50 +864,60 @@
 					{#if gallery.length}
 						<div class="grid gap-3 grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]">
 							{#each gallery as record (record.setId)}
-								<button
-									class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
-									title="Puzzle it again"
-									onclick={() => {
-										const song = librarySong({ id: record.setId, beatmaps: [] });
-										if (!song) {
-											showToast(
-												`"${record.title}" isn’t downloaded anymore`,
-												'icon-[mingcute--download-2-line]'
-											);
-											return;
-										}
-										chosen = song;
-										choice.mode = record.mode;
-										choice.difficulty = record.difficulty;
-										document
-											.querySelector('[data-scroll-container]')
-											?.scrollTo({ top: 0, behavior: 'smooth' });
-									}}
-								>
-									<BeatmapBackground
-										setId={record.setId}
-										mapId={record.mapId}
-										title={record.title}
-										class="absolute inset-0 transition-transform duration-300 group-hover:scale-105"
-									/>
-									<div
-										class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
-									></div>
-									<span
-										class="absolute top-1.5 right-2.5 text-3xl font-black italic drop-shadow-[0_2px_6px_black]"
-										style="color: {GRADE_COLORS[record.grade]}">{gradeText(record.grade)}</span
+								<div class="relative group">
+									<button
+										class="group relative aspect-video rounded-lg overflow-hidden text-left cursor-pointer ring-1 ring-white/10 hover:ring-primary-400 transition"
+										title="Puzzle it again"
+										onclick={() => {
+											const song = librarySong({ id: record.setId, beatmaps: [] });
+											if (!song) {
+												showToast(
+													`"${record.title}" isn’t downloaded anymore`,
+													'icon-[mingcute--download-2-line]'
+												);
+												return;
+											}
+											chosen = song;
+											choice.mode = record.mode;
+											choice.difficulty = record.difficulty;
+											document
+												.querySelector('[data-scroll-container]')
+												?.scrollTo({ top: 0, behavior: 'smooth' });
+										}}
 									>
-									<div class="absolute bottom-0 inset-x-0 p-2.5 min-w-0">
-										<p class="text-sm font-bold truncate">{record.title}</p>
-										<p class="flex items-center gap-1.5 text-xs text-white/70">
-											<span class="{modeOf(record.mode)?.icon} size-3.5"></span>
-											<span style="color: {DIFFICULTIES[record.difficulty].color}"
-												>{DIFFICULTIES[record.difficulty].label}</span
-											>
-											· {record.score.toLocaleString()}
-										</p>
-									</div>
-								</button>
+										<BeatmapBackground
+											setId={record.setId}
+											mapId={record.mapId}
+											title={record.title}
+											class="absolute inset-0 transition-transform duration-300 group-hover:scale-105"
+										/>
+										<div
+											class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
+										></div>
+										<span
+											class="absolute top-1.5 right-2.5 text-3xl font-black italic drop-shadow-[0_2px_6px_black]"
+											style="color: {GRADE_COLORS[record.grade]}">{gradeText(record.grade)}</span
+										>
+										<div class="absolute bottom-0 inset-x-0 p-2.5 min-w-0">
+											<p class="text-sm font-bold truncate">{record.title}</p>
+											<p class="flex items-center gap-1.5 text-xs text-white/70">
+												<span class="{modeOf(record.mode)?.icon} size-3.5"></span>
+												<span style="color: {DIFFICULTIES[record.difficulty].color}"
+													>{DIFFICULTIES[record.difficulty].label}</span
+												>
+												· {record.score.toLocaleString()}
+											</p>
+										</div>
+									</button>
+									{@render view3dButton(() =>
+										view3d(
+											record,
+											record.mode === 'jigsaw' ? 'jigsaw' : 'tiles',
+											{ setId: record.setId, mapId: record.mapId, title: record.title },
+											DIFFICULTIES[record.difficulty].pieces[record.mode]
+										)
+									)}
+								</div>
 							{/each}
 						</div>
 					{:else}
@@ -841,7 +966,7 @@
 					onclick={togglePlayback}
 				>
 					<span class="icon-[mingcute--play-fill] size-4 text-amber-300"></span>
-					Music paused: no beat, every move is a 100
+					Music paused: no beat, moves aren't judged
 				</button>
 			{/if}
 			<!-- The beat, to move on it -->
@@ -909,6 +1034,7 @@
 		>
 			{#key game.key}
 				<Puzzle
+					bind:this={puzzle}
 					url={game.url}
 					aspect={game.aspect}
 					cols={game.cols}
@@ -921,6 +1047,15 @@
 					onsolved={solved}
 				/>
 			{/key}
+
+			<!-- The beat as an approach circle around the cursor: move when it closes -->
+			<span
+				bind:this={approach}
+				class="absolute z-[100006] size-12 -ml-6 -mt-6 rounded-full border-2 pointer-events-none opacity-0 {lastKiai
+					? 'border-amber-300'
+					: 'border-primary-400'}"
+				style="left: {pointer.x}px; top: {pointer.y}px"
+			></span>
 
 			<!-- The combo, bottom left like in osu! -->
 			{#if score.combo > 1}
@@ -949,7 +1084,7 @@
 				>
 					<p
 						class="text-7xl font-black italic tracking-tight drop-shadow-[0_4px_30px_rgba(0,0,0,0.8)]"
-						in:scale={{ start: 0.4, duration: 600, easing: backOut }}
+						in:scale={{ start: 0.4, duration: 600, delay: 1100, easing: backOut }}
 					>
 						Solved!
 					</p>
@@ -975,8 +1110,29 @@
 	<RelaxedPuzzle game={relaxedGame} onleave={toMenu} onnew={toMenu} />
 {:else if view === 'results' && result}
 	<div class="h-full" in:fly={{ y: 20, duration: 300 }}>
-		<PuzzleResults {result} onretry={retry} onnext={next} onmenu={toMenu} />
+		<PuzzleResults
+			{result}
+			onretry={retry}
+			onnext={next}
+			onmenu={toMenu}
+			on3d={() => view3d(result.record, result.record.mode === 'jigsaw' ? 'jigsaw' : 'tiles')}
+		/>
 	</div>
+{/if}
+
+{#snippet view3dButton(open)}
+	<button
+		class="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 h-7 rounded-full bg-black/60 hover:bg-primary-300 text-xs font-bold cursor-pointer transition opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+		title="Look at it in 3D"
+		onclick={open}
+	>
+		<span class="icon-[mingcute--cube-3d-line] size-3.5"></span>3D
+	</button>
+{/snippet}
+
+<Bursts bind:this={bursts} />
+{#if shown3d}
+	<Puzzle3D puzzle={shown3d} onclose={() => (shown3d = null)} />
 {/if}
 
 <style>
