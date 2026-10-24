@@ -27,6 +27,8 @@
 	let easy = $derived(mods.includes('EZ'));
 	let hidden = $derived(mods.includes('HD'));
 
+	/** The cell a tile moved into last */
+	let lastMoved = 0;
 	/** Which cell each tile is in */
 	let cells = $state(shuffled());
 	let solved = $derived(cells.every((cell, tile) => cell === tile));
@@ -74,11 +76,15 @@
 		for (let at = gap; at !== cell; at -= step) {
 			const tile = cells.indexOf(at - step);
 			cells[tile] = at;
-			if (tile === at) home = true;
+			if (tile === at) {
+				home = true;
+				pop(tile);
+			}
 		}
+		lastMoved = gap;
 		cells[gapTile] = cell;
-		const { judgement, kiai } = judgeBeat(true);
-		onaction({ judgement, kiai, home, x, y });
+		const { judgement, kiai, free } = judgeBeat();
+		onaction({ judgement, kiai, free, home, x, y });
 	}
 
 	let board = $state();
@@ -113,11 +119,52 @@
 		return () => window.removeEventListener('keydown', onKey);
 	});
 
+	// --- How it feels --------------------------------------------------------------------
+
+	/** Each tile's element, to animate it */
+	const elements = [];
+	let celebrating = $state(false);
+
+	/** Where the board is on the screen (for the confetti) */
+	export function boardRect() {
+		return board?.getBoundingClientRect() ?? null;
+	}
+
+	/** A tile that went where it belongs: it pops */
+	function pop(index) {
+		elements[index]?.animate([{ filter: 'brightness(1.8)' }, { filter: 'brightness(1)' }], {
+			duration: 380,
+			easing: 'ease-out'
+		});
+	}
+
+	/** The end: a wave runs through the tiles from the last one moved */
+	function celebrate(from) {
+		celebrating = true;
+		const far = Math.hypot(cols, rows);
+		elements.forEach((element, index) => {
+			const distance =
+				Math.hypot(
+					(index % cols) - (from % cols),
+					Math.floor(index / cols) - Math.floor(from / cols)
+				) / far;
+			element?.firstElementChild?.animate(
+				[
+					{ transform: 'scale(1)', filter: 'brightness(1)' },
+					{ transform: 'scale(1.08)', filter: 'brightness(1.6)', offset: 0.4 },
+					{ transform: 'scale(1)', filter: 'brightness(1)' }
+				],
+				{ duration: 520, delay: distance * 650, easing: 'ease-in-out' }
+			);
+		});
+	}
+
 	let reported = false;
 	$effect(() => {
 		onprogress(homeCount / (count - 1));
 		if (solved && !reported) {
 			reported = true;
+			celebrate(lastMoved);
 			onsolved();
 		}
 	});
@@ -148,6 +195,7 @@
 				style="width: {tile}px; height: {tile}px; transform: translate({(cell % cols) *
 					tile}px, {Math.floor(cell / cols) * tile}px)"
 				aria-label="Tile {index + 1}"
+				bind:this={elements[index]}
 				onclick={(event) => slide(cells[index], event.clientX, event.clientY)}
 			>
 				<span
@@ -176,6 +224,9 @@
 		<div
 			class="kiai-glow absolute inset-0 pointer-events-none mix-blend-soft-light bg-[radial-gradient(circle_at_center,white,transparent_75%)]"
 		></div>
+		{#if celebrating}
+			<div class="shine absolute inset-0 z-10 pointer-events-none rounded-md"></div>
+		{/if}
 		{#if peeking}
 			<div class="absolute inset-0 overflow-hidden rounded-md pointer-events-none z-10">
 				<img
@@ -192,6 +243,27 @@
 </div>
 
 <style>
+	.shine {
+		background: linear-gradient(
+			105deg,
+			transparent 30%,
+			rgba(255, 255, 255, 0.55) 48%,
+			rgba(255, 255, 255, 0.9) 50%,
+			rgba(255, 255, 255, 0.55) 52%,
+			transparent 70%
+		);
+		background-size: 250% 100%;
+		mix-blend-mode: overlay;
+		animation: shine 1100ms ease-in-out 650ms both;
+	}
+	@keyframes shine {
+		from {
+			background-position: 120% 0;
+		}
+		to {
+			background-position: -40% 0;
+		}
+	}
 	.last-in {
 		animation: last-in 600ms ease-out;
 	}

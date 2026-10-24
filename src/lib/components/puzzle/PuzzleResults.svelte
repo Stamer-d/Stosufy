@@ -13,9 +13,9 @@
 
 	/**
 	 * The ranking screen after a solved puzzle, like osu!'s: the grade, the score and the hits.
-	 * @type {{ result: { record: import('#lib/puzzle/puzzle.ts').PuzzleRecord, counts: Record<number, number>, best: import('#lib/puzzle/puzzle.ts').PuzzleRecord | null, isBest: boolean, daily: import('#lib/puzzle/puzzle.ts').DailyState | null }, onretry: () => void, onnext: () => void, onmenu: () => void }}
+	 * @type {{ result: { record: import('#lib/puzzle/puzzle.ts').PuzzleRecord, counts: Record<string, number>, best: import('#lib/puzzle/puzzle.ts').PuzzleRecord | null, isBest: boolean, daily: import('#lib/puzzle/puzzle.ts').DailyState | null }, onretry: () => void, onnext: () => void, onmenu: () => void, on3d: () => void }}
 	 */
-	let { result, onretry, onnext, onmenu } = $props();
+	let { result, onretry, onnext, onmenu, on3d } = $props();
 
 	let record = $derived(result.record);
 	let mode = $derived(MODES.find((m) => m.id === record.mode));
@@ -111,9 +111,23 @@
 				</div>
 			{/if}
 
+			{#if result.counts.free}
+				<p class="text-sm text-white/60">
+					{result.counts.free}
+					{result.counts.free === 1 ? 'move was' : 'moves were'} made without music and not judged.
+				</p>
+			{/if}
+
 			<div class="flex flex-wrap gap-2">
 				<button
 					class="flex items-center gap-2 px-5 h-11 rounded-full bg-primary-300 hover:bg-primary-400 font-semibold cursor-pointer transition"
+					onclick={on3d}
+				>
+					<span class="icon-[mingcute--cube-3d-line] size-5"></span>
+					View in 3D
+				</button>
+				<button
+					class="flex items-center gap-2 px-5 h-11 rounded-full bg-white/15 hover:bg-white/25 font-semibold cursor-pointer transition"
 					onclick={onnext}
 				>
 					<span class="icon-[mingcute--shuffle-2-line] size-5"></span>

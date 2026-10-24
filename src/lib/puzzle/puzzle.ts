@@ -190,7 +190,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
  * The outlines of all pieces of a `cols` × `rows` jigsaw over a picture `width` × `height`
  * (in the picture's units), row by row. Neighbours share their edges, so they fit.
  */
-export function jigsawPaths(
+export function jigsawOutlines(
 	cols: number,
 	rows: number,
 	width: number,
@@ -226,7 +226,7 @@ export function jigsawPaths(
 			);
 		}
 	}
-	const paths: string[] = [];
+	const outlines: Outline[] = [];
 	for (let r = 0; r < rows; r++) {
 		for (let c = 0; c < cols; c++) {
 			// Clockwise: top, right, bottom (backwards), left (backwards)
@@ -236,34 +236,61 @@ export function jigsawPaths(
 				reversed(across[r + 1][c]),
 				reversed(down[c][r])
 			];
-			let d = `M${round(edges[0].start[0])} ${round(edges[0].start[1])}`;
-			for (const edge of edges)
-				for (const [a, b, end] of edge.segments)
-					d += `C${round(a[0])} ${round(a[1])} ${round(b[0])} ${round(b[1])} ${round(end[0])} ${round(end[1])}`;
-			paths.push(d + 'Z');
+			outlines.push({
+				start: edges[0].start,
+				segments: edges.flatMap((edge) => edge.segments)
+			});
 		}
 	}
-	return paths;
+	return outlines;
+}
+
+/** The outline of a piece: from its top left corner, clockwise in cubic Bézier segments */
+export type Outline = Edge;
+
+/**
+ * The outlines of all pieces of a `cols` × `rows` jigsaw as SVG paths (see jigsawOutlines;
+ * the same seed cuts the same pieces)
+ */
+export function jigsawPaths(
+	cols: number,
+	rows: number,
+	width: number,
+	height: number,
+	random: () => number
+) {
+	return jigsawOutlines(cols, rows, width, height, random).map(
+		({ start, segments }) =>
+			`M${round(start[0])} ${round(start[1])}` +
+			segments
+				.map(
+					([a, b, end]) =>
+						`C${round(a[0])} ${round(a[1])} ${round(b[0])} ${round(b[1])} ${round(end[0])} ${round(end[1])}`
+				)
+				.join('') +
+			'Z'
+	);
 }
 
 // --- Judging on the beat ------------------------------------------------------------------------
 
 /**
- * A move judged against the beat of the song as it's heard: right on it is a 300. Without a
- * beat to go by (the music is paused, or its timing isn't known) every move is a 100.
- * `missOffBeat`: too far from any beat is a miss (else still a 50).
+ * A move judged against the beat of the song as it's heard: on it is a 300, near it a 100,
+ * anything else a 50 (being off the beat is never a miss). Without a beat to go by (the
+ * music is paused, or its timing isn't known) a move isn't judged: it counts as a 300, and
+ * `free` says so.
  */
-export function judgeBeat(missOffBeat: boolean): {
+export function judgeBeat(): {
 	judgement: Judgement;
 	offset: number | null;
 	kiai: boolean;
+	free: boolean;
 } {
 	const beat = beatNow();
-	if (!beat) return { judgement: 100, offset: null, kiai: false };
+	if (!beat) return { judgement: 300, offset: null, kiai: false, free: true };
 	const off = Math.abs(beat.offset) / beat.beatLength;
-	const judgement: Judgement =
-		off <= 0.12 ? 300 : off <= 0.24 ? 100 : off <= 0.36 || !missOffBeat ? 50 : 0;
-	return { judgement, offset: beat.offset, kiai: beat.kiai };
+	const judgement: Judgement = off <= 0.15 ? 300 : off <= 0.28 ? 100 : 50;
+	return { judgement, offset: beat.offset, kiai: beat.kiai, free: false };
 }
 
 /** A jigsaw piece as kept to go on later: where it lies, and the pieces it's joined to */
@@ -280,6 +307,8 @@ export interface PuzzleAction {
 	judgement: Judgement;
 	/** Kiai time: the hit counts double */
 	kiai?: boolean;
+	/** Not judged: there was no beat to go by */
+	free?: boolean;
 	/** A piece went to where it belongs */
 	home?: boolean;
 	/** Where on the screen, for the judgement to show */
@@ -292,13 +321,16 @@ export interface Score {
 	combo: number;
 	maxCombo: number;
 	counts: Record<Judgement, number>;
+	/** Moves without a beat to go by (not judged) */
+	free: number;
 }
 
 export const newScore = (): Score => ({
 	score: 0,
 	combo: 0,
 	maxCombo: 0,
-	counts: { 300: 0, 100: 0, 50: 0, 0: 0 }
+	counts: { 300: 0, 100: 0, 50: 0, 0: 0 },
+	free: 0
 });
 
 /** The score after a judgement: like osu!, each hit is worth more the higher the combo */
@@ -307,7 +339,8 @@ export function addJudgement(
 	judgement: Judgement,
 	difficulty: number,
 	multiplier: number,
-	kiai = false
+	kiai = false,
+	free = false
 ): Score {
 	const combo = judgement ? score.combo + 1 : 0;
 	const value =
@@ -316,27 +349,45 @@ export function addJudgement(
 		score: score.score + Math.round(value * multiplier * (kiai ? 2 : 1)),
 		combo,
 		maxCombo: Math.max(score.maxCombo, combo),
-		counts: { ...score.counts, [judgement]: score.counts[judgement] + 1 }
+		counts: { ...score.counts, [judgement]: score.counts[judgement] + 1 },
+		free: score.free + (free ? 1 : 0)
 	};
 }
+
+/** What each judgement is worth for the accuracy: kinder than osu!'s, a 100 is still good */
+const ACCURACY_WEIGHT: Record<Judgement, number> = { 300: 1, 100: 0.8, 50: 0.55, 0: 0 };
 
 export function accuracy({ counts }: Score) {
 	const total = counts[300] + counts[100] + counts[50] + counts[0];
 	if (!total) return 1;
-	return (counts[300] * 300 + counts[100] * 100 + counts[50] * 50) / (total * 300);
+	const sum = ([300, 100, 50, 0] as Judgement[]).reduce(
+		(sum, judgement) => sum + counts[judgement] * ACCURACY_WEIGHT[judgement],
+		0
+	);
+	return sum / total;
 }
 
-/** osu!'s grade from the counts; with Hidden or Flashlight the silver ones */
-export function gradeOf({ counts }: Score, mods: PuzzleMod[]) {
+/**
+ * The grade from the accuracy (on a puzzle the beat is harder to hit than in osu!, so the
+ * grades go by accuracy alone); with Hidden or Flashlight the silver ones
+ */
+export function gradeOf(score: Score, mods: PuzzleMod[]) {
+	const graded = gradeFromAccuracy(score, mods);
+	// Mostly played without music (nothing judged): at best an A, pausing isn't a way to an S
+	const { counts } = score;
 	const total = counts[300] + counts[100] + counts[50] + counts[0];
+	if (total && score.free / total > 0.5 && ['SSH', 'SS', 'SH', 'S'].includes(graded)) return 'A';
+	return graded;
+}
+
+function gradeFromAccuracy(score: Score, mods: PuzzleMod[]) {
 	const silver = mods.includes('HD') || mods.includes('FL');
-	if (!total || counts[300] === total) return silver ? 'SSH' : 'SS';
-	const p300 = counts[300] / total;
-	const p50 = counts[50] / total;
-	if (p300 > 0.9 && p50 < 0.01 && !counts[0]) return silver ? 'SH' : 'S';
-	if ((p300 > 0.8 && !counts[0]) || p300 > 0.9) return 'A';
-	if ((p300 > 0.7 && !counts[0]) || p300 > 0.8) return 'B';
-	if (p300 > 0.6) return 'C';
+	const acc = accuracy(score);
+	if (acc >= 0.9999) return silver ? 'SSH' : 'SS';
+	if (acc >= 0.95) return silver ? 'SH' : 'S';
+	if (acc >= 0.9) return 'A';
+	if (acc >= 0.75) return 'B';
+	if (acc >= 0.62) return 'C';
 	return 'D';
 }
 
@@ -420,6 +471,11 @@ export interface PuzzleRecord {
 	at: number;
 	/** The day, if it was the daily puzzle */
 	daily?: string | null;
+	/** How it was cut, to show it again in 3D */
+	seed?: number;
+	cols?: number;
+	rows?: number;
+	aspect?: number;
 }
 
 const RECORDS_KEY = 'puzzleRecords';
@@ -571,6 +627,11 @@ export interface RelaxedRecord {
 	pieces: number;
 	time: number;
 	at: number;
+	/** How it was cut, to show it again in 3D */
+	seed?: number;
+	cols?: number;
+	rows?: number;
+	aspect?: number;
 }
 
 const RELAXED_SAVE_KEY = 'puzzleRelaxedSave';

@@ -5,6 +5,7 @@
 <script>
 	import { onMount, untrack } from 'svelte';
 	import { jigsawPaths, judgeBeat, seededRandom } from '#lib/puzzle/puzzle.ts';
+	import { pickSound } from '#lib/puzzle/sounds.ts';
 
 	/**
 	 * A jigsaw of the picture: pieces with knobs lie around the board, dragged onto it. A piece
@@ -13,7 +14,7 @@
 	 * `relaxed`: a puzzle like on a table instead: nothing is judged, pieces can lie anywhere,
 	 * and pieces that fit together join and move as one. `saved` puts a puzzle back the way
 	 * `onchange` last told it.
-	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, relaxed?: boolean, saved?: import('#lib/puzzle/puzzle.ts').SavedPiece[] | null, onaction?: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onsnap?: (snap: { x: number, y: number, home: boolean }) => void, onchange?: (pieces: import('#lib/puzzle/puzzle.ts').SavedPiece[]) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
+	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, relaxed?: boolean, saved?: import('#lib/puzzle/puzzle.ts').SavedPiece[] | null, onaction?: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onsnap?: (snap: { x: number, y: number, home: boolean, size: number }) => void, onchange?: (pieces: import('#lib/puzzle/puzzle.ts').SavedPiece[]) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
 	 */
 	let {
 		url,
@@ -170,6 +171,7 @@
 			member.kicked = false;
 		}
 		held = piece;
+		pickSound();
 		dragging = {
 			piece,
 			group: group.map((member) => ({ member, x: member.x, y: member.y })),
@@ -226,8 +228,10 @@
 				member.y = member.r * h;
 				member.placed = true;
 				member.z = 0;
+				pop(member);
 			}
-			onsnap({ x: event.clientX, y: event.clientY, home: true });
+			lastPlaced = group[0];
+			onsnap({ x: event.clientX, y: event.clientY, home: true, size: group.length });
 			return;
 		}
 		let joined = false;
@@ -268,8 +272,20 @@
 			}
 		}
 		const z = ++top;
-		for (const piece of pieces) if (piece.g === group[0].g) piece.z = z;
-		onsnap({ x: event.clientX, y: event.clientY, home: false });
+		for (const piece of pieces) {
+			if (piece.g !== group[0].g) continue;
+			piece.z = z;
+			elements[piece.i]?.animate([{ filter: 'brightness(1.7)' }, { filter: 'brightness(1)' }], {
+				duration: 380,
+				easing: 'ease-out'
+			});
+		}
+		onsnap({
+			x: event.clientX,
+			y: event.clientY,
+			home: false,
+			size: pieces.filter((piece) => piece.g === group[0].g).length
+		});
 	}
 
 	function drop(event) {
@@ -291,8 +307,10 @@
 			piece.y = homeY;
 			piece.placed = true;
 			piece.z = 0;
-			const { judgement, kiai } = judgeBeat(false);
-			onaction({ judgement, kiai, home: true, x: event.clientX, y: event.clientY });
+			pop(piece);
+			lastPlaced = piece;
+			const { judgement, kiai, free } = judgeBeat();
+			onaction({ judgement, kiai, free, home: true, x: event.clientX, y: event.clientY });
 			return;
 		}
 		// Only a real drop on the board counts, not a click
@@ -337,11 +355,58 @@
 		return () => window.removeEventListener('keydown', onKey);
 	});
 
+	// --- How it feels --------------------------------------------------------------------
+
+	/** Each piece's element, to animate it */
+	const elements = [];
+	let board = $state();
+	/** The piece placed last: the wave at the end starts from it */
+	let lastPlaced = null;
+
+	/** A piece snapping in: it pops and flashes */
+	function pop(piece) {
+		elements[piece.i]?.animate(
+			[
+				{ transform: 'scale(1.16)', filter: 'brightness(1.9) drop-shadow(0 0 14px white)' },
+				{ transform: 'scale(0.97)', filter: 'brightness(1.2)', offset: 0.55 },
+				{ transform: 'scale(1)', filter: 'brightness(1)' }
+			],
+			{ duration: 420, easing: 'ease-out' }
+		);
+	}
+
+	/** Where the board is on the screen (for the confetti) */
+	export function boardRect() {
+		return board?.getBoundingClientRect() ?? null;
+	}
+
+	/** The end: a wave runs through the picture from the last piece, then it becomes one */
+	let celebrating = $state(false);
+	let whole = $state(false);
+	function celebrate() {
+		celebrating = true;
+		const from = lastPlaced ?? pieces[Math.floor(pieces.length / 2)];
+		const far = Math.hypot(cols, rows);
+		for (const piece of pieces) {
+			const distance = Math.hypot(piece.c - from.c, piece.r - from.r) / far;
+			elements[piece.i]?.animate(
+				[
+					{ transform: 'scale(1)', filter: 'brightness(1)' },
+					{ transform: 'scale(1.1)', filter: 'brightness(1.6)', offset: 0.4 },
+					{ transform: 'scale(1)', filter: 'brightness(1)' }
+				],
+				{ duration: 520, delay: distance * 650, easing: 'ease-in-out', fill: 'none' }
+			);
+		}
+		setTimeout(() => (whole = true), 900);
+	}
+
 	let solved = false;
 	$effect(() => {
 		onprogress(placedCount / pieces.length);
 		if (placedCount === pieces.length && !solved) {
 			solved = true;
+			celebrate();
 			onsolved();
 		}
 	});
@@ -355,6 +420,7 @@
 	{#if tableWidth}
 		<!-- The board: where the pieces go -->
 		<div
+			bind:this={board}
 			class="absolute rounded-sm bg-black/35 ring-1 ring-white/15 shadow-[inset_0_0_40px_rgba(0,0,0,0.5)]"
 			style="left: {boardX}px; top: {boardY}px; width: {WIDTH * scale}px; height: {height *
 				scale}px"
@@ -363,7 +429,13 @@
 				<img src={url} alt="" class="absolute inset-0 size-full opacity-20 grayscale" />
 			{/if}
 			{#if !hidden}
-				<svg class="absolute inset-0 size-full" viewBox="0 0 {WIDTH} {height}" aria-hidden="true">
+				<svg
+					class="absolute inset-0 size-full transition-opacity duration-500 {celebrating
+						? 'opacity-0'
+						: ''}"
+					viewBox="0 0 {WIDTH} {height}"
+					aria-hidden="true"
+				>
 					{#each pieces as piece (piece.i)}
 						<path
 							d={piece.path}
@@ -389,18 +461,21 @@
 					? ''
 					: dragging?.group.some(({ member }) => member === piece)
 						? 'cursor-grabbing drop-shadow-[0_10px_14px_rgba(0,0,0,0.6)]'
-						: 'cursor-grab drop-shadow-[0_3px_4px_rgba(0,0,0,0.55)]'} {piece.placed
-					? 'snapped'
-					: ''}"
+						: 'cursor-grab drop-shadow-[0_3px_4px_rgba(0,0,0,0.55)]'}"
 				style="left: {boardX + (piece.x - pad) * scale}px; top: {boardY +
 					(piece.y - pad) * scale}px; width: {(w + pad * 2) * scale}px; height: {(h + pad * 2) *
 					scale}px; z-index: {piece.placed
 					? 0
-					: piece.z + 1}; transform: rotate({piece.rot}deg); transition-property: {piece.kicked
+					: piece.z + 1}; transform: rotate({piece.rot}deg) scale({dragging?.group.some(
+					({ member }) => member === piece
+				)
+					? 1.05
+					: 1}); transition-property: {piece.kicked
 					? 'left, top, transform'
 					: 'transform'}; transition-duration: {piece.kicked ? '500ms' : '150ms'}"
 				viewBox="{piece.c * w - pad} {piece.r * h - pad} {w + pad * 2} {h + pad * 2}"
 				aria-hidden="true"
+				bind:this={elements[piece.i]}
 			>
 				<defs>
 					<clipPath id="{uid}-{piece.i}">
@@ -440,6 +515,20 @@
 			</svg>
 		{/each}
 
+		{#if celebrating}
+			<!-- The light sweeping over it, and then one picture without seams -->
+			<div
+				class="absolute z-[2] pointer-events-none overflow-hidden rounded-sm"
+				style="left: {boardX}px; top: {boardY}px; width: {WIDTH * scale}px; height: {height *
+					scale}px"
+			>
+				{#if whole}
+					<img src={url} alt="" class="whole absolute inset-0 size-full" />
+				{/if}
+				<div class="shine absolute inset-0"></div>
+			</div>
+		{/if}
+
 		{#if peeking}
 			<img
 				src={url}
@@ -453,16 +542,33 @@
 </div>
 
 <style>
-	/* A placed piece flashes once as it snaps in */
-	.snapped {
-		animation: snap 450ms ease-out;
+	.whole {
+		animation: whole 500ms ease-out both;
 	}
-	@keyframes snap {
+	@keyframes whole {
 		from {
-			filter: brightness(1.9) drop-shadow(0 0 12px white);
+			opacity: 0;
+		}
+	}
+	.shine {
+		background: linear-gradient(
+			105deg,
+			transparent 30%,
+			rgba(255, 255, 255, 0.55) 48%,
+			rgba(255, 255, 255, 0.9) 50%,
+			rgba(255, 255, 255, 0.55) 52%,
+			transparent 70%
+		);
+		background-size: 250% 100%;
+		mix-blend-mode: overlay;
+		animation: shine 1100ms ease-in-out 650ms both;
+	}
+	@keyframes shine {
+		from {
+			background-position: 120% 0;
 		}
 		to {
-			filter: none;
+			background-position: -40% 0;
 		}
 	}
 </style>
