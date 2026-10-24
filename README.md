@@ -55,6 +55,14 @@ yourself.
 - **Play it yourself.** Use mouse and keys with real hit windows and sounds, mods (EZ, HD, HR, HT, DT, NC, RX) and a results screen.
 - **Any difficulty.** Pick which difficulty of the beatmap to show.
 
+### 🧩 Puzzle
+
+- **Your backgrounds as puzzles.** Put a song's background back together while it plays: a **jigsaw** with real pieces, a **sliding** puzzle, or tiles to **spin** the right way up. Five difficulties from Easy to Expert.
+- **Muffled until it's whole.** The music sounds like it's coming through a wall and opens up with every piece, until the full song comes back when the picture is done.
+- **Played on the beat.** Every move is judged like a hit in osu!: 300, 100, 50 or a miss, with combo, score, accuracy, a grade at the end and your skin's hitsounds. Kiai time counts double.
+- **Mods.** Easy, Hidden, Flashlight (smaller the higher your combo) and Spun (the pieces come turned).
+- **Daily puzzle** from your library (anime songs first), with a streak, and a **gallery** of every picture you've solved.
+
 ### 🎛️ DJ mode
 
 - **Two decks** with waveforms, beat grids taken from the beatmap (checked against the audio), sync, key lock, a three-band EQ with kills, filter, loops, hot cues and recording.

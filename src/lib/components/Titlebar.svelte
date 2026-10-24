@@ -168,6 +168,18 @@
 				<span class="icon-[mingcute--earth-2-line] size-[18px]"></span>
 			</button>
 			<button
+				title="Puzzle"
+				aria-label="Puzzle"
+				aria-pressed={page.url.pathname === '/puzzle'}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
+					.url.pathname === '/puzzle'
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={() => go('/puzzle')}
+			>
+				<span class="icon-[ri--puzzle-2-line] size-[18px]"></span>
+			</button>
+			<button
 				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-label={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-pressed={$focusMode}
