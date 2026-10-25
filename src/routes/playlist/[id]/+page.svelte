@@ -6,13 +6,7 @@
 	import { sameSong, songKey } from '#lib/tracks.ts';
 	import SongCover from '#lib/components/SongCover.svelte';
 	import Button from '#lib/components/Button.svelte';
-	import {
-		deleteSong,
-		getImageUrl,
-		isSongDownloaded,
-		downloadBeatmap,
-		downloads
-	} from '#lib/stores/data.ts';
+	import { deleteSong, getImageUrl, downloadBeatmap, downloads } from '#lib/stores/data.ts';
 	import {
 		getPlaylistSongs,
 		refreshOtherPlaylist,
@@ -44,6 +38,7 @@
 	import PlayButton from '#lib/components/PlayButton.svelte';
 	import Triangles from '#lib/components/Triangles.svelte';
 	import { colorFromImage, colorFromString, mapDataStore } from '#lib/stores/data.ts';
+	import { downloadQueue, queueDownloads, cancelDownloads } from '#lib/stores/downloadQueue.ts';
 	import { shuffleQueue } from '#lib/stores/audio.ts';
 	import { user, updateUserSettings } from '#lib/stores/user.ts';
 	import { userSettings } from '#lib/stores/user.ts';
@@ -223,12 +218,6 @@
 		map: null
 	};
 
-	let downloadingAll = {
-		downloading: false,
-		progress: 0,
-		abort: false
-	};
-
 	$: if (playlistId && playlistData) {
 		loadSongs();
 	}
@@ -265,10 +254,6 @@
 		}
 		try {
 			await downloadBeatmap(song, mapId, $keyStore.sessionKey, $keyStore.access_token);
-
-			setTimeout(() => {
-				songs = [...songs];
-			}, 500);
 		} catch (error) {
 			console.error(`Failed to download map ${song.id}:`, error);
 		}
@@ -362,46 +347,32 @@
 		await removeSongFromPlaylist(playlistId, songId);
 	}
 
-	function getNotDownloadedSongs() {
-		return songs.filter((song) => !isSongDownloaded(song.id));
-	}
+	// Read from the library store, so rows and the header follow downloads as they finish
+	// (a plain lookup in the template is only worked out once)
+	$: isDownloaded = (song) => Object.prototype.hasOwnProperty.call($mapDataStore, String(song.id));
+	$: missingSongs = songs.filter((song) => !isDownloaded(song));
+	// Downloading all goes through the download queue (one after another, waiting out osu!'s
+	// rate limit); it shows here while songs of this playlist are in it
+	$: missingIds = new Set(missingSongs.map((song) => String(song.id)));
+	$: queuedHere = $downloadQueue.items.filter(({ set }) => missingIds.has(String(set.id)));
+	$: downloadingAll = queuedHere.length > 0;
+	$: downloadProgress = songs.length
+		? ((songs.length - missingSongs.length) / songs.length) * 100
+		: 0;
 
-	async function downloadAllSongs() {
-		const notDownloadedSongs = getNotDownloadedSongs();
-		if (notDownloadedSongs.length === 0) {
+	function downloadAllSongs() {
+		if ($offline) {
+			showToast(
+				"You're offline: songs download once you're connected",
+				'icon-[mingcute--wifi-off-line]'
+			);
 			return;
 		}
+		queueDownloads(missingSongs.map((song) => ({ set: song, mapId: song.beatmaps[0].id })));
+	}
 
-		downloadingAll.downloading = true;
-		downloadingAll.progress = 0;
-		downloadingAll.abort = false;
-
-		let completedDownloads = 0;
-		const totalSongs = notDownloadedSongs.length;
-
-		for (const song of notDownloadedSongs) {
-			if (downloadingAll.abort) {
-				break;
-			}
-
-			try {
-				await startDownload(song, song.beatmaps[0].id);
-				completedDownloads++;
-
-				downloadingAll.progress = (completedDownloads / totalSongs) * 100;
-			} catch (error) {
-				console.error(`Failed to download ${song.title}:`, error);
-				completedDownloads++;
-				downloadingAll.progress = (completedDownloads / totalSongs) * 100;
-			}
-		}
-		setTimeout(() => {
-			downloadingAll.downloading = false;
-		}, 500);
-
-		if (!downloadingAll.abort) {
-			downloadingAll.progress = 100;
-		}
+	function stopDownloadingAll() {
+		cancelDownloads(queuedHere.map(({ set }) => String(set.id)));
 	}
 </script>
 
@@ -518,8 +489,11 @@
 			{/if}
 
 			{#if !isDownloadedPlaylist}
-				{#if downloadingAll.downloading}
-					<div class="relative size-10" title="Downloading {Math.round(downloadingAll.progress)}%">
+				{#if downloadingAll}
+					<div
+						class="relative size-10"
+						title="Downloading: {songs.length - missingSongs.length} of {songs.length} downloaded"
+					>
 						<svg class="size-10 -rotate-90" viewBox="0 0 36 36">
 							<circle
 								cx="18"
@@ -536,23 +510,20 @@
 								fill="none"
 								stroke-width="3"
 								stroke-linecap="round"
-								stroke-dasharray="{downloadingAll.progress}, 100"
+								stroke-dasharray="{downloadProgress}, 100"
 								class="stroke-primary-400 transition-all duration-300 ease-out"
 							/>
 						</svg>
 						<button
 							aria-label="Stop downloading"
-							on:click={() => {
-								downloadingAll.abort = true;
-								downloadingAll.downloading = false;
-							}}
+							on:click={stopDownloadingAll}
 							class="absolute inset-0 grid place-items-center text-white/70 hover:text-white cursor-pointer"
 						>
 							<span class="icon-[mingcute--stop-fill] size-4"></span>
 						</button>
 					</div>
 				{:else}
-					{@const missing = getNotDownloadedSongs().length}
+					{@const missing = missingSongs.length}
 					<button
 						title={missing
 							? `Download ${missing} missing ${missing === 1 ? 'song' : 'songs'}`
@@ -647,7 +618,7 @@
 			>
 				{#each shownSongs as song, i (songKey(song))}
 					{@const index = firstRow + i}
-					{@const downloaded = isSongDownloaded(song.id)}
+					{@const downloaded = isDownloaded(song)}
 					{@const current = isCurrent(song)}
 					{@const playingRow = current && $currentSong?.isPlaying && $songQueue.type == 'playlist'}
 					{@const download = $downloads[song.id]}
@@ -774,6 +745,12 @@
 											></span>
 										{/if}
 									</button>
+								{:else if downloaded && !isDownloadedPlaylist}
+									<span
+										title="Downloaded"
+										aria-label="Downloaded"
+										class="icon-[mingcute--arrow-down-circle-fill] shrink-0 size-4 text-primary-500"
+									></span>
 								{/if}
 								<span class="truncate"
 									>{getDateString(song?.created_at || song?.songInfo?.created_at)}</span

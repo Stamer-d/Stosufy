@@ -17,7 +17,11 @@
 	} from '#lib/stores/playlist.ts';
 	import { offline, noteNetworkError } from '#lib/stores/network.ts';
 	import { favourites, likedPlaylist, loadFavourites, LIKED_ID } from '#lib/stores/favourites.ts';
-	import { smartPlaylists, createSmartPlaylist } from '#lib/stores/smartPlaylists.ts';
+	import {
+		smartPlaylists,
+		createSmartPlaylist,
+		deleteSmartPlaylist
+	} from '#lib/stores/smartPlaylists.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import ContextMenu from './ContextMenu.svelte';
@@ -25,6 +29,7 @@
 	import Input from './Input.svelte';
 	import PlaylistCover from './PlaylistCover.svelte';
 	import DownloadQueue from './DownloadQueue.svelte';
+	import PlaylistMenuItems from './PlaylistMenuItems.svelte';
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 
@@ -125,8 +130,30 @@
 		}
 	}
 
+	/** The playlist the delete dialog asks about (`smart`: a smart playlist) */
 	let playlistToDelete = $state(null);
 	let deleteModalOpen = $state(false);
+
+	function askDelete(playlist, smart = false) {
+		playlistToDelete = { ...playlist, smart };
+		deleteModalOpen = true;
+	}
+
+	function openEdit(playlist) {
+		editPlaylistModal.open = true;
+		editPlaylistModal.playlist = playlist;
+		editPlaylistModal.title = playlist.title || '';
+		editPlaylistModal.description = playlist.description || '';
+		editPlaylistModal.isPublic = playlist.public || false;
+		editPlaylistModal.selectedFile = null;
+		uploadedImage = null;
+		editPlaylistModal.imageError = '';
+	}
+
+	function deleteSmart(id) {
+		deleteSmartPlaylist(id);
+		if (page.url?.pathname === `/smart/${id}`) goto('/home');
+	}
 
 	async function deleteClickedPlaylist(playlistId) {
 		const before = $playlists;
@@ -283,7 +310,7 @@
 		{#each $playlists as playlist (playlist.id)}
 			{@const isActive = page.params?.id == playlist.id}
 			<li>
-				<ContextMenu disabled={isVirtual(playlist)}>
+				<ContextMenu>
 					<div
 						class="group flex items-center gap-3 p-2 rounded-md transition {isActive
 							? 'bg-secondary-300'
@@ -316,35 +343,22 @@
 								title="Delete playlist"
 								aria-label="Delete {playlist.title}"
 								class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
-								onclick={() => {
-									playlistToDelete = playlist;
-									deleteModalOpen = true;
-								}}
+								onclick={() => askDelete(playlist)}
 							>
 								<span class="icon-[mingcute--delete-2-line] size-[18px]"></span>
 							</button>
 						{/if}
 					</div>
 					<svelte:fragment slot="menu">
-						{#if !isVirtual(playlist)}
-							<Button
-								type="ghost"
-								class="w-full rounded-md text-sm hover:bg-secondary-400"
-								icon="icon-[mingcute--pencil-line]"
-								on:click={async (e) => {
-									e.preventDefault();
-									editPlaylistModal.open = true;
-									editPlaylistModal.playlist = playlist;
-									editPlaylistModal.title = playlist.title || '';
-									editPlaylistModal.description = playlist.description || '';
-									editPlaylistModal.isPublic = playlist.public || false;
-									editPlaylistModal.selectedFile = null;
-									uploadedImage = null;
-									editPlaylistModal.imageError = '';
-								}}
-							>
-								Edit details
-							</Button>
+						{#if isVirtual(playlist)}
+							<PlaylistMenuItems {playlist} kind="virtual" />
+						{:else}
+							<PlaylistMenuItems
+								{playlist}
+								kind="own"
+								onEdit={() => openEdit(playlist)}
+								onDelete={() => askDelete(playlist)}
+							/>
 						{/if}
 					</svelte:fragment>
 				</ContextMenu>
@@ -357,28 +371,38 @@
 			{#each $smartPlaylists as smart (smart.id)}
 				{@const isActive = page.url?.pathname === `/smart/${smart.id}`}
 				<li>
-					<button
-						onclick={() => goto(`/smart/${smart.id}`)}
-						aria-current={isActive ? 'page' : undefined}
-						class="w-full flex items-center gap-3 p-2 rounded-md text-start cursor-pointer transition {isActive
-							? 'bg-secondary-300'
-							: 'hover:bg-secondary-200'}"
-					>
-						<span
-							class="size-12 shrink-0 grid place-items-center rounded-md bg-gradient-to-br from-primary-300 to-primary-700"
+					<ContextMenu>
+						<button
+							onclick={() => goto(`/smart/${smart.id}`)}
+							aria-current={isActive ? 'page' : undefined}
+							class="w-full flex items-center gap-3 p-2 rounded-md text-start cursor-pointer transition {isActive
+								? 'bg-secondary-300'
+								: 'hover:bg-secondary-200'}"
 						>
-							<span class="icon-[mingcute--magic-2-line] size-6 text-white/90"></span>
-						</span>
-						<span class="min-w-0">
-							<span class="block font-semibold truncate {isActive ? 'text-primary-500' : ''}"
-								>{smart.title}</span
+							<span
+								class="size-12 shrink-0 grid place-items-center rounded-md bg-gradient-to-br from-primary-300 to-primary-700"
 							>
-							<span class="block text-sm text-secondary-600 truncate">
-								Smart playlist · {smart.rules.length}
-								{smart.rules.length === 1 ? 'rule' : 'rules'}
+								<span class="icon-[mingcute--magic-2-line] size-6 text-white/90"></span>
 							</span>
-						</span>
-					</button>
+							<span class="min-w-0">
+								<span class="block font-semibold truncate {isActive ? 'text-primary-500' : ''}"
+									>{smart.title}</span
+								>
+								<span class="block text-sm text-secondary-600 truncate">
+									Smart playlist · {smart.rules.length}
+									{smart.rules.length === 1 ? 'rule' : 'rules'}
+								</span>
+							</span>
+						</button>
+						<svelte:fragment slot="menu">
+							<PlaylistMenuItems
+								playlist={smart}
+								kind="smart"
+								onEdit={() => goto(`/smart/${smart.id}?edit`)}
+								onDelete={() => askDelete(smart, true)}
+							/>
+						</svelte:fragment>
+					</ContextMenu>
 				</li>
 			{/each}
 		{/if}
@@ -389,36 +413,41 @@
 			{#each $savedPlaylists as playlist (playlist.id)}
 				{@const isActive = page.params?.id == playlist.id}
 				<li>
-					<div
-						class="group flex items-center gap-3 p-2 rounded-md transition {isActive
-							? 'bg-secondary-300'
-							: 'hover:bg-secondary-200'}"
-					>
-						<button
-							onclick={() => goto(`/playlist/${playlist.id}`)}
-							aria-current={isActive ? 'page' : undefined}
-							class="flex flex-1 min-w-0 items-center gap-3 text-start cursor-pointer"
+					<ContextMenu>
+						<div
+							class="group flex items-center gap-3 p-2 rounded-md transition {isActive
+								? 'bg-secondary-300'
+								: 'hover:bg-secondary-200'}"
 						>
-							<PlaylistCover {playlist} />
-							<div class="min-w-0">
-								<h3 class="font-semibold truncate {isActive ? 'text-primary-500' : ''}">
-									{playlist.title}
-								</h3>
-								<p class="text-sm text-secondary-600 truncate">
-									by {playlist.creator?.username ?? 'someone'} · {playlist.song_amount || 0}
-									{playlist.song_amount === 1 ? 'song' : 'songs'}
-								</p>
-							</div>
-						</button>
-						<button
-							title="Remove from your library"
-							aria-label="Remove {playlist.title} from your library"
-							class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
-							onclick={() => toggleSavedPlaylist(playlist)}
-						>
-							<span class="icon-[mingcute--bookmark-remove-line] size-[18px]"></span>
-						</button>
-					</div>
+							<button
+								onclick={() => goto(`/playlist/${playlist.id}`)}
+								aria-current={isActive ? 'page' : undefined}
+								class="flex flex-1 min-w-0 items-center gap-3 text-start cursor-pointer"
+							>
+								<PlaylistCover {playlist} />
+								<div class="min-w-0">
+									<h3 class="font-semibold truncate {isActive ? 'text-primary-500' : ''}">
+										{playlist.title}
+									</h3>
+									<p class="text-sm text-secondary-600 truncate">
+										by {playlist.creator?.username ?? 'someone'} · {playlist.song_amount || 0}
+										{playlist.song_amount === 1 ? 'song' : 'songs'}
+									</p>
+								</div>
+							</button>
+							<button
+								title="Remove from your library"
+								aria-label="Remove {playlist.title} from your library"
+								class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
+								onclick={() => toggleSavedPlaylist(playlist)}
+							>
+								<span class="icon-[mingcute--bookmark-remove-line] size-[18px]"></span>
+							</button>
+						</div>
+						<svelte:fragment slot="menu">
+							<PlaylistMenuItems {playlist} kind="saved" />
+						</svelte:fragment>
+					</ContextMenu>
 				</li>
 			{/each}
 		{/if}
@@ -443,7 +472,8 @@
 			class="bg-red-500! hover:bg-red-600! active:bg-red-700!"
 			on:click={async () => {
 				deleteModalOpen = false;
-				await deleteClickedPlaylist(playlistToDelete.id);
+				if (playlistToDelete.smart) deleteSmart(playlistToDelete.id);
+				else await deleteClickedPlaylist(playlistToDelete.id);
 			}}
 		>
 			Delete

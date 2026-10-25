@@ -375,7 +375,13 @@ export async function getPlaylistSongs(
 			const local = stored?.beatmaps?.[song.beatmap.id];
 			const named = stored
 				? track
-					? { title: local?.title, artist: local?.artist, track }
+					? {
+							// The track's own name; the set's where the difficulty has none (an
+							// undefined one would replace the set's and leave the row empty)
+							title: local?.title || song.beatmap.beatmapset.title,
+							artist: local?.artist || song.beatmap.beatmapset.artist,
+							track
+						}
 					: {}
 				: guessed >= 0
 					? {

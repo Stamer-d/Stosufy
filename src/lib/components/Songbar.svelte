@@ -13,12 +13,16 @@
 		hasNext,
 		upNext,
 		queuePanelOpen,
-		playbackTime
+		playbackTime,
+		focusMode
 	} from '#lib/stores/audio.ts';
 	import Range from './Range.svelte';
 	import { toggleLyrics } from '#lib/stores/keybinds.ts';
 	import HitsoundMenu from './HitsoundMenu.svelte';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { searchQuery } from '#lib/stores/search.ts';
+	import { allMixes } from '#lib/stores/mixes.ts';
 	import { updateUserSettings, userSettings, updateAppearance } from '#lib/stores/user.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { setVolume, toggleMute, DEFAULT_VOLUME, MAX_VOLUME } from '#lib/stores/mixer.ts';
@@ -38,6 +42,29 @@
 		$mapDataStore[$currentSong.song?.id]?.video || $mapDataStore[$currentSong.song?.id]?.videoSource
 	);
 	$: videoOn = $userSettings.settings?.appearance?.video ?? true;
+
+	// Where the song plays from (a playlist, smart playlist or mix): its title leads there,
+	// otherwise to focus mode, like the cover
+	$: sourcePath = pathOf($songQueue.type == 'playlist' ? $songQueue.playlistId : null);
+	function pathOf(id) {
+		if (id == null) return null;
+		const [kind, rest] = String(id).split(/:(.*)/);
+		if (rest === undefined) return /^-?\d+$/.test(kind) ? `/playlist/${kind}` : null;
+		if (kind === 'smart') return `/smart/${rest}`;
+		if (kind === 'mix' && $allMixes.has(rest)) return `/mix/${rest}`;
+		return null;
+	}
+
+	function openFocus() {
+		focusMode.set(true);
+	}
+
+	/** Searches for the artist (the search page shows their beatmaps and downloaded songs) */
+	function searchArtist(artist) {
+		if (!artist) return;
+		searchQuery.set(artist);
+		goto('/search');
+	}
 
 	function formatTime(seconds) {
 		if (!seconds) return '0:00';
@@ -77,15 +104,34 @@
 		class="h-20 shrink-0 grid grid-cols-[minmax(13rem,1fr)_minmax(14rem,2fr)_auto] 2xl:grid-cols-[1fr_minmax(0,40rem)_1fr] items-center gap-4 px-4"
 	>
 		<div class="flex items-center gap-3 min-w-0">
-			<SongCover
-				setId={$currentSong.song.id}
-				track={$currentSong.song.track}
-				title={$currentSong.song.title}
-				class="size-14 rounded-md"
-			/>
-			<div class="min-w-0">
-				<div class="text-sm font-semibold truncate">{$currentSong.song?.title}</div>
-				<div class="text-xs text-secondary-600 truncate">{$currentSong.song?.artist}</div>
+			<button
+				title="Open focus mode"
+				aria-label="Open focus mode"
+				class="shrink-0 rounded-md cursor-pointer transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/60 outline-none"
+				on:click={openFocus}
+			>
+				<SongCover
+					setId={$currentSong.song.id}
+					track={$currentSong.song.track}
+					title={$currentSong.song.title}
+					class="size-14 rounded-md"
+				/>
+			</button>
+			<div class="min-w-0 flex flex-col items-start">
+				<button
+					title={sourcePath ? 'Go to what is playing' : 'Open focus mode'}
+					class="max-w-full text-sm font-semibold truncate text-start cursor-pointer hover:underline"
+					on:click={() => (sourcePath ? goto(sourcePath) : openFocus())}
+				>
+					{$currentSong.song?.title}
+				</button>
+				<button
+					title="Search for {$currentSong.song?.artist}"
+					class="max-w-full text-xs text-secondary-600 truncate text-start cursor-pointer hover:underline hover:text-white"
+					on:click={() => searchArtist($currentSong.song?.artist)}
+				>
+					{$currentSong.song?.artist}
+				</button>
 			</div>
 			{#if Number($currentSong.song.beatmaps?.[0]?.id) > 0}
 				{@const liked = $isFavourite($currentSong.song)}
