@@ -5,7 +5,7 @@
 
 import { get } from 'svelte/store';
 import { backgroundUrls, formatSongData, mapDataStore } from '../stores/data';
-import type { PuzzleBoard, PuzzleScore, PuzzleTopBoard, PuzzleTopEntry } from '../api';
+import type { PuzzleBoard, PuzzleScore, PuzzleTopEntry } from '../api';
 import type { MapSet } from '../types';
 
 export type PuzzleMode = 'jigsaw' | 'slide' | 'spin';
@@ -655,68 +655,15 @@ export function scoreBoard(board: PuzzleBoard | null) {
 	return { ...board, entries: board.entries.map(place), mine: board.mine && place(board.mine) };
 }
 
-/** The overall leaderboards: what each ranks by */
-export const TOP_BOARDS: {
-	id: PuzzleTopBoard;
-	label: string;
-	icon: string;
-	hint: string;
-	value: (value: number) => string;
-	detail: (count: number) => string;
-}[] = [
-	{
-		id: 'score',
-		label: 'Total score',
-		icon: 'icon-[mingcute--star-line]',
-		hint: 'Your best score of every puzzle, added up',
-		value: (value) => value.toLocaleString(),
-		detail: (count) => `${count} ${count === 1 ? 'puzzle' : 'puzzles'}`
-	},
-	{
-		id: 'daily',
-		label: 'Daily points',
-		icon: 'icon-[mingcute--calendar-day-line]',
-		hint: 'Every daily puzzle: 100 points for the fastest, less the slower (half as fast, 50)',
-		value: (value) => `${value.toLocaleString()} pts`,
-		detail: (count) => `${count} daily ${count === 1 ? 'puzzle' : 'puzzles'}`
-	},
-	{
-		id: 'records',
-		label: 'Records',
-		icon: 'icon-[mingcute--trophy-line]',
-		hint: 'Puzzles with your score the best of all',
-		value: (value) => `${value} ${value === 1 ? 'record' : 'records'}`,
-		detail: (count) => `${count} ${count === 1 ? 'puzzle' : 'puzzles'} solved`
-	},
-	{
-		id: 'solved',
-		label: 'Most solved',
-		icon: 'icon-[ri--puzzle-2-line]',
-		hint: 'Different puzzles solved (a song in a mode and a difficulty)',
-		value: (value) => `${value} ${value === 1 ? 'puzzle' : 'puzzles'}`,
-		detail: (count) => `${count.toLocaleString()} pieces`
-	},
-	{
-		id: 'streak',
-		label: 'Streaks',
-		icon: 'icon-[mingcute--fire-line]',
-		hint: 'The most daily puzzles in a row',
-		value: (value) => `${value} ${value === 1 ? 'day' : 'days'}`,
-		detail: (count) => `${count} daily ${count === 1 ? 'puzzle' : 'puzzles'} in all`
-	}
-];
-
-/** An overall board as the leaderboard shows it */
-export function topBoard(
-	board: { entries: PuzzleTopEntry[]; mine: PuzzleTopEntry | null; players: number } | null,
-	id: PuzzleTopBoard
+/** A mode's ranking (everyone's best scores of its puzzles, added up) as the leaderboard shows it */
+export function rankingBoard(
+	board: { entries: PuzzleTopEntry[]; mine: PuzzleTopEntry | null; players: number } | null
 ) {
 	if (!board) return null;
-	const kind = TOP_BOARDS.find((top) => top.id === id)!;
 	const place = (entry: PuzzleTopEntry) => ({
 		...entry,
-		value: kind.value(entry.value),
-		detail: kind.detail(entry.count)
+		value: entry.value.toLocaleString(),
+		detail: `${entry.count} ${entry.count === 1 ? 'puzzle' : 'puzzles'}`
 	});
 	return { ...board, entries: board.entries.map(place), mine: board.mine && place(board.mine) };
 }

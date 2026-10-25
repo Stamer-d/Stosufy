@@ -26,7 +26,6 @@
 		MODES,
 		MODS,
 		PEEK_PENALTY,
-		TOP_BOARDS,
 		formatTime,
 		gridFor,
 		hashString,
@@ -46,7 +45,7 @@
 		solveDaily,
 		scoreBoard,
 		scoreMultiplier,
-		topBoard
+		rankingBoard
 	} from '#lib/puzzle/puzzle.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
 	import SongCover from '#lib/components/SongCover.svelte';
@@ -207,62 +206,67 @@
 	let peeking = $state(false);
 	let pointer = $state({ x: -1000, y: -1000 });
 
-	// --- Leaderboards -------------------------------------------------------------------------
+	// --- Leaderboards: a ranking of each mode, the chosen puzzle's and today's -------------
 
-	/** 'daily', 'puzzle' (the chosen song's, in the chosen mode and difficulty) or 'top' */
-	let boardTab = $state('daily');
-	let topTab = $state('score');
-	let shownBoard = $state(null);
-	let boardError = $state(null);
+	const BOARD_SIZE = 10;
+	/** The mode whose ranking shows */
+	let rankMode = $state(choice.mode);
 	let inMenu = $derived(view === 'menu' || view === 'loading');
-	let boardKey = $derived(
-		boardTab === 'daily'
-			? `daily:${daily.day}:${daily.online}`
-			: boardTab === 'puzzle'
-				? chosen && `puzzle:${chosen.id}:${choice.mode}:${choice.difficulty}`
-				: `top:${topTab}`
-	);
-	$effect(() => {
-		const key = boardKey;
-		const token = $keyStore.access_token;
+	let rankBoard = $state({ board: null, error: null });
+	let songBoard = $state({ board: null, error: null });
+	let dayBoard = $state({ board: null, error: null });
+
+	/**
+	 * Loads a board while the menu shows (again on each visit): null while it loads, or why it
+	 * can't be loaded
+	 */
+	function follow(token, why, load, show) {
 		if (!inMenu) return;
-		shownBoard = null;
-		boardError = null;
-		if (!token) {
-			boardError = 'Log in with osu! to see the leaderboards.';
-			return;
-		}
-		if (!key) {
-			boardError = 'Pick a song to see its leaderboard.';
-			return;
-		}
-		const [kind, a, b, c] = key.split(':');
-		if (kind === 'daily' && b !== 'true') {
-			boardError = "Today's puzzle couldn't be loaded from the server.";
-			return;
-		}
-		if (kind === 'puzzle' && !(Number(a) > 0)) {
-			boardError = 'Only songs from osu! have leaderboards.';
-			return;
-		}
+		show({ board: null, error: null });
+		if (!token) return show({ board: null, error: 'Log in with osu! to see the leaderboards.' });
+		if (why) return show({ board: null, error: why });
 		let stale = false;
-		const loading =
-			kind === 'daily'
-				? getDailyPuzzleBoard(token, a).then(scoreBoard)
-				: kind === 'puzzle'
-					? getPuzzleBoard(token, Number(a), b, Number(c)).then(scoreBoard)
-					: getPuzzleTop(token, /** @type {any} */ (a)).then((board) =>
-							topBoard(board, /** @type {any} */ (a))
-						);
-		loading
+		load(token)
 			.then((board) => {
-				if (!stale) shownBoard = board;
+				if (!stale) show({ board, error: null });
 			})
 			.catch((error) => {
 				console.error('Could not load the leaderboard:', error);
-				if (!stale) boardError = "Couldn't load the leaderboard.";
+				if (!stale) show({ board: null, error: "Couldn't load the leaderboard." });
 			});
 		return () => (stale = true);
+	}
+	$effect(() => {
+		const mode = rankMode;
+		return follow(
+			$keyStore.access_token,
+			null,
+			(token) => getPuzzleTop(token, 'score', mode, BOARD_SIZE).then(rankingBoard),
+			(next) => (rankBoard = next)
+		);
+	});
+	$effect(() => {
+		const { mode, difficulty } = choice;
+		const setId = Number(chosen?.id);
+		return follow(
+			$keyStore.access_token,
+			!chosen
+				? 'Pick a song to see its leaderboard.'
+				: !(setId > 0)
+					? 'Only songs from osu! have leaderboards.'
+					: null,
+			(token) => getPuzzleBoard(token, setId, mode, difficulty, BOARD_SIZE).then(scoreBoard),
+			(next) => (songBoard = next)
+		);
+	});
+	$effect(() => {
+		const { day, online } = daily;
+		return follow(
+			$keyStore.access_token,
+			online ? null : "Today's puzzle couldn't be loaded from the server.",
+			(token) => getDailyPuzzleBoard(token, day, BOARD_SIZE).then(scoreBoard),
+			(next) => (dayBoard = next)
+		);
 	});
 
 	/** The first of a song's backgrounds that loads, and its shape */
@@ -697,7 +701,8 @@
 									{#if dailyDone}
 										{daily.song.artist}
 									{:else if daily.online}
-										The same puzzle for everyone today. Only your first try counts!
+										The same puzzle for everyone today. Your first try counts on today's board, and
+										every try for your ranking.
 									{:else}
 										A song from your library (offline, so it isn't ranked)
 									{/if}
@@ -940,61 +945,65 @@
 			{#if choice.style !== 'relaxed'}
 				<!-- Leaderboards -->
 				<section class="flex flex-col gap-3">
-					<div class="flex flex-wrap items-center justify-between gap-3">
-						<h2 class="text-xl font-bold">Leaderboards</h2>
-						<div class="inline-flex gap-1 p-1 rounded-full bg-secondary-200" role="tablist">
-							{#each [['daily', 'Daily puzzle', 'icon-[mingcute--calendar-day-line]'], ['puzzle', 'This puzzle', 'icon-[ri--puzzle-2-line]'], ['top', 'Top players', 'icon-[mingcute--trophy-line]']] as [id, label, icon] (id)}
-								<button
-									role="tab"
-									aria-selected={boardTab === id}
-									class="flex items-center gap-2 px-3 h-8 rounded-full text-sm font-semibold cursor-pointer transition {boardTab ===
-									id
-										? 'bg-white text-black'
-										: 'text-secondary-700 hover:text-white hover:bg-white/10'}"
-									onclick={() => (boardTab = id)}
-								>
-									<span class="{icon} size-4"></span>{label}
-								</button>
-							{/each}
-						</div>
-					</div>
-					<div class="rounded-xl bg-secondary-100/60 ring-1 ring-white/5 p-3">
-						{#if boardTab === 'daily'}
-							<p class="px-3 pb-2 text-sm text-secondary-600">
-								Today's puzzle ({daily.day}): only everyone's first try counts.
-							</p>
-						{:else if boardTab === 'puzzle'}
-							<p class="px-3 pb-2 text-sm text-secondary-600 flex items-center gap-1.5 min-w-0">
-								{#if chosen}
-									<span class="truncate font-semibold text-secondary-700">{chosen.title}</span>
-									<span class="shrink-0">·</span>
-									<span class="{modeOf(choice.mode)?.icon} size-3.5 shrink-0"></span>
-									<span class="shrink-0" style="color: {DIFFICULTIES[choice.difficulty].color}"
-										>{DIFFICULTIES[choice.difficulty].label}</span
-									>
-									<span class="shrink-0">· your best score counts</span>
-								{/if}
-							</p>
-						{:else}
-							<div class="flex flex-wrap gap-2 px-3 pb-2">
-								{#each TOP_BOARDS as top (top.id)}
+					<h2 class="text-xl font-bold">Leaderboards</h2>
+					<div class="grid gap-4 items-start lg:grid-cols-2">
+						<!-- The ranking of a mode -->
+						{#snippet rankingHeader()}
+							<div class="flex gap-1 p-1 rounded-full bg-secondary-200 w-fit" role="tablist">
+								{#each MODES as mode (mode.id)}
 									<button
-										title={top.hint}
-										class="flex items-center gap-1.5 px-3 h-8 rounded-full text-sm font-semibold cursor-pointer transition {topTab ===
-										top.id
-											? 'bg-primary-300/30 ring-1 ring-primary-400'
-											: 'bg-secondary-200 hover:bg-secondary-300'}"
-										onclick={() => (topTab = top.id)}
+										role="tab"
+										aria-selected={rankMode === mode.id}
+										class="flex items-center gap-1.5 px-3 h-7 rounded-full text-xs font-semibold cursor-pointer transition {rankMode ===
+										mode.id
+											? 'bg-white text-black'
+											: 'text-secondary-700 hover:text-white hover:bg-white/10'}"
+										onclick={() => (rankMode = mode.id)}
 									>
-										<span class="{top.icon} size-4"></span>{top.label}
+										<span class="{mode.icon} size-3.5"></span>{mode.label}
 									</button>
 								{/each}
 							</div>
-							<p class="px-3 pb-2 text-sm text-secondary-600">
-								{TOP_BOARDS.find((top) => top.id === topTab)?.hint}
-							</p>
-						{/if}
-						<PuzzleLeaderboard board={shownBoard} error={boardError} />
+						{/snippet}
+						{@render boardCard(
+							'Ranking',
+							'icon-[mingcute--trophy-line]',
+							`Everyone's best scores of every ${modeOf(rankMode)?.label.toLowerCase()} puzzle, added up`,
+							rankBoard,
+							rankingHeader
+						)}
+
+						<div class="flex flex-col gap-4 min-w-0">
+							<!-- Today's puzzle -->
+							{@render boardCard(
+								"Today's puzzle",
+								'icon-[mingcute--calendar-day-line]',
+								"Only everyone's first try counts",
+								dayBoard,
+								null
+							)}
+							<!-- The chosen song's puzzle -->
+							{#snippet puzzleHeader()}
+								{#if chosen}
+									<p class="flex items-center gap-1.5 text-sm min-w-0">
+										<span class="truncate font-semibold">{chosen.title}</span>
+										<span class="{modeOf(choice.mode)?.icon} size-3.5 shrink-0"></span>
+										<span
+											class="shrink-0 font-semibold"
+											style="color: {DIFFICULTIES[choice.difficulty].color}"
+											>{DIFFICULTIES[choice.difficulty].label}</span
+										>
+									</p>
+								{/if}
+							{/snippet}
+							{@render boardCard(
+								'This puzzle',
+								'icon-[ri--puzzle-2-line]',
+								'The song, mode and difficulty you picked above',
+								songBoard,
+								puzzleHeader
+							)}
+						</div>
 					</div>
 				</section>
 			{/if}
@@ -1295,6 +1304,21 @@
 		/>
 	</div>
 {/if}
+
+{#snippet boardCard(title, icon, hint, shown, header)}
+	<div class="flex flex-col gap-2 rounded-xl bg-secondary-100/60 ring-1 ring-white/5 p-3 min-w-0">
+		<div class="px-3 pt-1">
+			<p class="flex items-center gap-2 font-bold">
+				<span class="{icon} size-5 text-amber-300"></span>{title}
+			</p>
+			<p class="text-xs text-secondary-600">{hint}</p>
+		</div>
+		{#if header}
+			<div class="px-3">{@render header()}</div>
+		{/if}
+		<PuzzleLeaderboard board={shown.board} error={shown.error} />
+	</div>
+{/snippet}
 
 {#snippet view3dButton(open)}
 	<button
