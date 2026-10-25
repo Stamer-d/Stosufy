@@ -1,10 +1,10 @@
 <script>
-	import { coverBox, judgeBeat, seededRandom, tileImageStyle } from '#lib/puzzle/puzzle.ts';
+	import { coverBox, seededRandom, tileImageStyle } from '#lib/puzzle/puzzle.ts';
 
 	/**
 	 * The picture in square tiles, most of them turned: a left click turns a tile right, a
-	 * right click left. Every turn is judged on the beat; turning a tile that was right is a miss.
-	 * `relaxed`: nothing is judged (`onsnap` hears of each turn instead); `saved` turns the tiles
+	 * right click left. Every turn is told (`onaction`); turning a tile that was right is wrong.
+	 * `relaxed`: nothing is counted (`onsnap` hears of each turn instead); `saved` turns the tiles
 	 * back the way `onchange` last told it.
 	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, relaxed?: boolean, saved?: number[] | null, onaction?: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onsnap?: (snap: { x: number, y: number, home: boolean }) => void, onchange?: (tiles: number[]) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
 	 */
@@ -61,15 +61,7 @@
 			onchange([...turns]);
 			return;
 		}
-		const beat = judgeBeat();
-		onaction({
-			judgement: wasRight ? 0 : beat.judgement,
-			kiai: beat.kiai,
-			free: !wasRight && beat.free,
-			home,
-			x: event.clientX,
-			y: event.clientY
-		});
+		onaction({ home, wrong: wasRight, x: event.clientX, y: event.clientY });
 	}
 
 	// --- How it feels --------------------------------------------------------------------

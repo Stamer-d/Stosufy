@@ -4,14 +4,14 @@
 
 <script>
 	import { onMount, untrack } from 'svelte';
-	import { jigsawPaths, judgeBeat, seededRandom } from '#lib/puzzle/puzzle.ts';
+	import { jigsawPaths, seededRandom } from '#lib/puzzle/puzzle.ts';
 	import { pickSound } from '#lib/puzzle/sounds.ts';
 
 	/**
 	 * A jigsaw of the picture: pieces with knobs lie around the board, dragged onto it. A piece
-	 * dropped where it belongs snaps in (judged on the beat); dropped on the board anywhere
-	 * else it's a miss and gets kicked back off.
-	 * `relaxed`: a puzzle like on a table instead: nothing is judged, pieces can lie anywhere,
+	 * dropped where it belongs snaps in; dropped on the board anywhere else it's wrong and
+	 * gets kicked back off.
+	 * `relaxed`: a puzzle like on a table instead: nothing is counted, pieces can lie anywhere,
 	 * and pieces that fit together join and move as one. `saved` puts a puzzle back the way
 	 * `onchange` last told it.
 	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, relaxed?: boolean, saved?: import('#lib/puzzle/puzzle.ts').SavedPiece[] | null, onaction?: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onsnap?: (snap: { x: number, y: number, home: boolean, size: number }) => void, onchange?: (pieces: import('#lib/puzzle/puzzle.ts').SavedPiece[]) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
@@ -309,8 +309,7 @@
 			piece.z = 0;
 			pop(piece);
 			lastPlaced = piece;
-			const { judgement, kiai, free } = judgeBeat();
-			onaction({ judgement, kiai, free, home: true, x: event.clientX, y: event.clientY });
+			onaction({ home: true, x: event.clientX, y: event.clientY });
 			return;
 		}
 		// Only a real drop on the board counts, not a click
@@ -318,7 +317,7 @@
 		const cy = piece.y + h / 2;
 		const moved = Math.hypot(event.clientX - startX, event.clientY - startY) > 6;
 		if (moved && cx > 0 && cx < WIDTH && cy > 0 && cy < height) {
-			onaction({ judgement: 0, x: event.clientX, y: event.clientY });
+			onaction({ wrong: true, x: event.clientX, y: event.clientY });
 			piece.kicked = true;
 			traySpot(piece, cx < WIDTH / 2 ? -1 : 1);
 		}

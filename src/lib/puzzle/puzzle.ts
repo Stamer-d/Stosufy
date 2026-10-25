@@ -1,14 +1,14 @@
-// The puzzle: a beatmap's background to put back together while its song plays. Moves are
-// judged against the beat like hits in osu! (300, 100, 50, miss), with combo, score,
-// accuracy and a grade; the music stays muffled until the picture is whole.
+// The puzzle: a beatmap's background to put back together, against the clock, while its song
+// plays (muffled until the picture is whole). The fastest times go on leaderboards: each
+// puzzle's, the daily puzzle's (the same for everyone) and the overall ones.
 
 import { get } from 'svelte/store';
-import { beatNow } from '../stores/beat';
 import { backgroundUrls, formatSongData, mapDataStore } from '../stores/data';
+import type { PuzzleBoard, PuzzleScore, PuzzleTopBoard, PuzzleTopEntry } from '../api';
 import type { MapSet } from '../types';
 
 export type PuzzleMode = 'jigsaw' | 'slide' | 'spin';
-export type Judgement = 300 | 100 | 50 | 0;
+/** EZ is the relaxed puzzle's help only: it isn't one to pick against the clock */
 export type PuzzleMod = 'EZ' | 'HD' | 'FL' | 'SP';
 
 export const MODES: { id: PuzzleMode; label: string; icon: string; hint: string }[] = [
@@ -16,13 +16,13 @@ export const MODES: { id: PuzzleMode; label: string; icon: string; hint: string 
 		id: 'jigsaw',
 		label: 'Jigsaw',
 		icon: 'icon-[ri--puzzle-2-line]',
-		hint: 'Drag the pieces onto the board. Drop them on the beat.'
+		hint: 'Drag the pieces onto the board where they belong.'
 	},
 	{
 		id: 'slide',
 		label: 'Slide',
 		icon: 'icon-[mingcute--layout-grid-line]',
-		hint: 'Slide the tiles into the gap, one move per beat. Arrow keys work too.'
+		hint: 'Slide the tiles into the gap until the picture is right. Arrow keys work too.'
 	},
 	{
 		id: 'spin',
@@ -41,39 +41,33 @@ export const DIFFICULTIES = [
 	{ label: 'Expert', color: '#aa88ff', pieces: { jigsaw: 117, slide: 48, spin: 96 } }
 ] as const;
 
+/** Mods only make a puzzle harder: a time with them is on the same leaderboard, to show off */
 export const MODS: {
 	id: PuzzleMod;
 	label: string;
 	hint: string;
-	multiplier: number;
 	modes?: PuzzleMode[];
 }[] = [
 	{
-		id: 'EZ',
-		label: 'Easy',
-		hint: 'The picture shows faintly on the board, and pieces snap from further away',
-		multiplier: 0.5
-	},
-	{
 		id: 'HD',
 		label: 'Hidden',
-		hint: 'No preview of the picture, and the board hides where pieces belong',
-		multiplier: 1.06
+		hint: 'No preview of the picture, no peeking, and the board hides where pieces belong'
 	},
 	{
 		id: 'FL',
 		label: 'Flashlight',
-		hint: 'You only see around the cursor, and less the higher your combo',
-		multiplier: 1.12
+		hint: 'You only see around the cursor'
 	},
 	{
 		id: 'SP',
 		label: 'Spun',
 		hint: 'Pieces come turned: right click or R turns the one you hold',
-		multiplier: 1.08,
 		modes: ['jigsaw']
 	}
 ];
+
+/** What a look at the whole picture costs (ms on the clock) */
+export const PEEK_PENALTY = 3000;
 
 /** Columns and rows for about `pieces` pieces of a picture this wide, each about square */
 export function gridFor(pieces: number, aspect: number) {
@@ -272,26 +266,7 @@ export function jigsawPaths(
 	);
 }
 
-// --- Judging on the beat ------------------------------------------------------------------------
-
-/**
- * A move judged against the beat of the song as it's heard: on it is a 300, near it a 100,
- * anything else a 50 (being off the beat is never a miss). Without a beat to go by (the
- * music is paused, or its timing isn't known) a move isn't judged: it counts as a 300, and
- * `free` says so.
- */
-export function judgeBeat(): {
-	judgement: Judgement;
-	offset: number | null;
-	kiai: boolean;
-	free: boolean;
-} {
-	const beat = beatNow();
-	if (!beat) return { judgement: 300, offset: null, kiai: false, free: true };
-	const off = Math.abs(beat.offset) / beat.beatLength;
-	const judgement: Judgement = off <= 0.2 ? 300 : off <= 0.33 ? 100 : 50;
-	return { judgement, offset: beat.offset, kiai: beat.kiai, free: false };
-}
+// --- Moves ------------------------------------------------------------------------------------
 
 /** A jigsaw piece as kept to go on later: where it lies, and the pieces it's joined to */
 export interface SavedPiece {
@@ -304,116 +279,18 @@ export interface SavedPiece {
 
 /** What a puzzle tells the page about a move */
 export interface PuzzleAction {
-	judgement: Judgement;
-	/** Kiai time: the hit counts double */
-	kiai?: boolean;
-	/** Not judged: there was no beat to go by */
-	free?: boolean;
 	/** A piece went to where it belongs */
 	home?: boolean;
-	/** Where on the screen, for the judgement to show */
+	/** A piece dropped where it doesn't belong, or a right tile turned wrong */
+	wrong?: boolean;
+	/** Where on the screen */
 	x: number;
 	y: number;
 }
 
-export interface Score {
-	score: number;
-	combo: number;
-	maxCombo: number;
-	counts: Record<Judgement, number>;
-	/** Moves without a beat to go by (not judged) */
-	free: number;
-}
-
-export const newScore = (): Score => ({
-	score: 0,
-	combo: 0,
-	maxCombo: 0,
-	counts: { 300: 0, 100: 0, 50: 0, 0: 0 },
-	free: 0
-});
-
-/** The score after a judgement: like osu!, each hit is worth more the higher the combo */
-export function addJudgement(
-	score: Score,
-	judgement: Judgement,
-	difficulty: number,
-	multiplier: number,
-	kiai = false,
-	free = false
-): Score {
-	const combo = judgement ? score.combo + 1 : 0;
-	const value =
-		judgement + (judgement * Math.max(0, combo - 1) * (difficulty + 2) * multiplier) / 25;
-	return {
-		score: score.score + Math.round(value * multiplier * (kiai ? 2 : 1)),
-		combo,
-		maxCombo: Math.max(score.maxCombo, combo),
-		counts: { ...score.counts, [judgement]: score.counts[judgement] + 1 },
-		free: score.free + (free ? 1 : 0)
-	};
-}
-
-/** What each judgement is worth for the accuracy: kinder than osu!'s, a 100 is still good */
-const ACCURACY_WEIGHT: Record<Judgement, number> = { 300: 1, 100: 0.8, 50: 0.55, 0: 0 };
-
-export function accuracy({ counts }: Score) {
-	const total = counts[300] + counts[100] + counts[50] + counts[0];
-	if (!total) return 1;
-	const sum = ([300, 100, 50, 0] as Judgement[]).reduce(
-		(sum, judgement) => sum + counts[judgement] * ACCURACY_WEIGHT[judgement],
-		0
-	);
-	return sum / total;
-}
-
-/**
- * The grade from the accuracy (on a puzzle the beat is harder to hit than in osu!, so the
- * grades go by accuracy alone); with Hidden or Flashlight the silver ones
- */
-export function gradeOf(score: Score, mods: PuzzleMod[]) {
-	const graded = gradeFromAccuracy(score, mods);
-	// Mostly played without music (nothing judged): at best an A, pausing isn't a way to an S
-	const { counts } = score;
-	const total = counts[300] + counts[100] + counts[50] + counts[0];
-	if (total && score.free / total > 0.5 && ['SSH', 'SS', 'SH', 'S'].includes(graded)) return 'A';
-	return graded;
-}
-
-function gradeFromAccuracy(score: Score, mods: PuzzleMod[]) {
-	const silver = mods.includes('HD') || mods.includes('FL');
-	const acc = accuracy(score);
-	// An SS allows a 100 or two, but no miss
-	if (acc >= 0.98 && !score.counts[0]) return silver ? 'SSH' : 'SS';
-	if (acc >= 0.93) return silver ? 'SH' : 'S';
-	if (acc >= 0.85) return 'A';
-	if (acc >= 0.72) return 'B';
-	if (acc >= 0.6) return 'C';
-	return 'D';
-}
-
-/** The colours of the grades, like osu!'s */
-export const GRADE_COLORS: Record<string, string> = {
-	SSH: '#e0e8f0',
-	SS: '#ffd84d',
-	SH: '#c8d4e0',
-	S: '#ffcc22',
-	A: '#88da20',
-	B: '#4fc3f7',
-	C: '#d070ff',
-	D: '#ff5a5a'
-};
-
-export const JUDGEMENT_COLORS: Record<Judgement, string> = {
-	300: '#66ccff',
-	100: '#88da20',
-	50: '#ffcc22',
-	0: '#ff5a5a'
-};
-
-export function scoreMultiplier(mods: PuzzleMod[]) {
-	return MODS.filter((mod) => mods.includes(mod.id)).reduce((m, mod) => m * mod.multiplier, 1);
-}
+/** The same puzzle for everyone: a song's picture cut the same way in a mode and difficulty */
+export const puzzleSeed = (setId: number | string, mode: PuzzleMode, difficulty: number) =>
+	hashString(`stosufy-puzzle:${setId}:${mode}:${difficulty}`);
 
 // --- Songs to puzzle --------------------------------------------------------------------------
 
@@ -424,35 +301,49 @@ export function puzzleSongs(animeOnly = true) {
 	return animeOnly && anime.length ? anime : library;
 }
 
+/** The day of the daily puzzle: in UTC, so it's the same day everywhere */
 export function today(date = new Date()) {
-	const pad = (n: number) => String(n).padStart(2, '0');
-	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+	return date.toISOString().slice(0, 10);
 }
 
-/** Today's puzzle: a song of the library, a mode and a difficulty, the same all day */
-export function dailyPuzzle(date = new Date()): {
+/** The daily puzzle: a song, a mode and a difficulty, the same for everyone all day */
+export interface DailyPuzzle {
 	day: string;
 	song: MapSet | null;
 	mode: PuzzleMode;
 	difficulty: number;
 	seed: number;
-} {
+	/** Picked by the server (the same for everyone, and ranked) or, offline, from the library */
+	online: boolean;
+	/** When the next one comes (ms) */
+	nextAt: number;
+	/** How many solved it, and the user's first solve, its place and the streak (online) */
+	players?: number;
+	mine?: PuzzleScore | null;
+	streak?: number;
+	longest?: number;
+}
+
+/** Without the server: a song of the library, the same all day (but not ranked) */
+export function localDailyPuzzle(date = new Date()): DailyPuzzle {
 	const day = today(date);
 	const seed = hashString(`stosufy-puzzle-${day}`);
 	const songs = puzzleSongs();
 	const dayNumber = Math.floor(date.getTime() / 86400000);
-	const weekend = date.getDay() === 0 || date.getDay() === 6;
+	const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
 	return {
 		day,
 		song: songs.length ? songs[seed % songs.length] : null,
 		mode: MODES[dayNumber % MODES.length].id,
 		// Harder at the weekend, when there's time
 		difficulty: weekend ? 2 : 1,
-		seed
+		seed,
+		online: false,
+		nextAt: (dayNumber + 1) * 86400000
 	};
 }
 
-// --- Records: the best of each song, mode and difficulty, and the daily streak ---------------------
+// --- Records: the best time of each song, mode and difficulty, and the daily streak ------------
 
 export interface PuzzleRecord {
 	setId: number | string;
@@ -462,13 +353,12 @@ export interface PuzzleRecord {
 	mode: PuzzleMode;
 	difficulty: number;
 	mods: PuzzleMod[];
-	score: number;
-	accuracy: number;
-	maxCombo: number;
-	grade: string;
-	/** How long it took (ms) */
+	/** How long it took (ms), with the seconds peeking cost */
 	time: number;
 	moves: number;
+	/** Pieces dropped where they don't belong (or right tiles turned wrong) */
+	mistakes?: number;
+	peeks?: number;
 	at: number;
 	/** The day, if it was the daily puzzle */
 	daily?: string | null;
@@ -506,16 +396,17 @@ export function loadRecords(): Record<string, PuzzleRecord> {
 const recordKey = (record: Pick<PuzzleRecord, 'setId' | 'mode' | 'difficulty'>) =>
 	`${record.setId}:${record.mode}:${record.difficulty}`;
 
-/** Keeps a solved puzzle if it's the best of its kind; returns the one it beat (if any) */
+/** Keeps a solved puzzle if it's the fastest of its kind; returns the one it beat (if any) */
 export function saveRecord(record: PuzzleRecord) {
 	const records = loadRecords();
 	const key = recordKey(record);
 	const best = records[key] ?? null;
-	if (!best || record.score > best.score) {
+	const isBest = !best || record.time < best.time;
+	if (isBest) {
 		records[key] = record;
 		write(RECORDS_KEY, records);
 	}
-	return { best, isBest: !best || record.score > best.score };
+	return { best, isBest };
 }
 
 export interface DailyState {
@@ -523,8 +414,8 @@ export interface DailyState {
 	day: string | null;
 	streak: number;
 	longest: number;
-	/** The best grade of the day's puzzle */
-	grade?: string;
+	/** The first time on the day's puzzle (ms) */
+	time?: number;
 }
 
 export function loadDaily(): DailyState {
@@ -535,28 +426,27 @@ export function loadDaily(): DailyState {
 	return daily;
 }
 
-const GRADE_ORDER = ['D', 'C', 'B', 'A', 'S', 'SH', 'SS', 'SSH'];
-
-export function solveDaily(grade: string): DailyState {
+/** Keeps the day's puzzle as solved (the first time counts, like on the leaderboard) */
+export function solveDaily(time: number, day = today()): DailyState {
 	const daily = loadDaily();
-	const better = (a: string | undefined, b: string) =>
-		a && GRADE_ORDER.indexOf(a) >= GRADE_ORDER.indexOf(b) ? a : b;
 	const next =
-		daily.day === today()
-			? { ...daily, grade: better(daily.grade, grade) }
+		daily.day === day
+			? { ...daily, time: daily.time ?? time }
 			: {
-					day: today(),
+					day,
 					streak: daily.streak + 1,
 					longest: Math.max(daily.longest, daily.streak + 1),
-					grade
+					time
 				};
 	write(DAILY_KEY, next);
 	return next;
 }
 
-export function formatTime(ms: number) {
+/** A time as 1:05, or to the tenth (1:05.3) for the leaderboards */
+export function formatTime(ms: number, precise = false) {
 	const seconds = Math.floor(ms / 1000);
-	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+	const text = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+	return precise ? `${text}.${Math.floor((ms % 1000) / 100)}` : text;
 }
 
 // --- Pictures ------------------------------------------------------------------------------------
@@ -580,6 +470,17 @@ export async function loadImage(urls: string[]) {
 /** A beatmap's background to puzzle: the first that loads */
 export async function loadBackground(setId: number | string, mapId?: number | string | null) {
 	return loadImage(await backgroundUrls(setId, mapId ?? undefined));
+}
+
+/**
+ * The daily puzzle's picture: the one on the osu! servers, so it's cut the same for everyone
+ * (a downloaded copy can be another size); the downloaded one if those don't load
+ */
+export async function loadDailyBackground(setId: number | string, mapId?: number | string | null) {
+	const base = `https://assets.ppy.sh/beatmaps/${setId}/covers`;
+	return (
+		(await loadImage([`${base}/raw.jpg`, `${base}/fullsize.jpg`])) ?? loadBackground(setId, mapId)
+	);
 }
 
 /** A picture of the user's own, made small enough to keep (a JPEG data URL) */
@@ -711,4 +612,77 @@ export async function finishRelaxed(record: RelaxedRecord) {
 		picture = { ...picture, image: small?.url ?? null };
 	}
 	write(RELAXED_DONE_KEY, [{ ...record, picture }, ...loadRelaxedDone()].slice(0, 60));
+}
+
+// --- Leaderboards: the server's places as the leaderboard shows them ---------------------------
+
+const shortDate = (at: number) => new Date(at).toLocaleDateString();
+
+/** A board of times: the time to the tenth, the moves and when */
+export function timeBoard(board: PuzzleBoard | null) {
+	if (!board) return null;
+	const place = (score: PuzzleScore) => ({
+		...score,
+		value: formatTime(score.time, true),
+		detail: `${score.moves} moves · ${shortDate(score.at)}`
+	});
+	return { ...board, entries: board.entries.map(place), mine: board.mine && place(board.mine) };
+}
+
+/** The overall leaderboards: what each ranks by */
+export const TOP_BOARDS: {
+	id: PuzzleTopBoard;
+	label: string;
+	icon: string;
+	hint: string;
+	value: (value: number) => string;
+	detail: (count: number) => string;
+}[] = [
+	{
+		id: 'daily',
+		label: 'Daily points',
+		icon: 'icon-[mingcute--calendar-day-line]',
+		hint: 'Every daily puzzle: 100 points for the fastest, less the slower (half as fast, 50)',
+		value: (value) => `${value.toLocaleString()} pts`,
+		detail: (count) => `${count} daily ${count === 1 ? 'puzzle' : 'puzzles'}`
+	},
+	{
+		id: 'records',
+		label: 'Records',
+		icon: 'icon-[mingcute--trophy-line]',
+		hint: 'Puzzles with your time the fastest of all',
+		value: (value) => `${value} ${value === 1 ? 'record' : 'records'}`,
+		detail: (count) => `${count} ${count === 1 ? 'puzzle' : 'puzzles'} solved`
+	},
+	{
+		id: 'solved',
+		label: 'Most solved',
+		icon: 'icon-[ri--puzzle-2-line]',
+		hint: 'Different puzzles solved (a song in a mode and a difficulty)',
+		value: (value) => `${value} ${value === 1 ? 'puzzle' : 'puzzles'}`,
+		detail: (count) => `${count.toLocaleString()} pieces`
+	},
+	{
+		id: 'streak',
+		label: 'Streaks',
+		icon: 'icon-[mingcute--fire-line]',
+		hint: 'The most daily puzzles in a row',
+		value: (value) => `${value} ${value === 1 ? 'day' : 'days'}`,
+		detail: (count) => `${count} daily ${count === 1 ? 'puzzle' : 'puzzles'} in all`
+	}
+];
+
+/** An overall board as the leaderboard shows it */
+export function topBoard(
+	board: { entries: PuzzleTopEntry[]; mine: PuzzleTopEntry | null; players: number } | null,
+	id: PuzzleTopBoard
+) {
+	if (!board) return null;
+	const kind = TOP_BOARDS.find((top) => top.id === id)!;
+	const place = (entry: PuzzleTopEntry) => ({
+		...entry,
+		value: kind.value(entry.value),
+		detail: kind.detail(entry.count)
+	});
+	return { ...board, entries: board.entries.map(place), mine: board.mine && place(board.mine) };
 }

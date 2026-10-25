@@ -1,12 +1,12 @@
 <script>
 	import { onMount } from 'svelte';
-	import { coverBox, judgeBeat, seededRandom, tileImageStyle } from '#lib/puzzle/puzzle.ts';
+	import { coverBox, seededRandom, tileImageStyle } from '#lib/puzzle/puzzle.ts';
 
 	/**
 	 * A sliding puzzle: the tiles of the picture with one gap; a tile in the gap's row or column
-	 * slides towards it (with the ones between). Every move is judged on the beat; too far off
-	 * it is a miss. The last tile comes in once the rest is in place.
-	 * `relaxed`: nothing is judged (`onsnap` hears of each move instead); `saved` puts the tiles
+	 * slides towards it (with the ones between); every move is told (`onaction`). The last tile
+	 * comes in once the rest is in place.
+	 * `relaxed`: nothing is counted (`onsnap` hears of each move instead); `saved` puts the tiles
 	 * back the way `onchange` last told it.
 	 * @type {{ url: string, aspect: number, cols: number, rows: number, seed: number, mods: string[], peeking?: boolean, relaxed?: boolean, saved?: number[] | null, onaction?: (action: import('#lib/puzzle/puzzle.ts').PuzzleAction) => void, onsnap?: (snap: { x: number, y: number, home: boolean }) => void, onchange?: (tiles: number[]) => void, onprogress: (fraction: number) => void, onsolved: () => void }}
 	 */
@@ -96,8 +96,7 @@
 			onchange([...cells]);
 			return;
 		}
-		const { judgement, kiai, free } = judgeBeat();
-		onaction({ judgement, kiai, free, home, x, y });
+		onaction({ home, x, y });
 	}
 
 	let board = $state();
