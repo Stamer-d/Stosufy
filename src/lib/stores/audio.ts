@@ -679,6 +679,16 @@ export async function queueSong(song: MapSet, next = false) {
 	upNext.update((songs) => (next ? [song, ...songs] : [...songs, song]));
 }
 
+/** Adds many songs (a whole playlist) to the queue; with nothing playing they play right away */
+export async function queueSongs(songs: MapSet[], playlistId: PlaylistId | null = null) {
+	if (!songs.length) return;
+	if (!get(songQueue).queue?.length) {
+		await setSongQueue(0, songs, 'playlist', playlistId);
+		return;
+	}
+	upNext.update((queued) => [...queued, ...songs]);
+}
+
 export function removeQueuedSong(index: number) {
 	upNext.update((songs) => songs.filter((_, i) => i !== index));
 }
