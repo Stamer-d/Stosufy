@@ -46,7 +46,7 @@
 				title="Cancel downloads"
 				aria-label="Cancel downloads"
 				class="size-6 grid place-items-center rounded-full text-secondary-600 hover:text-white cursor-pointer"
-				onclick={cancelDownloads}
+				onclick={() => cancelDownloads()}
 			>
 				<span class="icon-[mingcute--close-line] size-4"></span>
 			</button>

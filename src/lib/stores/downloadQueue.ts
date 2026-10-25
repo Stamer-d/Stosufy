@@ -54,8 +54,15 @@ export function queueDownloads(sets: { set: MapSet; mapId: number | string }[]) 
 	run();
 }
 
-export function cancelDownloads() {
-	downloadQueue.update((state) => ({ ...state, items: state.items.slice(0, running ? 1 : 0) }));
+/** Cancels the waiting downloads (only those of the given sets, if any); a running one ends */
+export function cancelDownloads(setIds?: string[]) {
+	downloadQueue.update((state) => ({
+		...state,
+		items: state.items.filter(
+			({ set }, index) =>
+				(running && index === 0) || (setIds !== undefined && !setIds.includes(String(set.id)))
+		)
+	}));
 }
 
 async function run() {
