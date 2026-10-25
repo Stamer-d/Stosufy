@@ -22,7 +22,6 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { searchQuery } from '#lib/stores/search.ts';
-	import { allMixes } from '#lib/stores/mixes.ts';
 	import { updateUserSettings, userSettings, updateAppearance } from '#lib/stores/user.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
 	import { setVolume, toggleMute, DEFAULT_VOLUME, MAX_VOLUME } from '#lib/stores/mixer.ts';
@@ -42,18 +41,6 @@
 		$mapDataStore[$currentSong.song?.id]?.video || $mapDataStore[$currentSong.song?.id]?.videoSource
 	);
 	$: videoOn = $userSettings.settings?.appearance?.video ?? true;
-
-	// Where the song plays from (a playlist, smart playlist or mix): its title leads there,
-	// otherwise to focus mode, like the cover
-	$: sourcePath = pathOf($songQueue.type == 'playlist' ? $songQueue.playlistId : null);
-	function pathOf(id) {
-		if (id == null) return null;
-		const [kind, rest] = String(id).split(/:(.*)/);
-		if (rest === undefined) return /^-?\d+$/.test(kind) ? `/playlist/${kind}` : null;
-		if (kind === 'smart') return `/smart/${rest}`;
-		if (kind === 'mix' && $allMixes.has(rest)) return `/mix/${rest}`;
-		return null;
-	}
 
 	function openFocus() {
 		focusMode.set(true);
@@ -119,9 +106,9 @@
 			</button>
 			<div class="min-w-0 flex flex-col items-start">
 				<button
-					title={sourcePath ? 'Go to what is playing' : 'Open focus mode'}
+					title="Go to the beatmap"
 					class="max-w-full text-sm font-semibold truncate text-start cursor-pointer hover:underline"
-					on:click={() => (sourcePath ? goto(sourcePath) : openFocus())}
+					on:click={() => goto(`/map/${$currentSong.song.id}`)}
 				>
 					{$currentSong.song?.title}
 				</button>

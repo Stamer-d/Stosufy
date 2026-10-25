@@ -238,6 +238,21 @@ export async function fetchMaps(
 	}
 }
 
+/** One beatmap set from osu! with all its difficulties (for the page of a map) */
+export async function fetchBeatmapset(setId: number | string): Promise<MapSet> {
+	const url = `https://osu.ppy.sh/api/v2/beatmapsets/${setId}`;
+	let response = await fetch(url, {
+		headers: { Authorization: `Bearer ${await freshToken()}` }
+	});
+	// The token ran out: once more with a new one
+	if (response.status === 401)
+		response = await fetch(url, {
+			headers: { Authorization: `Bearer ${await freshToken(true)}` }
+		});
+	if (!response.ok) throw new Error(`osu! API error (HTTP ${response.status})`);
+	return response.json();
+}
+
 // TODO - Adjust to remove specific beatmap songs
 export async function deleteSong(setId: number | string) {
 	const mapData = get(mapDataStore);
