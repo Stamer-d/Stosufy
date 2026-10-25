@@ -1,6 +1,7 @@
 // The puzzle: a beatmap's background to put back together, against the clock, while its song
-// plays (muffled until the picture is whole). The fastest times go on leaderboards: each
-// puzzle's, the daily puzzle's (the same for everyone) and the overall ones.
+// plays (muffled until the picture is whole). The faster, the more points, and mods multiply
+// them. The best scores go on leaderboards: each puzzle's, the daily puzzle's (the same for
+// everyone) and the overall ones.
 
 import { get } from 'svelte/store';
 import { backgroundUrls, formatSongData, mapDataStore } from '../stores/data';
@@ -41,30 +42,51 @@ export const DIFFICULTIES = [
 	{ label: 'Expert', color: '#aa88ff', pieces: { jigsaw: 117, slide: 48, spin: 96 } }
 ] as const;
 
-/** Mods only make a puzzle harder: a time with them is on the same leaderboard, to show off */
+/** Mods make a puzzle harder, and multiply its points (the server counts the same) */
 export const MODS: {
 	id: PuzzleMod;
 	label: string;
 	hint: string;
+	multiplier: number;
 	modes?: PuzzleMode[];
 }[] = [
 	{
 		id: 'HD',
 		label: 'Hidden',
-		hint: 'No preview of the picture, no peeking, and the board hides where pieces belong'
+		hint: 'No preview of the picture, no peeking, and the board hides where pieces belong',
+		multiplier: 1.12
 	},
 	{
 		id: 'FL',
 		label: 'Flashlight',
-		hint: 'You only see around the cursor'
+		hint: 'You only see around the cursor',
+		multiplier: 1.18
 	},
 	{
 		id: 'SP',
 		label: 'Spun',
 		hint: 'Pieces come turned: right click or R turns the one you hold',
+		multiplier: 1.1,
 		modes: ['jigsaw']
 	}
 ];
+
+export function scoreMultiplier(mods: PuzzleMod[]) {
+	return MODS.filter((mod) => mods.includes(mod.id)).reduce((m, mod) => m * mod.multiplier, 1);
+}
+
+/** How long a piece may take for the par time (ms) */
+const PAR_PER_PIECE: Record<PuzzleMode, number> = { jigsaw: 4000, slide: 10000, spin: 1200 };
+
+/**
+ * The points of a solve, as the server counts them: 100 a piece at the par time (so bigger
+ * puzzles are worth more), more the faster (up to twice that), less the slower (two thirds at
+ * twice the par time), times the mods' multiplier
+ */
+export function puzzleScore(mode: PuzzleMode, pieces: number, time: number, mods: PuzzleMod[]) {
+	const par = pieces * PAR_PER_PIECE[mode];
+	return Math.round(100 * pieces * ((2 * par) / (par + time)) * scoreMultiplier(mods));
+}
 
 /** What a look at the whole picture costs (ms on the clock) */
 export const PEEK_PENALTY = 3000;
@@ -343,7 +365,7 @@ export function localDailyPuzzle(date = new Date()): DailyPuzzle {
 	};
 }
 
-// --- Records: the best time of each song, mode and difficulty, and the daily streak ------------
+// --- Records: the best score of each song, mode and difficulty, and the daily streak -----------
 
 export interface PuzzleRecord {
 	setId: number | string;
@@ -353,6 +375,8 @@ export interface PuzzleRecord {
 	mode: PuzzleMode;
 	difficulty: number;
 	mods: PuzzleMod[];
+	/** The points (records from before there were points have none) */
+	score?: number;
 	/** How long it took (ms), with the seconds peeking cost */
 	time: number;
 	moves: number;
@@ -396,12 +420,12 @@ export function loadRecords(): Record<string, PuzzleRecord> {
 const recordKey = (record: Pick<PuzzleRecord, 'setId' | 'mode' | 'difficulty'>) =>
 	`${record.setId}:${record.mode}:${record.difficulty}`;
 
-/** Keeps a solved puzzle if it's the fastest of its kind; returns the one it beat (if any) */
+/** Keeps a solved puzzle if it's the best of its kind; returns the one it beat (if any) */
 export function saveRecord(record: PuzzleRecord) {
 	const records = loadRecords();
 	const key = recordKey(record);
 	const best = records[key] ?? null;
-	const isBest = !best || record.time < best.time;
+	const isBest = !best || (record.score ?? 0) > (best.score ?? 0);
 	if (isBest) {
 		records[key] = record;
 		write(RECORDS_KEY, records);
@@ -414,8 +438,9 @@ export interface DailyState {
 	day: string | null;
 	streak: number;
 	longest: number;
-	/** The first time on the day's puzzle (ms) */
+	/** The first time on the day's puzzle (ms), and its points */
 	time?: number;
+	score?: number;
 }
 
 export function loadDaily(): DailyState {
@@ -427,16 +452,17 @@ export function loadDaily(): DailyState {
 }
 
 /** Keeps the day's puzzle as solved (the first time counts, like on the leaderboard) */
-export function solveDaily(time: number, day = today()): DailyState {
+export function solveDaily(time: number, score: number, day = today()): DailyState {
 	const daily = loadDaily();
 	const next =
 		daily.day === day
-			? { ...daily, time: daily.time ?? time }
+			? { ...daily, time: daily.time ?? time, score: daily.score ?? score }
 			: {
 					day,
 					streak: daily.streak + 1,
 					longest: Math.max(daily.longest, daily.streak + 1),
-					time
+					time,
+					score
 				};
 	write(DAILY_KEY, next);
 	return next;
@@ -618,13 +644,13 @@ export async function finishRelaxed(record: RelaxedRecord) {
 
 const shortDate = (at: number) => new Date(at).toLocaleDateString();
 
-/** A board of times: the time to the tenth, the moves and when */
-export function timeBoard(board: PuzzleBoard | null) {
+/** A board of scores: the points, and the time to the tenth, the moves and when */
+export function scoreBoard(board: PuzzleBoard | null) {
 	if (!board) return null;
 	const place = (score: PuzzleScore) => ({
 		...score,
-		value: formatTime(score.time, true),
-		detail: `${score.moves} moves · ${shortDate(score.at)}`
+		value: score.score.toLocaleString(),
+		detail: `${formatTime(score.time, true)} · ${score.moves} moves · ${shortDate(score.at)}`
 	});
 	return { ...board, entries: board.entries.map(place), mine: board.mine && place(board.mine) };
 }
@@ -639,6 +665,14 @@ export const TOP_BOARDS: {
 	detail: (count: number) => string;
 }[] = [
 	{
+		id: 'score',
+		label: 'Total score',
+		icon: 'icon-[mingcute--star-line]',
+		hint: 'Your best score of every puzzle, added up',
+		value: (value) => value.toLocaleString(),
+		detail: (count) => `${count} ${count === 1 ? 'puzzle' : 'puzzles'}`
+	},
+	{
 		id: 'daily',
 		label: 'Daily points',
 		icon: 'icon-[mingcute--calendar-day-line]',
@@ -650,7 +684,7 @@ export const TOP_BOARDS: {
 		id: 'records',
 		label: 'Records',
 		icon: 'icon-[mingcute--trophy-line]',
-		hint: 'Puzzles with your time the fastest of all',
+		hint: 'Puzzles with your score the best of all',
 		value: (value) => `${value} ${value === 1 ? 'record' : 'records'}`,
 		detail: (count) => `${count} ${count === 1 ? 'puzzle' : 'puzzles'} solved`
 	},

@@ -4,12 +4,18 @@
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
 	import Triangles from '#lib/components/Triangles.svelte';
 	import PuzzleLeaderboard from '#lib/components/puzzle/PuzzleLeaderboard.svelte';
-	import { DIFFICULTIES, MODES, PEEK_PENALTY, formatTime } from '#lib/puzzle/puzzle.ts';
+	import {
+		DIFFICULTIES,
+		MODES,
+		PEEK_PENALTY,
+		formatTime,
+		scoreMultiplier
+	} from '#lib/puzzle/puzzle.ts';
 
 	/**
-	 * The screen after a solved puzzle: the time, the user's best before it and where it puts
-	 * them on the leaderboard (`ranking`: sending, done with the board, or why it isn't ranked).
-	 * @type {{ result: { record: import('#lib/puzzle/puzzle.ts').PuzzleRecord, best: import('#lib/puzzle/puzzle.ts').PuzzleRecord | null, isBest: boolean, daily: import('#lib/puzzle/puzzle.ts').DailyState | null }, ranking: { status: 'sending' | 'done' | 'unranked', message?: string, best?: boolean, previous?: number | null, ranked?: boolean, board?: any, streak?: number | null } | null, onretry: () => void, onnext: () => void, onmenu: () => void, on3d: () => void }}
+	 * The screen after a solved puzzle: the points and the time, the user's best before it and
+	 * where it puts them on the leaderboard (`ranking`: sending, done with the board, or why it isn't ranked).
+	 * @type {{ result: { record: import('#lib/puzzle/puzzle.ts').PuzzleRecord, best: import('#lib/puzzle/puzzle.ts').PuzzleRecord | null, isBest: boolean, daily: import('#lib/puzzle/puzzle.ts').DailyState | null }, ranking: { status: 'sending' | 'done' | 'unranked', message?: string, score?: number, best?: boolean, previous?: number | null, ranked?: boolean, board?: any, streak?: number | null } | null, onretry: () => void, onnext: () => void, onmenu: () => void, on3d: () => void }}
 	 */
 	let { result, ranking, onretry, onnext, onmenu, on3d } = $props();
 
@@ -17,8 +23,10 @@
 	let mode = $derived(MODES.find((m) => m.id === record.mode));
 	let difficulty = $derived(DIFFICULTIES[record.difficulty]);
 	let done = $derived(ranking?.status === 'done' ? ranking : null);
-	/** The time before this one: the server's (from any device), else this device's */
-	let previous = $derived(done ? done.previous : result.best && result.best.time);
+	/** The best score before this one: the server's (from any device), else this device's */
+	let previous = $derived(done ? done.previous : (result.best?.score ?? null));
+	let score = $derived(done?.score ?? record.score ?? 0);
+	let multiplier = $derived(scoreMultiplier(record.mods));
 	let isBest = $derived(done ? done.best : result.isBest);
 	let place = $derived(done?.ranked ? done.board?.mine : null);
 	let streak = $derived(done?.streak ?? result.daily?.streak ?? 0);
@@ -32,7 +40,7 @@
 		class="absolute inset-0"
 	/>
 	<div class="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-black/30"></div>
-	<Triangles count={20} seed={record.time % 97} />
+	<Triangles count={20} seed={score % 97} />
 
 	<div class="relative min-h-full flex flex-wrap items-center justify-center gap-x-14 gap-y-8 p-10">
 		<div class="w-full max-w-md flex flex-col gap-5" in:fly={{ x: -30, duration: 400 }}>
@@ -56,13 +64,20 @@
 				</div>
 			</div>
 
-			<!-- The time -->
+			<!-- The points, and the time they came from -->
 			<div>
 				<p
 					class="text-8xl font-black tabular-nums tracking-tighter leading-none drop-shadow-[0_0_30px_rgba(102,204,255,0.35)]"
 					in:scale={{ start: 1.8, duration: 600, easing: backOut }}
 				>
+					{score.toLocaleString()}
+				</p>
+				<p class="mt-2 text-xl font-bold tabular-nums text-white/80">
+					<span class="icon-[mingcute--time-line] size-5 align-[-3px]"></span>
 					{formatTime(record.time, true)}
+					{#if multiplier !== 1}
+						<span class="text-primary-400">· mods ×{multiplier.toFixed(2)}</span>
+					{/if}
 				</p>
 				<div class="mt-3 flex flex-wrap items-center gap-2">
 					{#if isBest && !(record.daily && done && !done.ranked)}
@@ -73,10 +88,10 @@
 					{/if}
 					{#if previous != null}
 						<span class="text-sm text-white/60">
-							{isBest ? 'Before' : 'Best'}: {formatTime(previous, true)}
+							{isBest ? 'Before' : 'Best'}: {previous.toLocaleString()}
 							{#if isBest}
 								<span class="text-primary-400 font-semibold"
-									>(−{((previous - record.time) / 1000).toFixed(1)}s)</span
+									>(+{(score - previous).toLocaleString()})</span
 								>
 							{/if}
 						</span>

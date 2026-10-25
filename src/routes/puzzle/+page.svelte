@@ -39,11 +39,13 @@
 		newSaveId,
 		loadRecords,
 		pieceCount,
+		puzzleScore,
 		puzzleSeed,
 		puzzleSongs,
 		saveRecord,
 		solveDaily,
-		timeBoard,
+		scoreBoard,
+		scoreMultiplier,
 		topBoard
 	} from '#lib/puzzle/puzzle.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
@@ -165,12 +167,12 @@
 		if ($keyStore.access_token) loadServerDaily();
 	});
 
-	/** Today's puzzle once it's solved: the first time (and its place, online) */
+	/** Today's puzzle once it's solved: the first score and time (and its place, online) */
 	let dailyDone = $derived(
 		daily.online
 			? daily.mine
 			: dailyState.day === daily.day && dailyState.time
-				? { time: dailyState.time }
+				? { time: dailyState.time, score: dailyState.score ?? 0 }
 				: null
 	);
 	let streak = $derived(daily.online ? (daily.streak ?? 0) : dailyState.streak);
@@ -209,7 +211,7 @@
 
 	/** 'daily', 'puzzle' (the chosen song's, in the chosen mode and difficulty) or 'top' */
 	let boardTab = $state('daily');
-	let topTab = $state('daily');
+	let topTab = $state('score');
 	let shownBoard = $state(null);
 	let boardError = $state(null);
 	let inMenu = $derived(view === 'menu' || view === 'loading');
@@ -246,9 +248,9 @@
 		let stale = false;
 		const loading =
 			kind === 'daily'
-				? getDailyPuzzleBoard(token, a).then(timeBoard)
+				? getDailyPuzzleBoard(token, a).then(scoreBoard)
 				: kind === 'puzzle'
-					? getPuzzleBoard(token, Number(a), b, Number(c)).then(timeBoard)
+					? getPuzzleBoard(token, Number(a), b, Number(c)).then(scoreBoard)
 					: getPuzzleTop(token, /** @type {any} */ (a)).then((board) =>
 							topBoard(board, /** @type {any} */ (a))
 						);
@@ -486,7 +488,7 @@
 				pieces,
 				daily: record.daily
 			});
-			return { status: 'done', ...sent, board: timeBoard(sent.board) };
+			return { status: 'done', ...sent, board: scoreBoard(sent.board) };
 		} catch (error) {
 			console.error('Could not send the time:', error);
 			return {
@@ -506,6 +508,7 @@
 			if (rect) bursts?.confetti(rect, 160);
 		}, 700);
 		const song = game.song;
+		const time = solvedAt - startedAt + peeks * PEEK_PENALTY;
 		const record = {
 			setId: song.id,
 			mapId: song.beatmaps?.[0]?.id ?? null,
@@ -514,7 +517,8 @@
 			mode: game.mode,
 			difficulty: game.difficulty,
 			mods: game.mods,
-			time: solvedAt - startedAt + peeks * PEEK_PENALTY,
+			time,
+			score: puzzleScore(game.mode, game.cols * game.rows, time, game.mods),
 			moves,
 			mistakes,
 			peeks,
@@ -526,7 +530,7 @@
 			aspect: game.aspect
 		};
 		const saved = saveRecord(record);
-		const streakNow = game.daily ? solveDaily(record.time, game.daily) : null;
+		const streakNow = game.daily ? solveDaily(record.time, record.score, game.daily) : null;
 		const key = game.key;
 		ranking = { status: 'sending' };
 		sendResult(record, game.cols * game.rows, game.dailyOnline).then((sent) => {
@@ -582,6 +586,11 @@
 		const minutes = Math.max(0, Math.ceil((daily.nextAt - now) / 60000));
 		return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
 	});
+	let multiplier = $derived(game ? scoreMultiplier(game.mods) : 1);
+	/** What it's worth if it were solved now: it goes down while the clock runs */
+	let liveScore = $derived(
+		game ? puzzleScore(game.mode, game.cols * game.rows, elapsed, game.mods) : 0
+	);
 	let Puzzle = $derived(game ? PUZZLES[game.mode] : null);
 	const modeOf = (id) => MODES.find((mode) => mode.id === id);
 </script>
@@ -605,9 +614,10 @@
 						Just puzzling: pick any picture and how many pieces, and put it together while your
 						music plays. No time limit, no score, and it waits for you when you leave.
 					{:else}
-						Put the backgrounds of your songs back together as fast as you can while they play. The
-						music stays muffled until the picture is whole, and the fastest times go on the
-						leaderboards: of every puzzle, of the daily puzzle and overall.
+						Put the backgrounds of your songs back together as fast as you can while they play: the
+						faster, the more points, and mods multiply them. The music stays muffled until the
+						picture is whole, and the best scores go on the leaderboards: of every puzzle, of the
+						daily puzzle and overall.
 					{/if}
 				</p>
 				<div class="mt-5 flex flex-wrap items-center gap-4">
@@ -726,13 +736,14 @@
 								{#if dailyDone}
 									<div class="text-right">
 										<p class="text-4xl font-black tabular-nums">
-											{formatTime(dailyDone.time, true)}
+											{dailyDone.score.toLocaleString()}
 										</p>
-										{#if dailyDone.rank}
-											<p class="text-sm font-bold text-primary-400">
-												#{dailyDone.rank} of {daily.players}
-											</p>
-										{/if}
+										<p class="text-sm font-bold">
+											<span class="text-white/70">{formatTime(dailyDone.time, true)}</span>
+											{#if dailyDone.rank}
+												<span class="text-primary-400">· #{dailyDone.rank} of {daily.players}</span>
+											{/if}
+										</p>
 									</div>
 								{/if}
 								<button
@@ -892,6 +903,9 @@
 									>
 										<span class="font-extrabold">{mod.id}</span>
 										<span class="opacity-70">{mod.label}</span>
+										<span class="font-bold {on ? 'text-primary-200' : 'text-primary-400'}"
+											>×{mod.multiplier}</span
+										>
 									</button>
 								{/each}
 							</div>
@@ -958,7 +972,7 @@
 									<span class="shrink-0" style="color: {DIFFICULTIES[choice.difficulty].color}"
 										>{DIFFICULTIES[choice.difficulty].label}</span
 									>
-									<span class="shrink-0">· your best time counts, mods or not</span>
+									<span class="shrink-0">· your best score counts</span>
 								{/if}
 							</p>
 						{:else}
@@ -1101,7 +1115,9 @@
 												<span style="color: {DIFFICULTIES[record.difficulty].color}"
 													>{DIFFICULTIES[record.difficulty].label}</span
 												>
-												· {formatTime(record.time, true)}
+												· {record.score != null
+													? `${record.score.toLocaleString()} pts`
+													: formatTime(record.time, true)}
 											</p>
 										</div>
 									</button>
@@ -1118,7 +1134,7 @@
 						</div>
 					{:else}
 						<p class="text-secondary-600">
-							Every picture you put back together hangs here, with your best time.
+							Every picture you put back together hangs here, with your best score.
 						</p>
 					{/if}
 				</section>
@@ -1160,11 +1176,22 @@
 					>Offline: not ranked</span
 				>
 			{/if}
+			<div class="text-right" title="The points if it were solved now: the faster, the more">
+				<p class="text-3xl font-extrabold tabular-nums leading-none">
+					{liveScore.toLocaleString()}
+				</p>
+				<p class="text-sm tabular-nums text-white/70">
+					{#if multiplier !== 1}<span class="text-primary-400 font-semibold"
+							>×{multiplier.toFixed(2)}</span
+						> ·
+					{/if}{Math.round(progress * 100)}% done
+				</p>
+			</div>
 			<div class="text-right">
 				<p class="text-3xl font-extrabold tabular-nums leading-none">
 					{formatTime(elapsed, true)}
 				</p>
-				<p class="text-sm tabular-nums text-white/70">{Math.round(progress * 100)}% done</p>
+				<p class="text-sm text-white/70">time</p>
 			</div>
 			<div class="flex items-center gap-1">
 				<PuzzleOptions onvolume={(next) => (volume = next)} />

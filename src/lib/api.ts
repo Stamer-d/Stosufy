@@ -464,6 +464,8 @@ export interface PuzzleScore {
 	osuId: number;
 	username: string | null;
 	avatarUrl: string | null;
+	/** The points: the faster, the more, times the mods' multiplier */
+	score: number;
 	/** ms */
 	time: number;
 	moves: number;
@@ -487,9 +489,9 @@ export interface PuzzleTopEntry {
 	count: number;
 }
 
-export type PuzzleTopBoard = 'daily' | 'records' | 'solved' | 'streak';
+export type PuzzleTopBoard = 'score' | 'daily' | 'records' | 'solved' | 'streak';
 
-const SCORE_FIELDS = 'rank osuId username avatarUrl time moves mods at';
+const SCORE_FIELDS = 'rank osuId username avatarUrl score time moves mods at';
 const BOARD_FIELDS = `entries { ${SCORE_FIELDS} } mine { ${SCORE_FIELDS} } players`;
 const TOP_FIELDS = 'rank osuId username avatarUrl value count';
 
@@ -516,7 +518,7 @@ export async function getDailyPuzzle(token: string) {
 	} | null;
 }
 
-/** The fastest times of a song's puzzle in a mode and difficulty */
+/** The best scores of a song's puzzle in a mode and difficulty */
 export async function getPuzzleBoard(
 	token: string,
 	setId: number,
@@ -534,7 +536,7 @@ export async function getPuzzleBoard(
 	return data.getStosufyPuzzleBoard;
 }
 
-/** The fastest first solves of a day's daily puzzle (today's without a day) */
+/** The best first solves of a day's daily puzzle (today's without a day) */
 export async function getDailyPuzzleBoard(
 	token: string,
 	day?: string,
@@ -550,7 +552,7 @@ export async function getDailyPuzzleBoard(
 	return data.getStosufyPuzzleDailyBoard;
 }
 
-/** An overall leaderboard: daily points, puzzle records, puzzles solved or streaks */
+/** An overall leaderboard: total score, daily points, puzzle records, puzzles solved or streaks */
 export async function getPuzzleTop(
 	token: string,
 	board: PuzzleTopBoard,
@@ -566,7 +568,7 @@ export async function getPuzzleTop(
 	return data.getStosufyPuzzleTop;
 }
 
-/** Puts a solved puzzle's time on its leaderboard */
+/** Puts a solved puzzle on its leaderboard (the server works out its score from the time) */
 export async function submitPuzzle(
 	token: string,
 	result: {
@@ -581,6 +583,7 @@ export async function submitPuzzle(
 		daily: string | null;
 	}
 ): Promise<{
+	score: number;
 	best: boolean;
 	previous: number | null;
 	ranked: boolean;
@@ -590,7 +593,7 @@ export async function submitPuzzle(
 	const data = await graphql<any>(
 		token,
 		`mutation ($result: StosufyPuzzleResultInput!) {
-			submitStosufyPuzzle(result: $result) { best previous ranked streak board { ${BOARD_FIELDS} } }
+			submitStosufyPuzzle(result: $result) { score best previous ranked streak board { ${BOARD_FIELDS} } }
 		}`,
 		{ result }
 	);
