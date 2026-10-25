@@ -455,3 +455,147 @@ export async function getPlays(
 export async function clearPlays(token: string) {
 	await graphql(token, 'mutation { clearStosufyHistory }');
 }
+
+// --- Puzzle leaderboards ---------------------------------------------------------------------
+
+/** A time on a puzzle leaderboard */
+export interface PuzzleScore {
+	rank: number;
+	osuId: number;
+	username: string | null;
+	avatarUrl: string | null;
+	/** The points: the faster, the more, times the mods' multiplier */
+	score: number;
+	/** ms */
+	time: number;
+	moves: number;
+	mods: string[];
+	at: number;
+}
+
+export interface PuzzleBoard {
+	entries: PuzzleScore[];
+	mine: PuzzleScore | null;
+	players: number;
+}
+
+/** A place on an overall leaderboard: `value` is what it's ranked by */
+export interface PuzzleTopEntry {
+	rank: number;
+	osuId: number;
+	username: string | null;
+	avatarUrl: string | null;
+	value: number;
+	count: number;
+}
+
+export type PuzzleTopBoard = 'score' | 'daily' | 'records' | 'solved' | 'streak';
+
+const SCORE_FIELDS = 'rank osuId username avatarUrl score time moves mods at';
+const BOARD_FIELDS = `entries { ${SCORE_FIELDS} } mine { ${SCORE_FIELDS} } players`;
+const TOP_FIELDS = 'rank osuId username avatarUrl value count';
+
+/** Today's puzzle, the same for everyone (null if there's no song to make it of) */
+export async function getDailyPuzzle(token: string) {
+	const data = await graphql<any>(
+		token,
+		`{ getStosufyPuzzleDaily { day setId mapId title artist mode difficulty seed nextAt players streak longest mine { ${SCORE_FIELDS} } } }`
+	);
+	return data.getStosufyPuzzleDaily as {
+		day: string;
+		setId: number;
+		mapId: number | null;
+		title: string | null;
+		artist: string | null;
+		mode: 'jigsaw' | 'slide' | 'spin';
+		difficulty: number;
+		seed: number;
+		nextAt: number;
+		players: number;
+		streak: number;
+		longest: number;
+		mine: PuzzleScore | null;
+	} | null;
+}
+
+/** The best scores of a song's puzzle in a mode and difficulty */
+export async function getPuzzleBoard(
+	token: string,
+	setId: number,
+	mode: string,
+	difficulty: number,
+	limit = 50
+): Promise<PuzzleBoard> {
+	const data = await graphql<any>(
+		token,
+		`query ($setId: Int!, $mode: String!, $difficulty: Int!, $limit: Int) {
+			getStosufyPuzzleBoard(setId: $setId, mode: $mode, difficulty: $difficulty, limit: $limit) { ${BOARD_FIELDS} }
+		}`,
+		{ setId, mode, difficulty, limit }
+	);
+	return data.getStosufyPuzzleBoard;
+}
+
+/** The best first solves of a day's daily puzzle (today's without a day) */
+export async function getDailyPuzzleBoard(
+	token: string,
+	day?: string,
+	limit = 50
+): Promise<PuzzleBoard> {
+	const data = await graphql<any>(
+		token,
+		`query ($day: String, $limit: Int) {
+			getStosufyPuzzleDailyBoard(day: $day, limit: $limit) { ${BOARD_FIELDS} }
+		}`,
+		{ day, limit }
+	);
+	return data.getStosufyPuzzleDailyBoard;
+}
+
+/** An overall leaderboard: total score, daily points, puzzle records, puzzles solved or streaks */
+export async function getPuzzleTop(
+	token: string,
+	board: PuzzleTopBoard,
+	limit = 50
+): Promise<{ entries: PuzzleTopEntry[]; mine: PuzzleTopEntry | null; players: number }> {
+	const data = await graphql<any>(
+		token,
+		`query ($board: String!, $limit: Int) {
+			getStosufyPuzzleTop(board: $board, limit: $limit) { entries { ${TOP_FIELDS} } mine { ${TOP_FIELDS} } players }
+		}`,
+		{ board, limit }
+	);
+	return data.getStosufyPuzzleTop;
+}
+
+/** Puts a solved puzzle on its leaderboard (the server works out its score from the time) */
+export async function submitPuzzle(
+	token: string,
+	result: {
+		setId: number;
+		mapId: number | null;
+		mode: string;
+		difficulty: number;
+		mods: string[];
+		time: number;
+		moves: number;
+		pieces: number;
+		daily: string | null;
+	}
+): Promise<{
+	score: number;
+	best: boolean;
+	previous: number | null;
+	ranked: boolean;
+	board: PuzzleBoard;
+	streak: number | null;
+}> {
+	const data = await graphql<any>(
+		token,
+		`mutation ($result: StosufyPuzzleResultInput!) {
+			submitStosufyPuzzle(result: $result) { score best previous ranked streak board { ${BOARD_FIELDS} } }
+		}`,
+		{ result }
+	);
+	return data.submitStosufyPuzzle;
+}

@@ -1,11 +1,13 @@
 <script>
-	// The puzzle, in two ways: rhythm (a song's background to put back together while the
-	// song plays, muffled until the picture is whole, moves judged on the beat like hits in
-	// osu!) and relaxed (any picture, any number of pieces, no time and no score).
+	// The puzzle, in two ways: against the clock (a song's background to put back together
+	// while the song plays, muffled until the picture is whole, the fastest times on
+	// leaderboards) and relaxed (any picture, any number of pieces, no time and no score).
 	import { onMount } from 'svelte';
 	import { fly, fade, scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
+	import { get } from 'svelte/store';
 	import { currentSong, setSongQueue, togglePlayback } from '#lib/stores/audio.ts';
+	import { keyStore } from '#lib/stores/auth.ts';
 	import { formatSongData, mapDataStore } from '#lib/stores/data.ts';
 	import { setMuffle } from '#lib/stores/equalizer.ts';
 	import { playSkinSound } from '#lib/hitsounds/player.ts';
@@ -13,30 +15,38 @@
 	import { showToast } from '#lib/stores/toast.ts';
 	import { sameSong } from '#lib/tracks.ts';
 	import {
+		getDailyPuzzle,
+		getDailyPuzzleBoard,
+		getPuzzleBoard,
+		getPuzzleTop,
+		submitPuzzle
+	} from '#lib/api.ts';
+	import {
 		DIFFICULTIES,
-		GRADE_COLORS,
-		JUDGEMENT_COLORS,
 		MODES,
 		MODS,
-		accuracy,
-		addJudgement,
-		dailyPuzzle,
+		PEEK_PENALTY,
+		TOP_BOARDS,
 		formatTime,
-		gradeOf,
 		gridFor,
 		hashString,
 		loadBackground,
 		loadDaily,
+		loadDailyBackground,
 		loadImage,
 		loadRelaxedDone,
+		localDailyPuzzle,
 		newSaveId,
 		loadRecords,
-		newScore,
 		pieceCount,
+		puzzleScore,
+		puzzleSeed,
 		puzzleSongs,
 		saveRecord,
+		solveDaily,
+		scoreBoard,
 		scoreMultiplier,
-		solveDaily
+		topBoard
 	} from '#lib/puzzle/puzzle.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
 	import SongCover from '#lib/components/SongCover.svelte';
@@ -45,13 +55,13 @@
 	import SlidePuzzle from '#lib/components/puzzle/SlidePuzzle.svelte';
 	import SpinPuzzle from '#lib/components/puzzle/SpinPuzzle.svelte';
 	import PuzzleResults from '#lib/components/puzzle/PuzzleResults.svelte';
+	import PuzzleLeaderboard from '#lib/components/puzzle/PuzzleLeaderboard.svelte';
 	import RelaxedSetup from '#lib/components/puzzle/RelaxedSetup.svelte';
 	import RelaxedPuzzle from '#lib/components/puzzle/RelaxedPuzzle.svelte';
 	import Bursts from '#lib/components/puzzle/Bursts.svelte';
 	import PuzzleTable from '#lib/components/puzzle/PuzzleTable.svelte';
 	import PuzzleOptions from '#lib/components/puzzle/PuzzleOptions.svelte';
 	import Puzzle3D from '#lib/components/puzzle/Puzzle3D.svelte';
-	import { beatNow } from '#lib/stores/beat.ts';
 	import {
 		finishSound,
 		missSound,
@@ -68,9 +78,13 @@
 	const SETTINGS_KEY = 'puzzleSettings';
 	let choice = $state(readSettings());
 	function readSettings() {
-		const fallback = { style: 'rhythm', mode: 'jigsaw', difficulty: 1, mods: [], muffle: true };
+		const fallback = { style: 'timed', mode: 'jigsaw', difficulty: 1, mods: [], muffle: true };
 		try {
-			return { ...fallback, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+			const saved = { ...fallback, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+			// It went by the beat before it went by time, and Easy was a mod then
+			if (saved.style === 'rhythm') saved.style = 'timed';
+			saved.mods = saved.mods.filter((id) => MODS.some((mod) => mod.id === id));
+			return saved;
 		} catch {
 			return fallback;
 		}
@@ -84,12 +98,9 @@
 		}
 	});
 	function toggleMod(id) {
-		const mods = choice.mods.includes(id)
+		choice.mods = choice.mods.includes(id)
 			? choice.mods.filter((mod) => mod !== id)
 			: [...choice.mods, id];
-		choice.mods = mods.filter(
-			(mod) => !(id === 'EZ' && mod === 'HD') && !(id === 'HD' && mod === 'EZ')
-		);
 	}
 	/** The mods that count for a mode (Spun is only for the jigsaw) */
 	const modsFor = (mode, mods) =>
@@ -122,21 +133,57 @@
 			.slice(0, 30);
 	});
 
-	// (again once the library is loaded)
-	let daily = $derived.by(() => {
+	// --- The daily puzzle: from the server, the same for everyone ----------------------------
+
+	/** Without the server (offline, not logged in): one from the library, not ranked */
+	let localDaily = $derived.by(() => {
 		void $mapDataStore;
-		return dailyPuzzle();
+		return localDailyPuzzle();
 	});
+	let serverDaily = $state(null);
+	let daily = $derived(serverDaily?.day === localDaily.day ? serverDaily : localDaily);
 	let dailyState = $state(loadDaily());
+
+	async function loadServerDaily() {
+		const token = get(keyStore).access_token;
+		if (!token) return;
+		try {
+			const found = await getDailyPuzzle(token);
+			if (!found) return;
+			// The downloaded song if it's in the library (its music plays), else what osu! said
+			const song = librarySong({ id: found.setId, beatmaps: [] }) ?? {
+				id: found.setId,
+				title: found.title ?? '',
+				artist: found.artist ?? '',
+				beatmaps: found.mapId ? [{ id: found.mapId }] : []
+			};
+			serverDaily = { ...found, song, online: true };
+		} catch (error) {
+			console.error("Could not load today's puzzle:", error);
+		}
+	}
+	// Once logged in (and again on each visit to the menu)
+	$effect(() => {
+		if ($keyStore.access_token) loadServerDaily();
+	});
+
+	/** Today's puzzle once it's solved: the first score and time (and its place, online) */
+	let dailyDone = $derived(
+		daily.online
+			? daily.mine
+			: dailyState.day === daily.day && dailyState.time
+				? { time: dailyState.time, score: dailyState.score ?? 0 }
+				: null
+	);
+	let streak = $derived(daily.online ? (daily.streak ?? 0) : dailyState.streak);
+
 	let records = $state(loadRecords());
-	/** Today's puzzle once it's solved: its best grade */
-	let dailyDone = $derived(dailyState.day === daily.day ? dailyState : null);
-	/** Solved pictures, the best of each song first by when */
+	/** Solved pictures, the fastest of each song first by when */
 	let gallery = $derived.by(() => {
 		const bySong = new Map();
 		for (const record of Object.values(records)) {
 			const kept = bySong.get(record.setId);
-			if (!kept || record.score > kept.score) bySong.set(record.setId, record);
+			if (!kept || record.at > kept.at) bySong.set(record.setId, record);
 		}
 		return [...bySong.values()].sort((a, b) => b.at - a.at);
 	});
@@ -146,39 +193,104 @@
 	/** 'menu', 'loading', 'play', 'results' or 'relaxed' */
 	let view = $state('menu');
 	let game = $state(null);
-	let score = $state(newScore());
 	let progress = $state(0);
 	let moves = $state(0);
+	let mistakes = $state(0);
+	let placed = $state(0);
+	let peeks = $state(0);
 	let startedAt = $state(0);
 	let now = $state(Date.now());
 	let solvedAt = $state(0);
 	let result = $state(null);
+	/** How the leaderboard took the time: sending, done (with the board) or not ranked */
+	let ranking = $state(null);
 	let peeking = $state(false);
-	let popups = $state([]);
 	let pointer = $state({ x: -1000, y: -1000 });
-	let lastKiai = $state(false);
+
+	// --- Leaderboards -------------------------------------------------------------------------
+
+	/** 'daily', 'puzzle' (the chosen song's, in the chosen mode and difficulty) or 'top' */
+	let boardTab = $state('daily');
+	let topTab = $state('score');
+	let shownBoard = $state(null);
+	let boardError = $state(null);
+	let inMenu = $derived(view === 'menu' || view === 'loading');
+	let boardKey = $derived(
+		boardTab === 'daily'
+			? `daily:${daily.day}:${daily.online}`
+			: boardTab === 'puzzle'
+				? chosen && `puzzle:${chosen.id}:${choice.mode}:${choice.difficulty}`
+				: `top:${topTab}`
+	);
+	$effect(() => {
+		const key = boardKey;
+		const token = $keyStore.access_token;
+		if (!inMenu) return;
+		shownBoard = null;
+		boardError = null;
+		if (!token) {
+			boardError = 'Log in with osu! to see the leaderboards.';
+			return;
+		}
+		if (!key) {
+			boardError = 'Pick a song to see its leaderboard.';
+			return;
+		}
+		const [kind, a, b, c] = key.split(':');
+		if (kind === 'daily' && b !== 'true') {
+			boardError = "Today's puzzle couldn't be loaded from the server.";
+			return;
+		}
+		if (kind === 'puzzle' && !(Number(a) > 0)) {
+			boardError = 'Only songs from osu! have leaderboards.';
+			return;
+		}
+		let stale = false;
+		const loading =
+			kind === 'daily'
+				? getDailyPuzzleBoard(token, a).then(scoreBoard)
+				: kind === 'puzzle'
+					? getPuzzleBoard(token, Number(a), b, Number(c)).then(scoreBoard)
+					: getPuzzleTop(token, /** @type {any} */ (a)).then((board) =>
+							topBoard(board, /** @type {any} */ (a))
+						);
+		loading
+			.then((board) => {
+				if (!stale) shownBoard = board;
+			})
+			.catch((error) => {
+				console.error('Could not load the leaderboard:', error);
+				if (!stale) boardError = "Couldn't load the leaderboard.";
+			});
+		return () => (stale = true);
+	});
 
 	/** The first of a song's backgrounds that loads, and its shape */
 	const loadPicture = (song) => loadBackground(song.id, song.beatmaps?.[0]?.id);
 
 	/**
 	 * Starts a puzzle of a song: it plays (with more of the library after it, so the music
-	 * goes on), and its background is cut up
+	 * goes on; a daily song that isn't downloaded lets the music go on), and its background is
+	 * cut up, the same way for everyone
 	 */
 	async function start(song, options = choice, isDaily = false) {
 		if (!song) return;
 		view = 'loading';
 		let picture = null;
+		const online = isDaily && daily.online;
 		try {
 			const playing = $currentSong.song;
-			if (!sameSong(playing, song)) {
+			const downloaded = librarySong(song);
+			if (downloaded && !sameSong(playing, downloaded)) {
 				const more = puzzleSongs()
-					.filter((other) => !sameSong(other, song))
+					.filter((other) => !sameSong(other, downloaded))
 					.sort(() => Math.random() - 0.5)
 					.slice(0, 40);
-				await setSongQueue(0, [song, ...more], 'playlist');
-			} else if (!$currentSong.isPlaying) togglePlayback();
-			picture = await loadPicture(song);
+				await setSongQueue(0, [downloaded, ...more], 'playlist');
+			} else if (!downloaded) await keepMusicGoing();
+			else if (!$currentSong.isPlaying) togglePlayback();
+			const mapId = song.beatmaps?.[0]?.id;
+			picture = online ? await loadDailyBackground(song.id, mapId) : await loadPicture(song);
 		} catch (error) {
 			console.error('Could not start the puzzle:', error);
 		}
@@ -187,7 +299,7 @@
 			view = 'menu';
 			return;
 		}
-		const mods = modsFor(options.mode, options.mods);
+		const mods = isDaily ? [] : modsFor(options.mode, options.mods);
 		const pieces = DIFFICULTIES[options.difficulty].pieces[options.mode];
 		game = {
 			song,
@@ -198,15 +310,18 @@
 			mods,
 			muffle: options.muffle,
 			daily: isDaily ? daily.day : null,
-			seed: isDaily ? daily.seed : hashString(`${song.id}:${Date.now()}`),
+			dailyOnline: online,
+			seed: isDaily ? daily.seed : puzzleSeed(song.id, options.mode, options.difficulty),
 			key: Date.now()
 		};
-		chosen = song;
-		score = newScore();
+		chosen = librarySong(song) ?? chosen;
 		progress = 0;
 		moves = 0;
+		mistakes = 0;
+		placed = 0;
+		peeks = 0;
 		solvedAt = 0;
-		popups = [];
+		ranking = null;
 		startedAt = Date.now();
 		view = 'play';
 	}
@@ -241,6 +356,7 @@
 		records = loadRecords();
 		dailyState = loadDaily();
 		relaxedDone = loadRelaxedDone();
+		loadServerDaily();
 	}
 
 	// --- Relaxed: any picture, any number of pieces, the music just plays on ----------------
@@ -292,7 +408,6 @@
 		view = 'relaxed';
 	}
 
-	let popupId = 0;
 	let bursts = $state();
 	let puzzle = $state();
 	/** The puzzle shown in 3D, if one is */
@@ -302,46 +417,22 @@
 	function act(action) {
 		if (solvedAt) return;
 		moves++;
-		const combo = score.combo;
-		score = addJudgement(
-			score,
-			action.judgement,
-			game.difficulty,
-			scoreMultiplier(game.mods),
-			action.kiai,
-			action.free
-		);
-		lastKiai = !!action.kiai;
-		// The skin's sounds like a hit in osu!, and the puzzle's own on top
-		const loud = 1.6 * volume;
-		if (!action.judgement) {
+		if (action.wrong) {
+			mistakes++;
 			missSound();
-			if (combo >= 5) playSkinSound('combobreak', 'normal', loud);
-			bursts?.burst(action.x, action.y, { power: 0.2, color: JUDGEMENT_COLORS[0] });
-		} else {
-			const strength = action.judgement === 300 ? 1 : action.judgement === 100 ? 0.6 : 0.3;
-			playSkinSound('normal', 'normal', loud * (0.6 + strength * 0.4));
-			if (action.home) {
-				snapSound(Math.min(1, score.combo / 40), strength);
-				if (game.mode === 'jigsaw') playSkinSound('clap', 'normal', loud * 0.8);
-			}
-			if (score.combo % 10 === 0) {
-				sparkleSound();
-				playSkinSound('finish', 'normal', loud * 0.8);
-			}
-			bursts?.burst(action.x, action.y, {
-				power: strength * (action.home ? 1 : 0.5),
-				color: action.kiai ? '#ffd84d' : null
-			});
-			if (action.judgement === 300 && action.home)
-				bursts?.ring(action.x, action.y, { color: JUDGEMENT_COLORS[300] });
+			bursts?.burst(action.x, action.y, { power: 0.2, color: '#ff5a5a' });
+			return;
 		}
-		const id = ++popupId;
-		popups = [
-			...popups.slice(-12),
-			{ id, judgement: action.judgement, kiai: action.kiai, x: action.x, y: action.y }
-		];
-		setTimeout(() => (popups = popups.filter((popup) => popup.id !== id)), 700);
+		if (!action.home) return;
+		// A piece in place: it pops, with a sound that climbs as the picture comes together
+		placed++;
+		const loud = 1.6 * volume;
+		snapSound(progress);
+		playSkinSound('normal', 'normal', loud);
+		if (game.mode === 'jigsaw') playSkinSound('clap', 'normal', loud * 0.8);
+		if (placed % 10 === 0) sparkleSound();
+		bursts?.burst(action.x, action.y, { power: 1 });
+		bursts?.ring(action.x, action.y, { color: '#66ccff' });
 	}
 
 	/**
@@ -370,25 +461,42 @@
 		};
 	}
 
-	// The approach circle: closes in on each beat (drawn every frame, without re-rendering)
-	let approach = $state();
-	$effect(() => {
-		if (view !== 'play' || !approach) return;
-		const element = approach;
-		let frame = requestAnimationFrame(function draw() {
-			frame = requestAnimationFrame(draw);
-			const beat = solvedAt ? null : beatNow();
-			if (!beat) {
-				element.style.opacity = '0';
-				return;
-			}
-			const since = beat.offset >= 0 ? beat.offset : beat.offset + beat.beatLength;
-			const p = since / beat.beatLength;
-			element.style.transform = `scale(${1 + (1 - p) * 1.6})`;
-			element.style.opacity = String(0.15 + p * 0.65);
-		});
-		return () => cancelAnimationFrame(frame);
-	});
+	/** Puts the time on its leaderboard; what came of it, or why it isn't ranked */
+	async function sendResult(record, pieces, online) {
+		const token = get(keyStore).access_token;
+		if (!token)
+			return { status: 'unranked', message: 'Log in with osu! to get on the leaderboards.' };
+		if (record.daily && !online) {
+			return {
+				status: 'unranked',
+				message:
+					"Today's puzzle came from your library (the server couldn't be reached), so it isn't ranked."
+			};
+		}
+		if (!(Number(record.setId) > 0)) {
+			return { status: 'unranked', message: 'Only songs from osu! have leaderboards.' };
+		}
+		try {
+			const sent = await submitPuzzle(token, {
+				setId: Number(record.setId),
+				mapId: record.mapId != null && Number(record.mapId) > 0 ? Number(record.mapId) : null,
+				mode: record.mode,
+				difficulty: record.difficulty,
+				mods: record.mods,
+				time: Math.round(record.time),
+				moves: record.moves,
+				pieces,
+				daily: record.daily
+			});
+			return { status: 'done', ...sent, board: scoreBoard(sent.board) };
+		} catch (error) {
+			console.error('Could not send the time:', error);
+			return {
+				status: 'unranked',
+				message: "Couldn't reach the leaderboard. Your time is kept here."
+			};
+		}
+	}
 
 	function solved() {
 		solvedAt = Date.now();
@@ -400,6 +508,7 @@
 			if (rect) bursts?.confetti(rect, 160);
 		}, 700);
 		const song = game.song;
+		const time = solvedAt - startedAt + peeks * PEEK_PENALTY;
 		const record = {
 			setId: song.id,
 			mapId: song.beatmaps?.[0]?.id ?? null,
@@ -408,12 +517,11 @@
 			mode: game.mode,
 			difficulty: game.difficulty,
 			mods: game.mods,
-			score: score.score,
-			accuracy: accuracy(score),
-			maxCombo: score.maxCombo,
-			grade: gradeOf(score, game.mods),
-			time: solvedAt - startedAt,
+			time,
+			score: puzzleScore(game.mode, game.cols * game.rows, time, game.mods),
 			moves,
+			mistakes,
+			peeks,
 			at: solvedAt,
 			daily: game.daily,
 			seed: game.seed,
@@ -422,13 +530,16 @@
 			aspect: game.aspect
 		};
 		const saved = saveRecord(record);
-		const streak = game.daily ? solveDaily(record.grade) : null;
-		const counts = { ...score.counts, free: score.free };
+		const streakNow = game.daily ? solveDaily(record.time, record.score, game.daily) : null;
 		const key = game.key;
+		ranking = { status: 'sending' };
+		sendResult(record, game.cols * game.rows, game.dailyOnline).then((sent) => {
+			if (game?.key === key) ranking = sent;
+		});
 		// A moment to see the whole picture (and hear the music open up) first
 		setTimeout(() => {
 			if (game?.key !== key || view !== 'play') return;
-			result = { record, counts, ...saved, daily: streak, url: game.url };
+			result = { record, ...saved, daily: streakNow, url: game.url };
 			view = 'results';
 		}, 2800);
 	}
@@ -440,7 +551,7 @@
 	});
 
 	onMount(() => {
-		const timer = setInterval(() => (now = Date.now()), 250);
+		const timer = setInterval(() => (now = Date.now()), 100);
 		const onKey = (event) => {
 			if (view !== 'play' || event.target instanceof HTMLInputElement) return;
 			if (event.key === 'Escape') toMenu();
@@ -459,26 +570,29 @@
 		};
 	});
 
-	/** A look at the whole picture: not with Hidden, and it costs the combo */
+	/** A look at the whole picture: not with Hidden, and it costs a few seconds */
 	function startPeek() {
 		if (!game || game.mods.includes('HD') || solvedAt) return;
 		peeking = true;
-		if (score.combo) score = { ...score, combo: 0 };
+		peeks++;
 	}
 
-	let flashlight = $derived(
-		view === 'play' && game?.mods.includes('FL') && !solvedAt
-			? score.combo < 10
-				? 230
-				: score.combo < 25
-					? 180
-					: 140
-			: 0
+	let flashlight = $derived(view === 'play' && game?.mods.includes('FL') && !solvedAt ? 180 : 0);
+	let elapsed = $derived(
+		view === 'play' ? (solvedAt || now) - startedAt + peeks * PEEK_PENALTY : 0
 	);
-	let elapsed = $derived(view === 'play' ? (solvedAt || now) - startedAt : 0);
+	/** Until the next daily puzzle, as 5h 12m */
+	let untilNext = $derived.by(() => {
+		const minutes = Math.max(0, Math.ceil((daily.nextAt - now) / 60000));
+		return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+	});
+	let multiplier = $derived(game ? scoreMultiplier(game.mods) : 1);
+	/** What it's worth if it were solved now: it goes down while the clock runs */
+	let liveScore = $derived(
+		game ? puzzleScore(game.mode, game.cols * game.rows, elapsed, game.mods) : 0
+	);
 	let Puzzle = $derived(game ? PUZZLES[game.mode] : null);
 	const modeOf = (id) => MODES.find((mode) => mode.id === id);
-	const gradeText = (g) => g.replace('H', '');
 </script>
 
 {#if view === 'menu' || view === 'loading'}
@@ -500,9 +614,10 @@
 						Just puzzling: pick any picture and how many pieces, and put it together while your
 						music plays. No time limit, no score, and it waits for you when you leave.
 					{:else}
-						Put the backgrounds of your songs back together while they play. The music stays muffled
-						until the picture is whole, and every move counts like a hit in osu!: on the beat it's a
-						300, in kiai time it's worth double.
+						Put the backgrounds of your songs back together as fast as you can while they play: the
+						faster, the more points, and mods multiply them. The music stays muffled until the
+						picture is whole, and the best scores go on the leaderboards: of every puzzle, of the
+						daily puzzle and overall.
 					{/if}
 				</p>
 				<div class="mt-5 flex flex-wrap items-center gap-4">
@@ -510,7 +625,7 @@
 						class="inline-flex gap-1 p-1 rounded-full bg-black/30 backdrop-blur ring-1 ring-white/10"
 						role="tablist"
 					>
-						{#each [['rhythm', 'Rhythm', 'icon-[mingcute--music-2-line]'], ['relaxed', 'Relaxed', 'icon-[ri--puzzle-2-line]']] as [id, label, icon] (id)}
+						{#each [['timed', 'Against the clock', 'icon-[mingcute--time-line]'], ['relaxed', 'Relaxed', 'icon-[ri--puzzle-2-line]']] as [id, label, icon] (id)}
 							<button
 								role="tab"
 								aria-selected={choice.style === id}
@@ -576,10 +691,16 @@
 									<span class="icon-[mingcute--calendar-day-line] size-4"></span>Daily puzzle
 								</p>
 								<p class="mt-1 text-3xl font-extrabold leading-tight truncate">
-									{dailyDone ? daily.song.title : '???'}
+									{dailyDone ? daily.song.title || 'Daily puzzle' : '???'}
 								</p>
 								<p class="text-white/80 truncate">
-									{dailyDone ? daily.song.artist : 'A song from your library, the same one all day'}
+									{#if dailyDone}
+										{daily.song.artist}
+									{:else if daily.online}
+										The same puzzle for everyone today. Only your first try counts!
+									{:else}
+										A song from your library (offline, so it isn't ranked)
+									{/if}
 								</p>
 								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold">
 									<span class="flex items-center gap-1 px-2 py-1 rounded-full bg-white/15">
@@ -591,23 +712,39 @@
 										style="background-color: {DIFFICULTIES[daily.difficulty].color}"
 										>{DIFFICULTIES[daily.difficulty].label}</span
 									>
-									{#if dailyState.streak}
+									{#if streak}
 										<span
 											class="flex items-center gap-1 px-2 py-1 rounded-full bg-orange-400/20 text-orange-200"
 										>
-											<span class="icon-[mingcute--fire-line] size-3.5"></span>{dailyState.streak}
-											{dailyState.streak === 1 ? 'day' : 'days'}
+											<span class="icon-[mingcute--fire-line] size-3.5"></span>{streak}
+											{streak === 1 ? 'day' : 'days'}
 										</span>
 									{/if}
+									{#if daily.online}
+										<span class="flex items-center gap-1 px-2 py-1 rounded-full bg-white/15">
+											<span class="icon-[mingcute--group-line] size-3.5"></span>{daily.players} solved
+										</span>
+									{/if}
+									<span
+										class="flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-white/70"
+									>
+										<span class="icon-[mingcute--time-line] size-3.5"></span>Next in {untilNext}
+									</span>
 								</div>
 							</div>
 							<div class="shrink-0 flex items-center gap-4">
 								{#if dailyDone}
-									<span
-										class="text-6xl font-black italic"
-										style="color: {GRADE_COLORS[dailyDone.grade]}"
-										>{gradeText(dailyDone.grade)}</span
-									>
+									<div class="text-right">
+										<p class="text-4xl font-black tabular-nums">
+											{dailyDone.score.toLocaleString()}
+										</p>
+										<p class="text-sm font-bold">
+											<span class="text-white/70">{formatTime(dailyDone.time, true)}</span>
+											{#if dailyDone.rank}
+												<span class="text-primary-400">· #{dailyDone.rank} of {daily.players}</span>
+											{/if}
+										</p>
+									</div>
 								{/if}
 								<button
 									class="flex items-center gap-2 px-5 h-11 rounded-full bg-primary-300 hover:bg-primary-400 font-semibold cursor-pointer transition shadow-lg shadow-black/40 disabled:opacity-50"
@@ -615,7 +752,7 @@
 									onclick={playDaily}
 								>
 									<span class="icon-[mingcute--play-fill] size-5"></span>
-									{dailyDone ? 'Play again' : 'Play'}
+									{dailyDone ? 'Practice' : 'Play'}
 								</button>
 							</div>
 						</div>
@@ -757,7 +894,7 @@
 									{@const on = choice.mods.includes(mod.id)}
 									{@const usable = !mod.modes || mod.modes.includes(choice.mode)}
 									<button
-										title="{mod.hint} (score ×{mod.multiplier})"
+										title={mod.hint}
 										class="flex items-center gap-2 px-3 h-9 rounded-full text-sm font-semibold cursor-pointer transition disabled:opacity-35 disabled:pointer-events-none {on
 											? 'bg-white text-black'
 											: 'bg-secondary-200 hover:bg-secondary-300'}"
@@ -766,6 +903,9 @@
 									>
 										<span class="font-extrabold">{mod.id}</span>
 										<span class="opacity-70">{mod.label}</span>
+										<span class="font-bold {on ? 'text-primary-200' : 'text-primary-400'}"
+											>×{mod.multiplier}</span
+										>
 									</button>
 								{/each}
 							</div>
@@ -793,6 +933,68 @@
 								<span class="icon-[ri--puzzle-2-line] size-5"></span>Start the puzzle
 							{/if}
 						</button>
+					</div>
+				</section>
+			{/if}
+
+			{#if choice.style !== 'relaxed'}
+				<!-- Leaderboards -->
+				<section class="flex flex-col gap-3">
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<h2 class="text-xl font-bold">Leaderboards</h2>
+						<div class="inline-flex gap-1 p-1 rounded-full bg-secondary-200" role="tablist">
+							{#each [['daily', 'Daily puzzle', 'icon-[mingcute--calendar-day-line]'], ['puzzle', 'This puzzle', 'icon-[ri--puzzle-2-line]'], ['top', 'Top players', 'icon-[mingcute--trophy-line]']] as [id, label, icon] (id)}
+								<button
+									role="tab"
+									aria-selected={boardTab === id}
+									class="flex items-center gap-2 px-3 h-8 rounded-full text-sm font-semibold cursor-pointer transition {boardTab ===
+									id
+										? 'bg-white text-black'
+										: 'text-secondary-700 hover:text-white hover:bg-white/10'}"
+									onclick={() => (boardTab = id)}
+								>
+									<span class="{icon} size-4"></span>{label}
+								</button>
+							{/each}
+						</div>
+					</div>
+					<div class="rounded-xl bg-secondary-100/60 ring-1 ring-white/5 p-3">
+						{#if boardTab === 'daily'}
+							<p class="px-3 pb-2 text-sm text-secondary-600">
+								Today's puzzle ({daily.day}): only everyone's first try counts.
+							</p>
+						{:else if boardTab === 'puzzle'}
+							<p class="px-3 pb-2 text-sm text-secondary-600 flex items-center gap-1.5 min-w-0">
+								{#if chosen}
+									<span class="truncate font-semibold text-secondary-700">{chosen.title}</span>
+									<span class="shrink-0">·</span>
+									<span class="{modeOf(choice.mode)?.icon} size-3.5 shrink-0"></span>
+									<span class="shrink-0" style="color: {DIFFICULTIES[choice.difficulty].color}"
+										>{DIFFICULTIES[choice.difficulty].label}</span
+									>
+									<span class="shrink-0">· your best score counts</span>
+								{/if}
+							</p>
+						{:else}
+							<div class="flex flex-wrap gap-2 px-3 pb-2">
+								{#each TOP_BOARDS as top (top.id)}
+									<button
+										title={top.hint}
+										class="flex items-center gap-1.5 px-3 h-8 rounded-full text-sm font-semibold cursor-pointer transition {topTab ===
+										top.id
+											? 'bg-primary-300/30 ring-1 ring-primary-400'
+											: 'bg-secondary-200 hover:bg-secondary-300'}"
+										onclick={() => (topTab = top.id)}
+									>
+										<span class="{top.icon} size-4"></span>{top.label}
+									</button>
+								{/each}
+							</div>
+							<p class="px-3 pb-2 text-sm text-secondary-600">
+								{TOP_BOARDS.find((top) => top.id === topTab)?.hint}
+							</p>
+						{/if}
+						<PuzzleLeaderboard board={shownBoard} error={boardError} />
 					</div>
 				</section>
 			{/if}
@@ -906,10 +1108,6 @@
 										<div
 											class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"
 										></div>
-										<span
-											class="absolute top-1.5 right-2.5 text-3xl font-black italic drop-shadow-[0_2px_6px_black]"
-											style="color: {GRADE_COLORS[record.grade]}">{gradeText(record.grade)}</span
-										>
 										<div class="absolute bottom-0 inset-x-0 p-2.5 min-w-0">
 											<p class="text-sm font-bold truncate">{record.title}</p>
 											<p class="flex items-center gap-1.5 text-xs text-white/70">
@@ -917,7 +1115,9 @@
 												<span style="color: {DIFFICULTIES[record.difficulty].color}"
 													>{DIFFICULTIES[record.difficulty].label}</span
 												>
-												· {record.score.toLocaleString()}
+												· {record.score != null
+													? `${record.score.toLocaleString()} pts`
+													: formatTime(record.time, true)}
 											</p>
 										</div>
 									</button>
@@ -934,7 +1134,7 @@
 						</div>
 					{:else}
 						<p class="text-secondary-600">
-							Every picture you put back together hangs here, with your best grade.
+							Every picture you put back together hangs here, with your best score.
 						</p>
 					{/if}
 				</section>
@@ -946,7 +1146,7 @@
 		<!-- The picture behind it all, dark and blurred -->
 		<PuzzleTable url={game.url} />
 
-		<!-- What's going on: the song, the score, combo and accuracy -->
+		<!-- What's going on: the song, the clock and how far along -->
 		<div class="relative z-[100040] flex items-center gap-4 px-5 py-3 bg-black/30 backdrop-blur">
 			{#if !game.mods.includes('HD')}
 				<img
@@ -966,40 +1166,39 @@
 					>
 					{#each game.mods as mod (mod)}<span class="font-extrabold text-white/80">{mod}</span
 						>{/each}
-					· {formatTime(elapsed)} · {moves} moves
+					· {moves} moves{#if peeks}
+						· {peeks} {peeks === 1 ? 'peek' : 'peeks'} (+{(peeks * PEEK_PENALTY) / 1000}s){/if}
 				</p>
 			</div>
-			{#if !$currentSong.isPlaying && !solvedAt}
-				<!-- Without music there's no beat: every move is a 100 -->
-				<button
-					class="flex items-center gap-2 px-3 h-8 rounded-full bg-amber-400/15 ring-1 ring-amber-300/30 text-xs font-semibold text-amber-100 cursor-pointer hover:bg-amber-400/25 transition"
-					onclick={togglePlayback}
+			{#if game.daily && !game.dailyOnline}
+				<span
+					class="px-3 h-8 grid place-items-center rounded-full bg-amber-400/15 ring-1 ring-amber-300/30 text-xs font-semibold text-amber-100"
+					>Offline: not ranked</span
 				>
-					<span class="icon-[mingcute--play-fill] size-4 text-amber-300"></span>
-					Music paused: no beat, moves aren't judged
-				</button>
 			{/if}
-			<!-- The beat, to move on it -->
-			<span
-				class="beat-logo size-5 rounded-full ring-2 {lastKiai
-					? 'ring-amber-300 bg-amber-300/40'
-					: 'ring-primary-400 bg-primary-400/30'}"
-				title="The beat: move on it for 300s"
-			></span>
-			<div class="text-right">
-				<p class="text-2xl font-extrabold tabular-nums leading-none">
-					{score.score.toLocaleString().padStart(8, '0')}
+			<div class="text-right" title="The points if it were solved now: the faster, the more">
+				<p class="text-3xl font-extrabold tabular-nums leading-none">
+					{liveScore.toLocaleString()}
 				</p>
 				<p class="text-sm tabular-nums text-white/70">
-					{(accuracy(score) * 100).toFixed(2)}%
+					{#if multiplier !== 1}<span class="text-primary-400 font-semibold"
+							>×{multiplier.toFixed(2)}</span
+						> ·
+					{/if}{Math.round(progress * 100)}% done
 				</p>
+			</div>
+			<div class="text-right">
+				<p class="text-3xl font-extrabold tabular-nums leading-none">
+					{formatTime(elapsed, true)}
+				</p>
+				<p class="text-sm text-white/70">time</p>
 			</div>
 			<div class="flex items-center gap-1">
 				<PuzzleOptions onvolume={(next) => (volume = next)} />
 				<button
 					title={game.mods.includes('HD')
 						? 'No peeking with Hidden'
-						: 'Hold to see the whole picture (Q); costs your combo'}
+						: `Hold to see the whole picture (Q); costs ${PEEK_PENALTY / 1000} seconds`}
 					aria-label="Peek"
 					class="size-9 grid place-items-center rounded-full hover:bg-white/15 cursor-pointer transition disabled:opacity-30 disabled:pointer-events-none"
 					disabled={game.mods.includes('HD')}
@@ -1059,28 +1258,7 @@
 				/>
 			{/key}
 
-			<!-- The beat as an approach circle around the cursor: move when it closes -->
-			<span
-				bind:this={approach}
-				class="absolute z-[100006] size-12 -ml-6 -mt-6 rounded-full border-2 pointer-events-none opacity-0 {lastKiai
-					? 'border-amber-300'
-					: 'border-primary-400'}"
-				style="left: {pointer.x}px; top: {pointer.y}px"
-			></span>
-
-			<!-- The combo, bottom left like in osu! -->
-			{#if score.combo > 1}
-				{#key score.combo}
-					<p
-						class="absolute left-5 bottom-3 z-[100005] text-5xl font-extrabold tabular-nums pointer-events-none drop-shadow-[0_2px_8px_black]"
-						in:scale={{ start: 1.25, duration: 160 }}
-					>
-						{score.combo}x
-					</p>
-				{/key}
-			{/if}
-
-			<!-- Flashlight: only around the cursor, smaller the higher the combo -->
+			<!-- Flashlight: only around the cursor -->
 			{#if flashlight}
 				<div
 					class="absolute inset-0 z-[100003] pointer-events-none"
@@ -1103,26 +1281,13 @@
 			{/if}
 		</div>
 	</div>
-
-	<!-- The judgements where they happened -->
-	{#each popups as popup (popup.id)}
-		<span
-			class="fixed z-[100004] -translate-x-1/2 -translate-y-1/2 pointer-events-none font-black italic text-2xl drop-shadow-[0_2px_6px_black] judgement"
-			style="left: {popup.x}px; top: {popup.y}px; color: {JUDGEMENT_COLORS[popup.judgement]}"
-		>
-			{popup.judgement || '✕'}{#if popup.kiai && popup.judgement}<span
-					class="text-sm align-top text-amber-300"
-				>
-					×2</span
-				>{/if}
-		</span>
-	{/each}
 {:else if view === 'relaxed' && relaxedGame}
 	<RelaxedPuzzle game={relaxedGame} onleave={toMenu} onnew={toMenu} />
 {:else if view === 'results' && result}
 	<div class="h-full" in:fly={{ y: 20, duration: 300 }}>
 		<PuzzleResults
 			{result}
+			{ranking}
 			onretry={retry}
 			onnext={next}
 			onmenu={toMenu}
@@ -1145,26 +1310,3 @@
 {#if shown3d}
 	<Puzzle3D puzzle={shown3d} onclose={() => (shown3d = null)} />
 {/if}
-
-<style>
-	.judgement {
-		animation: judgement 700ms ease-out forwards;
-	}
-	@keyframes judgement {
-		0% {
-			opacity: 0;
-			transform: translate(-50%, -50%) scale(1.6);
-		}
-		15% {
-			opacity: 1;
-			transform: translate(-50%, -50%) scale(1);
-		}
-		70% {
-			opacity: 1;
-		}
-		100% {
-			opacity: 0;
-			transform: translate(-50%, -110%) scale(1);
-		}
-	}
-</style>
