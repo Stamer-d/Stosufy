@@ -29,7 +29,7 @@
 {#snippet row(place, own)}
 	<li>
 		<button
-			class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left cursor-pointer transition {own
+			class="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-left cursor-pointer transition {own
 				? 'bg-primary-300/20 ring-1 ring-primary-400/60'
 				: 'hover:bg-white/5'}"
 			title="Profile of {place.username ?? 'this player'}"

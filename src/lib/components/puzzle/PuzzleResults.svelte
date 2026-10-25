@@ -173,7 +173,8 @@
 			</div>
 			{#if done && record.daily && !done.ranked}
 				<p class="px-1 text-sm text-white/60">
-					Practice: only your first try of the daily puzzle counts.
+					Practice: only your first try counts on today's board. Your score still counts for this
+					song's puzzle and your ranking.
 				</p>
 			{/if}
 			{#if ranking?.status === 'unranked'}

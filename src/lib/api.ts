@@ -552,18 +552,22 @@ export async function getDailyPuzzleBoard(
 	return data.getStosufyPuzzleDailyBoard;
 }
 
-/** An overall leaderboard: total score, daily points, puzzle records, puzzles solved or streaks */
+/**
+ * An overall leaderboard: total score, daily points, puzzle records, puzzles solved or streaks;
+ * total score, records and solved of one mode if it's given
+ */
 export async function getPuzzleTop(
 	token: string,
 	board: PuzzleTopBoard,
+	mode: string | null = null,
 	limit = 50
 ): Promise<{ entries: PuzzleTopEntry[]; mine: PuzzleTopEntry | null; players: number }> {
 	const data = await graphql<any>(
 		token,
-		`query ($board: String!, $limit: Int) {
-			getStosufyPuzzleTop(board: $board, limit: $limit) { entries { ${TOP_FIELDS} } mine { ${TOP_FIELDS} } players }
+		`query ($board: String!, $mode: String, $limit: Int) {
+			getStosufyPuzzleTop(board: $board, mode: $mode, limit: $limit) { entries { ${TOP_FIELDS} } mine { ${TOP_FIELDS} } players }
 		}`,
-		{ board, limit }
+		{ board, mode, limit }
 	);
 	return data.getStosufyPuzzleTop;
 }
