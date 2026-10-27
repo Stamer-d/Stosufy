@@ -26,11 +26,13 @@ type OfflineCopy = {
 let offlineCopy: Promise<OfflineCopy | null> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-// Kept in a file for the list of playlists and one file for each playlist's songs: a change
-// writes just the playlist that changed, not the whole library (with thousands of songs that
-// took the app a moment each time)
+// Kept in a file for the list of playlists, one file for each playlist's songs and one for
+// the beatmap sets they're of: a change writes just the playlist that changed (not the whole
+// library: with thousands of songs that took the app a moment each time), and a set that's in
+// several playlists is kept once
 
 const INDEX_FILE = 'offline-library.json';
+const SETS_FILE = 'offline-sets.json';
 const songsFile = (playlistId: string) => `offline-playlist-${playlistId}.json`;
 
 interface OfflineIndex {
@@ -44,6 +46,13 @@ interface OfflineIndex {
 /** What was written last: each playlist's songs (the very list of the cache) and the index */
 const written = new Map<string, { songs: MapSet[] }>();
 let writtenIndex = '';
+/** The sets as written, and which of them each playlist's songs are of */
+let sharedSets: Record<string, any> = {};
+const setsOf = new Map<string, Set<string>>();
+const setIds = (packed: PackedSongs) =>
+	new Set<string>(
+		packed.songs.filter((song) => song[SET] != null).map((song) => String(song[SET]))
+	);
 
 /** The library as it was the last time the app was online */
 export function offlineLibrary() {
@@ -57,14 +66,18 @@ async function readOfflineCopy(): Promise<OfflineCopy | null> {
 	// A copy from before, all in one (it's kept the new way the next time)
 	if (kept.version !== 2) return unpackOld(kept);
 	const index = kept as OfflineIndex;
+	sharedSets = (await (await load(SETS_FILE)).get<Record<string, any>>('sets')) ?? {};
 	const songs: OfflineCopy['songs'] = {};
 	await Promise.all(
 		index.ids.map(async (id) => {
 			const one = await (await load(songsFile(id))).get<PackedSongs>('songs').catch(() => null);
 			if (!one) return;
-			songs[id] = { songs: unpackSongs(one) };
-			// (the cache starts with this very list: unchanged, it isn't written again)
+			songs[id] = { songs: unpackSongs({ sets: one.sets ?? sharedSets, songs: one.songs }) };
+			// (the cache starts with this very list: unchanged, it isn't written again; one with
+			// its own sets, from before they were shared, is written the new way once)
+			if (one.sets) return;
 			written.set(id, songs[id]);
+			setsOf.set(id, setIds(one));
 		})
 	);
 	writtenIndex = JSON.stringify({ playlists: index.playlists, saved: index.saved, ids: index.ids });
@@ -76,7 +89,8 @@ async function readOfflineCopy(): Promise<OfflineCopy | null> {
 // whole set, so a big playlist was mostly the same sets again and again)
 
 interface PackedSongs {
-	sets: Record<string, any>;
+	/** The sets the songs are of (written in the shared file: only in files from before) */
+	sets?: Record<string, any>;
 	songs: any[];
 }
 /** Where a song or difficulty points to its set */
@@ -119,7 +133,7 @@ function packSongs(list: MapSet[]): PackedSongs {
 	return { sets, songs };
 }
 
-function unpackSongs({ sets, songs }: PackedSongs): MapSet[] {
+function unpackSongs({ sets = {}, songs }: PackedSongs): MapSet[] {
 	const unpackMap = (map: any) => {
 		if (map?.[SET] == null) return map;
 		const { [SET]: setId, ...rest } = map;
@@ -157,12 +171,39 @@ function keepOffline() {
 		offlineCopy = Promise.resolve(copy);
 		try {
 			// Only the playlists that changed (a changed one is a new list in the cache)
-			for (const id of ids) {
-				if (written.get(id) === cache[id]) continue;
-				const store = await load(songsFile(id));
-				await store.set('songs', packSongs(cache[id].songs ?? []));
+			const changed = ids
+				.filter((id) => written.get(id) !== cache[id])
+				.map((id) => ({ id, entry: cache[id], packed: packSongs(cache[id].songs ?? []) }));
+			for (const { id, packed } of changed) setsOf.set(id, setIds(packed));
+			for (const id of [...setsOf.keys()]) if (!ids.includes(id)) setsOf.delete(id);
+			// The sets first (a playlist written before its sets would point to nothing): the
+			// new ones in, the ones no playlist has anymore out
+			const used = new Set([...setsOf.values()].flatMap((sets) => [...sets]));
+			let setsChanged = false;
+			for (const { packed } of changed) {
+				for (const [setId, set] of Object.entries(packed.sets ?? {})) {
+					if (!sharedSets[setId]) {
+						sharedSets[setId] = set;
+						setsChanged = true;
+					}
+				}
+			}
+			for (const setId of Object.keys(sharedSets)) {
+				if (!used.has(setId)) {
+					delete sharedSets[setId];
+					setsChanged = true;
+				}
+			}
+			if (setsChanged) {
+				const store = await load(SETS_FILE);
+				await store.set('sets', sharedSets);
 				await store.save();
-				written.set(id, cache[id]);
+			}
+			for (const { id, entry, packed } of changed) {
+				const store = await load(songsFile(id));
+				await store.set('songs', { songs: packed.songs } satisfies PackedSongs);
+				await store.save();
+				written.set(id, entry);
 			}
 			const index = { playlists: copy.playlists, saved: copy.saved, ids };
 			const indexText = JSON.stringify(index);
