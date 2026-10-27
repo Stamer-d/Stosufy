@@ -10,6 +10,12 @@
 	import PlaylistCover from '../../../lib/components/PlaylistCover.svelte';
 	import { downloadedSongs } from '../../downloads';
 	import { offline } from '../../../lib/stores/network';
+	import {
+		smartPlaylists,
+		smartSongs,
+		createSmartPlaylist
+	} from '../../../lib/stores/smartPlaylists';
+	import MixCover from '../../../lib/components/MixCover.svelte';
 
 	let all = $derived([...$playlists, ...$savedPlaylists]);
 	let creating = $state(false);
@@ -63,6 +69,23 @@
 </header>
 
 {#if creating}
+	<button
+		class="mx-4 mb-2 w-[calc(100%-2rem)] flex items-center gap-3 p-2 rounded-md bg-white/[0.04] active:bg-white/[0.08] text-start"
+		onclick={() => {
+			creating = false;
+			goto(`${base}/smart/${createSmartPlaylist().id}?edit`);
+		}}
+	>
+		<span class="size-10 grid place-items-center rounded-md bg-primary-300/30 text-primary-400">
+			<span class="icon-[mingcute--magic-2-line] size-6"></span>
+		</span>
+		<span class="min-w-0">
+			<span class="block font-semibold">New smart playlist</span>
+			<span class="block text-sm text-secondary-600"
+				>Fills itself with songs like the ones you add</span
+			>
+		</span>
+	</button>
 	<form
 		class="mx-4 mb-3 flex gap-2"
 		onsubmit={(e) => {
@@ -122,6 +145,30 @@
 				? `Liked · ${playlist.song_amount ?? 0} songs`
 				: `${playlist.creator?.username && !$playlists.some((p) => p.id === playlist.id) ? playlist.creator.username : 'Playlist'} · ${playlist.song_amount ?? 0} songs`
 		)}
+	{/each}
+	{#each $smartPlaylists as smart (smart.id)}
+		{@const songs = smartSongs(smart)}
+		<li>
+			<a
+				href="{base}/smart/{smart.id}"
+				class="flex items-center gap-3 p-2 rounded-md active:bg-white/[0.06]"
+			>
+				{#if songs.length}
+					<MixCover {songs} class="size-12 rounded-md" />
+				{:else}
+					<span class="size-12 grid place-items-center rounded-md bg-white/[0.06]">
+						<span class="icon-[mingcute--magic-2-line] size-5 text-secondary-600"></span>
+					</span>
+				{/if}
+				<span class="min-w-0">
+					<span class="block font-semibold truncate">{smart.title}</span>
+					<span class="flex items-center gap-1 text-sm text-secondary-600 truncate">
+						<span class="icon-[mingcute--magic-2-line] size-3.5 shrink-0"></span>
+						Smart playlist · {songs.length} songs
+					</span>
+				</span>
+			</a>
+		</li>
 	{/each}
 </ul>
 {#if $libraryState.loading && !all.length}

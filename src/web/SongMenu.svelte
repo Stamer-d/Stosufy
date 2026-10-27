@@ -16,6 +16,7 @@
 	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
 	import { showToast } from '../lib/stores/toast';
 	import { sameSong } from '../lib/tracks';
+	import { smartPlaylists, addSeed, isSeed, removeSong } from '../lib/stores/smartPlaylists';
 
 	let song = $derived($songMenu?.song ?? null);
 	let from = $derived($songMenu?.playlistId);
@@ -27,6 +28,13 @@
 
 	let removable = $derived(
 		from != null && Number(from) > 0 && $playlists.some((p) => p.id == from) && song?.songInfo?.id
+	);
+
+	/** The smart playlist it's in (its menu was opened there) */
+	let smart = $derived(
+		typeof from === 'string' && from.startsWith('smart:')
+			? ($smartPlaylists.find((p) => p.id === from.slice(6)) ?? null)
+			: null
 	);
 
 	const close = () => songMenu.set(null);
@@ -122,6 +130,28 @@
 					{:else}
 						<li class="px-5 py-4 text-sm text-secondary-600">No playlists of your own yet</li>
 					{/each}
+					{#if $smartPlaylists.length}
+						<li class="px-5 pt-3 pb-1 text-xs font-bold uppercase tracking-wide text-secondary-600">
+							Smart playlists
+						</li>
+						{#each $smartPlaylists as playlist (playlist.id)}
+							{@const already = isSeed(playlist, song)}
+							<li>
+								<button
+									class="w-full flex items-center gap-4 px-5 py-3 text-start active:bg-white/5 {already
+										? 'opacity-50'
+										: ''}"
+									disabled={already}
+									onclick={() =>
+										act((target) => addSeed(playlist.id, target), `Added to "${playlist.title}"`)}
+								>
+									<span class="icon-[mingcute--magic-2-line] size-6 shrink-0"></span>
+									<span class="min-w-0 flex-1 truncate">{playlist.title}</span>
+									{#if already}<span class="text-xs text-secondary-600">Already in it</span>{/if}
+								</button>
+							</li>
+						{/each}
+					{/if}
 				</ul>
 			{:else}
 				{@const kept = isDownloaded($downloaded, song)}
@@ -154,6 +184,19 @@
 						'Add to playlist',
 						() => (choosing = true)
 					)}
+					{#if smart}
+						{#if !isSeed(smart, song)}
+							{@render item('icon-[mingcute--pin-line]', 'More like this', () =>
+								act(
+									(target, at) => addSeed(at.slice(6), target),
+									'Autofill looks for songs like it too'
+								)
+							)}
+						{/if}
+						{@render item('icon-[mingcute--delete-2-line]', 'Remove from this smart playlist', () =>
+							act((target, at) => removeSong(at.slice(6), target), 'Removed')
+						)}
+					{/if}
 					{#if removable}
 						{@render item('icon-[mingcute--delete-2-line]', 'Remove from this playlist', () =>
 							act(

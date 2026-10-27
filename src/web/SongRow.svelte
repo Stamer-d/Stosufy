@@ -9,8 +9,8 @@
 	import { offline } from '../lib/stores/network';
 	import { showToast } from '../lib/stores/toast';
 
-	/** @type {{ song: import('../lib/types').MapSet, playlistId?: string | number, onplay: () => void, index?: number }} */
-	let { song, playlistId, onplay, index } = $props();
+	/** @type {{ song: import('../lib/types').MapSet, playlistId?: string | number, onplay: () => void, index?: number, extra?: import('svelte').Snippet }} */
+	let { song, playlistId, onplay, index, extra } = $props();
 
 	let current = $derived(sameSong($queue.songs[$queue.index], song));
 	let kept = $derived(isDownloaded($downloaded, song));
@@ -111,6 +111,7 @@
 			>{clock(Number(song.beatmaps?.[0]?.total_length))}</span
 		>
 	</button>
+	{@render extra?.()}
 	<button
 		aria-label="More for {song.title}"
 		class="size-10 shrink-0 grid place-items-center text-secondary-600"
