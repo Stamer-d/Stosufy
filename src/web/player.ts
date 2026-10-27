@@ -5,16 +5,11 @@
 // start, where it goes on where it was.
 
 import { get, writable } from 'svelte/store';
+import { downloaded, localUrl } from './downloads';
+import { coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
 import type { MapSet } from '../lib/types';
 
-const MIRROR = 'https://catboy.best';
-
-export const streamUrl = (song: MapSet) => `${MIRROR}/preview/audio/${song.beatmaps?.[0]?.id}/full`;
-const previewUrl = (song: MapSet) => `https://b.ppy.sh/preview/${song.id}.mp3`;
-export const coverUrl = (song: MapSet) =>
-	`https://assets.ppy.sh/beatmaps/${song.id}/covers/list@2x.jpg`;
-export const bigCoverUrl = (song: MapSet) =>
-	`https://assets.ppy.sh/beatmaps/${song.id}/covers/card@2x.jpg`;
+export { streamUrl, coverUrl, bigCoverUrl, slim } from './songs';
 
 export type Repeat = 'off' | 'all' | 'one';
 
@@ -32,21 +27,11 @@ export const playerOpen = writable(false);
 let ordered: MapSet[] = [];
 let audio: HTMLAudioElement | null = null;
 let objectUrl: string | null = null;
+/** The next song's downloaded audio, read ahead: iOS starts a song with the screen locked
+ * only if it's started right away when the one before ends (no waiting on anything) */
+let readAhead: { key: string; url: string } | null = null;
 /** The song in the <audio> element (none after a start: it loads at the first play) */
 let loaded: MapSet | null = null;
-
-/** Only what the player needs of a song (kept in localStorage) */
-export function slim(song: MapSet): MapSet {
-	const map = song.beatmaps?.[0];
-	return {
-		id: song.id,
-		title: song.title,
-		artist: song.artist,
-		creator: song.creator,
-		track: song.track,
-		beatmaps: map ? [{ id: map.id, total_length: map.total_length, version: map.version }] : []
-	} as MapSet;
-}
 
 function shuffled<T>(list: T[]) {
 	const copy = [...list];
@@ -91,22 +76,50 @@ const current = () => {
 	return songs[index] ?? null;
 };
 
-async function load(at = 0) {
+/**
+ * Plays the queue's current song: right away (a stream, or a download read ahead), only a
+ * download that wasn't read ahead waits for it to be read
+ */
+function load(at = 0) {
 	const song = current();
 	if (!song) return;
 	const player = element();
 	loaded = song;
 	previewOnly.set(false);
-	if (objectUrl) URL.revokeObjectURL(objectUrl);
-	// (imported here: downloads.ts imports this file too)
-	const { localUrl } = await import('./downloads');
-	objectUrl = await localUrl(song);
-	if (current() !== song) return;
-	player.src = objectUrl ?? streamUrl(song);
-	if (at) player.currentTime = at;
-	await player.play().catch(() => {});
 	showInMediaSession(song);
-	save();
+	const key = keyOf(song);
+	const start = (url: string, own: boolean) => {
+		if (objectUrl && objectUrl !== url) URL.revokeObjectURL(objectUrl);
+		objectUrl = own ? url : null;
+		player.src = url;
+		if (at) player.currentTime = at;
+		player.play().catch(() => {});
+		save();
+		readNext();
+	};
+	if (readAhead?.key === key) {
+		const { url } = readAhead;
+		readAhead = null;
+		start(url, true);
+	} else if (get(downloaded).has(key)) {
+		return localUrl(song).then((url) => {
+			if (current() === song) start(url ?? streamUrl(song), !!url);
+			else if (url) URL.revokeObjectURL(url);
+		});
+	} else start(streamUrl(song), false);
+}
+
+/** Reads the next song's audio ahead if it's downloaded */
+async function readNext() {
+	const { songs, index } = get(queue);
+	const upcoming = songs[index + 1] ?? (get(repeat) === 'all' ? songs[0] : null);
+	if (!upcoming) return;
+	const key = keyOf(upcoming);
+	if (readAhead?.key === key || !get(downloaded).has(key)) return;
+	const url = await localUrl(upcoming);
+	if (!url) return;
+	if (readAhead) URL.revokeObjectURL(readAhead.url);
+	readAhead = { key, url };
 }
 
 /** Plays `songs` from the one at `index` (shuffled when shuffle is on) */
@@ -182,6 +195,7 @@ export function playNext(song: MapSet) {
 	}));
 	ordered.push(slim(song));
 	save();
+	readNext();
 }
 
 /** The song comes at the end of the queue */
@@ -190,6 +204,7 @@ export function addToQueue(song: MapSet) {
 	queue.update(({ songs, index }) => ({ songs: [...songs, slim(song)], index }));
 	ordered.push(slim(song));
 	save();
+	readNext();
 }
 
 export function removeFromQueue(at: number) {
@@ -198,6 +213,7 @@ export function removeFromQueue(at: number) {
 		index: at < index ? index - 1 : index
 	}));
 	save();
+	readNext();
 }
 
 export function toggleShuffle() {
@@ -217,11 +233,13 @@ export function toggleShuffle() {
 		queue.set({ songs: back, index: Math.max(at, 0) });
 	}
 	save();
+	readNext();
 }
 
 export function cycleRepeat() {
 	repeat.update((mode) => (mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off'));
 	save();
+	readNext();
 }
 
 // Kept for the next start
@@ -275,6 +293,14 @@ function setupMediaSession() {
 	session.setActionHandler('pause', () => element().pause());
 	session.setActionHandler('nexttrack', () => next());
 	session.setActionHandler('previoustrack', previous);
+	// (with these, iOS shows ±10 s on the lock screen instead of back and next)
+	for (const action of ['seekbackward', 'seekforward'] as const) {
+		try {
+			session.setActionHandler(action, null);
+		} catch {
+			// (not known here)
+		}
+	}
 	session.setActionHandler(
 		'seekto',
 		(details) => details.seekTime != null && seek(details.seekTime)

@@ -3,7 +3,7 @@
 // audio only if the mirror allows it (CORS): the checks page tells.
 
 import { get, writable } from 'svelte/store';
-import { slim, streamUrl } from './player';
+import { keyOf, slim, streamUrl } from './songs';
 import type { MapSet } from '../lib/types';
 
 const DATABASE = 'stosufy-audio';
@@ -39,8 +39,6 @@ async function run<T>(
 		request.onerror = () => reject(request.error);
 	});
 }
-
-const keyOf = (song: MapSet) => String(song.beatmaps?.[0]?.id ?? song.id);
 
 /** The songs kept (by the id of the difficulty they're of) */
 export const downloaded = writable<Set<string>>(new Set());
