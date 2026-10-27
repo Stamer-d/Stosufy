@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { tick } from 'svelte';
-	import { fetchMaps, formatSongData, mapDataStore } from '#lib/stores/data.ts';
+	import { fetchMaps, downloadedLibrary, mapDataStore } from '#lib/stores/data.ts';
 	import { matchesQuery } from '#lib/stores/search.ts';
 	import { offline } from '#lib/stores/network.ts';
 	import { showToast } from '#lib/stores/toast.ts';
@@ -51,9 +51,7 @@
 	let libraryResults = $derived.by(() => {
 		const words = query.trim();
 		if (!words) return [];
-		return formatSongData($mapDataStore)
-			.filter((song) => matchesQuery(song, words))
-			.slice(0, 5);
+		return $downloadedLibrary.filter((song) => matchesQuery(song, words)).slice(0, 5);
 	});
 	let onlineResults = $state([]);
 	let searching = $state(false);

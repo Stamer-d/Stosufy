@@ -1,10 +1,10 @@
 <script>
 	import { goto } from '$app/navigation';
 	import Widget from './MacWidget.svelte';
-	import { mapDataStore, formatSongData } from '#lib/stores/data.ts';
+	import { downloadedLibrary } from '#lib/stores/data.ts';
 	import { playlists } from '#lib/stores/playlist.ts';
 
-	let songCount = $derived(formatSongData($mapDataStore).length);
+	let songCount = $derived($downloadedLibrary.length);
 	let playlistCount = $derived(
 		$playlists.filter((playlist) => playlist.id != -1 && playlist.id != -2).length
 	);

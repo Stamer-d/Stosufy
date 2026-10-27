@@ -1,5 +1,5 @@
 import { derived } from 'svelte/store';
-import { formatSongData, mapDataStore } from './data';
+import { librarySongs, mapDataStore } from './data';
 import { currentSong } from './audio';
 import { DEFAULT_HOME, userSettings } from './user';
 import type { MapSet } from '../types';
@@ -24,7 +24,7 @@ export const wallpaper = derived(
 			if (pickedFor !== undefined) randomPick = Math.random();
 			pickedFor = songKey;
 		}
-		const downloaded = formatSongData($mapData);
+		const downloaded = librarySongs();
 		const randomSong = downloaded.length
 			? downloaded[Math.floor(randomPick * downloaded.length)]
 			: null;

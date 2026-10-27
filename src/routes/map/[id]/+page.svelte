@@ -9,7 +9,7 @@
 		deleteSong,
 		downloads,
 		mapDataStore,
-		formatSongData,
+		downloadedLibrary,
 		colorFromImage,
 		colorFromString
 	} from '#lib/stores/data.ts';
@@ -39,7 +39,7 @@
 	// What's known right away: the playing song or the downloaded set; then osu!'s own data
 	let local = $derived(
 		($currentSong.song?.id == id ? $currentSong.song : null) ??
-			formatSongData($mapDataStore).find((song) => song.id == id) ??
+			$downloadedLibrary.find((song) => song.id == id) ??
 			null
 	);
 	let fetched = $state(null);

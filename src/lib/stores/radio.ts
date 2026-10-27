@@ -8,7 +8,7 @@
 // waits. The order flows: tempos close to each other, never the same artist twice in a row.
 
 import { get } from 'svelte/store';
-import { formatSongData, mapDataStore } from './data';
+import { libraryByKey, librarySetSongs, librarySongs, mapDataStore } from './data';
 import { favourites } from './favourites';
 import { history, playCounts, songKey, type SongPlays } from './history';
 import { songBpm } from '../dj/library';
@@ -148,7 +148,7 @@ export function radioSongs(
 	const now = Date.now() / 1000;
 	const skipped = [...seeds, ...exclude];
 
-	const pool = formatSongData(get(mapDataStore))
+	const pool = librarySongs()
 		.filter((song) => !skipped.some((other) => sameSong(other, song)) && (!only || only(song)))
 		.map((song) => {
 			const features = featuresOf(song);
@@ -231,18 +231,12 @@ export function afterSkip(upcoming: MapSet[], skipped: MapSet): MapSet[] {
 
 /** The library's song of a set and difficulty (for liked songs, which are kept by those) */
 function librarySongById(setId: number | string, mapId: number | string): MapSet {
-	const set = get(mapDataStore)[setId];
-	const songs = set ? formatSongData({ [setId]: set }) : [];
+	const songs = librarySetSongs(setId);
 	const song = songs.find((s) => s.beatmaps?.some((map) => map.id == mapId)) ?? songs[0];
 	return song ?? ({ id: setId, beatmaps: [] } as MapSet);
 }
 
 /** The library's entry for a song (e.g. from the beatmap search), to play it in full */
 export function librarySong(song: MapSet): MapSet | null {
-	const library = formatSongData(get(mapDataStore));
-	return (
-		library.find((entry) => sameSong(entry, song)) ??
-		library.find((entry) => entry.id == song.id) ??
-		null
-	);
+	return libraryByKey().get(songKey(song)) ?? librarySetSongs(song.id)[0] ?? null;
 }

@@ -1,4 +1,4 @@
-import { get, writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
 import { keyStore, freshToken, sessionKeyNeeded } from './auth';
 import { fetch } from '@tauri-apps/plugin-http';
 import JSZip from 'jszip';
@@ -32,6 +32,48 @@ const BACKFILL_REQUEST_DELAY = 2_000;
 const BACKFILL_RATE_LIMIT_DELAY = 60_000;
 
 export const mapDataStore = writable<Record<string, StoredMapSet>>({});
+
+// --- The downloaded songs as a list: made once each time the library changes -------------
+// (not by everyone who asks: with thousands of songs, splitting and sorting them every time
+// was noticeable)
+
+interface LibraryIndex {
+	songs: MapSet[];
+	byKey: Map<string, MapSet>;
+	bySet: Map<string, MapSet[]>;
+}
+let libraryIndex: LibraryIndex | null = null;
+// (subscribed first, so whoever reacts to a change gets the new list)
+mapDataStore.subscribe(() => (libraryIndex = null));
+
+function indexLibrary(): LibraryIndex {
+	if (!libraryIndex) {
+		const songs = formatSongData(get(mapDataStore));
+		const byKey = new Map<string, MapSet>();
+		const bySet = new Map<string, MapSet[]>();
+		for (const song of songs) {
+			byKey.set(`${song.id}:${song.track ?? 0}`, song);
+			const ofSet = bySet.get(String(song.id));
+			if (ofSet) ofSet.push(song);
+			else bySet.set(String(song.id), [song]);
+		}
+		libraryIndex = { songs, byKey, bySet };
+	}
+	return libraryIndex;
+}
+
+/** The downloaded songs, the first downloaded first (a copy of the list: it may be changed) */
+export const librarySongs = (): MapSet[] => [...indexLibrary().songs];
+
+/** The downloaded songs by key (set:track); not to be changed */
+export const libraryByKey = (): ReadonlyMap<string, MapSet> => indexLibrary().byKey;
+
+/** The downloaded songs of a set (several for a set with several songs) */
+export const librarySetSongs = (setId: number | string): readonly MapSet[] =>
+	indexLibrary().bySet.get(String(setId)) ?? [];
+
+/** The downloaded songs, for components */
+export const downloadedLibrary = derived(mapDataStore, () => librarySongs());
 /**
  * Whether the song data was read: until then (or if it can't be read) nothing is saved, so
  * an empty library never replaces the one on disk
@@ -263,7 +305,7 @@ export async function deleteSong(setId: number | string) {
 	const queue = get(songQueue);
 
 	// Find the index of the song in the formatted data
-	const formattedSongs = formatSongData(mapData);
+	const formattedSongs = librarySongs();
 	const deletedIndex = formattedSongs.findIndex((song) => song.id.toString() === setId.toString());
 
 	const beatmapIds = Object.keys(mapData[setId].beatmaps);
@@ -292,7 +334,7 @@ export async function deleteSong(setId: number | string) {
 		const currentIndex = queue.currentIndex;
 
 		if (currentIndex !== undefined) {
-			const updatedSongs = formatSongData(get(mapDataStore));
+			const updatedSongs = librarySongs();
 
 			if (deletedIndex < currentIndex) {
 				await updateSongQueue(currentIndex - 1, updatedSongs, 'playlist', playlistId);

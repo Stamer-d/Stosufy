@@ -5,7 +5,7 @@
 
 import { derived, get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './user';
-import { fetchMaps, formatSongData, mapDataStore } from './data';
+import { fetchMaps, libraryByKey, mapDataStore } from './data';
 import { offline } from './network';
 import { fitTo } from './radio';
 import { artistsOf, songKey } from '../tracks';
@@ -102,7 +102,7 @@ export function toSmartSong(song: MapSet, details = false): SmartSong {
 const keyOf = (song: { id: number | string; track?: number }) => `${song.id}:${song.track ?? 0}`;
 
 /** A kept song to play: the library's if it's downloaded, else what was kept of it */
-function resolve(song: SmartSong, library: Map<string, MapSet>): MapSet {
+function resolve(song: SmartSong, library: ReadonlyMap<string, MapSet>): MapSet {
 	const own = library.get(keyOf(song)) ?? (song.track ? null : library.get(`${song.id}:0`));
 	if (own) return own;
 	return {
@@ -120,9 +120,6 @@ function resolve(song: SmartSong, library: Map<string, MapSet>): MapSet {
 		beatmaps: [{ id: song.mapId, total_length: song.length }]
 	};
 }
-
-const libraryByKey = () =>
-	new Map(formatSongData(get(mapDataStore)).map((song) => [songKey(song), song]));
 
 /** The songs of a smart playlist: the ones put in first, then what autofill added */
 export function smartSongs(playlist: SmartPlaylist): MapSet[] {

@@ -3,7 +3,7 @@ import { showToast } from './toast';
 import { fetch } from '@tauri-apps/plugin-http';
 import { get, writable } from 'svelte/store';
 import { keyStore, freshToken } from './auth';
-import { formatSongData, mapDataStore } from './data';
+import { librarySongs, mapDataStore } from './data';
 import * as api from '../api';
 import { load } from '@tauri-apps/plugin-store';
 import { offline, noteNetworkError } from './network';
@@ -323,7 +323,7 @@ export async function getPlaylistSongs(
 
 	try {
 		if (playlistId == -1) {
-			const songs = formatSongData(get(mapDataStore));
+			const songs = librarySongs();
 
 			playlistSongsCache.update((cache) => ({
 				...cache,

@@ -13,7 +13,7 @@
 	import {
 		DEFAULT_SEARCH_FILTERS,
 		fetchMaps,
-		formatSongData,
+		downloadedLibrary,
 		mapDataStore
 	} from '#lib/stores/data.ts';
 	import { user, userSettings, updateUserSettings } from '#lib/stores/user.ts';
@@ -119,7 +119,7 @@
 	const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 
 	// Newest downloads first
-	let downloadedSongs = $derived(formatSongData($mapDataStore).reverse());
+	let downloadedSongs = $derived([...$downloadedLibrary].reverse());
 	// What was heard last; the newest downloads until there's a history
 	let recentPlayed = $derived($recentlyPlayed.length >= 3);
 	let recentSongs = $derived(recentPlayed ? $recentlyPlayed : downloadedSongs);
@@ -135,7 +135,7 @@
 
 	function playDownloaded(song) {
 		// Play it within the "Downloaded Songs" playlist (sorted oldest first, like that page)
-		const songs = formatSongData($mapDataStore);
+		const songs = $downloadedLibrary;
 		setSongQueue(
 			songs.findIndex((s) => sameSong(s, song)),
 			songs,
@@ -192,7 +192,7 @@
 		}
 	});
 	let libraryMatches = $derived(
-		searchPage ? formatSongData($mapDataStore).filter((song) => matchesQuery(song, search)) : []
+		searchPage ? $downloadedLibrary.filter((song) => matchesQuery(song, search)) : []
 	);
 	let searching = $state(false);
 	let searchError = $state(null);

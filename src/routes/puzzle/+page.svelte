@@ -8,7 +8,7 @@
 	import { get } from 'svelte/store';
 	import { currentSong, setSongQueue, togglePlayback } from '#lib/stores/audio.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
-	import { formatSongData, mapDataStore } from '#lib/stores/data.ts';
+	import { downloadedLibrary, mapDataStore } from '#lib/stores/data.ts';
 	import { setMuffle } from '#lib/stores/equalizer.ts';
 	import { playSkinSound } from '#lib/hitsounds/player.ts';
 	import { librarySong } from '#lib/stores/radio.ts';
@@ -107,7 +107,7 @@
 
 	// --- The song --------------------------------------------------------------------------
 
-	let library = $derived(formatSongData($mapDataStore));
+	let library = $derived($downloadedLibrary);
 	let chosen = $state(null);
 	// The song playing, else (once the library is there) a random one
 	$effect(() => {

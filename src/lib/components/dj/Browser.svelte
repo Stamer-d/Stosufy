@@ -4,7 +4,7 @@
 	// the song that plays. Auto DJ mixes through the list.
 	import SongCover from '../SongCover.svelte';
 	import Select from '../Select.svelte';
-	import { mapDataStore, formatSongData, isSongDownloaded } from '#lib/stores/data.ts';
+	import { mapDataStore, downloadedLibrary, isSongDownloaded } from '#lib/stores/data.ts';
 	import { playlists, playlistSongsCache, getPlaylistSongs } from '#lib/stores/playlist.ts';
 	import { matchesQuery } from '#lib/stores/search.ts';
 	import { songBpm, songKeyOf, setDragged } from '#lib/dj/library.ts';
@@ -60,7 +60,7 @@
 	let songs = $derived.by(() => {
 		const all =
 			source === 'downloaded'
-				? formatSongData($mapDataStore)
+				? $downloadedLibrary
 				: ($playlistSongsCache[source]?.songs ?? []).filter((song) => isSongDownloaded(song.id));
 		const shown = filter.trim() ? all.filter((song) => matchesQuery(song, filter)) : all;
 		if (sort === 'bpm')

@@ -9,7 +9,7 @@
 
 import { derived, get, writable } from 'svelte/store';
 import { counts, history, historyLoaded, songKey, type Play } from './history';
-import { formatSongData, mapDataStore } from './data';
+import { libraryByKey as downloadedByKey, librarySongs, mapDataStore } from './data';
 import { favourites } from './favourites';
 import { radioSongs } from './radio';
 import { artistsOf } from '../tracks';
@@ -69,7 +69,7 @@ const says = (text: string | null | undefined) =>
 
 /** The songs of the library heard last (each once, the last first) */
 export const recentlyPlayed = derived([history, mapDataStore], ([$history, $data]) => {
-	const byKey = libraryByKey(formatSongData($data));
+	const byKey = downloadedByKey();
 	const songs: MapSet[] = [];
 	const seen = new Set<string>();
 	for (let i = $history.plays.length - 1; i >= 0 && songs.length < 12; i--) {
@@ -92,8 +92,8 @@ export const forgottenFavourites = derived(
 		const since = $history.plays[0]?.[1];
 		// Without a month of history, nothing is forgotten yet
 		if (!since || now - since < FORGOTTEN_AFTER) return null;
-		const library = formatSongData($data);
-		const byKey = libraryByKey(library);
+		const library = librarySongs();
+		const byKey = downloadedByKey();
 		const stats = new Map<string, { plays: number; last: number }>();
 		for (const [key, at, heard, length] of $history.plays) {
 			const entry = stats.get(key) ?? { plays: 0, last: 0 };
@@ -319,7 +319,7 @@ const plan = writable<{ day: string; mixes: PlannedMix[] } | null>(
 /** Today's mixes, with the songs of the library they're made of */
 export const dailyMixes = derived([plan, mapDataStore], ([$plan, $data]) => {
 	if (!$plan) return [] as Mix[];
-	const byKey = libraryByKey(formatSongData($data));
+	const byKey = downloadedByKey();
 	return $plan.mixes
 		.map(({ keys, ...mix }) => ({
 			...mix,
@@ -333,7 +333,7 @@ async function refreshMixes() {
 	const day = today();
 	if (get(plan)?.day === day) return;
 	await historyLoaded();
-	const library = formatSongData(get(mapDataStore));
+	const library = librarySongs();
 	if (!library.length) return;
 	const liked = new Set(
 		get(favourites).map((f) => {

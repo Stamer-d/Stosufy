@@ -5,8 +5,7 @@
 		downloadBeatmap,
 		deleteSong,
 		downloads,
-		mapDataStore,
-		formatSongData,
+		downloadedLibrary,
 		colorFromString
 	} from '#lib/stores/data.ts';
 	import { beatmapStatus, difficultyColor } from '#lib/beatmapStatus.ts';
@@ -30,12 +29,7 @@
 		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
 			async () => {
 				if ($songQueue.type == 'playlist' && $songQueue.playlistId == -1) {
-					await updateSongQueue(
-						$songQueue.currentIndex + 1,
-						formatSongData($mapDataStore),
-						'playlist',
-						-1
-					);
+					await updateSongQueue($songQueue.currentIndex + 1, $downloadedLibrary, 'playlist', -1);
 				}
 			}
 		);

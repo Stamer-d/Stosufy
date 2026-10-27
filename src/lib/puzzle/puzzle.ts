@@ -3,8 +3,7 @@
 // them. The best scores go on leaderboards: each puzzle's, the daily puzzle's (the same for
 // everyone) and the overall ones.
 
-import { get } from 'svelte/store';
-import { backgroundUrls, formatSongData, mapDataStore } from '../stores/data';
+import { backgroundUrls, librarySongs } from '../stores/data';
 import type { PuzzleBoard, PuzzleScore, PuzzleTopEntry } from '../api';
 import type { MapSet } from '../types';
 
@@ -318,7 +317,7 @@ export const puzzleSeed = (setId: number | string, mode: PuzzleMode, difficulty:
 
 /** The downloaded songs to puzzle: the anime ones if there are any (they look the best) */
 export function puzzleSongs(animeOnly = true) {
-	const library = formatSongData(get(mapDataStore));
+	const library = librarySongs();
 	const anime = library.filter((song) => song.genre === 'Anime');
 	return animeOnly && anime.length ? anime : library;
 }

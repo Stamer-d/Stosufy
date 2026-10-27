@@ -1,6 +1,6 @@
 <script>
 	import { currentSong } from '#lib/stores/audio.ts';
-	import { formatSongData, mapDataStore } from '#lib/stores/data.ts';
+	import { downloadedLibrary } from '#lib/stores/data.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 	import {
 		MODES,
@@ -62,7 +62,7 @@
 	}
 	const modeOf = (id) => MODES.find((mode) => mode.id === (id ?? 'jigsaw'));
 
-	let library = $derived(formatSongData($mapDataStore));
+	let library = $derived($downloadedLibrary);
 	/** @type {import('#lib/puzzle/puzzle.ts').PuzzlePicture | null} */
 	let picture = $state(null);
 	const fromSong = (song) => ({

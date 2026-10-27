@@ -1,13 +1,13 @@
 <script>
 	import TerminalWindow from './TerminalWindow.svelte';
 	import { user } from '#lib/stores/user.ts';
-	import { mapDataStore, formatSongData } from '#lib/stores/data.ts';
+	import { downloadedLibrary } from '#lib/stores/data.ts';
 	import { playlists } from '#lib/stores/playlist.ts';
 	import { currentSong, upNext } from '#lib/stores/audio.ts';
 
 	// A system info panel in the style of neofetch, with Stosufy stats
 
-	let songs = $derived(formatSongData($mapDataStore));
+	let songs = $derived($downloadedLibrary);
 
 	function mostCommon(values) {
 		const counts = new Map();
