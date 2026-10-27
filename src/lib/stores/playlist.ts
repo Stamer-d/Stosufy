@@ -25,28 +25,60 @@ type OfflineCopy = {
 };
 let offlineCopy: Promise<OfflineCopy | null> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-/** The copy as it was written last */
-let lastWritten = '';
+
+// Kept in a file for the list of playlists and one file for each playlist's songs: a change
+// writes just the playlist that changed, not the whole library (with thousands of songs that
+// took the app a moment each time)
+
+const INDEX_FILE = 'offline-library.json';
+const songsFile = (playlistId: string) => `offline-playlist-${playlistId}.json`;
+
+interface OfflineIndex {
+	version: 2;
+	playlists: Playlist[];
+	saved: Playlist[];
+	/** The playlists that have a file of songs */
+	ids: string[];
+}
+
+/** What was written last: each playlist's songs (the very list of the cache) and the index */
+const written = new Map<string, { songs: MapSet[] }>();
+let writtenIndex = '';
 
 /** The library as it was the last time the app was online */
 export function offlineLibrary() {
-	offlineCopy ??= load('offline-library.json')
-		.then((store) => store.get<KeptCopy>('library'))
-		.then((kept) => {
-			if (!kept) return null;
-			// (unchanged, it isn't written again)
-			if (kept.sets) lastWritten = JSON.stringify(kept);
-			return unpack(kept);
-		})
-		.catch(() => null);
+	offlineCopy ??= readOfflineCopy().catch(() => null);
 	return offlineCopy;
 }
 
-// The copy as it's written: each beatmap set once, the songs and their difficulties pointing
-// to it (from osu! every song and every difficulty of it came with the whole set, so the copy
-// of a big library was mostly the same sets again and again)
+async function readOfflineCopy(): Promise<OfflineCopy | null> {
+	const kept = await (await load(INDEX_FILE)).get<any>('library');
+	if (!kept) return null;
+	// A copy from before, all in one (it's kept the new way the next time)
+	if (kept.version !== 2) return unpackOld(kept);
+	const index = kept as OfflineIndex;
+	const songs: OfflineCopy['songs'] = {};
+	await Promise.all(
+		index.ids.map(async (id) => {
+			const one = await (await load(songsFile(id))).get<PackedSongs>('songs').catch(() => null);
+			if (!one) return;
+			songs[id] = { songs: unpackSongs(one) };
+			// (the cache starts with this very list: unchanged, it isn't written again)
+			written.set(id, songs[id]);
+		})
+	);
+	writtenIndex = JSON.stringify({ playlists: index.playlists, saved: index.saved, ids: index.ids });
+	return { playlists: index.playlists, songs, saved: index.saved };
+}
 
-type KeptCopy = OfflineCopy & { sets?: Record<string, any> };
+// A playlist's songs as they're written: each beatmap set once, the songs and their
+// difficulties pointing to it (from osu! every song and every difficulty of it came with the
+// whole set, so a big playlist was mostly the same sets again and again)
+
+interface PackedSongs {
+	sets: Record<string, any>;
+	songs: any[];
+}
 /** Where a song or difficulty points to its set */
 const SET = '$set';
 /** What osu! sends with each difficulty that isn't used (how far players got: 200 numbers) */
@@ -55,7 +87,7 @@ const UNUSED = new Set(['failtimes']);
 const same = (a: unknown, b: unknown) =>
 	a === b || (typeof a === 'object' && JSON.stringify(a) === JSON.stringify(b));
 
-function pack(copy: OfflineCopy): KeptCopy {
+function packSongs(list: MapSet[]): PackedSongs {
 	const sets: Record<string, any> = {};
 	const packMap = (map: any) => {
 		const kept: any = {};
@@ -68,7 +100,7 @@ function pack(copy: OfflineCopy): KeptCopy {
 		}
 		return kept;
 	};
-	const packSong = (song: MapSet) => {
+	const songs = list.map((song) => {
 		// (a song added from the library or the search has no set with it: kept as it is)
 		const set = song.beatmaps?.find((map) => map?.beatmapset)?.beatmapset;
 		if (!set) return song;
@@ -83,57 +115,71 @@ function pack(copy: OfflineCopy): KeptCopy {
 		}
 		kept[SET] = set.id;
 		return kept;
-	};
-	const songs: OfflineCopy['songs'] = {};
-	for (const [id, list] of Object.entries(copy.songs)) {
-		songs[id] = { songs: (list?.songs ?? []).map(packSong) };
-	}
-	return { ...copy, songs, sets };
+	});
+	return { sets, songs };
 }
 
-function unpack(kept: KeptCopy): OfflineCopy {
-	// (a copy from before is as it was)
-	if (!kept.sets) return kept;
-	const { sets, ...copy } = kept;
+function unpackSongs({ sets, songs }: PackedSongs): MapSet[] {
 	const unpackMap = (map: any) => {
 		if (map?.[SET] == null) return map;
 		const { [SET]: setId, ...rest } = map;
 		return { ...rest, beatmapset: sets[setId] };
 	};
+	return (songs ?? []).map((song: any) => {
+		if (song[SET] == null) return song;
+		const { [SET]: setId, ...rest } = song;
+		return { ...sets[setId], ...rest, beatmaps: (rest.beatmaps ?? []).map(unpackMap) };
+	});
+}
+
+/** A copy from before: all playlists in one, the sets once for all of them (or not at all) */
+function unpackOld(kept: OfflineCopy & { sets?: Record<string, any> }): OfflineCopy {
+	if (!kept.sets) return kept;
 	const songs: OfflineCopy['songs'] = {};
-	for (const [id, list] of Object.entries(copy.songs)) {
-		songs[id] = {
-			songs: (list?.songs ?? []).map((song: any) => {
-				if (song[SET] == null) return song;
-				const { [SET]: setId, ...rest } = song;
-				return { ...sets[setId], ...rest, beatmaps: (rest.beatmaps ?? []).map(unpackMap) };
-			})
-		};
+	for (const [id, list] of Object.entries(kept.songs ?? {})) {
+		songs[id] = { songs: unpackSongs({ sets: kept.sets, songs: list?.songs ?? [] }) };
 	}
-	return { ...copy, songs };
+	return { playlists: kept.playlists, songs, saved: kept.saved };
 }
 
 /** Keeps the playlists and their songs on this computer (a moment after they change) */
 function keepOffline() {
 	if (saveTimer) clearTimeout(saveTimer);
 	saveTimer = setTimeout(async () => {
-		const songs = { ...get(playlistSongsCache) };
-		delete songs['-1'];
+		const cache = get(playlistSongsCache);
+		// (the downloaded songs are on this computer anyway)
+		const ids = Object.keys(cache).filter((id) => id !== '-1');
 		const copy: OfflineCopy = {
 			playlists: get(playlists).filter((p) => Number(p.id) > 0 || p.id == -2),
-			songs,
+			songs: Object.fromEntries(ids.map((id) => [id, cache[id]])),
 			saved: get(savedPlaylists)
 		};
 		offlineCopy = Promise.resolve(copy);
 		try {
-			const kept = pack(copy);
-			// Only written when something changed (each playlist checked at the start changes it)
-			const written = JSON.stringify(kept);
-			if (written === lastWritten) return;
-			const store = await load('offline-library.json');
-			await store.set('library', kept);
-			await store.save();
-			lastWritten = written;
+			// Only the playlists that changed (a changed one is a new list in the cache)
+			for (const id of ids) {
+				if (written.get(id) === cache[id]) continue;
+				const store = await load(songsFile(id));
+				await store.set('songs', packSongs(cache[id].songs ?? []));
+				await store.save();
+				written.set(id, cache[id]);
+			}
+			const index = { playlists: copy.playlists, saved: copy.saved, ids };
+			const indexText = JSON.stringify(index);
+			if (indexText !== writtenIndex) {
+				const store = await load(INDEX_FILE);
+				await store.set('library', { version: 2, ...index } satisfies OfflineIndex);
+				await store.save();
+				writtenIndex = indexText;
+			}
+			// The songs of playlists that are gone
+			for (const id of [...written.keys()]) {
+				if (ids.includes(id)) continue;
+				const store = await load(songsFile(id));
+				await store.clear();
+				await store.save();
+				written.delete(id);
+			}
 		} catch (error) {
 			console.warn('Could not keep the library for offline use:', error);
 		}
@@ -144,6 +190,8 @@ function keepOffline() {
 
 const queues = new Map<string, Promise<unknown>>();
 const pending = new Map<string, number>();
+/** How many changes each playlist has had (a load that began before one is out of date) */
+const edits = new Map<string, number>();
 const RETRIES = 3;
 
 /** Errors trying again won't fix */
@@ -158,6 +206,7 @@ const final = (error: unknown) =>
 function change<T>(playlistId: PlaylistId, run: () => Promise<T>, what: string): Promise<T | null> {
 	const key = String(playlistId);
 	pending.set(key, (pending.get(key) ?? 0) + 1);
+	edits.set(key, (edits.get(key) ?? 0) + 1);
 	const job = (queues.get(key) ?? Promise.resolve()).then(async () => {
 		for (let attempt = 0; ; attempt++) {
 			try {
@@ -417,6 +466,29 @@ async function fetchBeatmaps(mapIds: string[]): Promise<any[]> {
 	return found;
 }
 
+const songSignature = (song: MapSet) =>
+	`${song.songInfo?.id ?? ''}:${song.id}:${song.track ?? 0}:${song.title}:${song.beatmaps?.length}`;
+const sameSongs = (a: MapSet[], b: MapSet[]) =>
+	a.length === b.length && a.every((song, i) => songSignature(song) === songSignature(b[i]));
+
+/**
+ * A playlist's songs as the server has them, into the cache. Not over changes made since the
+ * load began (they'd be undone on screen; the playlist is checked with the server once they
+ * are done), and unchanged it stays the very same list: nothing to show or keep again.
+ */
+function storeSongs(playlistId: PlaylistId, songs: MapSet[], editsBefore: number) {
+	const key = String(playlistId);
+	const cache = get(playlistSongsCache);
+	const before = cache[playlistId];
+	if (before) {
+		const changedSince = (edits.get(key) ?? 0) !== editsBefore || (pending.get(key) ?? 0) > 0;
+		if (changedSince || sameSongs(before.songs ?? [], songs)) return before;
+	}
+	const entry = { songs };
+	playlistSongsCache.set({ ...cache, [playlistId]: entry });
+	return entry;
+}
+
 export async function getPlaylistSongs(
 	playlistId: PlaylistId,
 	forceRefresh = false
@@ -424,6 +496,7 @@ export async function getPlaylistSongs(
 	if (!forceRefresh && get(playlistSongsCache)[playlistId]) {
 		return get(playlistSongsCache)[playlistId];
 	}
+	const editsBefore = edits.get(String(playlistId)) ?? 0;
 	playlistLoadingStatus.update((status) => ({
 		...status,
 		[playlistId]: true
@@ -447,13 +520,7 @@ export async function getPlaylistSongs(
 				? (await api.getFavourites(token())).map((song, index) => ({ ...song, position: index }))
 				: await api.getPlaylistSongs(token(), Number(playlistId));
 
-		if (playlistSongs.length === 0) {
-			playlistSongsCache.update((cache) => ({
-				...cache,
-				[playlistId]: { songs: [] }
-			}));
-			return { songs: [] };
-		}
+		if (playlistSongs.length === 0) return storeSongs(playlistId, [], editsBefore);
 
 		// What osu! knows about the songs: asked only for the ones no playlist knew yet (one
 		// unchanged since the last time asks for none)
@@ -544,14 +611,12 @@ export async function getPlaylistSongs(
 		// The playlist's own order (positions can be changed by dragging songs)
 		structuredSongs.sort((a, b) => (a.songInfo.position ?? 0) - (b.songInfo.position ?? 0));
 
-		playlistSongsCache.update((cache) => ({
-			...cache,
-			[playlistId]: { songs: structuredSongs }
-		}));
-		return { songs: structuredSongs };
+		return storeSongs(playlistId, structuredSongs, editsBefore);
 	} catch (error) {
 		noteNetworkError(error);
-		// Offline: the songs as they were the last time
+		// Offline: what's shown already, else the songs as they were the last time
+		const shown = get(playlistSongsCache)[playlistId];
+		if (shown) return shown;
 		const kept = (await offlineLibrary())?.songs[String(playlistId)];
 		if (kept) {
 			playlistSongsCache.update((cache) => ({ ...cache, [playlistId]: kept }));
