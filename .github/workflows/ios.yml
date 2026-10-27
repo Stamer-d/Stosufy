@@ -6,8 +6,6 @@ on:
   push:
     branches:
       - main
-      # TEMPORARY: testing the workflow before it's on main
-      - claude/smart-playlist-dropdowns-autofill-kjv4kn
   workflow_dispatch:
 
 permissions:
@@ -24,25 +22,6 @@ env:
   SOURCE_URL: https://github.com/${{ github.repository }}/releases/download/ios/source.json
 
 jobs:
-  # TEMPORARY: the desktop app still compiles with the plugins only on desktop
-  desktop-check:
-    if: github.ref != 'refs/heads/main'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-          shared-key: tauri-release-macos-arm
-          save-if: false
-      - run: npm ci && npm run build
-      - run: cargo check --manifest-path src-tauri/Cargo.toml
-
   ios:
     runs-on: macos-latest
     steps:
