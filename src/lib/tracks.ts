@@ -63,3 +63,14 @@ export function songsLength(songs: MapSet[]) {
 	const hours = Math.floor(minutes / 60);
 	return hours ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
 }
+
+/**
+ * The song itself, whoever mapped it: osu! has many sets of the same song (a TV size, a cut,
+ * a sped up one), they all have the same name here
+ */
+export function songName(song: { title?: string; artist?: string }) {
+	const normal = (text: string | undefined) => (text ?? '').toLowerCase().trim();
+	const title = normal(song.title);
+	const bare = title.replace(/\s*[([（【][^)\]）】]*[)\]）】]/g, '').trim() || title;
+	return `${normal(artistsOf(song.artist ?? '')[0])}|${bare.replace(/\s+/g, ' ')}`;
+}

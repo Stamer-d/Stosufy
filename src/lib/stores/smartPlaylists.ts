@@ -8,7 +8,7 @@ import { userSettings, updateUserSettings } from './user';
 import { fetchMaps, libraryByKey, mapDataStore } from './data';
 import { offline } from './network';
 import { fitTo } from './radio';
-import { artistsOf, songKey } from '../tracks';
+import { artistsOf, songKey, songName } from '../tracks';
 import { GENRES, LANGUAGES } from '../genres';
 import type { MapSet } from '../types';
 
@@ -200,16 +200,6 @@ const SOURCE_SEARCHES = 4;
 
 const normalized = (text: string | null | undefined) => (text ?? '').toLowerCase().trim();
 
-/**
- * The song itself, whoever mapped it: osu! has many sets of the same song (a TV size, a cut,
- * a sped up one), only one of them should come
- */
-function sameSongName(song: MapSet) {
-	const title = normalized(song.title);
-	const bare = title.replace(/\s*[([（【][^)\]）】]*[)\]）】]/g, '').trim() || title;
-	return `${normalized(artistsOf(song.artist ?? '')[0])}|${bare.replace(/\s+/g, ' ')}`;
-}
-
 /** A beatmap set of osu!'s search as a song (its osu! difficulty plays) */
 export function songFromSearch(set: any): MapSet {
 	const maps = [...(set.beatmaps ?? [])].sort(
@@ -294,7 +284,7 @@ export async function autofill(id: string): Promise<number> {
 		const removed = new Set(start.removed);
 		const taken = new Set([...seeds.map(songKey), ...removed]);
 		// The same song in another set counts as taken too
-		const takenNames = new Set(seeds.map(sameSongName));
+		const takenNames = new Set(seeds.map(songName));
 
 		const candidates: Candidate[] = [];
 		for (const song of library.values()) {
@@ -305,10 +295,10 @@ export async function autofill(id: string): Promise<number> {
 		}
 		if (start.online && !get(offline)) {
 			const downloaded = get(mapDataStore);
-			const downloadedNames = new Set([...library.values()].map(sameSongName));
+			const downloadedNames = new Set([...library.values()].map(songName));
 			const seen = new Set<string>();
 			for (const song of await searchOnline(seeds)) {
-				const name = sameSongName(song);
+				const name = songName(song);
 				if (downloaded[song.id] || taken.has(songKey(song))) continue;
 				if (downloadedNames.has(name) || seen.has(name)) continue;
 				seen.add(name);
@@ -368,7 +358,7 @@ function pick(candidates: Candidate[], wanted: number, takenNames: Set<string>):
 		});
 		if (best < 0) break;
 		const [next] = pool.splice(best, 1);
-		const name = sameSongName(next.song);
+		const name = songName(next.song);
 		if (names.has(name)) continue;
 		names.add(name);
 		picked.push(next.song);
