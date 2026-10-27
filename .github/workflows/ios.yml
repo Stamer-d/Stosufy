@@ -1,0 +1,185 @@
+name: iOS
+# Each push to main builds the iOS app and publishes it at the "ios" release, with a source
+# for SideStore: each user's SideStore signs it with their own (free) Apple ID, so the build
+# itself isn't signed and needs no Apple developer account.
+on:
+  push:
+    branches:
+      - main
+      # TEMPORARY: testing the workflow before it's on main
+      - claude/smart-playlist-dropdowns-autofill-kjv4kn
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# (a newer push makes the build before it pointless)
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: ios
+  # What SideStore shows and where it finds the app
+  SOURCE_URL: https://github.com/${{ github.repository }}/releases/download/ios/source.json
+
+jobs:
+  # TEMPORARY: the desktop app still compiles with the plugins only on desktop
+  desktop-check:
+    if: github.ref != 'refs/heads/main'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: tauri-release-macos-arm
+          save-if: false
+      - run: npm ci && npm run build
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: tauri-ios
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Tauri makes the Xcode project with XcodeGen
+      - name: XcodeGen
+        run: brew install xcodegen
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Create .env file
+        run: echo "VITE_CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" >> .env
+
+      # The Xcode project isn't kept in the repository: made fresh each time from the config
+      - name: Create the Xcode project
+        run: npx tauri ios init --ci
+
+      - name: App icon
+        run: npx tauri icon static/logo.png --ios-color "#121212"
+
+      # Unsigned: SideStore signs it on each phone
+      - name: Build the app
+        run: npx tauri ios build --ci --no-sign --build-number ${{ github.run_number }}
+
+      - name: Collect the app
+        run: |
+          ipa=$(find src-tauri/gen/apple -name '*.ipa' -print -quit)
+          test -n "$ipa" || { echo "No .ipa was built"; exit 1; }
+          plist=$(mktemp)
+          unzip -p "$ipa" 'Payload/*.app/Info.plist' > "$plist"
+          version=$(plutil -extract CFBundleShortVersionString raw "$plist")
+          build=$(plutil -extract CFBundleVersion raw "$plist")
+          bundle_id=$(plutil -extract CFBundleIdentifier raw "$plist")
+          min_os=$(plutil -extract MinimumOSVersion raw "$plist")
+          echo "Built $bundle_id $version ($build), iOS $min_os+"
+          mkdir -p dist
+          cp "$ipa" "dist/Stosufy-$build.ipa"
+          {
+            echo "VERSION=$version"
+            echo "BUILD=$build"
+            echo "BUNDLE_ID=$bundle_id"
+            echo "MIN_OS=$min_os"
+            echo "IPA=Stosufy-$build.ipa"
+          } >> "$GITHUB_ENV"
+
+      # The source SideStore reads: the app and its newest version (SideStore checks the
+      # version and build against the app's own, so they're taken from the built app)
+      - name: SideStore source
+        env:
+          REPO: ${{ github.repository }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const { REPO, VERSION, BUILD, BUNDLE_ID, MIN_OS, IPA, COMMIT_MESSAGE } = process.env;
+          const raw = `https://raw.githubusercontent.com/${REPO}/main`;
+          const source = {
+            name: 'Stosufy',
+            identifier: `${BUNDLE_ID}.source`,
+            subtitle: 'Listen to osu! beatmaps',
+            website: `https://github.com/${REPO}`,
+            iconURL: `${raw}/static/logo.png`,
+            tintColor: '8b5cf6',
+            apps: [
+              {
+                name: 'Stosufy',
+                bundleIdentifier: BUNDLE_ID,
+                developerName: 'Stamer',
+                subtitle: 'Listen to osu! beatmaps',
+                localizedDescription:
+                  'A music player for osu! beatmaps: search, stream and download songs, playlists, mixes and more.',
+                iconURL: `${raw}/static/logo.png`,
+                tintColor: '8b5cf6',
+                versions: [
+                  {
+                    version: VERSION,
+                    buildVersion: BUILD,
+                    date: new Date().toISOString(),
+                    localizedDescription: (COMMIT_MESSAGE || '').split('\n')[0],
+                    downloadURL: `https://github.com/${REPO}/releases/download/ios/${IPA}`,
+                    size: fs.statSync(`dist/${IPA}`).size,
+                    minOSVersion: MIN_OS
+                  }
+                ],
+                appPermissions: { entitlements: [], privacy: {} }
+              }
+            ],
+            news: []
+          };
+          fs.writeFileSync('dist/source.json', JSON.stringify(source, null, 2));
+          console.log(JSON.stringify(source, null, 2));
+          EOF
+
+      # Builds of other branches can be downloaded from the run, without replacing the app
+      # everyone has
+      - name: Keep the build
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stosufy-ios
+          path: dist/
+
+      # A prerelease, so the desktop app's updater (it looks at the latest release) doesn't see it
+      - name: Publish
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="The iOS app for SideStore. In SideStore add this source: $SOURCE_URL"
+          if ! gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --prerelease --target "$GITHUB_SHA" \
+              --title "Stosufy for iOS" --notes "$notes"
+          fi
+          # The tag goes along to what was built
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+            -f sha="$GITHUB_SHA" -F force=true > /dev/null
+          for asset in $(gh release view "$RELEASE_TAG" --json assets -q '.assets[].name'); do
+            gh release delete-asset "$RELEASE_TAG" "$asset" -y
+          done
+          gh release upload "$RELEASE_TAG" "dist/$IPA" dist/source.json --clobber

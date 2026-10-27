@@ -4,6 +4,7 @@
 import { derived, get, writable } from 'svelte/store';
 import { readFile, writeFile, mkdir, exists, readTextFile } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
+import { filesRoot } from '../platform';
 import { fetch } from '@tauri-apps/plugin-http';
 import { freshToken } from '../stores/auth';
 import { userSettings, updateUserSettings } from '../stores/user';
@@ -213,7 +214,7 @@ export function leaderboard(mapId: string): Promise<LeaderboardScore[]> {
 }
 
 async function replaysDir() {
-	return path.join(await path.homeDir(), 'Stosufy', 'Replays');
+	return path.join(await filesRoot(), 'Stosufy', 'Replays');
 }
 
 /** A score's replay: from the disk if downloaded before, else from osu! (kept for next time) */

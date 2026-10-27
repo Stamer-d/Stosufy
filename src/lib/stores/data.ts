@@ -23,6 +23,7 @@ import { addSong } from '../api';
 import { showToast } from './toast';
 import type { Beatmap, DownloadState, MapSet, SearchFilters, StoredMapSet } from '../types';
 import { offscreenCanvas } from '../canvas';
+import { filesRoot, relocated } from '../platform';
 
 let homeDir = '';
 let mapSetsDir = '';
@@ -84,7 +85,7 @@ export const downloads = writable<Record<string, DownloadState>>({});
 (async function initialize() {
 	try {
 		// Get required paths
-		homeDir = await path.homeDir();
+		homeDir = await filesRoot();
 		mapSetsDir = await path.join(homeDir, 'Stosufy/Songs');
 		mapDataFile = await path.join(mapSetsDir, 'songData.json');
 
@@ -123,10 +124,28 @@ export const downloads = writable<Record<string, DownloadState>>({});
  * The saved song data. A file that can't be read (cut off by a crash while it was written)
  * is kept as a copy, so the library can be recovered, and the app starts with an empty one.
  */
+/** The saved paths of the songs' files where they are now (they move on iOS, see platform.ts) */
+function relocateFiles(data: Record<string, StoredMapSet>) {
+	const root = homeDir;
+	for (const set of Object.values(data)) {
+		set.background = relocated(set.background, root);
+		set.thumbnail = relocated(set.thumbnail, root);
+		set.video = relocated(set.video, root);
+		if (set.hitsounds?.dir) set.hitsounds.dir = relocated(set.hitsounds.dir, root)!;
+		for (const map of Object.values(set.beatmaps ?? {})) {
+			map.audioFile = relocated(map.audioFile, root);
+			map.background = relocated(map.background, root);
+			map.osuFile = relocated(map.osuFile, root);
+			map.chartFile = relocated(map.chartFile, root);
+		}
+	}
+	return data;
+}
+
 async function readMapData(): Promise<Record<string, StoredMapSet>> {
 	const text = await readTextFile(mapDataFile, { baseDir: BaseDirectory.Home });
 	try {
-		return JSON.parse(text);
+		return relocateFiles(JSON.parse(text));
 	} catch (error) {
 		console.error('The song data could not be read, a copy is kept:', error);
 		const copy = mapDataFile.replace(/\.json$/, `.broken-${Date.now()}.json`);

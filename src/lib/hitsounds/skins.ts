@@ -7,6 +7,7 @@ import { osuSkinsFolder } from '../stores/osuFolder';
 import JSZip from 'jszip';
 import { readDir, readFile, writeFile, mkdir, exists, remove } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
+import { filesRoot } from '../platform';
 import { fetch } from '@tauri-apps/plugin-http';
 import { open } from '@tauri-apps/plugin-dialog';
 
@@ -35,7 +36,7 @@ export const skinTask = writable<{ state: 'idle' | 'working' | 'error'; message?
 });
 
 export async function stosufySkinsDir() {
-	return path.join(await path.homeDir(), 'Stosufy', 'Skins');
+	return path.join(await filesRoot(), 'Stosufy', 'Skins');
 }
 
 /** The osu! Skins folder: the one in the osu! folder */

@@ -1,5 +1,6 @@
 import { setActivity, start } from 'tauri-plugin-drpc';
 import { Activity, ActivityType } from 'tauri-plugin-drpc/activity';
+import { isMobile } from '../platform';
 import type { MapSet } from '../types';
 
 const defaultActivity = new Activity()
@@ -11,6 +12,8 @@ const defaultActivity = new Activity()
 let started = false;
 
 export async function startDiscord() {
+	// (no Discord on a phone)
+	if (isMobile) return;
 	try {
 		await start('1364962218805952532');
 		started = true;

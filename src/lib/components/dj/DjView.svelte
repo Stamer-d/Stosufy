@@ -4,6 +4,7 @@
 	import { fade } from 'svelte/transition';
 	import { writeFile, mkdir } from '@tauri-apps/plugin-fs';
 	import * as path from '@tauri-apps/api/path';
+	import { filesRoot } from '#lib/platform.ts';
 	import Titlebar from '../Titlebar.svelte';
 	import Deck from './Deck.svelte';
 	import Mixer from './Mixer.svelte';
@@ -43,7 +44,7 @@
 		const blob = await mixer.stopRecording();
 		if (!blob || !blob.size) return;
 		try {
-			const dir = await path.join(await path.homeDir(), 'Stosufy', 'Mixes');
+			const dir = await path.join(await filesRoot(), 'Stosufy', 'Mixes');
 			await mkdir(dir, { recursive: true });
 			const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
 			const extension = blob.type.includes('ogg')

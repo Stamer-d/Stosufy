@@ -17,10 +17,12 @@
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 	import { logout } from '#lib/stores/account.ts';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { isMobile } from '#lib/platform.ts';
 
 	const appWindow = getCurrentWindow();
 	// macOS has its own window buttons (top left, over the bar): room for them, no others
-	const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+	// (an iPhone's and an iPad's web view say "Mac" too: they have no window buttons at all)
+	const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent) && !isMobile;
 
 	/** Where a button leads, out of the focus and DJ modes (also to the page that's open) */
 	function go(path) {
@@ -264,16 +266,19 @@
 					>
 						Settings
 					</Button>
-					<Button
-						type="ghost"
-						class="w-full rounded-md text-sm hover:bg-secondary-400"
-						icon="icon-[mingcute--refresh-2-line]"
-						on:click={() => {
-							updateModal.open();
-						}}
-					>
-						Check for updates
-					</Button>
+					<!-- (on a phone SideStore updates it) -->
+					{#if !isMobile}
+						<Button
+							type="ghost"
+							class="w-full rounded-md text-sm hover:bg-secondary-400"
+							icon="icon-[mingcute--refresh-2-line]"
+							on:click={() => {
+								updateModal.open();
+							}}
+						>
+							Check for updates
+						</Button>
+					{/if}
 					<Button
 						on:click={() => {
 							refreshAuth();
@@ -296,7 +301,7 @@
 			</Dropdown>
 		{/if}
 
-		{#if !isMac}
+		{#if !isMac && !isMobile}
 			<button
 				aria-label="Minimize"
 				class="h-full w-12 grid place-items-center text-secondary-600 hover:text-white hover:bg-secondary-300 transition"
