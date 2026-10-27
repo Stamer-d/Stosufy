@@ -1,5 +1,6 @@
 <script>
-	// The song playing, above the tabs: play and pause, back and next, where it is
+	// The song playing, above the tabs: play and pause, back and next, where it is (tap it
+	// for the whole screen player)
 	import {
 		queue,
 		playing,
@@ -9,7 +10,8 @@
 		next,
 		previous,
 		seek,
-		coverUrl
+		coverUrl,
+		playerOpen
 	} from './player';
 
 	let song = $derived($queue.songs[$queue.index] ?? null);
@@ -20,13 +22,23 @@
 {#if song}
 	<div class="px-3 pt-2">
 		<div class="flex items-center gap-3">
-			<img src={coverUrl(song)} alt="" class="size-11 rounded-md object-cover bg-secondary-300" />
-			<div class="min-w-0 flex-1">
-				<p class="text-sm font-semibold truncate">{song.title}</p>
-				<p class="text-xs text-secondary-600 truncate">
-					{song.artist}{$previewOnly ? ' · preview' : ''}
-				</p>
-			</div>
+			<button
+				class="min-w-0 flex-1 flex items-center gap-3 text-start"
+				aria-label="Open the player"
+				onclick={() => playerOpen.set(true)}
+			>
+				<img
+					src={coverUrl(song)}
+					alt=""
+					class="size-11 shrink-0 rounded-md object-cover bg-secondary-300"
+				/>
+				<span class="min-w-0 flex-1">
+					<span class="block text-sm font-semibold truncate">{song.title}</span>
+					<span class="block text-xs text-secondary-600 truncate">
+						{song.artist}{$previewOnly ? ' · preview' : ''}
+					</span>
+				</span>
+			</button>
 			<button aria-label="Back" class="size-10 grid place-items-center" onclick={previous}>
 				<span class="icon-[mingcute--skip-previous-fill] size-6"></span>
 			</button>
@@ -39,7 +51,7 @@
 					class="{$playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-6"
 				></span>
 			</button>
-			<button aria-label="Next" class="size-10 grid place-items-center" onclick={next}>
+			<button aria-label="Next" class="size-10 grid place-items-center" onclick={() => next()}>
 				<span class="icon-[mingcute--skip-forward-fill] size-6"></span>
 			</button>
 		</div>

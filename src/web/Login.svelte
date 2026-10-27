@@ -2,10 +2,12 @@
 	const base = __WEB_BASE__;
 	// The proof of concept's login: the token the desktop app copies (Settings → Library →
 	// Web app on your phone). A real login needs the osu! login through the Stosufy API.
-	import { logIn, logOut } from './shims/auth';
+	import { logIn, logOut, readLogin, loginExpired } from './shims/auth';
 	import { getStosufyUser } from '../lib/api';
 
 	let token = $state('');
+	// (shown again once the login ran out)
+	const expired = $loginExpired;
 	let checking = $state(false);
 	let error = $state('');
 
@@ -13,9 +15,15 @@
 		if (!token.trim()) return;
 		checking = true;
 		error = '';
+		const login = readLogin(token);
+		if (login.expires <= Date.now()) {
+			error = 'That login ran out already: copy a new one';
+			checking = false;
+			return;
+		}
 		try {
-			await getStosufyUser(token.trim());
-			logIn(token);
+			await getStosufyUser(login.token);
+			logIn(login.token, login.expires);
 		} catch (e) {
 			logOut();
 			error = `That didn't work: ${e instanceof Error ? e.message : e}`;
@@ -31,6 +39,11 @@
 		<h1 class="text-2xl font-extrabold">Stosufy</h1>
 		<p class="mt-1 text-sm text-secondary-600">Your playlists on your phone</p>
 	</div>
+	{#if expired}
+		<p class="p-3 rounded-xl bg-amber-300/10 text-sm text-amber-200">
+			Your login ran out. Copy a new one in the desktop app; your downloads stay.
+		</p>
+	{/if}
 	<ol class="text-sm text-white/80 list-decimal pl-5 flex flex-col gap-1">
 		<li>In the desktop app: Settings → Library → <b>Copy login</b></li>
 		<li>Paste it here (it lasts a day)</li>

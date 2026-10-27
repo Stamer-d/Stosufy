@@ -535,7 +535,11 @@
 						<Button
 							type="normal"
 							onclick={async () => {
-								await navigator.clipboard.writeText(await freshToken());
+								// (with when it runs out: the web app asks for a new one then)
+								const token = await freshToken();
+								await navigator.clipboard.writeText(
+									JSON.stringify({ token, expires: $keyStore.expiry_time })
+								);
 								showToast('Login copied', 'icon-[mingcute--copy-2-line]');
 							}}
 						>

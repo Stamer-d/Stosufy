@@ -4,24 +4,49 @@
 	// to Home Screen) it opens as an app of its own and plays on with the screen locked.
 	import '../../app.css';
 	import { page } from '$app/state';
+	import { keyStore, loginExpired } from '../shims/auth';
+	import { loadLibrary } from '../library';
 	import MiniPlayer from '../MiniPlayer.svelte';
+	import FullPlayer from '../FullPlayer.svelte';
+	import SongMenu from '../SongMenu.svelte';
+	import Toasts from '../Toasts.svelte';
+	import Login from '../Login.svelte';
 
 	let { children } = $props();
 
 	const TABS = [
 		{ href: `${base}/`, label: 'Playlists', icon: 'icon-[mingcute--playlist-2-line]' },
+		{ href: `${base}/search`, label: 'Search', icon: 'icon-[mingcute--search-line]' },
+		{ href: `${base}/downloads`, label: 'Downloads', icon: 'icon-[mingcute--download-2-line]' },
 		{ href: `${base}/check`, label: 'Checks', icon: 'icon-[mingcute--check-circle-line]' }
 	];
 	const active = (href) =>
 		href === `${base}/`
-			? !page.url.pathname.startsWith(`${base}/check`)
+			? page.url.pathname === `${base}/` || page.url.pathname.startsWith(`${base}/playlist`)
 			: page.url.pathname.startsWith(href);
+
+	// (the checks and the downloads work without a login: downloads play offline after it ran out)
+	let needsLogin = $derived(
+		(!$keyStore.access_token || $loginExpired) &&
+			!page.url.pathname.startsWith(`${base}/check`) &&
+			!page.url.pathname.startsWith(`${base}/downloads`)
+	);
+
+	$effect(() => {
+		if ($keyStore.access_token && !$loginExpired) loadLibrary($keyStore.access_token);
+	});
 </script>
 
 <div class="min-h-dvh bg-app pt-[env(safe-area-inset-top)]">
-	<main class="pb-40">{@render children()}</main>
+	<main class="pb-44">
+		{#if needsLogin}
+			<Login />
+		{:else}
+			{@render children()}
+		{/if}
+	</main>
 	<div
-		class="fixed inset-x-0 bottom-0 bg-panel/95 backdrop-blur border-t border-white/5 pb-[env(safe-area-inset-bottom)]"
+		class="fixed inset-x-0 bottom-0 z-20 bg-panel/95 backdrop-blur border-t border-white/5 pb-[env(safe-area-inset-bottom)]"
 	>
 		<MiniPlayer />
 		<nav class="flex">
@@ -38,4 +63,7 @@
 			{/each}
 		</nav>
 	</div>
+	<FullPlayer />
+	<SongMenu />
+	<Toasts />
 </div>

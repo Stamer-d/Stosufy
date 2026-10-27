@@ -1,7 +1,8 @@
 // The web app's login: the osu! access token, pasted in (the proof of concept: without the
-// client secret, which stays out of a web page, it can't be renewed; it lasts a day)
+// client secret, which stays out of a web page, it can't be renewed; it lasts a day). Once
+// it ran out, the app asks for a new one.
 
-import { get, writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
 
 interface Keys {
 	access_token: string;
@@ -32,12 +33,36 @@ keyStore.subscribe((keys) => {
 
 export const sessionKeyNeeded = writable(false);
 
+/** The login ran out (checked every minute) */
+const now = writable(Date.now());
+if (typeof window !== 'undefined') setInterval(() => now.set(Date.now()), 60_000);
+export const loginExpired = derived(
+	[keyStore, now],
+	([keys, time]) => !!keys.access_token && !!keys.expiry_time && keys.expiry_time <= time
+);
+
 export async function freshToken(_force = false): Promise<string> {
 	return get(keyStore).access_token;
 }
 
-export function logIn(token: string) {
-	keyStore.set({ ...empty, access_token: token.trim(), expiry_time: Date.now() + 86_400_000 });
+/**
+ * What the desktop app copies: `{ "token": …, "expires": … }` (when it runs out, in ms), or
+ * the token alone (then it's taken to last a day)
+ */
+export function readLogin(text: string) {
+	const pasted = text.trim();
+	try {
+		const login = JSON.parse(pasted);
+		if (typeof login?.token === 'string')
+			return { token: login.token, expires: Number(login.expires) || Date.now() + 86_400_000 };
+	} catch {
+		// (the token alone)
+	}
+	return { token: pasted, expires: Date.now() + 86_400_000 };
+}
+
+export function logIn(token: string, expires = Date.now() + 86_400_000) {
+	keyStore.set({ ...empty, access_token: token.trim(), expiry_time: expires });
 }
 
 export function logOut() {
