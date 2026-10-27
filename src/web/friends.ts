@@ -9,7 +9,8 @@ import { user, userSettings, updateUserSettings } from './shims/user';
 import { queue, playing, time, audioElement, play } from './player';
 import { offline } from '../lib/stores/network';
 import { showToast } from '../lib/stores/toast';
-import type { MapSet } from '../lib/types';
+import { MODS, currentMod } from '../lib/stores/mods';
+import type { MapSet, PlaybackMod } from '../lib/types';
 
 export interface FriendsState {
 	status: 'idle' | 'loading' | 'ok' | 'needs-login' | 'error';
@@ -69,7 +70,7 @@ function nowPlaying(): api.ListenPlaybackInput | null {
 		artist: song.artist ?? '',
 		position: get(time).current,
 		playing: get(playing),
-		mod: 'none'
+		mod: currentMod()
 	};
 }
 
@@ -149,6 +150,9 @@ export const friendSong = (playback: NonNullable<api.FriendActivity['playback']>
 export function listenAlong(friend: api.FriendActivity) {
 	if (!friend.playback) return;
 	const at = friend.online ? Math.max(0, friendPosition(friend)) : 0;
+	// (their speed mod too, as in the desktop app)
+	const mod = friend.playback.mod as PlaybackMod;
+	if (MODS[mod] && mod !== currentMod()) updateUserSettings({ mod });
 	play([friendSong(friend.playback)], 0, { at });
 	showToast(`Listening along with ${friend.username}`, 'icon-[mingcute--headphone-line]');
 }

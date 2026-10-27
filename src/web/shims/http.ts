@@ -9,12 +9,18 @@ const THROUGH_STOSUFY = 'https://api.stamer-d.de/v2/stosufy/osu/';
 const LRCLIB = 'https://lrclib.net/api/';
 const LYRICS_THROUGH_STOSUFY = 'https://api.stamer-d.de/v2/stosufy/lyrics/';
 
+// (and a difficulty's .osu file)
+const OSU_FILE = /^https:\/\/osu\.ppy\.sh\/osu\/(\d+)$/;
+export const OSU_FILE_THROUGH_STOSUFY = 'https://api.stamer-d.de/v2/stosufy/osufile/';
+
 const viaStosufy = (url: string) =>
 	url.startsWith(OSU_API)
 		? THROUGH_STOSUFY + url.slice(OSU_API.length)
-		: url.startsWith(LRCLIB)
-			? LYRICS_THROUGH_STOSUFY + url.slice(LRCLIB.length)
-			: url;
+		: OSU_FILE.test(url)
+			? OSU_FILE_THROUGH_STOSUFY + url.match(OSU_FILE)![1]
+			: url.startsWith(LRCLIB)
+				? LYRICS_THROUGH_STOSUFY + url.slice(LRCLIB.length)
+				: url;
 /** (the Stosufy API sends LRCLIB who asks: the request needs no headers of its own) */
 const plain = (url: string, init?: RequestInit) =>
 	url.startsWith(LRCLIB) && init?.headers ? { ...init, headers: undefined } : init;

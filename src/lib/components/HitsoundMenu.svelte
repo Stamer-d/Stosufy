@@ -40,7 +40,7 @@
 			: `osu:${settings.hitsoundSkin}`
 	);
 	let skinOptions = $derived([
-		{ value: '', label: DEFAULT_SKIN },
+		{ value: '', label: 'Stosufy (default)' },
 		...skins
 			.filter((skin) => !(skin.source === 'stosufy' && skin.name === DEFAULT_SKIN))
 			.map((skin) => ({

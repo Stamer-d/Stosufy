@@ -49,6 +49,11 @@ let context: AudioContext | null = null;
 let output: GainNode | null = null;
 let noise: AudioBuffer | null = null;
 
+/** Lets the beat's audio rest (the web app, in the background) */
+export function suspendBeats() {
+	context?.suspend().catch(() => {});
+}
+
 /** Creates the audio context; call it from a click, browsers only allow sound after one */
 export function prepareBeats() {
 	if (!context) {
@@ -185,16 +190,25 @@ export async function loadTiming(setId: string, mapId: string | null) {
 
 /** Schedules the Nightcore beat for whatever `current` returns, while NC is on */
 export function startBeats(
-	current: () => { audio: HTMLAudioElement | null; setId: string | null; mapId: string | null }
+	current: () => {
+		audio: HTMLAudioElement | null;
+		setId: string | null;
+		mapId: string | null;
+		/** The timing points, if known already (the web app reads them itself) */
+		timing?: TimingPoint[] | null;
+		/** How loud (0–1); else the app's volume */
+		volume?: number;
+	}
 ) {
 	setInterval(() => {
-		const { audio, setId, mapId } = current();
+		const { audio, setId, mapId, timing: known, volume } = current();
 		const stored = setId ? get(mapDataStore)[setId] : null;
-		const timing = (mapId && stored?.beatmaps?.[mapId]?.timing) || stored?.timing;
+		const timing =
+			known !== undefined ? known : (mapId && stored?.beatmaps?.[mapId]?.timing) || stored?.timing;
 		// The beat can be turned off (Nightcore stays faster and higher)
 		const beatOn = get(userSettings).settings?.nightcoreBeat ?? true;
 		const playing = beatOn && currentMod() === 'NC' && audio && !audio.paused && context;
-		if (playing && setId && !timing) loadTiming(setId, mapId);
+		if (playing && setId && !timing && known === undefined) loadTiming(setId, mapId);
 		if (!playing || !timing?.length) {
 			// Like osu!lazer: after a pause the beat waits for the next segment again
 			firstBeat = null;
@@ -202,7 +216,7 @@ export function startBeats(
 			return;
 		}
 		if (context.state === 'suspended') context.resume();
-		output.gain.value = BEAT_VOLUME * (get(userSettings).settings?.volume || 0.05);
+		output.gain.value = BEAT_VOLUME * (volume ?? (get(userSettings).settings?.volume || 0.05));
 
 		const now = audio.currentTime * 1000;
 		const rate = audio.playbackRate;

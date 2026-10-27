@@ -30,6 +30,7 @@ import {
 	BUILTIN
 } from './skins';
 import { builtinExtra, type ExtraSound } from './builtin';
+import { BUNDLED_DIR, bundledSamples, bundledSample } from './bundled';
 import type { GameplayBeatmap } from '../gameplay/beatmap';
 import {
 	autoplayFor,
@@ -94,6 +95,10 @@ const folders = new Map<string, Promise<Folder | null>>();
 /** Why a folder couldn't be read, to show it */
 const folderErrors = new Map<string, string>();
 
+/** The hitsounds that come with Stosufy: the default skin's */
+const bundledFolder = (): Promise<Folder> =>
+	Promise.resolve({ dir: BUNDLED_DIR, files: bundledSamples });
+
 function folder(dir: string | null | undefined): Promise<Folder | null> {
 	if (!dir) return Promise.resolve(null);
 	if (!folders.has(dir)) {
@@ -140,11 +145,11 @@ const buffers = new Map<string, Promise<AudioBuffer | null | undefined>>();
  * A sample file as audio: null for files that are empty on purpose (skins mute samples with
  * them), undefined if it can't be read or decoded (then the next source is tried)
  */
-function decode(file: string) {
+function decode(file: string, bundled = false) {
 	if (!buffers.has(file)) {
 		buffers.set(
 			file,
-			readFile(file)
+			(bundled ? bundledSample(file).then((data) => new Uint8Array(data)) : readFile(file))
 				.then(async (data) => {
 					if (data.byteLength < 100) return null;
 					return decodeAudio(audioContext(), data.buffer.slice(0) as ArrayBuffer).catch((error) => {
@@ -160,7 +165,9 @@ function decode(file: string) {
 
 async function fromFolder(dir: Folder | null, name: string) {
 	const file = dir?.files.get(name.toLowerCase());
-	return file ? decode(await path.join(dir!.dir, file)) : undefined;
+	if (!file) return undefined;
+	if (dir!.dir === BUNDLED_DIR) return decode(file, true);
+	return decode(await path.join(dir!.dir, file));
 }
 
 /**
@@ -253,9 +260,10 @@ export function playSkinSound(
 		skinSounds.set(
 			key,
 			(async () => {
+				// (no skin chosen: Stosufy's own sounds, the osu! default ones fill in)
 				const [skinSamples, defaultSamples] = await Promise.all([
-					skinFolder(skin).then(folder),
-					skin && skin !== BUILTIN ? skinFolder(null).then(folder) : null
+					skin ? skinFolder(skin).then(folder) : bundledFolder(),
+					skin !== BUILTIN ? skinFolder(null).then(folder) : null
 				]);
 				if (sound === 'combobreak')
 					return resolveExtra('combobreak', skinSamples, defaultSamples, skin === BUILTIN);
@@ -425,9 +433,10 @@ async function load() {
 		const events: HitsoundEvent[] = parseHitsounds(files.content);
 		const [beatmapFolder, skinSamples, defaultSamples] = await Promise.all([
 			beatmap ? folder(files.samples) : null,
-			skinFolder(skin).then(folder),
+			// No skin chosen: the sounds that come with Stosufy
+			skin ? skinFolder(skin).then(folder) : bundledFolder(),
 			// The osu! default sounds fill in what a skin doesn't have (not for "Simple")
-			skin && skin !== BUILTIN ? skinFolder(null).then(folder) : null
+			skin !== BUILTIN ? skinFolder(null).then(folder) : null
 		]);
 		// Each different sample once
 		const resolved = new Map<string, Promise<AudioBuffer | null>>();

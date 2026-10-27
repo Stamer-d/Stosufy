@@ -10,6 +10,7 @@
 	import { keyStore, loginExpired } from '../shims/auth';
 	import { loadLibrary } from '../library';
 	import '../listening';
+	import '../hitsounds';
 	import { offline } from '../../lib/stores/network';
 	import { queue } from '../player';
 	import { setupNavigation } from '../navigation';

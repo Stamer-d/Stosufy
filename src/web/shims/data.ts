@@ -9,6 +9,9 @@ import type { MapSet, StoredMapSet } from '../../lib/types';
 
 export const mapDataStore = writable<Record<string, StoredMapSet>>({});
 
+/** (nothing of the library is saved on the phone: the speed mods' store asks) */
+export async function saveMapData() {}
+
 /**
  * All playlists' songs are there: what follows the library (the daily mixes) goes on. (The
  * desktop app's library has a beatmap set per key; this one only says it's ready.)

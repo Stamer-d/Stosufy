@@ -115,6 +115,8 @@ function element() {
 		saveSoon();
 	});
 	audio.addEventListener('loadedmetadata', updatePosition);
+	// (a speed mod: the lock screen's position runs at its speed)
+	audio.addEventListener('ratechange', updatePosition);
 	// (it loops, so only if that didn't work)
 	audio.addEventListener('ended', () => {
 		log('ended');
@@ -458,7 +460,7 @@ function updatePosition() {
 		navigator.mediaSession.setPositionState({
 			duration: audio.duration,
 			position: Math.min(audio.currentTime, audio.duration),
-			playbackRate: 1
+			playbackRate: audio.playbackRate || 1
 		});
 	} catch {
 		// (older Safari)

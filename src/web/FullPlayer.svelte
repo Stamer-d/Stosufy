@@ -33,7 +33,10 @@
 	import { handleImageError } from './shims/data';
 	import { songMenu } from './library';
 	import { swipe } from './gestures';
-	import { fly } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
+	import { MODS, setMod, hitsoundStatus } from './hitsounds';
+	import { userSettings, updateUserSettings } from './shims/user';
+	import { showToast } from '../lib/stores/toast';
 	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
 
 	let song = $derived($queue.songs[$queue.index] ?? null);
@@ -79,10 +82,57 @@
 		s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
 	const close = () => playerOpen.set(false);
 
+	// Speed mods and hitsounds (the account's settings, as in the desktop app)
+	const MOD_COLOR = {
+		HT: 'oklch(0.85 0.17 135)',
+		DC: 'oklch(0.85 0.17 135)',
+		DT: 'oklch(0.7 0.19 20)',
+		NC: 'oklch(0.7 0.19 20)'
+	};
+	let choosingMods = $state(false);
+	let mod = $derived($userSettings.settings?.mod ?? 'NM');
+	let beatOn = $derived($userSettings.settings?.nightcoreBeat ?? true);
+	let hitsoundsOn = $derived($userSettings.settings?.hitsounds ?? false);
+	let hitsoundVolume = $derived($userSettings.settings?.hitsoundVolume ?? 0.8);
+	function toggleHitsounds() {
+		haptic();
+		const on = !hitsoundsOn;
+		updateUserSettings({ hitsounds: on });
+		showToast(on ? 'Hitsounds on' : 'Hitsounds off', 'icon-[mingcute--drum-line]');
+	}
+
 	$effect(() => {
 		if (!song) close();
 	});
 </script>
+
+{#snippet toggleRow(label, detail, on, onclick)}
+	<button
+		class="w-full px-5 pt-4 flex items-center justify-between gap-4 text-start"
+		role="switch"
+		aria-checked={on}
+		onclick={() => {
+			haptic();
+			onclick();
+		}}
+	>
+		<span>
+			<span class="block font-semibold">{label}</span>
+			<span class="block text-sm text-white/60">{detail}</span>
+		</span>
+		<span
+			class="relative w-11 h-6 shrink-0 rounded-full transition {on
+				? 'bg-primary-400'
+				: 'bg-white/20'}"
+		>
+			<span
+				class="absolute top-0.5 left-0.5 size-5 rounded-full bg-white transition-transform {on
+					? 'translate-x-5'
+					: ''}"
+			></span>
+		</span>
+	</button>
+{/snippet}
 
 {#if $playerOpen && song}
 	<!-- (swiped down, it closes) -->
@@ -344,6 +394,36 @@
 				{/if}
 				<div class="flex">
 					<button
+						aria-label={mod === 'NM' ? 'Speed mods' : `Speed mod: ${MODS[mod].name}`}
+						class="h-11 min-w-11 px-1 grid place-items-center {mod === 'NM' ? 'text-white/70' : ''}"
+						onclick={() => (choosingMods = true)}
+					>
+						{#if mod === 'NM'}
+							<span class="icon-[mingcute--dashboard-3-line] size-6"></span>
+						{:else}
+							<span
+								class="px-1.5 py-0.5 rounded-md text-xs font-black tracking-wide text-black"
+								style="background-color: {MOD_COLOR[mod]}"
+							>
+								{mod}
+							</span>
+						{/if}
+					</button>
+					<button
+						aria-label="Hitsounds"
+						aria-pressed={hitsoundsOn}
+						class="size-11 grid place-items-center {hitsoundsOn
+							? 'text-primary-400'
+							: 'text-white/70'}"
+						onclick={toggleHitsounds}
+					>
+						<span
+							class="{$hitsoundStatus === 'loading' && hitsoundsOn
+								? 'icon-[svg-spinners--ring-resize]'
+								: 'icon-[mingcute--drum-line]'} size-6"
+						></span>
+					</button>
+					<button
 						aria-label="Lyrics"
 						aria-pressed={view === 'lyrics'}
 						class="size-11 grid place-items-center {view === 'lyrics'
@@ -366,5 +446,85 @@
 				</div>
 			</div>
 		</div>
+		{#if choosingMods}
+			<div class="fixed inset-0 z-40 flex flex-col justify-end" data-no-swipe>
+				<button
+					class="absolute inset-0 bg-black/60"
+					aria-label="Close"
+					onclick={() => (choosingMods = false)}
+					transition:fade={{ duration: 150 }}
+				></button>
+				<div
+					class="relative rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
+					transition:fly={{ y: 400, duration: 220, opacity: 1 }}
+				>
+					<div class="pt-2 flex justify-center">
+						<span class="w-10 h-1 rounded-full bg-white/20"></span>
+					</div>
+					<p class="px-5 pt-3 text-lg font-bold">Speed</p>
+					<div class="px-4 pt-3 grid grid-cols-5 gap-2">
+						{#each ['NM', 'HT', 'DC', 'DT', 'NC'] as option (option)}
+							<button
+								class="h-16 flex flex-col items-center justify-center gap-1 rounded-xl ring-1 transition {mod ===
+								option
+									? 'ring-2 ring-white bg-white/10'
+									: 'ring-white/10 bg-white/[0.04]'}"
+								aria-pressed={mod === option}
+								onclick={() => {
+									haptic();
+									setMod(option);
+								}}
+							>
+								<span
+									class="px-1.5 py-0.5 rounded-md text-xs font-black tracking-wide {option === 'NM'
+										? 'bg-white/15'
+										: 'text-black'}"
+									style={option === 'NM' ? '' : `background-color: ${MOD_COLOR[option]}`}
+								>
+									{option}
+								</span>
+								<span class="text-[11px] text-white/60">{MODS[option].rate}×</span>
+							</button>
+						{/each}
+					</div>
+					<p class="px-5 pt-2 text-sm text-white/60">
+						{mod === 'NM' ? 'As the song is.' : `${MODS[mod].name}: ${MODS[mod].description}`}
+					</p>
+					{#if mod === 'NC'}
+						{@render toggleRow('Nightcore beat', 'Its drums, on the beat of the song', beatOn, () =>
+							updateUserSettings({ nightcoreBeat: !beatOn })
+						)}
+					{/if}
+
+					<p class="px-5 pt-5 text-lg font-bold">Hitsounds</p>
+					{@render toggleRow(
+						'Play the hitsounds',
+						$hitsoundStatus === 'unavailable' && hitsoundsOn
+							? "This song's beatmap couldn't be loaded"
+							: 'Like watching osu! autoplay',
+						hitsoundsOn,
+						toggleHitsounds
+					)}
+					<label class="px-5 pt-3 flex items-center gap-4 {hitsoundsOn ? '' : 'opacity-40'}">
+						<span class="icon-[mingcute--volume-line] size-5 text-white/60"></span>
+						<input
+							type="range"
+							min="0"
+							max="1"
+							step="0.05"
+							value={hitsoundVolume}
+							disabled={!hitsoundsOn}
+							onchange={(e) =>
+								updateUserSettings({ hitsoundVolume: Number(e.currentTarget.value) })}
+							class="flex-1 accent-[var(--color-primary-400)]"
+							aria-label="Hitsound volume"
+						/>
+					</label>
+					<p class="px-5 pt-3 text-xs text-white/50">
+						The same as in the desktop app. With the screen locked, only the music plays on.
+					</p>
+				</div>
+			</div>
+		{/if}
 	</div>
 {/if}
