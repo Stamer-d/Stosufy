@@ -1,0 +1,86 @@
+<script>
+	// The bar at the bottom, the song bar of the desktop app on a phone: the song playing
+	// (tap it for the whole screen player, swipe it for the next one or the one before) and the
+	// tabs
+	import SongCover from '../lib/components/SongCover.svelte';
+	import { queue, playing, time, previewOnly, toggle, next, previous, playerOpen } from './player';
+	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
+	import { swipe } from './gestures';
+	import { TABS, currentTab, openTab } from './navigation';
+
+	let song = $derived($queue.songs[$queue.index] ?? null);
+	let progress = $derived($time.duration ? Math.min(1, $time.current / $time.duration) : 0);
+</script>
+
+<div
+	class="fixed inset-x-0 bottom-0 z-20 bg-app/90 backdrop-blur-2xl backdrop-saturate-150 border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)]"
+	style="view-transition-name: dock"
+>
+	{#if song}
+		<div class="relative">
+			<div class="absolute inset-x-0 top-0 h-0.5 bg-white/10">
+				<div class="h-full bg-primary-400" style="width: {progress * 100}%"></div>
+			</div>
+			<div
+				class="flex items-center gap-3 pl-3 pr-2 pt-2.5 pb-2"
+				use:swipe={{ axis: 'x', onswipe: (direction) => (direction < 0 ? next() : previous()) }}
+			>
+				<button
+					class="min-w-0 flex-1 flex items-center gap-3 text-start"
+					aria-label="Open the player"
+					onclick={() => playerOpen.set(true)}
+				>
+					{#key song.id}
+						<SongCover
+							setId={song.id}
+							track={song.track}
+							title={song.title}
+							class="size-11 rounded-md shadow-md shadow-black/30"
+						/>
+					{/key}
+					<span class="min-w-0 flex-1">
+						<span class="block text-sm font-semibold truncate">{song.title}</span>
+						<span class="block text-xs text-secondary-600 truncate">
+							{song.artist}{$previewOnly ? ' · preview' : ''}
+						</span>
+					</span>
+				</button>
+				<button
+					aria-label={$isFavourite(song) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+					class="size-10 shrink-0 grid place-items-center"
+					onclick={() => toggleFavourite(song)}
+				>
+					<span
+						class="{$isFavourite(song)
+							? 'icon-[mingcute--heart-fill] text-primary-500'
+							: 'icon-[mingcute--heart-line] text-secondary-600'} size-[22px]"
+					></span>
+				</button>
+				<button
+					aria-label={$playing ? 'Pause' : 'Play'}
+					class="size-10 shrink-0 grid place-items-center rounded-full bg-white text-black active:scale-95 transition"
+					onclick={toggle}
+				>
+					<span
+						class="{$playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-5"
+					></span>
+				</button>
+			</div>
+		</div>
+	{/if}
+	<nav class="flex px-2">
+		{#each TABS as tab (tab.id)}
+			{@const active = $currentTab === tab.id}
+			<button
+				class="relative flex-1 flex flex-col items-center gap-0.5 pt-1.5 pb-1 text-[10px] font-semibold transition-colors {active
+					? 'text-white'
+					: 'text-secondary-600'}"
+				aria-current={active ? 'page' : undefined}
+				onclick={() => openTab(tab.id)}
+			>
+				<span class="{active ? tab.activeIcon : tab.icon} size-6"></span>
+				{tab.label}
+			</button>
+		{/each}
+	</nav>
+</div>

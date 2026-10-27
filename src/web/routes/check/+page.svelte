@@ -111,7 +111,8 @@
 		});
 		await check('Lyrics (LRCLIB)', async () => {
 			const response = await withTimeout(
-				fetch('https://lrclib.net/api/search?q=disco%20prince'),
+				// (through the Stosufy API, like the lyrics)
+				fetch('https://api.stamer-d.de/v2/stosufy/lyrics/search?q=disco%20prince'),
 				15000,
 				'LRCLIB'
 			);

@@ -1,12 +1,14 @@
 <script>
 	const base = __WEB_BASE__;
-	// Your playlists (the same as in the desktop app: from the Stosufy API); + makes a new one
+	// Your library, as the desktop app's sidebar: the downloads, the liked songs, your
+	// playlists and the ones you saved; + makes a new one
 	import { goto } from '$app/navigation';
 	import { keyStore, logOut } from '../../shims/auth';
 	import { playlists, savedPlaylists, createPlaylist } from '../../../lib/stores/playlist';
 	import { showToast } from '../../../lib/stores/toast';
 	import { libraryState, loadLibrary } from '../../library';
-	import PlaylistCover from '../../PlaylistCover.svelte';
+	import PlaylistCover from '../../../lib/components/PlaylistCover.svelte';
+	import { downloadedSongs } from '../../downloads';
 	import { offline } from '../../../lib/stores/network';
 
 	let all = $derived([...$playlists, ...$savedPlaylists]);
@@ -35,16 +37,9 @@
 	}
 </script>
 
-<header class="px-5 pt-6 pb-3 flex items-end justify-between gap-3">
-	<h1 class="text-3xl font-extrabold">Library</h1>
-	<div class="flex items-center gap-1">
-		<button
-			aria-label="New playlist"
-			class="size-10 grid place-items-center text-secondary-600"
-			onclick={() => (creating = !creating)}
-		>
-			<span class="icon-[mingcute--add-line] size-6"></span>
-		</button>
+<header class="px-4 pt-4 pb-2 flex items-center justify-between gap-3">
+	<h1 class="text-xl font-bold">Your Library</h1>
+	<div class="flex items-center">
 		<button
 			aria-label="Reload"
 			class="size-10 grid place-items-center text-secondary-600"
@@ -57,13 +52,19 @@
 					: 'icon-[mingcute--refresh-2-line]'} size-5"
 			></span>
 		</button>
-		<button class="h-10 px-2 text-sm text-secondary-600" onclick={logOut}>Log out</button>
+		<button
+			aria-label="New playlist"
+			class="size-10 grid place-items-center text-secondary-600"
+			onclick={() => (creating = !creating)}
+		>
+			<span class="icon-[mingcute--add-line] size-6"></span>
+		</button>
 	</div>
 </header>
 
 {#if creating}
 	<form
-		class="mx-5 mb-3 flex gap-2"
+		class="mx-4 mb-3 flex gap-2"
 		onsubmit={(e) => {
 			e.preventDefault();
 			create();
@@ -74,44 +75,62 @@
 			bind:value={title}
 			autofocus
 			maxlength="100"
-			class="flex-1 min-w-0 h-11 px-3 rounded-xl bg-secondary-300 text-base outline-none focus:ring-2 focus:ring-primary-400"
+			class="flex-1 min-w-0 h-10 px-3 rounded-md bg-white/[0.06] outline-none ring-1 ring-transparent focus:ring-white/20"
 			placeholder="Name of the playlist"
 			aria-label="Name of the new playlist"
 		/>
 		<button
-			class="h-11 px-4 rounded-xl bg-primary-300 font-semibold disabled:opacity-50"
+			class="h-10 px-4 rounded-md bg-primary-300 font-semibold disabled:opacity-50"
 			disabled={!title.trim() || saving}
 		>
-			{saving ? '…' : 'Make'}
+			{saving ? '…' : 'Create'}
 		</button>
 	</form>
 {/if}
 
 {#if $libraryState.error && !$offline}
-	<p class="px-5 pb-2 text-sm text-red-400">
+	<p class="px-4 pb-2 text-sm text-red-400">
 		Couldn't load the playlists: {$libraryState.error}{all.length ? ' (these are from before)' : ''}
 	</p>
 {/if}
-{#if $libraryState.loading && !all.length}
-	<p class="px-5 text-sm text-secondary-600">Loading…</p>
-{/if}
-<ul class="px-3">
+
+{#snippet entry(href, playlist, name, detail)}
+	<li>
+		<a {href} class="flex items-center gap-3 p-2 rounded-md active:bg-white/[0.06]">
+			<PlaylistCover {playlist} class="size-12 rounded-md" iconClass="size-5" />
+			<span class="min-w-0">
+				<span class="block font-semibold truncate">{name}</span>
+				<span class="block text-sm text-secondary-600 truncate">{detail}</span>
+			</span>
+		</a>
+	</li>
+{/snippet}
+
+<ul class="px-2 pb-4">
+	{@render entry(
+		`${base}/downloads`,
+		{ id: -1, title: 'Downloaded Songs', song_amount: 0 },
+		'Downloaded Songs',
+		`On this phone · ${$downloadedSongs.length} songs`
+	)}
 	{#each all as playlist (playlist.id)}
-		<li>
-			<a
-				href="{base}/playlist/{playlist.id}"
-				class="flex items-center gap-3 p-2 rounded-lg active:bg-white/5"
-			>
-				<PlaylistCover {playlist} />
-				<span class="min-w-0">
-					<span class="block font-semibold truncate">{playlist.title}</span>
-					<span class="block text-sm text-secondary-600 truncate">
-						{playlist.song_amount ?? 0} songs{playlist.creator?.username
-							? ` · ${playlist.creator.username}`
-							: ''}
-					</span>
-				</span>
-			</a>
-		</li>
+		{@render entry(
+			`${base}/playlist/${playlist.id}`,
+			playlist,
+			playlist.title,
+			playlist.id == -2
+				? `Liked · ${playlist.song_amount ?? 0} songs`
+				: `${playlist.creator?.username && !$playlists.some((p) => p.id === playlist.id) ? playlist.creator.username : 'Playlist'} · ${playlist.song_amount ?? 0} songs`
+		)}
 	{/each}
 </ul>
+{#if $libraryState.loading && !all.length}
+	<div class="py-6 grid place-items-center">
+		<span class="icon-[svg-spinners--ring-resize] size-6 text-secondary-600"></span>
+	</div>
+{/if}
+<div class="px-4 pb-6 flex justify-center">
+	<button class="h-9 px-4 rounded-full bg-white/[0.06] text-sm text-secondary-600" onclick={logOut}
+		>Log out</button
+	>
+</div>

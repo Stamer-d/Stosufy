@@ -123,28 +123,37 @@
 	}
 </script>
 
-<header class="px-5 pt-6 pb-3">
-	<h1 class="text-3xl font-extrabold">Search</h1>
+<header
+	class="sticky top-[env(safe-area-inset-top)] z-10 px-3 pt-3 pb-2 bg-panel/90 backdrop-blur-xl"
+>
 	<label
-		class="mt-3 flex items-center gap-2 h-11 px-3 rounded-xl bg-secondary-300 focus-within:ring-2 focus-within:ring-primary-400"
+		class="flex items-center gap-2.5 h-11 px-4 rounded-full bg-white/[0.08] ring-1 ring-transparent focus-within:ring-white/20 focus-within:bg-white/10 transition"
 	>
 		<span class="icon-[mingcute--search-line] size-5 text-secondary-600"></span>
 		<input
 			bind:value={query}
 			type="search"
 			enterkeyhint="search"
-			class="flex-1 min-w-0 bg-transparent outline-none text-base"
-			placeholder="Songs and artists on osu!"
+			class="flex-1 min-w-0 bg-transparent outline-none placeholder:text-secondary-600 [&::-webkit-search-cancel-button]:hidden"
+			placeholder="What do you want to listen to?"
 			aria-label="Search"
 		/>
 		{#if searching}
 			<span class="icon-[svg-spinners--ring-resize] size-5 text-secondary-600"></span>
+		{:else if query}
+			<button
+				aria-label="Clear"
+				class="-mr-1 size-7 grid place-items-center text-secondary-600"
+				onclick={() => (query = '')}
+			>
+				<span class="icon-[mingcute--close-circle-fill] size-5"></span>
+			</button>
 		{/if}
 	</label>
 </header>
 
 {#if !query.trim() && recent.length}
-	<section class="px-5 pt-2">
+	<section class="px-4 pt-2">
 		<div class="flex items-center justify-between">
 			<h2 class="font-bold">Searched before</h2>
 			<button class="text-sm text-secondary-600" onclick={() => keepRecent([])}>Clear</button>
@@ -173,10 +182,8 @@
 {/if}
 
 {#if yours.length}
-	<h2 class="px-5 pt-1 pb-1 text-xs font-bold uppercase tracking-wide text-secondary-600">
-		Your songs
-	</h2>
-	<ul class="px-3 pb-3">
+	<h2 class="px-4 pt-2 pb-1 text-lg font-bold">Your songs</h2>
+	<ul class="px-2 pb-3">
 		{#each yours as song, i (`${song.id}:${song.track ?? 0}`)}
 			<SongRow
 				{song}
@@ -196,9 +203,9 @@
 {/if}
 
 {#if results.length}
-	<h2 class="px-5 pb-1 text-xs font-bold uppercase tracking-wide text-secondary-600">On osu!</h2>
+	<h2 class="px-4 pt-2 pb-1 text-lg font-bold">On osu!</h2>
 {/if}
-<ul class="px-3">
+<ul class="px-2 pb-4">
 	{#each results as song, i (`${song.id}:${i}`)}
 		<SongRow
 			{song}

@@ -25,6 +25,7 @@
 		toggleAutoplay
 	} from './player';
 	import Lyrics from './Lyrics.svelte';
+	import Triangles from '../lib/components/Triangles.svelte';
 	import { songMenu } from './library';
 	import { swipe } from './gestures';
 	import { fly } from 'svelte/transition';
@@ -85,11 +86,14 @@
 		transition:fly={{ y: 900, duration: 280, opacity: 1 }}
 		use:swipe={{ axis: 'y', only: 1, onswipe: close }}
 	>
+		<!-- The song's background, dimmed like the desktop app's, with osu!'s triangles -->
 		<img
 			src={bigCoverUrl(song)}
 			alt=""
-			class="absolute inset-0 size-full object-cover opacity-25 blur-3xl scale-110 pointer-events-none"
+			class="absolute inset-0 size-full object-cover blur-2xl scale-125 pointer-events-none"
 		/>
+		<div class="absolute inset-0 bg-app/70 pointer-events-none"></div>
+		<Triangles count={14} seed={Number(song.id) || 3} />
 		<div class="relative flex items-center justify-between px-3 py-2">
 			<button aria-label="Close" class="size-11 grid place-items-center" onclick={close}>
 				<span class="icon-[mingcute--down-line] size-7"></span>
@@ -195,20 +199,31 @@
 				</button>
 			</div>
 
-			<input
-				type="range"
-				min="0"
-				max={$time.duration || 0}
-				step="1"
-				value={dragging ?? $time.current}
-				oninput={(e) => (dragging = Number(e.currentTarget.value))}
-				onchange={(e) => {
-					seek(Number(e.currentTarget.value));
-					dragging = null;
-				}}
-				class="mt-4 w-full accent-white"
-				aria-label="Position"
-			/>
+			<!-- The song bar's slider (a thin line), with room for a finger -->
+			<div class="relative mt-5 h-6 flex items-center">
+				<div class="absolute inset-x-0 h-1 rounded-full bg-white/15">
+					<div
+						class="h-full rounded-full {dragging != null ? 'bg-primary-400' : 'bg-white'}"
+						style="width: {$time.duration
+							? ((dragging ?? $time.current) / $time.duration) * 100
+							: 0}%"
+					></div>
+				</div>
+				<input
+					type="range"
+					min="0"
+					max={$time.duration || 0}
+					step="1"
+					value={dragging ?? $time.current}
+					oninput={(e) => (dragging = Number(e.currentTarget.value))}
+					onchange={(e) => {
+						seek(Number(e.currentTarget.value));
+						dragging = null;
+					}}
+					class="absolute inset-0 w-full opacity-0"
+					aria-label="Position"
+				/>
+			</div>
 			<div class="flex justify-between text-xs text-white/60 tabular-nums">
 				<span>{clock(dragging ?? $time.current)}</span>
 				<span>{clock($time.duration)}</span>

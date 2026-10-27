@@ -15,6 +15,7 @@ import { autoDownload, downloadAll } from './downloads';
 import { offline, whenOnline } from '../lib/stores/network';
 import { keyStore } from './shims/auth';
 import { favourites, loadFavourites, LIKED_ID } from '../lib/stores/favourites';
+import { getStosufyUser } from '../lib/api';
 import type { MapSet, Playlist } from '../lib/types';
 
 const KEY = 'stosufy-web-playlists';
@@ -23,6 +24,19 @@ export const libraryState = writable<{ loading: boolean; error: string }>({
 	loading: false,
 	error: ''
 });
+/** Who's logged in (their osu! name and picture), kept for a start without a connection */
+const USER_KEY = 'stosufy-web-user';
+export const webUser = writable<{ username?: string; avatar_url?: string } | null>(
+	typeof localStorage === 'undefined' ? null : JSON.parse(localStorage.getItem(USER_KEY) ?? 'null')
+);
+webUser.subscribe((user) => {
+	try {
+		if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+	} catch {
+		// (asked again next time)
+	}
+});
+
 /** The menu of a song (the ⋯ of a row): which song, and the playlist it's in */
 export const songMenu = writable<{ song: MapSet; playlistId?: string | number } | null>(null);
 
@@ -57,7 +71,13 @@ export async function loadLibrary(token: string, again = false) {
 	loadedFor = token;
 	libraryState.set({ loading: true, error: '' });
 	try {
-		const [own] = await Promise.all([getPlaylists(token), loadFavourites().catch(() => {})]);
+		const [own] = await Promise.all([
+			getPlaylists(token),
+			loadFavourites().catch(() => {}),
+			getStosufyUser(token)
+				.then((user) => webUser.set(user))
+				.catch(() => {})
+		]);
 		playlists.set([liked(get(favourites).length), ...own]);
 		loadSavedPlaylists().catch(() => {});
 		libraryState.set({ loading: false, error: '' });

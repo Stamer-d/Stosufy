@@ -1,16 +1,23 @@
 // Tauri's fetch in the web app: the browser's. osu! doesn't let web pages ask its API (no
-// CORS), so those requests go through the Stosufy API, which passes them on with the user's
-// token.
+// CORS) and LRCLIB turns browsers down, so those requests go through the Stosufy API, which
+// passes them on (osu!'s with the user's token).
 
 const OSU_API = 'https://osu.ppy.sh/api/v2/';
 const THROUGH_STOSUFY = 'https://api.stamer-d.de/v2/stosufy/osu/';
 
-const viaStosufy = (url: string) =>
-	url.startsWith(OSU_API) ? THROUGH_STOSUFY + url.slice(OSU_API.length) : url;
+// (LRCLIB turns browsers down: its lyrics come through the Stosufy API too)
+const LRCLIB = 'https://lrclib.net/api/';
+const LYRICS_THROUGH_STOSUFY = 'https://api.stamer-d.de/v2/stosufy/lyrics/';
 
-/** Without headers of its own a request needs no CORS preflight (LRCLIB's lyrics) */
+const viaStosufy = (url: string) =>
+	url.startsWith(OSU_API)
+		? THROUGH_STOSUFY + url.slice(OSU_API.length)
+		: url.startsWith(LRCLIB)
+			? LYRICS_THROUGH_STOSUFY + url.slice(LRCLIB.length)
+			: url;
+/** (the Stosufy API sends LRCLIB who asks: the request needs no headers of its own) */
 const plain = (url: string, init?: RequestInit) =>
-	url.startsWith('https://lrclib.net/') && init?.headers ? { ...init, headers: undefined } : init;
+	url.startsWith(LRCLIB) && init?.headers ? { ...init, headers: undefined } : init;
 
 export const fetch: typeof globalThis.fetch = (input, init) =>
 	globalThis.fetch(

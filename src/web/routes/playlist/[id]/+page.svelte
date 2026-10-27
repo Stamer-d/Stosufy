@@ -1,7 +1,7 @@
 <script>
 	const base = __WEB_BASE__;
-	// A playlist's songs: tap one to play the playlist from there, ⋯ for the rest; Download
-	// all keeps them all on the phone
+	// A playlist, as in the desktop app: its header in the cover's color, Play and Shuffle,
+	// keeping it on the phone, and its songs (tap one to play the playlist from there)
 	import { page } from '$app/state';
 	import {
 		playlists,
@@ -19,19 +19,13 @@
 	import { downloaded, bulk, downloadAll, stopDownloadAll, isDownloaded } from '../../../downloads';
 	import SongRow from '../../../SongRow.svelte';
 	import { nearView } from '../../../visible';
-	import PlaylistCover from '../../../PlaylistCover.svelte';
-	import { coverUrl } from '../../../player';
+	import PlaylistCover from '../../../../lib/components/PlaylistCover.svelte';
+	import PlayButton from '../../../../lib/components/PlayButton.svelte';
+	import PageHeader from '../../../PageHeader.svelte';
 	import { autoDownload, setAutoDownload } from '../../../downloads';
-
-	// The bar at the top once the header is scrolled away
-	let headerGone = $state(false);
-	function watchHeader(node) {
-		const observer = new IntersectionObserver(([entry]) => (headerGone = !entry.isIntersecting), {
-			rootMargin: '-60px 0px 0px 0px'
-		});
-		observer.observe(node);
-		return { destroy: () => observer.disconnect() };
-	}
+	import { colorFromString, colorFromImage } from '../../../shims/data';
+	import { webUser } from '../../../library';
+	import { queue, playing, toggle, shuffle } from '../../../player';
 
 	/** Rows shown: more as the list is scrolled */
 	const STEP = 100;
@@ -47,8 +41,28 @@
 	let songs = $derived($playlistSongsCache[id]?.songs ?? []);
 	let keptCount = $derived(songs.filter((song) => isDownloaded($downloaded, song)).length);
 	let title = $derived(playlist?.title ?? (id == '-2' ? 'Liked Songs' : 'Playlist'));
-	/** The picture behind the header: the playlist's, else its first song's cover */
-	let backdrop = $derived(playlist?.image_url ?? (songs[0] ? coverUrl(songs[0]) : null));
+	// The header's wash, from the cover (as in the desktop app)
+	let color = $state(null);
+	$effect(() => {
+		const which = playlist;
+		if (id == '-2') return void (color = 'oklch(0.45 0.17 290)');
+		color = colorFromString(title);
+		if (which?.image_url)
+			colorFromImage(which.image_url).then(
+				(found) => found && which === playlist && (color = found)
+			);
+	});
+	/** This playlist plays now */
+	let playingThis = $derived(
+		$playing &&
+			songs.some(
+				(song) =>
+					song === $queue.songs[$queue.index] ||
+					(song.id === $queue.songs[$queue.index]?.id &&
+						song.beatmaps?.[0]?.id === $queue.songs[$queue.index]?.beatmaps?.[0]?.id)
+			)
+	);
+	let menuOpen = $state(false);
 	let autoOn = $derived($autoDownload.has(String(id)));
 	let error = $state('');
 	let loading = $state(false);
@@ -136,171 +150,173 @@
 	}
 </script>
 
-<!-- The bar at the top, once the header is scrolled away -->
-<div
-	class="fixed inset-x-0 top-0 z-10 pt-[env(safe-area-inset-top)] bg-panel/95 backdrop-blur border-b border-white/5 transition-opacity duration-200 {headerGone
-		? 'opacity-100'
-		: 'opacity-0 pointer-events-none'}"
+<PageHeader
+	{color}
+	seed={Number(id) || 7}
+	label={id == '-2' ? 'Playlist' : playlist?.public ? 'Public playlist' : 'Private playlist'}
+	title={editing ? '' : title}
+	back="{base}/library"
+	onplay={songs.length ? () => play(songs, 0) : undefined}
 >
-	<div class="h-12 px-2 flex items-center gap-2">
-		<a href="{base}/library" aria-label="Back" class="size-10 grid place-items-center">
-			<span class="icon-[mingcute--left-line] size-6"></span>
-		</a>
-		<p class="min-w-0 flex-1 font-bold truncate">{title}</p>
-		<button
-			aria-label="Play"
-			class="size-9 grid place-items-center rounded-full bg-primary-300 disabled:opacity-40"
-			disabled={!songs.length}
-			onclick={() => play(songs, 0)}
-		>
-			<span class="icon-[mingcute--play-fill] size-5"></span>
-		</button>
-	</div>
-</div>
-
-<header class="relative overflow-hidden" use:watchHeader>
-	{#if backdrop}
-		<img
-			src={backdrop}
-			alt=""
-			class="absolute inset-0 size-full object-cover opacity-40 blur-2xl scale-125 pointer-events-none"
+	{#snippet cover()}
+		<PlaylistCover
+			playlist={playlist ?? /** @type {any} */ ({ id, title })}
+			class="size-48 rounded-md shadow-2xl shadow-black/50"
+			iconClass="size-16"
 		/>
+	{/snippet}
+	{#if editing}
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				rename();
+			}}
+		>
+			<!-- svelte-ignore a11y_autofocus -->
+			<input
+				bind:value={newTitle}
+				autofocus
+				maxlength="100"
+				onblur={rename}
+				class="-mt-8 w-full bg-transparent text-3xl font-extrabold tracking-tight outline-none border-b border-primary-400"
+				aria-label="Name"
+			/>
+		</form>
 	{/if}
-	<div
-		class="absolute inset-0 bg-gradient-to-b from-transparent via-app/40 to-app pointer-events-none"
-	></div>
-	<div class="relative px-5 pt-3 pb-3">
-		<a href="{base}/library" aria-label="Back" class="-ml-2 size-10 grid place-items-center">
-			<span class="icon-[mingcute--left-line] size-6"></span>
-		</a>
-		<div class="mt-1 flex justify-center">
-			<PlaylistCover {playlist} {id} class="size-44 rounded-lg shadow-2xl" icon="size-14" />
-		</div>
-		{#if editing}
-			<form
-				class="mt-4"
-				onsubmit={(e) => {
-					e.preventDefault();
-					rename();
+	{#if playlist?.description}
+		<p class="mt-2 text-sm text-white/70 line-clamp-2">{playlist.description}</p>
+	{/if}
+	<p class="mt-2 text-sm">
+		{#if playlist?.creator?.username}
+			<span class="font-bold">{playlist.creator.username}</span><span class="text-white/70">
+				·
+			</span>
+		{:else if own && $webUser?.username}
+			<span class="font-bold">{$webUser.username}</span><span class="text-white/70"> · </span>
+		{/if}
+		<span class="text-white/70"
+			>{songs.length}
+			{songs.length === 1 ? 'song' : 'songs'}{songs.length ? ` · ${songsLength(songs)}` : ''}</span
+		>
+	</p>
+	{#snippet actions()}
+		<PlayButton
+			playing={playingThis}
+			disabled={!songs.length}
+			onclick={() => (playingThis ? toggle() : play(songs, 0))}
+		/>
+		<button
+			aria-label="Shuffle"
+			class="relative size-10 grid place-items-center {$shuffle
+				? 'text-primary-500'
+				: 'text-white/60'}"
+			disabled={!songs.length}
+			onclick={() => play(songs, 0, { shuffled: true })}
+		>
+			<span class="icon-[mingcute--shuffle-line] size-7"></span>
+			{#if $shuffle}<span class="absolute bottom-0 size-1 rounded-full bg-primary-500"></span>{/if}
+		</button>
+		{#if $bulk}
+			<button
+				class="h-10 px-2 flex items-center gap-1.5 text-sm font-semibold text-primary-500"
+				onclick={stopDownloadAll}
+			>
+				<span class="text-xs tabular-nums">{$bulk.done}/{$bulk.total}</span>
+				<span class="icon-[mingcute--close-circle-line] size-6"></span>
+			</button>
+		{:else}
+			<button
+				aria-label={autoOn ? 'Stop keeping it on the phone' : 'Keep it on the phone'}
+				aria-pressed={autoOn}
+				class="size-10 grid place-items-center {autoOn ||
+				(songs.length && keptCount === songs.length)
+					? 'text-primary-500'
+					: 'text-white/60'}"
+				onclick={() => {
+					setAutoDownload(id, !autoOn);
+					if (!autoOn) keepAll();
 				}}
 			>
-				<!-- svelte-ignore a11y_autofocus -->
-				<input
-					bind:value={newTitle}
-					autofocus
-					maxlength="100"
-					onblur={rename}
-					class="w-full bg-transparent text-2xl font-extrabold outline-none border-b border-primary-400"
-					aria-label="Name"
-				/>
-			</form>
-		{:else}
-			<h1 class="mt-4 text-2xl font-extrabold leading-tight line-clamp-2">{title}</h1>
+				<span
+					class="{autoOn || (songs.length && keptCount === songs.length)
+						? 'icon-[mingcute--check-circle-fill]'
+						: 'icon-[mingcute--download-2-line]'} size-7"
+				></span>
+			</button>
 		{/if}
-		<p class="mt-1 text-sm text-white/60">
-			{#if playlist?.creator?.username}{playlist.creator.username} ·
-			{/if}{songs.length} songs{songs.length ? ` · ${songsLength(songs)}` : ''}
-		</p>
+		{#if own}
+			<div class="relative">
+				<button
+					aria-label="More"
+					class="size-10 grid place-items-center text-white/60"
+					onclick={() => (menuOpen = !menuOpen)}
+				>
+					<span class="icon-[mingcute--more-2-fill] size-6"></span>
+				</button>
+				{#if menuOpen}
+					<div
+						class="absolute left-0 top-11 z-20 w-48 py-1 rounded-lg bg-secondary-200 shadow-2xl ring-1 ring-white/10"
+					>
+						<button
+							class="w-full flex items-center gap-3 px-3 py-2.5 text-start text-sm active:bg-white/5"
+							onclick={() => {
+								menuOpen = false;
+								newTitle = playlist?.title ?? '';
+								editing = true;
+							}}
+						>
+							<span class="icon-[mingcute--edit-2-line] size-5"></span> Rename
+						</button>
+						<button
+							class="w-full flex items-center gap-3 px-3 py-2.5 text-start text-sm text-red-400 active:bg-white/5"
+							onclick={remove}
+						>
+							<span class="icon-[mingcute--delete-2-line] size-5"></span>
+							{confirmDelete ? 'Tap again to delete' : 'Delete'}
+						</button>
+					</div>
+				{/if}
+			</div>
+		{/if}
+		{#if keptCount}
+			<span class="ml-auto text-xs text-secondary-600 tabular-nums">{keptCount} on the phone</span>
+		{/if}
+	{/snippet}
+</PageHeader>
 
-		<div class="mt-3 flex items-center gap-1">
-			{#if $bulk}
-				<button
-					class="h-10 px-3 -ml-2 rounded-full text-sm font-semibold flex items-center gap-2"
-					onclick={stopDownloadAll}
-				>
-					<span class="icon-[svg-spinners--ring-resize] size-5"></span>
-					{$bulk.done}/{$bulk.total} · Stop
-				</button>
-			{:else}
-				<button
-					aria-label={autoOn ? 'Stop keeping it downloaded' : 'Keep it downloaded'}
-					aria-pressed={autoOn}
-					class="h-10 -ml-2 px-2 flex items-center gap-1.5 text-sm {autoOn ||
-					(songs.length && keptCount === songs.length)
-						? 'text-primary-400'
-						: 'text-white/70'}"
-					onclick={() => {
-						setAutoDownload(id, !autoOn);
-						if (!autoOn) keepAll();
-					}}
-				>
-					<span
-						class="{autoOn || (songs.length && keptCount === songs.length)
-							? 'icon-[mingcute--arrow-down-circle-fill]'
-							: 'icon-[mingcute--arrow-down-circle-line]'} size-7"
-					></span>
-					{#if keptCount}{keptCount}/{songs.length}{/if}
-				</button>
-			{/if}
-			{#if own}
-				<button
-					aria-label="Rename"
-					class="size-10 grid place-items-center text-white/70"
-					onclick={() => {
-						newTitle = playlist?.title ?? '';
-						editing = true;
-					}}
-				>
-					<span class="icon-[mingcute--edit-2-line] size-6"></span>
-				</button>
-				<button
-					aria-label="Delete"
-					class="h-10 px-2 flex items-center gap-1 text-sm {confirmDelete
-						? 'text-red-400'
-						: 'text-white/70'}"
-					onclick={remove}
-					onblur={() => (confirmDelete = false)}
-				>
-					<span class="icon-[mingcute--delete-2-line] size-6"></span>
-					{confirmDelete ? 'Delete?' : ''}
-				</button>
-			{/if}
-			<button
-				aria-label="Shuffle"
-				class="ml-auto size-11 grid place-items-center text-white/80 disabled:opacity-40"
-				disabled={!songs.length}
-				onclick={() => play(songs, 0, { shuffled: true })}
-			>
-				<span class="icon-[mingcute--shuffle-2-line] size-7"></span>
-			</button>
-			<button
-				aria-label="Play"
-				class="size-14 grid place-items-center rounded-full bg-primary-300 shadow-lg disabled:opacity-40"
-				disabled={!songs.length}
-				onclick={() => play(songs, 0)}
-			>
-				<span class="icon-[mingcute--play-fill] size-7"></span>
-			</button>
+<div class="px-2 pb-4">
+	{#if songs.length > 15}
+		<div class="relative mx-2 mt-1 mb-2 flex items-center">
+			<span
+				class="icon-[mingcute--search-line] absolute left-3 size-4 text-secondary-600 pointer-events-none"
+			></span>
+			<input
+				type="search"
+				bind:value={filter}
+				placeholder="Filter"
+				aria-label="Filter songs in this playlist"
+				class="w-full h-9 pl-9 pr-3 rounded-full bg-white/[0.06] focus:bg-white/10 text-white placeholder:text-secondary-600 outline-none ring-1 ring-transparent focus:ring-white/20 transition [&::-webkit-search-cancel-button]:hidden"
+			/>
 		</div>
-		{#if songs.length > 15}
-			<label class="mt-3 flex items-center gap-2 h-10 px-3 rounded-xl bg-white/10">
-				<span class="icon-[mingcute--search-line] size-4 text-white/60"></span>
-				<input
-					bind:value={filter}
-					type="search"
-					class="flex-1 min-w-0 bg-transparent outline-none text-base"
-					placeholder="Find in this playlist"
-					aria-label="Find in this playlist"
-				/>
-			</label>
-		{/if}
-	</div>
-</header>
+	{/if}
 
-{#if error}
-	<p class="px-5 text-sm text-red-400">Couldn't load the songs: {error}</p>
-{:else if loading && !songs.length}
-	<p class="px-5 text-sm text-secondary-600">Loading…</p>
-{/if}
+	{#if error}
+		<p class="px-2 text-sm text-red-400">Couldn't load the songs: {error}</p>
+	{:else if loading && !songs.length}
+		<div class="py-10 grid place-items-center">
+			<span class="icon-[svg-spinners--ring-resize] size-7 text-secondary-600"></span>
+		</div>
+	{/if}
 
-<ol class="px-3">
-	{#each shown.slice(0, limit) as { song, index } (`${song.id}:${song.track ?? 0}:${index}`)}
-		<SongRow {song} playlistId={id} onplay={() => play(songs, index)} />
-	{/each}
-</ol>
-{#if shown.length > limit}
-	<!-- (made again each time: it calls back once it comes near) -->
-	{#key limit}
-		<div use:nearView={() => (limit += STEP)} class="h-20"></div>
-	{/key}
-{/if}
+	<ol>
+		{#each shown.slice(0, limit) as { song, index } (`${song.id}:${song.track ?? 0}:${index}`)}
+			<SongRow {song} {index} playlistId={id} onplay={() => play(songs, index)} />
+		{/each}
+	</ol>
+	{#if shown.length > limit}
+		<!-- (made again each time: it calls back once it comes near) -->
+		{#key limit}
+			<div use:nearView={() => (limit += STEP)} class="h-20"></div>
+		{/key}
+	{/if}
+</div>
