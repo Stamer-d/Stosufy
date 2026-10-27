@@ -68,16 +68,16 @@
 	}
 </script>
 
-<Button type="ghost" class={ITEM} icon="icon-[mingcute--playlist-2-line]" on:click={addToQueue}>
+<Button type="ghost" class={ITEM} icon="icon-[mingcute--playlist-2-line]" onclick={addToQueue}>
 	Add to queue
 </Button>
 {#if downloadable}
-	<Button type="ghost" class={ITEM} icon="icon-[mingcute--download-2-line]" on:click={downloadAll}>
+	<Button type="ghost" class={ITEM} icon="icon-[mingcute--download-2-line]" onclick={downloadAll}>
 		Download all songs
 	</Button>
 {/if}
 {#if onEdit}
-	<Button type="ghost" class={ITEM} icon="icon-[mingcute--pencil-line]" on:click={onEdit}>
+	<Button type="ghost" class={ITEM} icon="icon-[mingcute--pencil-line]" onclick={onEdit}>
 		{kind === 'smart' ? 'Add songs' : 'Edit details'}
 	</Button>
 {/if}
@@ -86,7 +86,7 @@
 		type="ghost"
 		class={ITEM}
 		icon="icon-[mingcute--bookmark-remove-line]"
-		on:click={() => toggleSavedPlaylist(playlist)}
+		onclick={() => toggleSavedPlaylist(playlist)}
 	>
 		Remove from your library
 	</Button>
@@ -96,7 +96,7 @@
 		type="ghost"
 		class="{ITEM} text-red-400!"
 		icon="icon-[mingcute--delete-2-line]"
-		on:click={onDelete}
+		onclick={onDelete}
 	>
 		Delete playlist
 	</Button>

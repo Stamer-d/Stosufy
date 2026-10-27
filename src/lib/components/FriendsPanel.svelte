@@ -161,7 +161,7 @@
 				<p class="text-sm text-secondary-600">
 					Allow Stosufy to see your osu! friends to find out who's online and what they listen to.
 				</p>
-				<Button type="primary" on:click={connectFriends}>Connect friends</Button>
+				<Button type="primary" onclick={connectFriends}>Connect friends</Button>
 			</div>
 		{:else if $noConnection && $friendActivity.status !== 'ok'}
 			<div class="px-3 py-6 text-center flex flex-col items-center gap-2">

@@ -545,7 +545,7 @@
 					<p class="text-xl">Couldn't load beatmaps</p>
 					<p class="text-sm">{searchError}</p>
 				{/if}
-				<Button type="primary" on:click={() => runSearch(search)}>Try again</Button>
+				<Button type="primary" onclick={() => runSearch(search)}>Try again</Button>
 			</div>
 		{:else if osuMapsSearch && !allMaps?.length}
 			<div class="flex flex-col items-center gap-2 mt-16 text-secondary-600">
@@ -566,7 +566,7 @@
 				{#each allMaps as map (map.id)}
 					<ContextMenu>
 						<Beatmap bind:playMap {map} isDownloaded={isMapDownloaded(map.id.toString())} />
-						<svelte:fragment slot="menu">
+						{#snippet menu()}
 							{#if isMapDownloaded(map.id.toString())}
 								<QueueMenuItems song={map} />
 							{/if}
@@ -574,14 +574,14 @@
 								type="ghost"
 								icon="icon-[mingcute--add-circle-line]"
 								class="w-full rounded-md text-sm hover:bg-secondary-400"
-								on:click={() => {
+								onclick={() => {
 									addPlaylistModal.open = true;
 									addPlaylistModal.map = map;
 								}}
 							>
 								Add to Playlist
 							</Button>
-						</svelte:fragment>
+						{/snippet}
 					</ContextMenu>
 				{/each}
 			</div>
@@ -763,18 +763,18 @@
 				<span class="icon-[mingcute--arrow-down-line] size-4"></span>
 			</button>
 		</section>
-		<svelte:fragment slot="menu">
+		{#snippet menu()}
 			{#each desktopMenu as item (item.label)}
 				<Button
 					type="ghost"
 					icon={item.icon}
 					class="w-full rounded-md text-sm hover:bg-secondary-400"
-					on:click={item.action}
+					onclick={item.action}
 				>
 					{item.label}
 				</Button>
 			{/each}
-		</svelte:fragment>
+		{/snippet}
 	</ContextMenu>
 
 	<div class="px-6 pt-8 pb-10 flex flex-col gap-10">

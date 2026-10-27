@@ -126,7 +126,7 @@
 		<Button
 			type="ghost"
 			icon="icon-[mingcute--refresh-2-line]"
-			on:click={() => {
+			onclick={() => {
 				resetKeybinds();
 				notice = '';
 			}}

@@ -308,7 +308,7 @@
 							min={0}
 							max={95}
 							step={5}
-							on:change={(e) => updateAppearance({ dim: e.detail })}
+							onchange={(value) => updateAppearance({ dim: value })}
 						/>
 					</div>
 				</section>
@@ -346,7 +346,7 @@
 							></span>
 						{:else}
 							<div class="shrink-0 whitespace-nowrap">
-								<Button type="normal" on:click={fetchMissingVideos}>
+								<Button type="normal" onclick={fetchMissingVideos}>
 									{$videoFetch.state === 'error' ? 'Retry' : 'Get them'}
 								</Button>
 							</div>
@@ -415,7 +415,7 @@
 							min={0}
 							max={12}
 							step={1}
-							on:change={(e) => updateUserSettings({ crossfade: e.detail })}
+							onchange={(value) => updateUserSettings({ crossfade: value })}
 						/>
 					</div>
 				</section>
@@ -480,10 +480,10 @@
 						{:else}
 							<div class="flex gap-2 shrink-0">
 								{#if osuFolder}
-									<Button type="ghost" on:click={chooseOsuFolder}>Other folder</Button>
-									<Button type="normal" on:click={() => importOsuFolder(osuFolder)}>Import</Button>
+									<Button type="ghost" onclick={chooseOsuFolder}>Other folder</Button>
+									<Button type="normal" onclick={() => importOsuFolder(osuFolder)}>Import</Button>
 								{:else}
-									<Button type="normal" on:click={chooseOsuFolder}>Choose osu! folder</Button>
+									<Button type="normal" onclick={chooseOsuFolder}>Choose osu! folder</Button>
 								{/if}
 							</div>
 						{/if}
@@ -497,7 +497,7 @@
 						</span>
 						<Button
 							type="normal"
-							on:click={() => {
+							onclick={() => {
 								settingsTab.set(null);
 								profileImportOpen.set(true);
 							}}
@@ -516,7 +516,7 @@
 						</span>
 						<Button
 							type="normal"
-							on:click={() => {
+							onclick={() => {
 								settingsTab.set(null);
 								sessionKeyNeeded.set(true);
 							}}
@@ -538,7 +538,7 @@
 		</div>
 	</div>
 
-	<svelte:fragment slot="footer">
-		<Button type="primary" on:click={() => settingsTab.set(null)}>Done</Button>
-	</svelte:fragment>
+	{#snippet footer()}
+		<Button type="primary" onclick={() => settingsTab.set(null)}>Done</Button>
+	{/snippet}
 </Modal>

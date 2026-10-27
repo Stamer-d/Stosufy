@@ -85,15 +85,15 @@
 		</section>
 	{/each}
 
-	<svelte:fragment slot="footer">
+	{#snippet footer()}
 		<Button
-			on:click={() => {
+			onclick={() => {
 				updateHomeSettings({ widgets: DEFAULT_WIDGETS });
 				showToast('Widgets reset');
 			}}
 		>
 			Reset to default
 		</Button>
-		<Button type="primary" on:click={() => (open = false)}>Done</Button>
-	</svelte:fragment>
+		<Button type="primary" onclick={() => (open = false)}>Done</Button>
+	{/snippet}
 </Modal>

@@ -1,12 +1,29 @@
 <script lang="ts">
-	export let type: 'ghost' | 'normal' | 'primary' = 'normal';
-	export let size: 'sm' | 'md' | 'lg' = 'md';
-	export let disabled = false;
-	export let icon: string | null = null;
-	export let iconLeft: string | null = null;
-	export let iconRight: string | null = null;
+	import type { Snippet } from 'svelte';
+	import type { HTMLButtonAttributes } from 'svelte/elements';
 
-	$: leftIcon = iconLeft ?? icon;
+	interface Props extends Omit<HTMLButtonAttributes, 'type'> {
+		type?: 'ghost' | 'normal' | 'primary';
+		size?: 'sm' | 'md' | 'lg';
+		icon?: string | null;
+		iconLeft?: string | null;
+		iconRight?: string | null;
+		children?: Snippet;
+	}
+
+	let {
+		type = 'normal',
+		size = 'md',
+		disabled = false,
+		icon = null,
+		iconLeft = null,
+		iconRight = null,
+		class: className = '',
+		children,
+		...rest
+	}: Props = $props();
+
+	let leftIcon = $derived(iconLeft ?? icon);
 
 	const typeClasses = {
 		normal: 'bg-secondary-300 text-white',
@@ -25,25 +42,23 @@
 		md: 'p-2',
 		lg: 'text-lg p-3 '
 	};
-	$: buttonClasses = `
-	  ${$$restProps?.class ?? ''}
+	let buttonClasses = $derived(`
+	  ${className ?? ''}
 	  ${!disabled ? hoverClasses[type] : 'text-secondary-500'}
       ${typeClasses[type]} 
       ${sizeClasses[size]} 
       rounded-lg font-semibold transition flex items-center gap-2
       ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}
-    `;
+    `);
 </script>
 
-<button {...$$restProps} class={buttonClasses} on:click {disabled} on:mouseover on:focus on:blur>
+<button {...rest} class={buttonClasses} {disabled}>
 	{#if leftIcon?.includes('icon-')}
 		<span class="flex-none inline-grid" aria-hidden="true">
 			<span class="place-self-center opacity-75 {leftIcon}"></span>
 		</span>
 	{/if}
-	{#if $$slots.default}
-		<slot></slot>
-	{/if}
+	{@render children?.()}
 	{#if iconRight?.includes('icon-')}
 		<span class="flex-none inline-grid" aria-hidden="true">
 			<span class="place-self-center opacity-75 {iconRight}"></span>

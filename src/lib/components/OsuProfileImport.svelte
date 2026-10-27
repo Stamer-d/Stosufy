@@ -65,7 +65,7 @@
 				{:else if playlist && finished?.state === 'done'}
 					<Button
 						type="ghost"
-						on:click={() => {
+						onclick={() => {
 							$profileImportOpen = false;
 							goto(`/playlist/${playlist.id}`);
 						}}
@@ -76,7 +76,7 @@
 					<Button
 						type={playlist ? 'normal' : 'primary'}
 						disabled={busy || !info.count($user)}
-						on:click={() => importProfileList(list, download)}
+						onclick={() => importProfileList(list, download)}
 					>
 						{playlist ? 'Update' : 'Create playlist'}
 					</Button>
@@ -98,7 +98,7 @@
 			</span>
 		</span>
 	</label>
-	<svelte:fragment slot="footer">
-		<Button type="primary" on:click={() => ($profileImportOpen = false)}>Done</Button>
-	</svelte:fragment>
+	{#snippet footer()}
+		<Button type="primary" onclick={() => ($profileImportOpen = false)}>Done</Button>
+	{/snippet}
 </Modal>

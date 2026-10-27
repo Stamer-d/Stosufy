@@ -1,37 +1,29 @@
 <script>
-	import { onMount, createEventDispatcher } from 'svelte';
+	/**
+	 * A menu that opens below its trigger; choosing an item (a button in it) closes it
+	 * @type {{
+	 *   isOpen?: boolean,
+	 *   menuClass?: string,
+	 *   trigger?: import('svelte').Snippet,
+	 *   menu?: import('svelte').Snippet
+	 * }}
+	 */
+	let { isOpen = $bindable(false), menuClass = '', trigger, menu } = $props();
 
-	export let isOpen = false;
-	export let menuClass = '';
+	let dropdownContainer = $state();
 
-	let dropdownContainer;
-
-	const dispatch = createEventDispatcher();
-
-	function handleClickOutside(event) {
-		if (dropdownContainer && !dropdownContainer.contains(event.target)) {
-			isOpen = false;
-			dispatch('close');
-		}
-	}
-
-	function toggleDropdown() {
-		isOpen = !isOpen;
-		dispatch(isOpen ? 'open' : 'close');
-	}
-
-	onMount(() => {
-		document.addEventListener('click', handleClickOutside);
-
-		return () => {
-			document.removeEventListener('click', handleClickOutside);
+	$effect(() => {
+		const handleClickOutside = (event) => {
+			if (dropdownContainer && !dropdownContainer.contains(event.target)) isOpen = false;
 		};
+		document.addEventListener('click', handleClickOutside);
+		return () => document.removeEventListener('click', handleClickOutside);
 	});
 </script>
 
 <div class="relative inline-block" bind:this={dropdownContainer}>
-	<div on:click={toggleDropdown} role="presentation" class="cursor-pointer">
-		<slot name="trigger" />
+	<div onclick={() => (isOpen = !isOpen)} role="presentation" class="cursor-pointer">
+		{@render trigger?.()}
 	</div>
 
 	{#if isOpen}
@@ -40,18 +32,19 @@
 			role="menu"
 			aria-orientation="vertical"
 			tabindex="-1"
-			on:click={(event) => {
+			onclick={(event) => {
 				// Choosing an item closes the menu
 				if (event.target instanceof Element && event.target.closest('button')) {
 					isOpen = false;
-					dispatch('close');
 				}
 			}}
-			on:keydown={() => {}}
+			onkeydown={() => {}}
 		>
-			<slot name="menu">
+			{#if menu}
+				{@render menu()}
+			{:else}
 				<div class="py-1 text-white text-sm">No Content provided</div>
-			</slot>
+			{/if}
 		</div>
 	{/if}
 </div>

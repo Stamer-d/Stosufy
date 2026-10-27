@@ -30,17 +30,19 @@
 	import { isFavourite, toggleFavourite } from '#lib/stores/favourites.ts';
 
 	// The position, from the player (twice a second; it also saves it for the next start)
-	$: currentTime = $playbackTime.current;
-	$: duration = $playbackTime.duration;
+	let currentTime = $derived($playbackTime.current);
+	let duration = $derived($playbackTime.duration);
 	// The volume lives in the settings (see mixer.ts); muted shows as 0
-	$: muted = $userSettings.settings?.muted ?? false;
-	$: volume = muted ? 0 : ($userSettings.settings?.volume ?? DEFAULT_VOLUME);
-	let shuffled = false;
+	let muted = $derived($userSettings.settings?.muted ?? false);
+	let volume = $derived(muted ? 0 : ($userSettings.settings?.volume ?? DEFAULT_VOLUME));
 
-	$: hasVideo = !!(
-		$mapDataStore[$currentSong.song?.id]?.video || $mapDataStore[$currentSong.song?.id]?.videoSource
+	let hasVideo = $derived(
+		!!(
+			$mapDataStore[$currentSong.song?.id]?.video ||
+			$mapDataStore[$currentSong.song?.id]?.videoSource
+		)
 	);
-	$: videoOn = $userSettings.settings?.appearance?.video ?? true;
+	let videoOn = $derived($userSettings.settings?.appearance?.video ?? true);
 
 	function openFocus() {
 		focusMode.set(true);
@@ -60,9 +62,9 @@
 		return `${mins}:${secs.toString().padStart(2, '0')}`;
 	}
 
-	function handleProgressChange(event) {
+	function handleProgressChange(value) {
 		if (!$songQueue?.audio) return;
-		$songQueue.audio.currentTime = event.detail;
+		$songQueue.audio.currentTime = value;
 	}
 
 	onDestroy(async () => {
@@ -70,9 +72,9 @@
 			stopPlayback();
 		}
 	});
-	$: shuffled = $userSettings.settings?.shuffle || false;
-	$: repeat = $userSettings.settings?.repeat ?? 'off';
-	$: canSkipForward = hasNext($songQueue, $upNext, repeat);
+	let shuffled = $derived($userSettings.settings?.shuffle || false);
+	let repeat = $derived($userSettings.settings?.repeat ?? 'off');
+	let canSkipForward = $derived(hasNext($songQueue, $upNext, repeat));
 
 	const ICON_BUTTON =
 		'size-8 grid place-items-center rounded-full cursor-pointer transition disabled:opacity-30 disabled:cursor-not-allowed';
@@ -95,7 +97,7 @@
 				title="Open focus mode"
 				aria-label="Open focus mode"
 				class="shrink-0 rounded-md cursor-pointer transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/60 outline-none"
-				on:click={openFocus}
+				onclick={openFocus}
 			>
 				<SongCover
 					setId={$currentSong.song.id}
@@ -108,14 +110,14 @@
 				<button
 					title="Go to the beatmap"
 					class="max-w-full text-sm font-semibold truncate text-start cursor-pointer hover:underline"
-					on:click={() => goto(`/map/${$currentSong.song.id}`)}
+					onclick={() => goto(`/map/${$currentSong.song.id}`)}
 				>
 					{$currentSong.song?.title}
 				</button>
 				<button
 					title="Search for {$currentSong.song?.artist}"
 					class="max-w-full text-xs text-secondary-600 truncate text-start cursor-pointer hover:underline hover:text-white"
-					on:click={() => searchArtist($currentSong.song?.artist)}
+					onclick={() => searchArtist($currentSong.song?.artist)}
 				>
 					{$currentSong.song?.artist}
 				</button>
@@ -129,7 +131,7 @@
 					class="size-8 shrink-0 grid place-items-center rounded-full cursor-pointer transition {liked
 						? 'text-primary-500 hover:text-primary-400'
 						: 'text-secondary-600 hover:text-white'}"
-					on:click={() => toggleFavourite($currentSong.song)}
+					onclick={() => toggleFavourite($currentSong.song)}
 				>
 					<span
 						class="{liked
@@ -150,7 +152,7 @@
 					class="relative {ICON_BUTTON} {shuffled
 						? 'text-primary-500'
 						: 'text-white/60 hover:text-white'}"
-					on:click={async () => {
+					onclick={async () => {
 						shuffled = !shuffled;
 						updateUserSettings({ shuffle: shuffled });
 						await shuffleQueue();
@@ -165,7 +167,7 @@
 					title="Previous"
 					aria-label="Previous"
 					class="{ICON_BUTTON} text-white/70 hover:text-white"
-					on:click={async () => await skipBackward()}
+					onclick={async () => await skipBackward()}
 				>
 					<span class="icon-[mingcute--skip-previous-fill] size-5"></span>
 				</button>
@@ -173,7 +175,7 @@
 					title={$currentSong.isPlaying ? 'Pause (Space)' : 'Play (Space)'}
 					aria-label={$currentSong.isPlaying ? 'Pause' : 'Play'}
 					class="size-9 grid place-items-center rounded-full bg-white text-black cursor-pointer transition hover:scale-105"
-					on:click={() => togglePlayback()}
+					onclick={() => togglePlayback()}
 				>
 					<span
 						class="{$currentSong.isPlaying
@@ -186,7 +188,7 @@
 					aria-label="Next"
 					disabled={!canSkipForward}
 					class="{ICON_BUTTON} text-white/70 hover:text-white"
-					on:click={async () => await skipForward()}
+					onclick={async () => await skipForward()}
 				>
 					<span class="icon-[mingcute--skip-forward-fill] size-5"></span>
 				</button>
@@ -196,7 +198,7 @@
 					class="relative {ICON_BUTTON} {repeat !== 'off'
 						? 'text-primary-500'
 						: 'text-white/60 hover:text-white'}"
-					on:click={cycleRepeatMode}
+					onclick={cycleRepeatMode}
 				>
 					<span
 						class="{repeat === 'one'
@@ -213,11 +215,11 @@
 					{formatTime(currentTime)}
 				</span>
 				<Range
-					bind:value={currentTime}
+					value={currentTime}
 					min={0}
 					max={duration || 1}
 					step={0.1}
-					on:change={handleProgressChange}
+					onchange={handleProgressChange}
 				/>
 				<span class="w-10 text-xs text-secondary-600 tabular-nums">{formatTime(duration)}</span>
 			</div>
@@ -232,7 +234,7 @@
 					aria-label="Beatmap video"
 					aria-pressed={videoOn}
 					class="{ICON_BUTTON} {videoOn ? 'text-primary-500' : 'text-white/60 hover:text-white'}"
-					on:click={() => updateAppearance({ video: !videoOn })}
+					onclick={() => updateAppearance({ video: !videoOn })}
 				>
 					<span class="icon-[mingcute--video-line] size-5"></span>
 				</button>
@@ -245,7 +247,7 @@
 				class="{ICON_BUTTON} {page.url.pathname === '/lyrics'
 					? 'text-primary-500'
 					: 'text-white/60 hover:text-white'}"
-				on:click={toggleLyrics}
+				onclick={toggleLyrics}
 			>
 				<span class="icon-[mingcute--mic-line] size-5"></span>
 			</button>
@@ -256,7 +258,7 @@
 				class="relative {ICON_BUTTON} {$queuePanelOpen
 					? 'text-primary-500'
 					: 'text-white/60 hover:text-white'}"
-				on:click={() => queuePanelOpen.update((open) => !open)}
+				onclick={() => queuePanelOpen.update((open) => !open)}
 			>
 				<span class="icon-[mingcute--playlist-2-line] size-5"></span>
 				{#if $upNext.length}
@@ -274,7 +276,7 @@
 					aria-label={volume === 0 ? 'Unmute' : 'Mute'}
 					aria-pressed={volume === 0}
 					class="{ICON_BUTTON} text-white/60 hover:text-white"
-					on:click={toggleMute}
+					onclick={toggleMute}
 				>
 					<span
 						class="{volume === 0
@@ -290,7 +292,7 @@
 						min={0}
 						max={MAX_VOLUME}
 						step={0.001}
-						on:change={(e) => setVolume(e.detail)}
+						onchange={(value) => setVolume(value)}
 					/>
 				</div>
 			</div>

@@ -136,7 +136,7 @@
 						min={0}
 						max={1}
 						step={0.05}
-						on:change={(e) => updateUserSettings({ hitsoundVolume: e.detail })}
+						onchange={(value) => updateUserSettings({ hitsoundVolume: value })}
 					/>
 				</div>
 				{#if $hitsoundStatus.state === 'ready' && $hitsoundStatus.skinUnreadable}

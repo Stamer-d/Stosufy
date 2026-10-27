@@ -1,58 +1,59 @@
 <script>
-	// @ts-nocheck
-
-	import { onMount, createEventDispatcher } from 'svelte';
 	import Button from './Button.svelte';
-	// Props
-	export let open = false;
-	export let title = '';
-	export let closeOnEsc = true;
-	export let closeOnOutsideClick = true;
-	export let width = '600px';
 
-	let modal;
-	let previouslyFocused;
+	/**
+	 * A dialog over the app. `footer` replaces its Close button.
+	 * @type {{
+	 *   open?: boolean,
+	 *   title?: string,
+	 *   closeOnEsc?: boolean,
+	 *   closeOnOutsideClick?: boolean,
+	 *   width?: string,
+	 *   children?: import('svelte').Snippet,
+	 *   footer?: import('svelte').Snippet
+	 * }}
+	 */
+	let {
+		open = $bindable(false),
+		title = '',
+		closeOnEsc = true,
+		closeOnOutsideClick = true,
+		width = '600px',
+		children,
+		footer
+	} = $props();
+
+	let modal = $state();
 
 	function close() {
 		open = false;
 	}
 
 	function handleKeydown(e) {
-		if (closeOnEsc && e.key === 'Escape' && open) {
-			close();
-		}
+		if (closeOnEsc && e.key === 'Escape') close();
 	}
 
 	function handleOutsideClick(e) {
-		if (closeOnOutsideClick && modal && !modal.contains(e.target) && open) {
-			close();
-		}
+		if (closeOnOutsideClick && modal && !modal.contains(e.target)) close();
 	}
 
-	$: if (open) {
-		previouslyFocused = document.activeElement;
-		setTimeout(() => {
+	// While it's open: Escape and a click outside close it, the focus is in it (and goes back
+	// to where it was once it closes)
+	$effect(() => {
+		if (!open) return;
+		const previouslyFocused = document.activeElement;
+		const timer = setTimeout(() => {
 			document.addEventListener('keydown', handleKeydown);
 			document.addEventListener('mousedown', handleOutsideClick);
-			const focusable = modal.querySelectorAll(
-				'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-			);
-			if (focusable.length > 0) {
-				focusable[0].focus();
-			}
+			modal
+				?.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+				?.focus();
 		}, 0);
-	} else {
-		document.removeEventListener('keydown', handleKeydown);
-		document.removeEventListener('mousedown', handleOutsideClick);
-		if (previouslyFocused) {
-			previouslyFocused.focus();
-		}
-	}
-
-	onMount(() => {
 		return () => {
+			clearTimeout(timer);
 			document.removeEventListener('keydown', handleKeydown);
 			document.removeEventListener('mousedown', handleOutsideClick);
+			if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
 		};
 	});
 </script>
@@ -78,19 +79,15 @@
 				{/if}
 
 				<div class="modal-body px-5 py-2 overflow-y-auto text-sm text-white/80">
-					<slot />
+					{@render children?.()}
 				</div>
 
 				<div class="modal-footer px-5 pb-5 pt-4 flex justify-end gap-2 flex-shrink-0">
-					<slot name="footer">
-						<Button
-							on:click={() => {
-								close();
-							}}
-						>
-							Close
-						</Button>
-					</slot>
+					{#if footer}
+						{@render footer()}
+					{:else}
+						<Button onclick={close}>Close</Button>
+					{/if}
 				</div>
 			</div>
 		</div>

@@ -226,7 +226,7 @@
 				<span class="icon-[mingcute--settings-3-line] size-[18px]"></span>
 			</button>
 			<Dropdown>
-				<svelte:fragment slot="trigger">
+				{#snippet trigger()}
 					<button
 						class="mr-3 grid place-items-center rounded-full p-0.5 bg-secondary-200 hover:bg-secondary-300 cursor-pointer transition"
 						aria-label="Account menu"
@@ -238,13 +238,13 @@
 							alt=""
 						/>
 					</button>
-				</svelte:fragment>
-				<svelte:fragment slot="menu">
+				{/snippet}
+				{#snippet menu()}
 					<Button
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--user-3-line]"
-						on:click={() => go('/profile/me')}
+						onclick={() => go('/profile/me')}
 					>
 						Profile
 					</Button>
@@ -252,7 +252,7 @@
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--sparkles-line]"
-						on:click={() => go('/wrapped')}
+						onclick={() => go('/wrapped')}
 					>
 						Your Wrapped
 					</Button>
@@ -260,7 +260,7 @@
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--settings-3-line]"
-						on:click={() => openSettings()}
+						onclick={() => openSettings()}
 					>
 						Settings
 					</Button>
@@ -268,14 +268,14 @@
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--refresh-2-line]"
-						on:click={() => {
+						onclick={() => {
 							updateModal.open();
 						}}
 					>
 						Check for updates
 					</Button>
 					<Button
-						on:click={() => {
+						onclick={() => {
 							refreshAuth();
 						}}
 						type="ghost"
@@ -285,14 +285,14 @@
 						Refresh login
 					</Button>
 					<Button
-						on:click={() => (logoutOpen = true)}
+						onclick={() => (logoutOpen = true)}
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--exit-line]"
 					>
 						Log out
 					</Button>
-				</svelte:fragment>
+				{/snippet}
 			</Dropdown>
 		{/if}
 
@@ -328,11 +328,11 @@
 		and your downloaded songs stay on this computer. The osu! session key is removed too.
 	</p>
 	<div class="mt-5 flex justify-end gap-2">
-		<Button type="ghost" on:click={() => (logoutOpen = false)}>Cancel</Button>
+		<Button type="ghost" onclick={() => (logoutOpen = false)}>Cancel</Button>
 		<Button
 			type="primary"
 			disabled={loggingOut}
-			on:click={async () => {
+			onclick={async () => {
 				loggingOut = true;
 				try {
 					await logout();
@@ -357,7 +357,7 @@
 		<Button
 			type="primary"
 			class="w-full mt-4"
-			on:click={async () => {
+			onclick={async () => {
 				await updateApp();
 			}}>Update Now</Button
 		>

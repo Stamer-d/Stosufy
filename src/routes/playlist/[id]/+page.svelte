@@ -29,7 +29,6 @@
 		updateSongQueue
 	} from '#lib/stores/audio.ts';
 	import { page } from '$app/state';
-	import { toStore } from 'svelte/store';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import ContextMenu from '#lib/components/ContextMenu.svelte';
 	import SongToPlaylistModal from '#lib/components/SongToPlaylistModal.svelte';
@@ -46,25 +45,30 @@
 	import { matchesQuery } from '#lib/stores/search.ts';
 	import { sortOptions, sortSongs } from '#lib/songSort.ts';
 
-	const pagePlaylistId = toStore(() => page.params?.id);
-	$: playlistId = $pagePlaylistId;
+	let playlistId = $derived(page.params?.id);
 	// The "Downloaded Songs" playlist has the id -1
-	$: isDownloadedPlaylist = playlistId === '-1';
-	$: isLiked = playlistId == String(LIKED_ID);
+	let isDownloadedPlaylist = $derived(playlistId === '-1');
+	let isLiked = $derived(playlistId == String(LIKED_ID));
 	// The user's own, a saved one of someone else, or one opened from Community playlists
-	$: playlistData =
+	let playlistData = $derived(
 		$playlists.find((playlist) => playlist.id == playlistId) ??
-		$savedPlaylists.find((playlist) => playlist.id == playlistId) ??
-		$otherPlaylists[playlistId];
-	$: isOwn = playlistData?.created_by != null && playlistData.created_by == $user?.stosufy_id;
+			$savedPlaylists.find((playlist) => playlist.id == playlistId) ??
+			$otherPlaylists[playlistId]
+	);
+	let isOwn = $derived(
+		playlistData?.created_by != null && playlistData.created_by == $user?.stosufy_id
+	);
 	/** A public playlist of someone else: only to listen to and save */
-	$: isOther =
-		!!playlistData && !isDownloadedPlaylist && !isLiked && !isOwn && Number(playlistId) > 0;
-	$: isSaved = $savedPlaylists.some((playlist) => playlist.id == playlistId);
-	let missing = '';
-	$: if (playlistId && !playlistData && Number(playlistId) > 0 && $keyStore.access_token) {
-		openOther(playlistId);
-	}
+	let isOther = $derived(
+		!!playlistData && !isDownloadedPlaylist && !isLiked && !isOwn && Number(playlistId) > 0
+	);
+	let isSaved = $derived($savedPlaylists.some((playlist) => playlist.id == playlistId));
+	let missing = $state('');
+	$effect(() => {
+		if (playlistId && !playlistData && Number(playlistId) > 0 && $keyStore.access_token) {
+			openOther(playlistId);
+		}
+	});
 	async function openOther(id) {
 		missing = '';
 		try {
@@ -73,14 +77,15 @@
 			if (id === playlistId) missing = "This playlist is private or doesn't exist anymore.";
 		}
 	}
-	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
-	$: songs = $playlistSongsCache[playlistId]?.songs || [];
+	let isLoadingSongs = $derived($playlistLoadingStatus[playlistId] || false);
+	// (taken out right away when a song is removed, before the cache has it)
+	let songs = $derived($playlistSongsCache[playlistId]?.songs || []);
 	// How long it lasts (once its songs are loaded)
-	$: duration = songsLength(songs);
+	let duration = $derived(songsLength(songs));
 
 	// Sorting (remembered per playlist) and filtering; playing follows what's shown
-	let filterText = '';
-	$: sort = $userSettings.settings?.playlistSort?.[playlistId] ?? 'custom';
+	let filterText = $state('');
+	let sort = $derived($userSettings.settings?.playlistSort?.[playlistId] ?? 'custom');
 	// Genre and language: from the song, else from the downloaded set (see backfillDetails)
 	const detailsOf = (song) => {
 		const stored = $mapDataStore[song.id];
@@ -92,61 +97,75 @@
 			songSource: song.songSource ?? stored?.songSource ?? ''
 		};
 	};
-	$: detailed = songs.map(detailsOf);
-	let genre = '';
-	let language = '';
-	$: (playlistId, (genre = ''), (language = ''));
+	let detailed = $derived(songs.map(detailsOf));
+	let genre = $state('');
+	let language = $state('');
+	// (each playlist starts without a genre or language chosen)
+	$effect(() => {
+		void playlistId;
+		genre = '';
+		language = '';
+	});
 	const counted = (values) =>
 		Object.entries(
 			values.filter(Boolean).reduce((all, v) => ({ ...all, [v]: (all[v] ?? 0) + 1 }), {})
 		).sort((a, b) => b[1] - a[1]);
-	$: genres = counted(detailed.map((song) => song.genre));
-	$: languages = counted(detailed.map((song) => song.language));
-	$: visibleSongs = sortSongs(
-		detailed.filter(
-			(song) =>
-				(!filterText.trim() || matchesQuery(song, filterText)) &&
-				(!genre || song.genre === genre) &&
-				(!language || song.language === language)
-		),
-		sort
+	let genres = $derived(counted(detailed.map((song) => song.genre)));
+	let languages = $derived(counted(detailed.map((song) => song.language)));
+	let visibleSongs = $derived(
+		sortSongs(
+			detailed.filter(
+				(song) =>
+					(!filterText.trim() || matchesQuery(song, filterText)) &&
+					(!genre || song.genre === genre) &&
+					(!language || song.language === language)
+			),
+			sort
+		)
 	);
 	// Only the rows on screen (and a few around them) exist: big libraries (thousands of
 	// songs) stay smooth, also when the playing song changes. Every row is ROW pixels tall.
 	const ROW = 56;
 	const AROUND = 12;
-	let listEl = null;
+	let listEl = $state(null);
 	let scrollEl = null;
-	let firstRow = 0;
-	let rowCount = 40;
+	let firstRow = $state(0);
+	let rowCount = $state(40);
 	function updateRows() {
 		if (!listEl || !scrollEl) return;
 		const top = listEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top;
 		firstRow = Math.max(0, Math.floor(-top / ROW) - AROUND);
 		rowCount = Math.ceil(scrollEl.clientHeight / ROW) + AROUND * 2;
 	}
-	$: if (listEl && !scrollEl) {
+	$effect(() => {
+		if (!listEl || scrollEl) return;
 		scrollEl = listEl.closest('[data-scroll-container]');
 		scrollEl?.addEventListener('scroll', updateRows, { passive: true });
 		window.addEventListener('resize', updateRows);
 		updateRows();
-	}
+	});
 	onDestroy(() => {
 		scrollEl?.removeEventListener('scroll', updateRows);
 		if (typeof window !== 'undefined') window.removeEventListener('resize', updateRows);
 	});
-	$: (visibleSongs, playlistId, listEl && requestAnimationFrame(updateRows));
-	$: shownSongs = visibleSongs.slice(firstRow, firstRow + rowCount);
+	// (the rows again when the list or the playlist changes)
+	$effect(() => {
+		void visibleSongs;
+		void playlistId;
+		if (listEl) requestAnimationFrame(updateRows);
+	});
+	let shownSongs = $derived(visibleSongs.slice(firstRow, firstRow + rowCount));
 
 	// Dragging songs reorders the playlist; only in its own order, unfiltered, if it's yours
-	$: canReorder =
+	let canReorder = $derived(
 		!isDownloadedPlaylist &&
-		sort === 'custom' &&
-		!filterText.trim() &&
-		playlistData?.created_by != null &&
-		playlistData.created_by == $user?.stosufy_id;
-	let dragFrom = null;
-	let dropAt = null;
+			sort === 'custom' &&
+			!filterText.trim() &&
+			playlistData?.created_by != null &&
+			playlistData.created_by == $user?.stosufy_id
+	);
+	let dragFrom = $state(null);
+	let dropAt = $state(null);
 
 	function dragOver(event, index) {
 		if (dragFrom === null) return;
@@ -171,8 +190,10 @@
 	}
 
 	// Background wash of the header, taken from the cover
-	let headerColor = null;
-	$: if (playlistData) updateHeaderColor(playlistData);
+	let headerColor = $state(null);
+	$effect(() => {
+		if (playlistData) updateHeaderColor(playlistData);
+	});
 
 	async function updateHeaderColor(playlist) {
 		if (playlist.id == -1) {
@@ -190,11 +211,11 @@
 		}
 	}
 
-	$: isPlayingThis = $songQueue.playlistId == playlistId && $currentSong?.isPlaying;
-	$: shuffleOn = $userSettings.settings?.shuffle || false;
+	let isPlayingThis = $derived($songQueue.playlistId == playlistId && $currentSong?.isPlaying);
+	let shuffleOn = $derived($userSettings.settings?.shuffle || false);
 	// With streaming on, songs that aren't downloaded play too (from the mirror)
-	$: streamable = ($userSettings.settings?.stream ?? false) && !$offline;
-	$: isCurrent = (song) =>
+	let streamable = $derived(($userSettings.settings?.stream ?? false) && !$offline);
+	const isCurrent = (song) =>
 		sameSong($currentSong?.song, song) && $songQueue.playlistId == playlistId;
 
 	async function playSong(index, song) {
@@ -215,19 +236,25 @@
 		await shuffleQueue();
 	}
 
-	let addPlaylistModal = {
+	let addPlaylistModal = $state({
 		open: false,
 		map: null
-	};
+	});
 
-	$: if (playlistId && playlistData) {
-		loadSongs();
-	}
+	$effect(() => {
+		if (playlistId && playlistData) loadSongs();
+	});
 
 	// Someone else's playlist: loaded fresh when opened, and again every minute while open
 	let refreshedOther = null;
 	let otherTimer = null;
-	$: if (isOther && playlistId !== refreshedOther) {
+	$effect(() => {
+		if (!isOther) {
+			clearInterval(otherTimer);
+			refreshedOther = null;
+			return;
+		}
+		if (playlistId === refreshedOther) return;
 		refreshedOther = playlistId;
 		refreshOtherPlaylist(playlistId).catch(() => {});
 		clearInterval(otherTimer);
@@ -235,11 +262,7 @@
 		otherTimer = setInterval(() => {
 			if (id === playlistId) refreshOtherPlaylist(id).catch(() => {});
 		}, 60_000);
-	}
-	$: if (!isOther) {
-		clearInterval(otherTimer);
-		refreshedOther = null;
-	}
+	});
 	onDestroy(() => clearInterval(otherTimer));
 
 	async function loadSongs(forceRefresh = false) {
@@ -351,16 +374,19 @@
 
 	// Read from the library store, so rows and the header follow downloads as they finish
 	// (a plain lookup in the template is only worked out once)
-	$: isDownloaded = (song) => Object.prototype.hasOwnProperty.call($mapDataStore, String(song.id));
-	$: missingSongs = songs.filter((song) => !isDownloaded(song));
+	const isDownloaded = (song) =>
+		Object.prototype.hasOwnProperty.call($mapDataStore, String(song.id));
+	let missingSongs = $derived(songs.filter((song) => !isDownloaded(song)));
 	// Downloading all goes through the download queue (one after another, waiting out osu!'s
 	// rate limit); it shows here while songs of this playlist are in it
-	$: missingIds = new Set(missingSongs.map((song) => String(song.id)));
-	$: queuedHere = $downloadQueue.items.filter(({ set }) => missingIds.has(String(set.id)));
-	$: downloadingAll = queuedHere.length > 0;
-	$: downloadProgress = songs.length
-		? ((songs.length - missingSongs.length) / songs.length) * 100
-		: 0;
+	let missingIds = $derived(new Set(missingSongs.map((song) => String(song.id))));
+	let queuedHere = $derived(
+		$downloadQueue.items.filter(({ set }) => missingIds.has(String(set.id)))
+	);
+	let downloadingAll = $derived(queuedHere.length > 0);
+	let downloadProgress = $derived(
+		songs.length ? ((songs.length - missingSongs.length) / songs.length) * 100 : 0
+	);
 
 	function downloadAllSongs() {
 		if ($offline) {
@@ -464,7 +490,7 @@
 				class="relative size-10 grid place-items-center rounded-full cursor-pointer transition {shuffleOn
 					? 'text-primary-500'
 					: 'text-white/60 hover:text-white'}"
-				on:click={toggleShuffle}
+				onclick={toggleShuffle}
 			>
 				<span class="icon-[mingcute--shuffle-line] size-7"></span>
 				{#if shuffleOn}
@@ -480,7 +506,7 @@
 					class="size-10 grid place-items-center rounded-full cursor-pointer transition {isSaved
 						? 'text-primary-500'
 						: 'text-white/60 hover:text-white'}"
-					on:click={() => toggleSavedPlaylist(playlistData)}
+					onclick={() => toggleSavedPlaylist(playlistData)}
 				>
 					<span
 						class="{isSaved
@@ -518,7 +544,7 @@
 						</svg>
 						<button
 							aria-label="Stop downloading"
-							on:click={stopDownloadingAll}
+							onclick={stopDownloadingAll}
 							class="absolute inset-0 grid place-items-center text-white/70 hover:text-white cursor-pointer"
 						>
 							<span class="icon-[mingcute--stop-fill] size-4"></span>
@@ -535,7 +561,7 @@
 						class="size-10 grid place-items-center rounded-full cursor-pointer transition {missing
 							? 'text-white/60 hover:text-white'
 							: 'text-primary-500 cursor-default'}"
-						on:click={downloadAllSongs}
+						onclick={downloadAllSongs}
 					>
 						<span
 							class="{missing
@@ -592,7 +618,7 @@
 						chip.name
 							? 'bg-white text-black'
 							: 'bg-white/[0.06] text-white/75 hover:bg-white/10 hover:text-white'}"
-						on:click={() => (genre = genre === chip.name ? '' : chip.name)}
+						onclick={() => (genre = genre === chip.name ? '' : chip.name)}
 					>
 						{chip.name || 'All'}
 						<span class="ml-1 opacity-50 font-normal">{chip.n}</span>
@@ -633,27 +659,27 @@
 							aria-label={playable ? `Play ${song.title}` : `Download ${song.title}`}
 							draggable={canReorder}
 							title={canReorder ? 'Drag to change the order' : undefined}
-							on:dragstart={(e) => {
+							ondragstart={(e) => {
 								dragFrom = index;
 								e.dataTransfer.effectAllowed = 'move';
 								e.dataTransfer.setData('text/plain', String(index));
 							}}
-							on:dragover={(e) => dragOver(e, index)}
-							on:drop={drop}
-							on:dragend={() => (dragFrom = dropAt = null)}
+							ondragover={(e) => dragOver(e, index)}
+							ondrop={drop}
+							ondragend={() => (dragFrom = dropAt = null)}
 							class="group relative grid grid-cols-[2rem_minmax(0,1fr)_9rem_2rem_2.5rem] items-center gap-4 px-4 h-14 rounded-md cursor-pointer transition-colors {current
 								? 'bg-white/[0.08]'
 								: 'hover:bg-white/[0.06]'} {dragFrom === index ? 'opacity-40' : ''}"
-							on:mouseenter={() => prefetchOnHover(song, downloaded)}
-							on:mouseleave={cancelHoverPrefetch}
-							on:click={async () => {
+							onmouseenter={() => prefetchOnHover(song, downloaded)}
+							onmouseleave={cancelHoverPrefetch}
+							onclick={async () => {
 								if (playable) {
 									await playSong(index, song);
 								} else if (!download?.isDownloading) {
 									await startDownload(song, song.beatmaps[0].id);
 								}
 							}}
-							on:keydown={(e) => {
+							onkeydown={(e) => {
 								if (e.key === 'Enter') e.currentTarget.click();
 							}}
 						>
@@ -731,7 +757,7 @@
 										aria-label="Download {song.title}"
 										class="relative shrink-0 size-7 grid place-items-center rounded-full hover:bg-white/10 hover:text-white cursor-pointer transition"
 										disabled={download?.isDownloading}
-										on:click={async (e) => {
+										onclick={async (e) => {
 											e.stopPropagation();
 											await startDownload(song, song.beatmaps[0].id);
 										}}
@@ -768,7 +794,7 @@
 								class="size-8 grid place-items-center rounded-full cursor-pointer transition {liked
 									? 'text-primary-500'
 									: 'text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}"
-								on:click={(e) => {
+								onclick={(e) => {
 									e.stopPropagation();
 									toggleFavourite(song);
 								}}
@@ -790,7 +816,7 @@
 										: `Remove ${song.title} from playlist`}
 									disabled={!isDownloadedPlaylist && !song?.songInfo?.id}
 									class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
-									on:click={async (e) => {
+									onclick={async (e) => {
 										e.stopPropagation();
 										if (isDownloadedPlaylist) {
 											// (just this song of a set with several)
@@ -818,20 +844,20 @@
 								</div>
 							{/if}
 						</div>
-						<svelte:fragment slot="menu">
+						{#snippet menu()}
 							<QueueMenuItems {song} />
 							<Button
 								type="ghost"
 								class="w-full rounded-md text-sm hover:bg-secondary-400"
 								icon="icon-[mingcute--add-circle-line]"
-								on:click={() => {
+								onclick={() => {
 									addPlaylistModal.open = true;
 									addPlaylistModal.map = song;
 								}}
 							>
 								Add to playlist
 							</Button>
-						</svelte:fragment>
+						{/snippet}
 					</ContextMenu>
 				{/each}
 			</div>

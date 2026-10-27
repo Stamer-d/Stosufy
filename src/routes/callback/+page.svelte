@@ -47,7 +47,7 @@
 		<p class="text-red-500">Something got messed up here...</p>
 		<p>Please try again later or contact the creator of Stosufy!</p>
 		<Button
-			on:click={() => {
+			onclick={() => {
 				goto('/login', { replaceState: true });
 			}}>Back to Login</Button
 		>

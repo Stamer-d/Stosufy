@@ -18,7 +18,7 @@
 	type="ghost"
 	class="w-full rounded-md text-sm hover:bg-secondary-400"
 	icon="icon-[mingcute--corner-down-right-line]"
-	on:click={() => add(true)}
+	onclick={() => add(true)}
 >
 	Play next
 </Button>
@@ -26,7 +26,7 @@
 	type="ghost"
 	class="w-full rounded-md text-sm hover:bg-secondary-400"
 	icon="icon-[mingcute--playlist-2-line]"
-	on:click={() => add(false)}
+	onclick={() => add(false)}
 >
 	Add to queue
 </Button>
@@ -35,7 +35,7 @@
 		type="ghost"
 		class="w-full rounded-md text-sm hover:bg-secondary-400"
 		icon={$isFavourite(song) ? 'icon-[mingcute--heart-fill]' : 'icon-[mingcute--heart-line]'}
-		on:click={() => toggleFavourite(song)}
+		onclick={() => toggleFavourite(song)}
 	>
 		{$isFavourite(song) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
 	</Button>
@@ -44,7 +44,7 @@
 	type="ghost"
 	class="w-full rounded-md text-sm hover:bg-secondary-400"
 	icon="icon-[mingcute--radio-line]"
-	on:click={() => startRadio(song)}
+	onclick={() => startRadio(song)}
 >
 	Start radio
 </Button>
@@ -52,7 +52,7 @@
 	type="ghost"
 	class="w-full rounded-md text-sm hover:bg-secondary-400"
 	icon="icon-[mingcute--pin-line]"
-	on:click={() => {
+	onclick={() => {
 		updateHomeSettings({ heroBackground: 'pinned', pinnedSetId: song.id });
 		showToast(`Pinned "${song.title}" to the home page`);
 	}}

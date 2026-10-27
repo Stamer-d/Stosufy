@@ -349,7 +349,7 @@
 							</button>
 						{/if}
 					</div>
-					<svelte:fragment slot="menu">
+					{#snippet menu()}
 						{#if isVirtual(playlist)}
 							<PlaylistMenuItems {playlist} kind="virtual" />
 						{:else}
@@ -360,7 +360,7 @@
 								onDelete={() => askDelete(playlist)}
 							/>
 						{/if}
-					</svelte:fragment>
+					{/snippet}
 				</ContextMenu>
 			</li>
 		{/each}
@@ -395,14 +395,14 @@
 								</span>
 							</span>
 						</button>
-						<svelte:fragment slot="menu">
+						{#snippet menu()}
 							<PlaylistMenuItems
 								playlist={smart}
 								kind="smart"
 								onEdit={() => goto(`/smart/${smart.id}?edit`)}
 								onDelete={() => askDelete(smart, true)}
 							/>
-						</svelte:fragment>
+						{/snippet}
 					</ContextMenu>
 				</li>
 			{/each}
@@ -445,9 +445,9 @@
 								<span class="icon-[mingcute--bookmark-remove-line] size-[18px]"></span>
 							</button>
 						</div>
-						<svelte:fragment slot="menu">
+						{#snippet menu()}
 							<PlaylistMenuItems {playlist} kind="saved" />
-						</svelte:fragment>
+						{/snippet}
 					</ContextMenu>
 				</li>
 			{/each}
@@ -460,9 +460,9 @@
 	<p>
 		Do you really want to delete <strong>{playlistToDelete?.title}</strong>? This cannot be undone.
 	</p>
-	<svelte:fragment slot="footer">
+	{#snippet footer()}
 		<Button
-			on:click={() => {
+			onclick={() => {
 				deleteModalOpen = false;
 			}}
 		>
@@ -471,7 +471,7 @@
 		<Button
 			type="primary"
 			class="bg-red-500! hover:bg-red-600! active:bg-red-700!"
-			on:click={async () => {
+			onclick={async () => {
 				deleteModalOpen = false;
 				if (playlistToDelete.smart) deleteSmart(playlistToDelete.id);
 				else await deleteClickedPlaylist(playlistToDelete.id);
@@ -479,7 +479,7 @@
 		>
 			Delete
 		</Button>
-	</svelte:fragment>
+	{/snippet}
 </Modal>
 
 <Modal title="Edit details" bind:open={editPlaylistModal.open}>
@@ -555,9 +555,9 @@
 			</label>
 		</div>
 	</div>
-	<svelte:fragment slot="footer">
+	{#snippet footer()}
 		<Button
-			on:click={() => {
+			onclick={() => {
 				editPlaylistModal.open = false;
 			}}
 		>
@@ -565,10 +565,10 @@
 		</Button>
 		<Button
 			type="primary"
-			on:click={handleSavePlaylistChanges}
+			onclick={handleSavePlaylistChanges}
 			disabled={!editPlaylistModal.title || saving}
 		>
 			Save Changes
 		</Button>
-	</svelte:fragment>
+	{/snippet}
 </Modal>

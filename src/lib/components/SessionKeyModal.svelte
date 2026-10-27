@@ -88,7 +88,7 @@
 					{showSteps ? 'Hide the steps' : 'Where do I find it?'}
 				</button>
 				<span class="flex-1"></span>
-				<Button type="primary" disabled={checking} on:click={save}>
+				<Button type="primary" disabled={checking} onclick={save}>
 					{checking ? 'Checking…' : 'Save key'}
 				</Button>
 			</div>

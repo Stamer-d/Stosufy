@@ -1,15 +1,22 @@
 <script lang="ts">
-	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import type { Snippet } from 'svelte';
 	import { fly } from 'svelte/transition';
 
-	let x = 0;
-	let y = 0;
-	let showMenu = false;
-	export let disabled = false;
-	let className = '';
-	export { className as class };
+	/** `menu`: what the right-click shows */
+	let {
+		disabled = false,
+		class: className = '',
+		children,
+		menu
+	}: { disabled?: boolean; class?: string; children?: Snippet; menu?: Snippet } = $props();
 
-	const dispatch = createEventDispatcher();
+	let x = $state(0);
+	let y = $state(0);
+	let showMenu = $state(false);
+	// (moved in when it would go past the window's edge)
+	let adjustedX = $state(0);
+	let adjustedY = $state(0);
 
 	const CLOSE_ALL_CONTEXT_MENUS = 'closeAllContextMenus';
 
@@ -21,49 +28,31 @@
 
 		window.dispatchEvent(new CustomEvent(CLOSE_ALL_CONTEXT_MENUS));
 
-		x = event.clientX;
-		y = event.clientY;
+		x = adjustedX = event.clientX;
+		y = adjustedY = event.clientY;
 
 		showMenu = true;
-
-		dispatch('open', { x, y });
 	}
 
-	function handleClickOutside(event: MouseEvent) {
-		if (showMenu) {
-			showMenu = false;
-			dispatch('close');
-		}
+	function close() {
+		showMenu = false;
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
-		if (event.key === 'Escape' && showMenu) {
-			showMenu = false;
-			dispatch('close');
-		}
-	}
-
-	function handleCloseAllContextMenus() {
-		if (showMenu) {
-			showMenu = false;
-			dispatch('close');
-		}
+		if (event.key === 'Escape') close();
 	}
 
 	onMount(() => {
-		document.addEventListener('click', handleClickOutside);
+		document.addEventListener('click', close);
 		document.addEventListener('keydown', handleKeyDown);
-		window.addEventListener(CLOSE_ALL_CONTEXT_MENUS, handleCloseAllContextMenus);
+		window.addEventListener(CLOSE_ALL_CONTEXT_MENUS, close);
 	});
 
 	onDestroy(() => {
-		document.removeEventListener('click', handleClickOutside);
+		document.removeEventListener('click', close);
 		document.removeEventListener('keydown', handleKeyDown);
-		window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS, handleCloseAllContextMenus);
+		window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS, close);
 	});
-
-	$: adjustedX = x;
-	$: adjustedY = y;
 
 	function adjustMenuPosition(node: HTMLElement) {
 		const rect = node.getBoundingClientRect();
@@ -81,8 +70,8 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="context-menu-container block {className}" on:contextmenu={handleContextMenu}>
-	<slot></slot>
+<div class="context-menu-container block {className}" oncontextmenu={handleContextMenu}>
+	{@render children?.()}
 
 	{#if showMenu}
 		<div
@@ -94,7 +83,7 @@
 			<div
 				class="bg-secondary-300 rounded-lg min-w-56 p-1.5 shadow-xl shadow-black/40 ring-1 ring-white/5"
 			>
-				<slot name="menu"></slot>
+				{@render menu?.()}
 			</div>
 		</div>
 	{/if}

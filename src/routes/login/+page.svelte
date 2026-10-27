@@ -18,21 +18,25 @@
 	import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 	import { goto } from '$app/navigation';
 
-	let sessionKeyValid: Pick<SessionKeyCheck, 'status' | 'status_code'> = {
+	let sessionKeyValid: Pick<SessionKeyCheck, 'status' | 'status_code'> = $state({
 		status: false
-	};
-	let showInfo = false;
-	let checking = false;
+	});
+	let showInfo = $state(false);
+	let checking = $state(false);
 	// The session key is optional (only downloads need it); a wrong one is pointed out
-	$: keyEntered = !!$keyStore.sessionKey?.trim();
-	$: keyWrong = keyEntered && !checking && !sessionKeyValid.status && !!sessionKeyValid.status_code;
+	let keyEntered = $derived(!!$keyStore.sessionKey?.trim());
+	let keyWrong = $derived(
+		keyEntered && !checking && !sessionKeyValid.status && !!sessionKeyValid.status_code
+	);
 
 	// The osu! Songs folder, imported once logged in
-	let osuFolder: string | null = null;
-	let detectedFolder: string | null = null;
-	let useFolder = false;
+	let osuFolder: string | null = $state(null);
+	let detectedFolder: string | null = $state(null);
+	let useFolder = $state(false);
 	defaultOsuSongsFolder().then((folder) => (detectedFolder = folder));
-	$: setPendingOsuFolder(useFolder ? osuFolder : null);
+	$effect(() => {
+		setPendingOsuFolder(useFolder ? osuFolder : null);
+	});
 
 	async function chooseFolder() {
 		const folder = await pickOsuSongsFolder();
@@ -55,7 +59,7 @@
 		checking = false;
 	}
 
-	let loginError: string | null = null;
+	let loginError: string | null = $state(null);
 	let stopListening: (() => void) | null = null;
 	let destroyed = false;
 
@@ -142,7 +146,7 @@
 				id="session-key"
 				bind:value={$keyStore.sessionKey}
 				type="password"
-				on:blur={checkKey}
+				onblur={checkKey}
 				placeholder="Paste your session key"
 			></Input>
 			<p class="mt-2 text-xs text-secondary-600">
@@ -183,7 +187,7 @@
 					{#if detectedFolder}
 						<Button
 							class="flex-1 justify-center"
-							on:click={() => {
+							onclick={() => {
 								osuFolder = detectedFolder;
 								useFolder = true;
 							}}
@@ -192,7 +196,7 @@
 							Use my osu! songs
 						</Button>
 					{/if}
-					<Button class="flex-1 justify-center" on:click={chooseFolder}>
+					<Button class="flex-1 justify-center" onclick={chooseFolder}>
 						<span class="icon-[mingcute--folder-open-line] size-4"></span>
 						{detectedFolder ? 'Other osu! folder' : 'Pick your osu! folder'}
 					</Button>
@@ -209,7 +213,7 @@
 			class="mt-6 w-full justify-center h-11"
 			type="primary"
 			disabled={checking || keyWrong}
-			on:click={async () => {
+			onclick={async () => {
 				await open(osuAuthUrl);
 			}}
 		>

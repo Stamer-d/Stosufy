@@ -130,7 +130,7 @@
 				min={0}
 				max={1}
 				step={0.05}
-				on:change={(e) => updateUserSettings({ hitsoundVolume: e.detail })}
+				onchange={(value) => updateUserSettings({ hitsoundVolume: value })}
 			/>
 		</div>
 
@@ -159,13 +159,13 @@
 		{/if}
 		<div class="mt-2 flex flex-wrap justify-end gap-2">
 			{#if selected.startsWith('stosufy:')}
-				<Button type="ghost" class="text-xs h-7!" on:click={removeSelected}>Remove skin</Button>
+				<Button type="ghost" class="text-xs h-7!" onclick={removeSelected}>Remove skin</Button>
 			{/if}
 			<Button
 				type="ghost"
 				class="text-xs h-7!"
 				icon="icon-[mingcute--search-line]"
-				on:click={() => openUrl('https://skins.osuck.net/')}
+				onclick={() => openUrl('https://skins.osuck.net/')}
 			>
 				Find skins
 			</Button>
@@ -173,7 +173,7 @@
 				type="ghost"
 				class="text-xs h-7!"
 				icon="icon-[mingcute--folder-open-line]"
-				on:click={chooseFolder}
+				onclick={chooseFolder}
 			>
 				{osuFolder ? 'Other osu! folder' : 'Choose osu! folder'}
 			</Button>
@@ -182,7 +182,7 @@
 				class="text-xs h-7!"
 				icon="icon-[mingcute--download-2-line]"
 				disabled={$skinTask.state === 'working'}
-				on:click={importOsk}
+				onclick={importOsk}
 			>
 				Import skin (.osk)
 			</Button>
@@ -220,7 +220,7 @@
 				min={-100}
 				max={100}
 				step={5}
-				on:change={(e) => updateUserSettings({ hitsoundOffset: e.detail })}
+				onchange={(value) => updateUserSettings({ hitsoundOffset: value })}
 			/>
 			<p class="mt-1.5 text-xs text-secondary-600">
 				If the hitsounds come early or late, move them here.

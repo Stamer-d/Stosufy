@@ -1,22 +1,33 @@
 <script>
-	// Props
-	export let value = 0; // Current value
-	export let min = 0; // Minimum value
-	export let max = 1; // Maximum value
-	export let step = 0.01; // Step size
-	export let disabled = false; // Disabled state
-
-	// Create custom event dispatcher
-	import { createEventDispatcher } from 'svelte';
-	const dispatch = createEventDispatcher();
+	/**
+	 * A slider: `oninput` while it moves and `onchange` (both with the value)
+	 * @type {{
+	 *   value?: number,
+	 *   min?: number,
+	 *   max?: number,
+	 *   step?: number,
+	 *   disabled?: boolean,
+	 *   oninput?: (value: number) => void,
+	 *   onchange?: (value: number) => void
+	 * }}
+	 */
+	let {
+		value = $bindable(0),
+		min = 0,
+		max = 1,
+		step = 0.01,
+		disabled = false,
+		oninput,
+		onchange
+	} = $props();
 
 	function handleInput(event) {
 		value = parseFloat(event.target.value);
-		dispatch('input', value);
-		dispatch('change', value);
+		oninput?.(value);
+		onchange?.(value);
 	}
 
-	$: percentage = ((value - min) / (max - min)) * 100;
+	let percentage = $derived(((value - min) / (max - min)) * 100);
 </script>
 
 <div class="range-container relative flex-1 h-1 bg-white/15 rounded-full group">
@@ -34,7 +45,7 @@
 		{step}
 		{disabled}
 		bind:value
-		on:input={handleInput}
+		oninput={handleInput}
 	/>
 </div>
 

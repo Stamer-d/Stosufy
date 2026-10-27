@@ -12,18 +12,23 @@
 	import { keyStore } from '#lib/stores/auth.ts';
 	import MapperLink from './MapperLink.svelte';
 
-	/** @type {import('#lib/types.ts').MapSet} */
-	export let map;
-	export let isDownloaded = false;
-	/** @type {import('#lib/types.ts').MapSet | null} */
-	export let playMap = null;
+	/**
+	 * A beatmap set as a card (the search, a profile). `playMap`: set to the set to play.
+	 * @type {{
+	 *   map: import('#lib/types.ts').MapSet,
+	 *   isDownloaded?: boolean,
+	 *   playMap?: import('#lib/types.ts').MapSet | null
+	 * }}
+	 */
+	let { map, isDownloaded = false, playMap = $bindable(null) } = $props();
 
-	$: sortedBeatmaps = sortAndColorDifficulties(map.beatmaps);
-	$: status = beatmapStatus(map.status);
-	$: isPlaying =
-		$currentSong.song?.id == map.id && $currentSong.isPlaying && $songQueue.type != 'playlist';
-	$: download = $downloads[map.id];
-	let coverFailed = false;
+	let sortedBeatmaps = $derived(sortAndColorDifficulties(map.beatmaps));
+	let status = $derived(beatmapStatus(map.status));
+	let isPlaying = $derived(
+		$currentSong.song?.id == map.id && $currentSong.isPlaying && $songQueue.type != 'playlist'
+	);
+	let download = $derived($downloads[map.id]);
+	let coverFailed = $state(false);
 
 	function startDownload(mapData, mapId) {
 		return downloadBeatmap(mapData, mapId, $keyStore.sessionKey, $keyStore.access_token).then(
@@ -55,8 +60,8 @@
 
 <article
 	class="group relative rounded-lg overflow-hidden bg-secondary-200 hover:bg-secondary-300 transition-colors"
-	on:mouseenter={() => prefetchOnHover(map, isDownloaded)}
-	on:mouseleave={cancelHoverPrefetch}
+	onmouseenter={() => prefetchOnHover(map, isDownloaded)}
+	onmouseleave={cancelHoverPrefetch}
 >
 	<div
 		class="relative aspect-[400/140] overflow-hidden"
@@ -68,7 +73,7 @@
 				alt=""
 				loading="lazy"
 				class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-				on:error={() => (coverFailed = true)}
+				onerror={() => (coverFailed = true)}
 			/>
 		{:else}
 			<div class="size-full grid place-items-center">
@@ -92,7 +97,7 @@
 			class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 cursor-pointer transition duration-200 hover:scale-105 hover:bg-primary-400 {isPlaying
 				? 'opacity-100 translate-y-0'
 				: 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100'}"
-			on:click={() => {
+			onclick={() => {
 				if ($currentSong.song?.id == map.id && $songQueue.type != 'playlist') {
 					togglePlayback();
 				} else {
@@ -140,7 +145,7 @@
 					title="Delete download"
 					aria-label="Delete download of {map.title}"
 					class="size-8 grid place-items-center rounded-full text-secondary-600 hover:text-red-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer transition"
-					on:click={async () => {
+					onclick={async () => {
 						try {
 							await deleteSong(map.id);
 						} catch (err) {
@@ -159,7 +164,7 @@
 				title="Download"
 				aria-label="Download {map.title}"
 				class="size-8 shrink-0 grid place-items-center rounded-full text-secondary-600 hover:text-white hover:bg-secondary-400 cursor-pointer transition"
-				on:click={async () => {
+				onclick={async () => {
 					// Errors are shown as a toast by downloadBeatmap
 					await startDownload(map, map.beatmaps[0].id).catch(() => {});
 				}}
