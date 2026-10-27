@@ -363,7 +363,7 @@
 				</h2>
 				<p class="text-white/80 font-medium truncate">
 					{hero.song.artist}{#if hero.song.creator}
-						· mapped by <MapperLink
+						{' '}· mapped by <MapperLink
 							name={hero.song.creator}
 							id={hero.song.user_id ?? hero.song.creatorId}
 						/>{/if}
@@ -659,7 +659,7 @@
 								>
 								<span class="block text-sm text-secondary-600 truncate">
 									{song.artist}{#if song.creator}
-										· mapped by <MapperLink
+										{' '}· mapped by <MapperLink
 											name={song.creator}
 											id={song.user_id ?? song.creatorId}
 										/>{/if}

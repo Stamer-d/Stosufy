@@ -339,7 +339,7 @@
 		</div>
 	</div>
 
-	<div class="px-6 flex flex-col gap-10">
+	<div class="px-6 pt-8 flex flex-col gap-10">
 		{#if error && !profile}
 			<p class="text-secondary-600">Couldn't load the osu! profile: {error}</p>
 		{/if}

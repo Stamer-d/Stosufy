@@ -168,7 +168,7 @@
 					<div class="p-2.5 rounded-xl bg-white/[0.04]" title={hint}>
 						<p class="text-[10px] font-bold uppercase tracking-wide text-white/45">{name}</p>
 						<p class="text-lg font-extrabold tabular-nums leading-tight">
-							{value}<span class="text-[10px] font-semibold text-white/45"> {unit}</span>
+							{value} <span class="text-[10px] font-semibold text-white/45">{unit}</span>
 						</p>
 					</div>
 				{/each}

@@ -86,7 +86,7 @@
 				<div>
 					<p class="text-[10px] font-bold uppercase text-white/50">{label}</p>
 					<p class="text-lg font-extrabold tabular-nums leading-tight">
-						{value}<span class="text-[10px] font-semibold text-white/50"> {unit}</span>
+						{value} <span class="text-[10px] font-semibold text-white/50">{unit}</span>
 					</p>
 				</div>
 			{/each}

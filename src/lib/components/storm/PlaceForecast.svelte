@@ -287,7 +287,7 @@
 						<WindArrow towards={now.windFrom + 180} size={12} />Wind
 					</p>
 					<p class="text-sm font-extrabold tabular-nums">
-						{Math.round(now.wind)}<span class="text-[10px] font-semibold text-white/60"> km/h</span>
+						{Math.round(now.wind)} <span class="text-[10px] font-semibold text-white/60">km/h</span>
 					</p>
 					<p class="text-[10px] text-white/60 truncate">{direction(now.windFrom)} · Bft {force}</p>
 				</div>
@@ -303,11 +303,8 @@
 						<span class="icon-[mingcute--umbrella-fill] size-3"></span>Today
 					</p>
 					<p class="text-sm font-extrabold tabular-nums">
-						{today.rain >= 10 ? Math.round(today.rain) : today.rain.toFixed(1)}<span
-							class="text-[10px] font-semibold text-white/60"
-						>
-							mm</span
-						>
+						{today.rain >= 10 ? Math.round(today.rain) : today.rain.toFixed(1)}
+						<span class="text-[10px] font-semibold text-white/60">mm</span>
 					</p>
 					<p class="text-[10px] text-white/60 truncate">{today.rainChance}% chance</p>
 				</div>
@@ -699,7 +696,7 @@
 			<section class="{card} p-3.5">
 				<p class={heading}>Pressure</p>
 				<p class="mt-1 text-2xl font-extrabold tabular-nums leading-none">
-					{Math.round(now.pressure)}<span class="text-xs font-semibold text-white/50"> hPa</span>
+					{Math.round(now.pressure)} <span class="text-xs font-semibold text-white/50">hPa</span>
 				</p>
 				<p class="flex items-center gap-1 text-xs text-white/60">
 					<span
@@ -716,9 +713,8 @@
 				<p class="mt-1 text-2xl font-extrabold tabular-nums leading-none">
 					{now.visibility >= 10000
 						? Math.round(now.visibility / 1000)
-						: (now.visibility / 1000).toFixed(1)}<span class="text-xs font-semibold text-white/50">
-						km</span
-					>
+						: (now.visibility / 1000).toFixed(1)}
+					<span class="text-xs font-semibold text-white/50">km</span>
 				</p>
 				<p class="text-xs text-white/60">
 					{now.visibility < 1000 ? 'Fog' : now.visibility < 5000 ? 'Hazy' : 'Clear view'}

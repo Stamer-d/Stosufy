@@ -1192,7 +1192,8 @@
 				<p class="text-sm tabular-nums text-white/70">
 					{#if multiplier !== 1}<span class="text-primary-400 font-semibold"
 							>×{multiplier.toFixed(2)}</span
-						> ·
+						>
+						·{' '}
 					{/if}{Math.round(progress * 100)}% done
 				</p>
 			</div>
