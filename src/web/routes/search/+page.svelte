@@ -1,4 +1,5 @@
 <script>
+	const base = __WEB_BASE__;
 	// Search: your playlists' songs first, then osu!'s (they stream); the searches of before
 	// while nothing is typed. osu!'s songs by status, genre, language and order, as in the
 	// desktop app (the same filters: they're in the account's settings).
@@ -276,6 +277,22 @@
 			</ul>
 		</div>
 	</div>
+{/if}
+
+{#if !query.trim() && !filtered}
+	<a
+		href="{base}/community"
+		class="mx-3 mt-1 mb-2 flex items-center gap-3 p-3 rounded-xl bg-gradient-to-r from-primary-300/40 to-white/[0.04] active:opacity-80"
+	>
+		<span class="size-11 grid place-items-center rounded-lg bg-black/25">
+			<span class="icon-[mingcute--earth-2-line] size-6"></span>
+		</span>
+		<span class="min-w-0 flex-1">
+			<span class="block font-semibold">Community playlists</span>
+			<span class="block text-sm text-white/70">Public playlists of other Stosufy users</span>
+		</span>
+		<span class="icon-[mingcute--right-line] size-5 text-white/60"></span>
+	</a>
 {/if}
 
 {#if !query.trim() && !filtered && recent.length}

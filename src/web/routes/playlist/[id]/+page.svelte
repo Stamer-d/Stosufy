@@ -28,7 +28,7 @@
 	import { webUser } from '../../../library';
 	import { queue, playing, toggle, shuffle } from '../../../player';
 	import { sortable } from '../../../sortable';
-	import { moveSongInPlaylist } from '../../../../lib/stores/playlist';
+	import { moveSongInPlaylist, toggleSavedPlaylist } from '../../../../lib/stores/playlist';
 
 	/** Rows shown: more as the list is scrolled */
 	const STEP = 100;
@@ -257,6 +257,21 @@
 					class="{autoOn || (songs.length && keptCount === songs.length)
 						? 'icon-[mingcute--check-circle-fill]'
 						: 'icon-[mingcute--download-2-line]'} size-7"
+				></span>
+			</button>
+		{/if}
+		{#if !own && Number(id) > 0 && playlist}
+			{@const saved = $savedPlaylists.some((p) => p.id == id)}
+			<button
+				aria-label={saved ? 'Remove from your library' : 'Save to your library'}
+				aria-pressed={saved}
+				class="size-10 grid place-items-center {saved ? 'text-primary-500' : 'text-white/60'}"
+				onclick={() => toggleSavedPlaylist(playlist)}
+			>
+				<span
+					class="{saved
+						? 'icon-[mingcute--bookmark-fill]'
+						: 'icon-[mingcute--bookmark-line]'} size-7"
 				></span>
 			</button>
 		{/if}
