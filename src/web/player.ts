@@ -160,7 +160,17 @@ function load(at = 0) {
 		objectUrl = own ? url : null;
 		lastTime = 0;
 		player.src = url;
-		if (at) player.currentTime = at;
+		// (where to start, once it knows how long the song is: before, browsers may forget it)
+		if (at) {
+			player.currentTime = at;
+			player.addEventListener(
+				'loadedmetadata',
+				() => {
+					if (loaded === song && player.currentTime < at - 1) player.currentTime = at;
+				},
+				{ once: true }
+			);
+		}
 		log(`start ${song.title} (${own ? 'downloaded' : 'stream'})`);
 		player.play().catch((error) => log(`play() turned down: ${error?.name}`));
 		save();
@@ -193,7 +203,11 @@ async function readNext() {
 }
 
 /** Plays `songs` from the one at `index` (shuffled when shuffle is on) */
-export function play(songs: MapSet[], index = 0, { shuffled: shuffleThem = false } = {}) {
+export function play(
+	songs: MapSet[],
+	index = 0,
+	{ shuffled: shuffleThem = false, at = 0 }: { shuffled?: boolean; at?: number } = {}
+) {
 	if (!songs.length) return;
 	if (shuffleThem) shuffle.set(true);
 	ordered = songs.map(slim);
@@ -206,7 +220,7 @@ export function play(songs: MapSet[], index = 0, { shuffled: shuffleThem = false
 	} else {
 		queue.set({ songs: ordered, index });
 	}
-	return load();
+	return load(at);
 }
 
 export function toggle() {

@@ -19,6 +19,12 @@
 	import PlaylistCover from '../../lib/components/PlaylistCover.svelte';
 	import MixCover from '../../lib/components/MixCover.svelte';
 	import SongRow from '../SongRow.svelte';
+	import { onMount } from 'svelte';
+	import { friendActivity, watchFriends } from '../friends';
+
+	// (how many friends are on, at the friends button)
+	onMount(watchFriends);
+	let friendsOn = $derived($friendActivity.friends.filter((friend) => friend.online).length);
 
 	const hour = new Date().getHours();
 	const greeting =
@@ -121,13 +127,28 @@
 		<h1 class="text-3xl font-bold tracking-tight">
 			{greeting}{$webUser?.username ? `, ${$webUser.username}` : ''}
 		</h1>
-		<a
-			href="{base}/check"
-			aria-label="Checks"
-			class="-mr-2 size-11 shrink-0 grid place-items-center text-secondary-600"
-		>
-			<span class="icon-[mingcute--settings-3-line] size-7"></span>
-		</a>
+		<div class="-mr-2 flex shrink-0">
+			<a
+				href="{base}/friends"
+				aria-label="Friends"
+				class="relative size-11 grid place-items-center text-secondary-600"
+			>
+				<span class="icon-[mingcute--group-2-line] size-7"></span>
+				{#if friendsOn}
+					<span
+						class="absolute top-1.5 right-1.5 min-w-4 h-4 px-1 grid place-items-center rounded-full bg-green-500 text-[10px] font-bold text-black"
+						>{friendsOn}</span
+					>
+				{/if}
+			</a>
+			<a
+				href="{base}/check"
+				aria-label="Checks"
+				class="size-11 grid place-items-center text-secondary-600"
+			>
+				<span class="icon-[mingcute--settings-3-line] size-7"></span>
+			</a>
+		</div>
 	</div>
 
 	{#if hero}
