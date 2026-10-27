@@ -32,7 +32,7 @@ jobs:
             cache: linux
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Linux libraries
         if: matrix.platform == 'ubuntu-22.04'
@@ -42,7 +42,7 @@ jobs:
             libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - name: setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
