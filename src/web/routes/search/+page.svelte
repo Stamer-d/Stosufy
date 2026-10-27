@@ -1,6 +1,7 @@
 <script>
 	// osu!'s songs: search, play (they stream), like, add to a playlist, download
-	import { keyStore } from '../../shims/auth';
+	import { freshToken } from '../../shims/auth';
+	import { osuApi } from '../../shims/http';
 	import { play, slim } from '../../player';
 	import SongRow from '../../SongRow.svelte';
 
@@ -28,9 +29,7 @@
 	async function search(words, after = '') {
 		const params = new URLSearchParams({ q: words });
 		if (after) params.set('cursor_string', after);
-		const response = await fetch(`https://osu.ppy.sh/api/v2/beatmapsets/search?${params}`, {
-			headers: { Authorization: `Bearer ${$keyStore.access_token}` }
-		});
+		const response = await osuApi(`beatmapsets/search?${params}`, await freshToken());
 		if (!response.ok) throw new Error(`osu! answered ${response.status}`);
 		const data = await response.json();
 		return { songs: (data.beatmapsets ?? []).map(songOf), cursor: data.cursor_string ?? '' };

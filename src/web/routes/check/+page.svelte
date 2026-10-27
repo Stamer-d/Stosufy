@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { keyStore, webLoginSetup } from '../../shims/auth';
+	import { osuApi } from '../../shims/http';
 	import { getStosufyUser } from '../../../lib/api';
 	import { playlistSongsCache } from '../../../lib/stores/playlist';
 	import { streamUrl } from '../../player';
@@ -65,9 +66,8 @@
 		});
 		await check('osu! API (song details, search)', async () => {
 			if (!token) return { state: 'info', detail: 'Log in first' };
-			const response = await fetch('https://osu.ppy.sh/api/v2/me', {
-				headers: { Authorization: `Bearer ${token}` }
-			});
+			// (through the Stosufy API: osu! doesn't let web pages ask it)
+			const response = await osuApi('me', token);
 			return { state: response.ok ? 'ok' : 'fail', detail: `HTTP ${response.status}` };
 		});
 		const song = someSong();
