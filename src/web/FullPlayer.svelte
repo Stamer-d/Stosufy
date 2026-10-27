@@ -26,6 +26,8 @@
 	} from './player';
 	import Lyrics from './Lyrics.svelte';
 	import Triangles from '../lib/components/Triangles.svelte';
+	import SongSwipe from './SongSwipe.svelte';
+	import { handleImageError } from './shims/data';
 	import { songMenu } from './library';
 	import { swipe } from './gestures';
 	import { fly } from 'svelte/transition';
@@ -167,15 +169,20 @@
 					{/each}
 				</ol>
 			{:else}
-				<div
-					class="flex-1 min-h-0 grid place-items-center"
-					use:swipe={{ axis: 'x', onswipe: (direction) => (direction < 0 ? next() : previous()) }}
-				>
-					<img
-						src={bigCoverUrl(song)}
-						alt=""
-						class="w-full max-h-full aspect-square object-cover rounded-xl shadow-2xl bg-secondary-300"
-					/>
+				<div class="flex-1 min-h-0 flex items-center">
+					<SongSwipe class="w-full">
+						{#snippet item(shown)}
+							<div class="px-1">
+								<img
+									src={bigCoverUrl(shown)}
+									alt=""
+									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300"
+									style="max-width: min(100%, 46dvh)"
+									onerror={handleImageError}
+								/>
+							</div>
+						{/snippet}
+					</SongSwipe>
 				</div>
 			{/if}
 

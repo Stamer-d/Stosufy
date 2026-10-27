@@ -119,6 +119,8 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		(event) => {
 			const touch = event.touches[0];
 			if (!standalone() || touch.clientX > EDGE || rootOf(location.pathname)) return;
+			// (what swipes across itself keeps its swipe)
+			if ((event.target as HTMLElement).closest?.('[data-no-edge]')) return;
 			start = { x: touch.clientX, y: touch.clientY };
 			dx = 0;
 			tracking = false;

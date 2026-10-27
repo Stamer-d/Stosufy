@@ -3,9 +3,9 @@
 	// (tap it for the whole screen player, swipe it for the next one or the one before) and the
 	// tabs
 	import SongCover from '../lib/components/SongCover.svelte';
-	import { queue, playing, time, previewOnly, toggle, next, previous, playerOpen } from './player';
+	import { queue, playing, time, previewOnly, toggle, playerOpen } from './player';
 	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
-	import { swipe } from './gestures';
+	import SongSwipe from './SongSwipe.svelte';
 	import { TABS, currentTab, openTab } from './navigation';
 
 	let song = $derived($queue.songs[$queue.index] ?? null);
@@ -21,30 +21,29 @@
 			<div class="absolute inset-x-0 top-0 h-0.5 bg-white/10">
 				<div class="h-full bg-primary-400" style="width: {progress * 100}%"></div>
 			</div>
-			<div
-				class="flex items-center gap-3 pl-3 pr-2 pt-2.5 pb-2"
-				use:swipe={{ axis: 'x', onswipe: (direction) => (direction < 0 ? next() : previous()) }}
-			>
-				<button
-					class="min-w-0 flex-1 flex items-center gap-3 text-start"
-					aria-label="Open the player"
-					onclick={() => playerOpen.set(true)}
-				>
-					{#key song.id}
-						<SongCover
-							setId={song.id}
-							track={song.track}
-							title={song.title}
-							class="size-11 rounded-md shadow-md shadow-black/30"
-						/>
-					{/key}
-					<span class="min-w-0 flex-1">
-						<span class="block text-sm font-semibold truncate">{song.title}</span>
-						<span class="block text-xs text-secondary-600 truncate">
-							{song.artist}{$previewOnly ? ' · preview' : ''}
-						</span>
-					</span>
-				</button>
+			<div class="flex items-center gap-1 pl-3 pr-2 pt-2.5 pb-2">
+				<SongSwipe class="min-w-0 flex-1">
+					{#snippet item(shown)}
+						<button
+							class="w-full flex items-center gap-3 text-start"
+							aria-label="Open the player"
+							onclick={() => playerOpen.set(true)}
+						>
+							<SongCover
+								setId={shown.id}
+								track={shown.track}
+								title={shown.title}
+								class="size-11 rounded-md shadow-md shadow-black/30"
+							/>
+							<span class="min-w-0 flex-1 pr-2">
+								<span class="block text-sm font-semibold truncate">{shown.title}</span>
+								<span class="block text-xs text-secondary-600 truncate">
+									{shown.artist}{$previewOnly && shown === song ? ' · preview' : ''}
+								</span>
+							</span>
+						</button>
+					{/snippet}
+				</SongSwipe>
 				<button
 					aria-label={$isFavourite(song) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
 					class="size-10 shrink-0 grid place-items-center"
