@@ -7,7 +7,6 @@
 	import '../../app.css';
 	import '../web.css';
 	import { page } from '$app/state';
-	import { fade } from 'svelte/transition';
 	import { keyStore, loginExpired } from '../shims/auth';
 	import { loadLibrary } from '../library';
 	import '../listening';
@@ -15,6 +14,7 @@
 	import { queue } from '../player';
 	import { setupNavigation } from '../navigation';
 	import Dock from '../Dock.svelte';
+	import SongBackdrop from '../SongBackdrop.svelte';
 	import FullPlayer from '../FullPlayer.svelte';
 	import SongMenu from '../SongMenu.svelte';
 	import Toasts from '../Toasts.svelte';
@@ -41,19 +41,8 @@
 </script>
 
 <!-- The song's background behind the app, blurred and dimmed (like the desktop app's) -->
-<div class="fixed inset-0 -z-10 bg-app">
-	{#if song}
-		{#key song.id}
-			<img
-				src="https://assets.ppy.sh/beatmaps/{song.id}/covers/card@2x.jpg"
-				alt=""
-				class="absolute inset-0 size-full object-cover blur-2xl scale-125"
-				transition:fade={{ duration: 600 }}
-				onerror={(e) => e.currentTarget.classList.add('hidden')}
-			/>
-		{/key}
-		<div class="absolute inset-0 bg-app/75"></div>
-	{/if}
+<div class="fixed inset-0 -z-10">
+	<SongBackdrop {song} dim={song ? 0.75 : 1} />
 </div>
 
 <div
@@ -61,19 +50,20 @@
 >
 	{#if $offline}
 		<div
-			class="sticky top-[calc(env(safe-area-inset-top)+0.5rem)] z-20 mt-2 flex items-center gap-2 px-3 h-9 rounded-lg bg-amber-400/15 backdrop-blur-xl ring-1 ring-amber-300/25 text-xs text-amber-100"
+			class="sticky top-[calc(env(safe-area-inset-top)+0.5rem)] z-20 mt-2 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[#2b2410] ring-1 ring-amber-300/25 text-amber-100"
 		>
-			<span class="icon-[mingcute--wifi-off-line] size-4 text-amber-300"></span>
-			<span class="font-semibold">You're offline.</span>
-			<span class="text-amber-100/70 truncate">Your downloaded songs still play.</span>
+			<span class="icon-[mingcute--wifi-off-line] size-6 shrink-0 text-amber-300"></span>
+			<span class="min-w-0">
+				<span class="block font-semibold">You're offline</span>
+				<span class="block text-sm text-amber-100/70">Your downloaded songs still play.</span>
+			</span>
 		</div>
 	{/if}
 	<main
 		bind:this={panel}
-		class="mt-2 min-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-9.5rem)] rounded-xl {song
+		class="mt-3 min-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-9.5rem)] rounded-xl {song
 			? 'bg-panel/80'
 			: 'bg-panel'} overflow-clip"
-		style="view-transition-name: page"
 	>
 		{#if needsLogin}
 			<Login />
@@ -85,9 +75,7 @@
 
 <Dock />
 <!-- (what scrolls doesn't show behind the clock and the notch) -->
-<div
-	class="fixed inset-x-0 top-0 z-20 h-[env(safe-area-inset-top)] bg-app/80 backdrop-blur-xl"
-></div>
+<div class="fixed inset-x-0 top-0 z-20 h-[env(safe-area-inset-top)] bg-app"></div>
 <FullPlayer />
 <SongMenu />
 <Toasts />

@@ -123,13 +123,11 @@
 	}
 </script>
 
-<header
-	class="sticky top-[env(safe-area-inset-top)] z-10 px-3 pt-3 pb-2 bg-panel/90 backdrop-blur-xl"
->
+<header class="sticky top-[env(safe-area-inset-top)] z-10 px-3 pt-4 pb-3 bg-panel">
 	<label
-		class="flex items-center gap-2.5 h-11 px-4 rounded-full bg-white/[0.08] ring-1 ring-transparent focus-within:ring-white/20 focus-within:bg-white/10 transition"
+		class="flex items-center gap-3 h-12 px-4 rounded-full bg-white/[0.08] ring-1 ring-transparent focus-within:ring-white/20 focus-within:bg-white/10 transition"
 	>
-		<span class="icon-[mingcute--search-line] size-5 text-secondary-600"></span>
+		<span class="icon-[mingcute--search-line] size-6 text-secondary-600"></span>
 		<input
 			bind:value={query}
 			type="search"

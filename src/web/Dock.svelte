@@ -13,8 +13,7 @@
 </script>
 
 <div
-	class="fixed inset-x-0 bottom-0 z-20 bg-app/90 backdrop-blur-2xl backdrop-saturate-150 border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)]"
-	style="view-transition-name: dock"
+	class="fixed inset-x-0 bottom-0 z-20 bg-app border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)]"
 >
 	{#if song}
 		<div class="relative">

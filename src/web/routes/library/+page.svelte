@@ -37,27 +37,27 @@
 	}
 </script>
 
-<header class="px-4 pt-4 pb-2 flex items-center justify-between gap-3">
-	<h1 class="text-xl font-bold">Your Library</h1>
+<header class="px-4 pt-5 pb-3 flex items-center justify-between gap-3">
+	<h1 class="text-2xl font-bold tracking-tight">Your Library</h1>
 	<div class="flex items-center">
 		<button
 			aria-label="Reload"
-			class="size-10 grid place-items-center text-secondary-600"
+			class="size-11 grid place-items-center text-secondary-600"
 			disabled={$libraryState.loading}
 			onclick={() => loadLibrary($keyStore.access_token, true)}
 		>
 			<span
 				class="{$libraryState.loading
 					? 'icon-[svg-spinners--ring-resize]'
-					: 'icon-[mingcute--refresh-2-line]'} size-5"
+					: 'icon-[mingcute--refresh-2-line]'} size-6"
 			></span>
 		</button>
 		<button
 			aria-label="New playlist"
-			class="size-10 grid place-items-center text-secondary-600"
+			class="size-11 grid place-items-center text-secondary-600"
 			onclick={() => (creating = !creating)}
 		>
-			<span class="icon-[mingcute--add-line] size-6"></span>
+			<span class="icon-[mingcute--add-line] size-7"></span>
 		</button>
 	</div>
 </header>

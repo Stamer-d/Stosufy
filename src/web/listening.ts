@@ -58,15 +58,32 @@ export const topSongs = derived([history, libraryPool], ([{ songs, plays }]) => 
 		.map(([key]) => known(songs[key]));
 });
 
-// The radio's songs: the playlists' and the kept ones, each once
+// The radio's songs: the playlists' and the kept ones, each once. Made a moment after they
+// change, when nothing moves: thousands of songs, put together while a page opens, stutter.
 const keyOfSong = (song: MapSet) => `${song.id}:${song.track ?? 0}`;
-derived([playlistSongsCache, downloadedSongs], ([cache, kept]) => {
+let poolTimer: ReturnType<typeof setTimeout> | null = null;
+function makePool() {
+	poolTimer = null;
 	const all = new Map<string, MapSet>();
-	for (const { songs } of Object.values(cache))
+	for (const { songs } of Object.values(get(playlistSongsCache)))
 		for (const song of songs ?? []) all.set(keyOfSong(song), normalized(song));
-	for (const song of kept) if (!all.has(keyOfSong(song))) all.set(keyOfSong(song), song);
-	return [...all.values()];
-}).subscribe((songs) => libraryPool.set(songs));
+	for (const song of get(downloadedSongs))
+		if (!all.has(keyOfSong(song))) all.set(keyOfSong(song), song);
+	libraryPool.set([...all.values()]);
+}
+const poolLater = () => {
+	if (poolTimer) clearTimeout(poolTimer);
+	poolTimer = setTimeout(() => {
+		const idle = (window as { requestIdleCallback?: (run: () => void) => void })
+			.requestIdleCallback;
+		if (idle) idle(makePool);
+		else makePool();
+	}, 800);
+};
+if (typeof window !== 'undefined') {
+	playlistSongsCache.subscribe(poolLater);
+	downloadedSongs.subscribe(poolLater);
+}
 
 // Autoplay: songs like the last ones of the queue
 setSimilarSongs((seeds, exclude) =>

@@ -1,7 +1,7 @@
 // How the web app moves between pages, like an app on a phone:
 // - each tab keeps where you were in it (tapping it again goes back to its start, and at
 //   its start scrolls to the top)
-// - pages slide in from the right and back out to it (the View Transitions API)
+// - a new page slides in a little (from the right, or the left going back); tabs fade
 // - installed on the home screen, a swipe from the left edge goes back (iOS has no back
 //   gesture for web apps there)
 
@@ -81,16 +81,18 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		lastPath[get(currentTab)] = path;
 	});
 
+	// Only the new page moves (sliding in, or fading for another tab): cheap for a phone, not
+	// a picture of the whole page as the View Transitions API takes
+	let kind: 'forward' | 'back' | 'fade' | 'none' = 'none';
 	onNavigate((navigation) => {
 		const from = navigation.from?.url.pathname;
 		const to = navigation.to?.url.pathname;
-		if (!document.startViewTransition || !from || !to || from === to) return;
-		// (a tab to another: a fade; back: out to the right; else in from the right)
+		if (!from || !to || from === to) return void (kind = 'none');
 		const back =
 			navigation.type === 'popstate'
 				? ((navigation as { delta?: number }).delta ?? -1) < 0
 				: !!rootOf(to) && !rootOf(from);
-		const kind = swipedBack
+		kind = swipedBack
 			? 'none'
 			: switchingTab || (rootOf(from) && rootOf(to))
 				? 'fade'
@@ -99,14 +101,36 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 					: 'forward';
 		swipedBack = false;
 		switchingTab = false;
-		if (kind === 'none') return;
-		document.documentElement.dataset.nav = kind;
-		return new Promise((resolve) => {
-			document.startViewTransition(async () => {
-				resolve();
-				await navigation.complete;
-			});
+	});
+	afterNavigate(() => {
+		const element = page();
+		if (element && resetAfterBack) {
+			resetAfterBack = false;
+			element.style.transition = 'none';
+			element.style.transform = '';
+			element.animate(
+				[
+					{ transform: 'translateX(-28px)', opacity: 0.4 },
+					{ transform: 'none', opacity: 1 }
+				],
+				{ duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+			);
+			return;
+		}
+		if (!element || kind === 'none' || matchMedia('(prefers-reduced-motion: reduce)').matches)
+			return;
+		const frames: Keyframe[] =
+			kind === 'fade'
+				? [{ opacity: 0 }, { opacity: 1 }]
+				: [
+						{ transform: `translateX(${kind === 'forward' ? 36 : -36}px)`, opacity: 0.3 },
+						{ transform: 'none', opacity: 1 }
+					];
+		element.animate(frames, {
+			duration: kind === 'fade' ? 140 : 200,
+			easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)'
 		});
+		kind = 'none';
 	});
 
 	// Swipe from the left edge: back
@@ -154,16 +178,10 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		const element = page();
 		if (!tracking || !element) return;
 		if (dx > 90) {
-			element.style.transition = 'transform 160ms ease-out';
-			element.style.transform = `translateX(${window.innerWidth}px)`;
+			// Back: the page stays where the finger left it until the one before is there
 			swipedBack = true;
-			setTimeout(() => {
-				history.back();
-				setTimeout(() => {
-					element.style.transition = 'none';
-					element.style.transform = '';
-				}, 60);
-			}, 150);
+			resetAfterBack = true;
+			history.back();
 		} else {
 			element.style.transition = 'transform 200ms ease-out';
 			element.style.transform = '';
@@ -174,4 +192,5 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 }
 
 let swipedBack = false;
+let resetAfterBack = false;
 let switchingTab = false;

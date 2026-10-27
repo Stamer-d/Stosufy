@@ -116,15 +116,15 @@
 
 <div class="px-4 pt-5 pb-8 flex flex-col gap-8">
 	<div class="flex items-center justify-between gap-4 -mb-3">
-		<h1 class="text-2xl font-bold tracking-tight">
+		<h1 class="text-3xl font-bold tracking-tight">
 			{greeting}{$webUser?.username ? `, ${$webUser.username}` : ''}
 		</h1>
 		<a
 			href="{base}/check"
 			aria-label="Checks"
-			class="-mr-2 size-10 shrink-0 grid place-items-center text-secondary-600"
+			class="-mr-2 size-11 shrink-0 grid place-items-center text-secondary-600"
 		>
-			<span class="icon-[mingcute--settings-3-line] size-6"></span>
+			<span class="icon-[mingcute--settings-3-line] size-7"></span>
 		</a>
 	</div>
 

@@ -27,6 +27,7 @@
 	import Lyrics from './Lyrics.svelte';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongSwipe from './SongSwipe.svelte';
+	import SongBackdrop from './SongBackdrop.svelte';
 	import { handleImageError } from './shims/data';
 	import { songMenu } from './library';
 	import { swipe } from './gestures';
@@ -89,12 +90,7 @@
 		use:swipe={{ axis: 'y', only: 1, onswipe: close }}
 	>
 		<!-- The song's background, dimmed like the desktop app's, with osu!'s triangles -->
-		<img
-			src={bigCoverUrl(song)}
-			alt=""
-			class="absolute inset-0 size-full object-cover blur-2xl scale-125 pointer-events-none"
-		/>
-		<div class="absolute inset-0 bg-app/70 pointer-events-none"></div>
+		<SongBackdrop {song} dim={0.7} />
 		<Triangles count={14} seed={Number(song.id) || 3} />
 		<div class="relative flex items-center justify-between px-3 py-2">
 			<button aria-label="Close" class="size-11 grid place-items-center" onclick={close}>

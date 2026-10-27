@@ -28,25 +28,25 @@
 </script>
 
 <div
-	class="sticky top-[env(safe-area-inset-top)] z-10 -mb-12 h-12 px-1 flex items-center gap-1 rounded-t-xl transition-[background-color,opacity] duration-200 {gone
+	class="sticky top-[env(safe-area-inset-top)] z-10 -mb-14 h-14 px-1 flex items-center gap-1 rounded-t-xl transition-[background-color,opacity] duration-200 {gone
 		? 'opacity-100'
 		: 'opacity-0 pointer-events-none'}"
 	style="background-color: color-mix(in oklab, {color ??
 		'var(--color-panel)'} 55%, var(--color-panel));"
 >
 	{#if back}
-		<a href={back} aria-label="Back" class="size-10 grid place-items-center">
-			<span class="icon-[mingcute--left-line] size-6"></span>
+		<a href={back} aria-label="Back" class="size-12 grid place-items-center">
+			<span class="icon-[mingcute--left-line] size-7"></span>
 		</a>
 	{/if}
-	<p class="min-w-0 flex-1 font-bold truncate">{title}</p>
+	<p class="min-w-0 flex-1 text-lg font-bold truncate">{title}</p>
 	{#if onplay}
 		<button
 			aria-label="Play"
-			class="mr-1 size-9 grid place-items-center rounded-full bg-primary-300 shadow-md"
+			class="mr-1.5 size-10 grid place-items-center rounded-full bg-primary-300 shadow-md"
 			onclick={onplay}
 		>
-			<span class="icon-[mingcute--play-fill] size-5"></span>
+			<span class="icon-[mingcute--play-fill] size-6"></span>
 		</button>
 	{/if}
 </div>
@@ -58,15 +58,15 @@
 	<header class="relative px-4 pt-2 pb-4 overflow-hidden" use:watch>
 		<Triangles count={12} {seed} />
 		{#if back}
-			<a href={back} aria-label="Back" class="relative -ml-2 size-10 grid place-items-center">
-				<span class="icon-[mingcute--left-line] size-6"></span>
+			<a href={back} aria-label="Back" class="relative -ml-3 size-12 grid place-items-center">
+				<span class="icon-[mingcute--left-line] size-7"></span>
 			</a>
 		{/if}
 		<div class="relative mt-2 flex justify-center">
 			{@render cover()}
 		</div>
 		<div class="relative mt-5">
-			{#if label}<p class="text-xs font-semibold">{label}</p>{/if}
+			{#if label}<p class="text-sm font-semibold">{label}</p>{/if}
 			<h1
 				class="mt-0.5 text-3xl font-extrabold tracking-tight leading-[1.05] line-clamp-2 break-words"
 			>

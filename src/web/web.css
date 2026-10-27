@@ -21,68 +21,20 @@ img {
 	-webkit-touch-callout: none;
 }
 
-/* Between pages (see navigation.ts): the page slides, the bar at the bottom stays */
-::view-transition-old(root),
-::view-transition-new(root) {
-	animation: none;
+/* osu!'s triangles (the desktop app's Triangles) rise by transform here, not by their top:
+   moving top lays the page out again every frame, which a phone feels */
+div:has(> .animate-triangle) {
+	container-type: size;
 }
-::view-transition-group(page) {
-	animation-duration: 280ms;
+.animate-triangle {
+	top: 0;
+	will-change: transform;
 }
-html[data-nav='forward']::view-transition-old(page) {
-	animation: 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-out-left;
-}
-html[data-nav='forward']::view-transition-new(page) {
-	animation: 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-in-right;
-}
-html[data-nav='back']::view-transition-old(page) {
-	animation: 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-out-right;
-}
-html[data-nav='back']::view-transition-new(page) {
-	animation: 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-in-left;
-}
-html[data-nav='fade']::view-transition-old(page) {
-	animation: 140ms ease-out both nav-fade-out;
-}
-html[data-nav='fade']::view-transition-new(page) {
-	animation: 160ms ease-out both nav-fade-in;
-}
-@keyframes nav-in-right {
+@keyframes triangle-rise {
 	from {
-		transform: translateX(100%);
+		transform: translateY(100cqh);
 	}
-}
-@keyframes nav-out-left {
 	to {
-		transform: translateX(-30%);
-		opacity: 0.6;
-	}
-}
-@keyframes nav-in-left {
-	from {
-		transform: translateX(-30%);
-		opacity: 0.6;
-	}
-}
-@keyframes nav-out-right {
-	to {
-		transform: translateX(100%);
-	}
-}
-@keyframes nav-fade-out {
-	to {
-		opacity: 0;
-	}
-}
-@keyframes nav-fade-in {
-	from {
-		opacity: 0;
-	}
-}
-@media (prefers-reduced-motion: reduce) {
-	::view-transition-group(*),
-	::view-transition-old(*),
-	::view-transition-new(*) {
-		animation: none !important;
+		transform: translateY(-40cqh);
 	}
 }
