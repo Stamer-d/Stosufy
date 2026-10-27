@@ -98,6 +98,12 @@ jobs:
           bundle_id=$(plutil -extract CFBundleIdentifier raw "$plist")
           min_os=$(plutil -extract MinimumOSVersion raw "$plist")
           echo "Built $bundle_id $version ($build), iOS $min_os+"
+          # What the app can't do without: music with the screen locked, and the login link
+          plutil -extract UIBackgroundModes json -o - "$plist" | grep -q '"audio"' \
+            || { echo "::error::Background audio is missing from Info.plist"; exit 1; }
+          plutil -extract CFBundleURLTypes json -o - "$plist" | grep -q '"stosufynew"' \
+            || { echo "::error::The stosufynew:// login link is missing from Info.plist"; exit 1; }
+          echo "Background audio and the login link are in"
           mkdir -p dist
           cp "$ipa" "dist/Stosufy-$build.ipa"
           {
