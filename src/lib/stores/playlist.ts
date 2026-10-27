@@ -262,6 +262,53 @@ export async function moveSongInPlaylist(playlistId: PlaylistId, from: number, t
 	);
 }
 
+/**
+ * The osu! beatmaps (each with its set) of the songs of all playlists known on this computer,
+ * by id: from the copy kept from before, and what was asked for since
+ */
+let beatmapIndex: Promise<Map<string, any>> | null = null;
+function knownBeatmaps() {
+	beatmapIndex ??= offlineLibrary().then((kept) => {
+		const known = new Map<string, any>();
+		for (const { songs } of Object.values(kept?.songs ?? {})) {
+			for (const song of songs ?? []) {
+				// (a song added from the library or the search has no set with it: asked for)
+				for (const map of song.beatmaps ?? []) if (map?.beatmapset) known.set(String(map.id), map);
+			}
+		}
+		return known;
+	});
+	return beatmapIndex;
+}
+
+/** At most this many beatmaps per request (osu!'s limit), and this many requests at a time */
+const BEATMAPS_PER_REQUEST = 50;
+const REQUESTS_AT_ONCE = 4;
+
+/** osu!'s beatmaps (each with its set) of these ids */
+async function fetchBeatmaps(mapIds: string[]): Promise<any[]> {
+	const chunks: string[][] = [];
+	for (let i = 0; i < mapIds.length; i += BEATMAPS_PER_REQUEST) {
+		chunks.push(mapIds.slice(i, i + BEATMAPS_PER_REQUEST));
+	}
+	const found: any[] = [];
+	for (let i = 0; i < chunks.length; i += REQUESTS_AT_ONCE) {
+		const osuToken = await freshToken();
+		const results = await Promise.all(
+			chunks.slice(i, i + REQUESTS_AT_ONCE).map(async (chunk) => {
+				const response = await fetch(
+					`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${chunk.join('&ids[]=')}`,
+					{ headers: { Authorization: `Bearer ${osuToken}`, 'Content-Type': 'application/json' } }
+				);
+				if (!response.ok) throw new Error(`OSU API error! status: ${response.status}`);
+				return (await response.json()).beatmaps ?? [];
+			})
+		);
+		for (const beatmaps of results) found.push(...beatmaps);
+	}
+	return found;
+}
+
 export async function getPlaylistSongs(
 	playlistId: PlaylistId,
 	forceRefresh = false
@@ -300,41 +347,19 @@ export async function getPlaylistSongs(
 			return { songs: [] };
 		}
 
-		const mapIds = playlistSongs.map((song) => song.map_id);
-
-		// Process in chunks of 50
-		const chunkSize = 50;
-		const mapIdChunks = [];
-		for (let i = 0; i < mapIds.length; i += chunkSize) {
-			mapIdChunks.push(mapIds.slice(i, i + chunkSize));
-		}
-
-		const osuToken = await freshToken();
-		const beatmapRequests = mapIdChunks.map((chunk) =>
-			fetch(`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${chunk.join('&ids[]=')}`, {
-				method: 'GET',
-				headers: {
-					Authorization: `Bearer ${osuToken}`,
-					'Content-Type': 'application/json'
-				}
-			})
-		);
-
-		const responses = await Promise.all(beatmapRequests);
-
-		for (let i = 0; i < responses.length; i++) {
-			if (!responses[i].ok) {
-				throw new Error(`OSU API error! status: ${responses[i].status} for chunk ${i + 1}`);
-			}
-		}
-
-		const responseDataPromises = responses.map((res) => res.json());
-		const responseData = await Promise.all(responseDataPromises);
-
-		// By id: big playlists (thousands of songs) would otherwise search the list per song
+		// What osu! knows about the songs: asked only for the ones no playlist knew yet (one
+		// unchanged since the last time asks for none)
+		const known = await knownBeatmaps();
 		const beatmapsById = new Map<string, any>();
-		for (const data of responseData) {
-			for (const beatmap of data.beatmaps ?? []) beatmapsById.set(String(beatmap.id), beatmap);
+		const unknown: string[] = [];
+		for (const mapId of new Set(playlistSongs.map((song) => String(song.map_id)))) {
+			const beatmap = known.get(mapId);
+			if (beatmap) beatmapsById.set(mapId, beatmap);
+			else unknown.push(mapId);
+		}
+		for (const beatmap of await fetchBeatmaps(unknown)) {
+			beatmapsById.set(String(beatmap.id), beatmap);
+			known.set(String(beatmap.id), beatmap);
 		}
 
 		const enhancedSongs = playlistSongs.map((song) => {
@@ -439,9 +464,18 @@ export async function loadAllPlaylistSongs() {
 	const concurrencyLimit = 3;
 	const playlistIds = allPlaylists.map((playlist) => playlist.id);
 
+	// Right away the songs as they were the last time, then each playlist's songs from the
+	// server (osu! is only asked about the songs that are new)
+	const kept = (await offlineLibrary())?.songs ?? {};
+	playlistSongsCache.update((cache) => {
+		const next = { ...cache };
+		for (const id of playlistIds) if (!next[id] && kept[String(id)]) next[id] = kept[String(id)];
+		return next;
+	});
+
 	for (let i = 0; i < playlistIds.length; i += concurrencyLimit) {
 		const batch = playlistIds.slice(i, i + concurrencyLimit);
-		await Promise.all(batch.map((id) => getPlaylistSongs(id)));
+		await Promise.all(batch.map((id) => getPlaylistSongs(id, true)));
 	}
 
 	return true;
