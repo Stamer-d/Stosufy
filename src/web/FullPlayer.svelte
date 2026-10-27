@@ -14,7 +14,6 @@
 		toggle,
 		next,
 		previous,
-		seek,
 		jumpTo,
 		removeFromQueue,
 		toggleShuffle,
@@ -27,6 +26,7 @@
 	} from './player';
 	import { haptic } from './haptics';
 	import Lyrics from './Lyrics.svelte';
+	import Scrubber from './Scrubber.svelte';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongSwipe from './SongSwipe.svelte';
 	import SongBackdrop from './SongBackdrop.svelte';
@@ -49,8 +49,6 @@
 	/** What's in the middle: the cover, the lyrics or what comes next */
 	let view = $state('cover');
 	const toggleView = (which) => (view = view === which ? 'cover' : which);
-	/** Where the finger has the position slider (it seeks once let go) */
-	let dragging = $state(null);
 
 	// The sleep timer: what's left of it, looked at every 15 s
 	let choosingSleep = $state(false);
@@ -78,8 +76,6 @@
 					: null
 		);
 	}
-	const clock = (s) =>
-		s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
 	const close = () => playerOpen.set(false);
 
 	// Speed mods and hitsounds (the account's settings, as in the desktop app)
@@ -261,34 +257,9 @@
 				</button>
 			</div>
 
-			<!-- The song bar's slider (a thin line), with room for a finger -->
-			<div class="relative mt-5 h-6 flex items-center">
-				<div class="absolute inset-x-0 h-1 rounded-full bg-white/15">
-					<div
-						class="h-full rounded-full {dragging != null ? 'bg-primary-400' : 'bg-white'}"
-						style="width: {$time.duration
-							? ((dragging ?? $time.current) / $time.duration) * 100
-							: 0}%"
-					></div>
-				</div>
-				<input
-					type="range"
-					min="0"
-					max={$time.duration || 0}
-					step="1"
-					value={dragging ?? $time.current}
-					oninput={(e) => (dragging = Number(e.currentTarget.value))}
-					onchange={(e) => {
-						seek(Number(e.currentTarget.value));
-						dragging = null;
-					}}
-					class="absolute inset-0 w-full opacity-0"
-					aria-label="Position"
-				/>
-			</div>
-			<div class="flex justify-between text-xs text-white/60 tabular-nums">
-				<span>{clock(dragging ?? $time.current)}</span>
-				<span>{clock($time.duration)}</span>
+			<!-- Where the song is: touch anywhere on the line and drag -->
+			<div class="mt-4">
+				<Scrubber />
 			</div>
 
 			<div class="mt-3 flex items-center justify-between">

@@ -1,33 +1,53 @@
 <script>
-	import { haptic } from './haptics';
 	// Swiping between songs, as in Spotify: the song before and the next one wait left and
-	// right and come along with the finger; let go far or fast enough, the next one slides
-	// in (else it springs back). Touch events: on iOS they're the dependable ones.
+	// right and come along with the finger; let go far enough, or with a flick, and the next
+	// one slides in (else it springs back). The three are the same elements all along: the
+	// next one becomes the song where it is, its cover already there (nothing loads again).
+	// Touch events: on iOS they're the dependable ones.
+	import { haptic } from './haptics';
 	import { queue, repeat, next, previous } from './player';
 
 	/** @type {{ item: import('svelte').Snippet<[import('../lib/types').MapSet]>, class?: string }} */
 	let { item, class: className = '' } = $props();
 
 	let { songs, index } = $derived($queue);
-	let current = $derived(songs[index] ?? null);
-	let before = $derived(songs[index - 1] ?? ($repeat === 'all' ? songs.at(-1) : null) ?? null);
-	let after = $derived(songs[index + 1] ?? ($repeat === 'all' ? songs[0] : null) ?? null);
+	let beforeAt = $derived(
+		index > 0 ? index - 1 : $repeat === 'all' && songs.length > 1 ? songs.length - 1 : -1
+	);
+	let afterAt = $derived(
+		index < songs.length - 1 ? index + 1 : $repeat === 'all' && songs.length > 1 ? 0 : -1
+	);
+	/** The songs shown, by their place in the queue (-1 left, 0 the song, 1 right) */
+	let panes = $derived(
+		[
+			[beforeAt, -1],
+			[index, 0],
+			[afterAt, 1]
+		]
+			// (two songs on repeat: the other one waits on the right only)
+			.filter(([at, place]) => at >= 0 && songs[at] && !(place === -1 && at === afterAt))
+			.map(([at, place]) => ({ at, place, song: songs[at] }))
+	);
+	let hasBefore = $derived(beforeAt >= 0);
+	let hasAfter = $derived(afterAt >= 0);
 
 	let box = $state();
 	let offset = $state(0);
-	let animate = $state(false);
+	let transition = $state('none');
 	let start = null;
 	let locked = null;
 	let busy = false;
+	let samples = [];
 	/** A drag isn't a tap on what's under the finger */
 	let dragged = false;
 
 	function touchstart(event) {
 		if (busy || event.touches.length > 1) return;
 		const touch = event.touches[0];
-		start = { x: touch.clientX, y: touch.clientY, time: performance.now() };
+		start = { x: touch.clientX, y: touch.clientY };
 		locked = null;
 		dragged = false;
+		samples = [];
 	}
 
 	function touchmove(event) {
@@ -36,42 +56,57 @@
 		const dx = touch.clientX - start.x;
 		const dy = touch.clientY - start.y;
 		if (!locked) {
-			if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+			if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
 			locked = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
 		}
 		if (locked !== 'x') return;
+		if (event.cancelable) event.preventDefault();
 		dragged = true;
-		animate = false;
+		transition = 'none';
 		// (no song that way: it gives a little, like a rubber band)
-		const blocked = (dx > 0 && !before) || (dx < 0 && !after);
-		offset = blocked ? dx / 4 : dx;
+		const blocked = (dx > 0 && !hasBefore) || (dx < 0 && !hasAfter);
+		offset = blocked ? Math.sign(dx) * Math.sqrt(Math.abs(dx)) * 3 : dx;
+		const now = performance.now();
+		samples.push({ x: dx, t: now });
+		while (samples.length > 2 && now - samples[0].t > 80) samples.shift();
 	}
 
 	function touchend() {
 		// (the click that may follow the drag is swallowed, not a later tap)
 		if (dragged) setTimeout(() => (dragged = false), 400);
 		if (!start) return;
-		const time = performance.now() - start.time;
 		start = null;
 		if (locked !== 'x') return;
 		const width = box?.offsetWidth ?? 300;
-		const fast = Math.abs(offset) / Math.max(time, 1) > 0.3 && Math.abs(offset) > 20;
-		const direction = offset < 0 ? 1 : -1;
-		const possible = direction === 1 ? !!after : !!before;
-		animate = true;
-		if (possible && (Math.abs(offset) > width * 0.3 || fast)) {
+		const first = samples[0];
+		const last = samples[samples.length - 1];
+		const speed = first && last && last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
+		// Which way: the flick's, else where it was dragged to
+		const direction = Math.abs(speed) > 0.3 ? (speed < 0 ? 1 : -1) : offset < 0 ? 1 : -1;
+		const possible = direction === 1 ? hasAfter : hasBefore;
+		const far = Math.abs(offset) > width * 0.35 && Math.sign(speed) !== direction;
+		if (possible && (Math.abs(speed) > 0.3 || far)) {
 			busy = true;
 			haptic();
+			// The rest of the way at the finger's speed (not slower than a moment)
+			const rest = width - Math.abs(offset);
+			const duration = Math.round(
+				Math.max(120, Math.min(280, rest / Math.max(Math.abs(speed), 1.4)))
+			);
+			transition = `transform ${duration}ms cubic-bezier(0.25, 0.8, 0.3, 1)`;
 			offset = -direction * width;
 			setTimeout(() => {
-				// The neighbour becomes the song: it's in the middle at once, without sliding
-				animate = false;
+				// The neighbour becomes the song where it is: no sliding, nothing loads again
+				transition = 'none';
 				if (direction === 1) next();
 				else previous();
 				offset = 0;
 				requestAnimationFrame(() => (busy = false));
-			}, 220);
-		} else offset = 0;
+			}, duration);
+		} else {
+			transition = 'transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1)';
+			offset = 0;
+		}
 	}
 
 	function swallowClick(event) {
@@ -97,22 +132,16 @@
 >
 	<div
 		class="relative w-full"
-		style="transform: translate3d({offset}px, 0, 0); transition: {animate
-			? 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)'
-			: 'none'}"
+		style="transform: translate3d({offset}px, 0, 0); transition: {transition}"
 	>
-		{#if before}
-			<div class="absolute inset-y-0 right-full w-full" aria-hidden="true">
-				{@render item(before)}
+		{#each panes as pane (pane.at)}
+			<div
+				class={pane.place === 0 ? 'relative w-full' : 'absolute inset-y-0 w-full'}
+				style={pane.place === 0 ? '' : `left: ${pane.place * 100}%`}
+				aria-hidden={pane.place !== 0}
+			>
+				{@render item(pane.song)}
 			</div>
-		{/if}
-		{#if current}
-			{@render item(current)}
-		{/if}
-		{#if after}
-			<div class="absolute inset-y-0 left-full w-full" aria-hidden="true">
-				{@render item(after)}
-			</div>
-		{/if}
+		{/each}
 	</div>
 </div>

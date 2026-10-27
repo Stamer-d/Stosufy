@@ -1,5 +1,9 @@
 // use:swipe: a finger dragging an element, across or down (whichever way it starts going);
-// the element follows it, and lets go with `onswipe` when it went far or fast enough.
+// the element follows it, and lets go with `onswipe` when it went far enough or the finger
+// was still moving fast at the end (a flick). Then it goes on from where it is (the page
+// closing it slides it out from there); else it springs back.
+// Touch events: once it's dragging, the browser's own scrolling is held off (on iOS pointer
+// events give up when the browser starts to scroll, and the drag stops halfway).
 
 import { haptic } from './haptics';
 
@@ -12,57 +16,74 @@ interface SwipeOptions {
 	only?: -1 | 1;
 }
 
-const FAR = 80;
-const FAST = 0.5; // px/ms
+/** Of the element's size, how far counts without a flick */
+const FAR = 0.25;
+const FLICK = 0.45; // px/ms, at the end of the drag
+const SPRING = 'transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1)';
 
 export function swipe(node: HTMLElement, options: SwipeOptions) {
 	let current = options;
-	let start: { x: number; y: number; time: number } | null = null;
+	let start: { x: number; y: number } | null = null;
 	let dragging = false;
 	let offset = 0;
+	/** The last moments of the drag, for the speed at its end */
+	let samples: { v: number; t: number }[] = [];
 
-	const place = (value: number, animate: boolean) => {
-		node.style.transition = animate ? 'transform 200ms ease-out' : 'none';
+	const place = (value: number, transition = 'none') => {
+		node.style.transition = transition;
 		node.style.transform =
-			current.axis === 'x' ? `translateX(${value}px)` : `translateY(${value}px)`;
+			current.axis === 'x' ? `translate3d(${value}px, 0, 0)` : `translate3d(0, ${value}px, 0)`;
 	};
 
-	function down(event: PointerEvent) {
-		if (event.pointerType === 'mouse' && event.button !== 0) return;
-		// (sliders and fields keep their own dragging)
+	function down(event: TouchEvent) {
+		if (event.touches.length > 1) return void (start = null);
+		const touch = event.touches[0];
+		// (sliders, fields and what scrolls or drags itself keep their own dragging)
 		if ((event.target as HTMLElement).closest('input, textarea, [data-no-swipe]')) return;
 		// (scrolled down in it: dragging down scrolls back up first)
 		if (current.axis === 'y' && node.scrollTop > 0) return;
-		start = { x: event.clientX, y: event.clientY, time: performance.now() };
+		start = { x: touch.clientX, y: touch.clientY };
 		dragging = false;
 		offset = 0;
+		samples = [];
 	}
 
-	function move(event: PointerEvent) {
+	function move(event: TouchEvent) {
 		if (!start) return;
-		const dx = event.clientX - start.x;
-		const dy = event.clientY - start.y;
+		const touch = event.touches[0];
+		const dx = touch.clientX - start.x;
+		const dy = touch.clientY - start.y;
 		if (!dragging) {
 			// Which way it's going: the other way is scrolling, not this
-			if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+			if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
 			const across = Math.abs(dx) > Math.abs(dy);
 			if (across !== (current.axis === 'x')) {
 				start = null;
 				return;
 			}
+			// (the wrong way only, as a start: that's not this either)
+			const value = current.axis === 'x' ? dx : dy;
+			if (current.only && Math.sign(value) !== current.only && current.axis === 'y') {
+				start = null;
+				return;
+			}
 			dragging = true;
-			node.setPointerCapture?.(event.pointerId);
 		}
+		// (it's this drag now, not the page scrolling)
+		if (event.cancelable) event.preventDefault();
 		let value = current.axis === 'x' ? dx : dy;
-		if (current.only && Math.sign(value) !== current.only) value /= 4;
+		// (the way it can't go, it gives a little, like a rubber band)
+		if (current.only && Math.sign(value) !== current.only) value = -Math.sqrt(Math.abs(value)) * 2;
 		offset = value;
-		place(value, false);
+		const now = performance.now();
+		samples.push({ v: value, t: now });
+		while (samples.length > 2 && now - samples[0].t > 80) samples.shift();
+		place(value);
 	}
 
-	function up(event: PointerEvent) {
+	function up(event: TouchEvent) {
 		if (!start) return;
 		const wasDragging = dragging;
-		const time = performance.now() - start.time;
 		start = null;
 		dragging = false;
 		if (!wasDragging) return;
@@ -73,32 +94,38 @@ export function swipe(node: HTMLElement, options: SwipeOptions) {
 		};
 		node.addEventListener('click', stopClick, { capture: true, once: true });
 		setTimeout(() => node.removeEventListener('click', stopClick, { capture: true }), 50);
-		const direction = Math.sign(offset) as -1 | 1;
+
+		const first = samples[0];
+		const last = samples[samples.length - 1];
+		const speed = first && last && last.t > first.t ? (last.v - first.v) / (last.t - first.t) : 0;
+		const size = current.axis === 'x' ? node.offsetWidth : node.offsetHeight;
+		const direction = (Math.sign(speed) || Math.sign(offset)) as -1 | 1;
 		const counts =
-			(Math.abs(offset) > FAR || Math.abs(offset) / time > FAST) &&
-			(!current.only || direction === current.only);
+			event.type !== 'touchcancel' &&
+			(!current.only || direction === current.only) &&
+			(Math.abs(speed) > FLICK ||
+				(Math.abs(offset) > size * FAR && Math.sign(speed) !== -direction));
 		if (counts) {
 			haptic();
 			current.onswipe(direction);
-		}
-		place(0, true);
-		if (event.type === 'pointercancel') place(0, true);
+			// (if it's still there after all, back in place)
+			setTimeout(() => node.isConnected && place(0, SPRING), 600);
+		} else place(0, SPRING);
 	}
 
-	node.addEventListener('pointerdown', down);
-	node.addEventListener('pointermove', move);
-	node.addEventListener('pointerup', up);
-	node.addEventListener('pointercancel', up);
-	node.style.touchAction = options.axis === 'x' ? 'pan-y' : 'pan-x';
+	node.addEventListener('touchstart', down, { passive: true });
+	node.addEventListener('touchmove', move, { passive: false });
+	node.addEventListener('touchend', up);
+	node.addEventListener('touchcancel', up);
 	return {
 		update(next: SwipeOptions) {
 			current = next;
 		},
 		destroy() {
-			node.removeEventListener('pointerdown', down);
-			node.removeEventListener('pointermove', move);
-			node.removeEventListener('pointerup', up);
-			node.removeEventListener('pointercancel', up);
+			node.removeEventListener('touchstart', down);
+			node.removeEventListener('touchmove', move);
+			node.removeEventListener('touchend', up);
+			node.removeEventListener('touchcancel', up);
 		}
 	};
 }

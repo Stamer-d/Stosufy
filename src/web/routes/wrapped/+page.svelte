@@ -1,5 +1,6 @@
 <script>
 	const base = __WEB_BASE__;
+	import { goBack } from '../../navigation';
 	// Wrapped, as in the desktop app: what you listened to in the last week, month, this year
 	// or ever (here and on the desktop: the history is the account's). Watch it as a story.
 	import { history, deleteHistory } from '../../../lib/stores/history';
@@ -67,7 +68,13 @@
 	<Triangles count={14} seed={7} />
 	<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/40 to-transparent"></div>
 	<div class="relative px-4 pt-2 pb-6">
-		<a href="{base}/" aria-label="Back" class="-ml-3 size-12 grid place-items-center">
+		<a
+		href="{base}/"
+		onclick={(e) => {
+			e.preventDefault();
+			goBack(`${base}/`);
+		}}
+		aria-label="Back" class="-ml-3 size-12 grid place-items-center">
 			<span class="icon-[mingcute--left-line] size-7"></span>
 		</a>
 		<p class="mt-2 text-sm font-bold uppercase tracking-wide text-white/70">Your Wrapped</p>

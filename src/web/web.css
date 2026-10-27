@@ -5,6 +5,17 @@ html {
 	overscroll-behavior-y: none;
 	-webkit-text-size-adjust: 100%;
 }
+body {
+	/* (holding a row opens its menu, not iOS' text selection and magnifier) */
+	-webkit-user-select: none;
+	user-select: none;
+}
+input,
+textarea,
+[contenteditable] {
+	-webkit-user-select: text;
+	user-select: text;
+}
 a,
 button {
 	/* (taps right away, without waiting for a double tap) */

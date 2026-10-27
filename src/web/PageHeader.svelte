@@ -2,6 +2,7 @@
 	// The header of a playlist, a mix or the downloads, as in the desktop app: its color from
 	// the cover washing down, osu!'s triangles rising, the cover, what it is, its name. Once
 	// scrolled away, a bar with the name and Play stays at the top.
+	import { goBack } from './navigation';
 	import Triangles from '../lib/components/Triangles.svelte';
 
 	/** @type {{ color?: string | null, seed?: number, label?: string, title: string, back?: string, onplay?: () => void, cover: import('svelte').Snippet, children?: import('svelte').Snippet, actions?: import('svelte').Snippet }} */
@@ -17,11 +18,10 @@
 		actions
 	} = $props();
 
-	/** Back to the page before (opened from anywhere), or to `back` */
-	function goBack(event) {
-		if (back !== 'history') return;
+	/** Back to the page before (as a phone app does), else up to `back` */
+	function back_(event) {
 		event.preventDefault();
-		history.back();
+		goBack(back === 'history' ? undefined : back);
 	}
 
 	let gone = $state(false);
@@ -44,7 +44,7 @@
 	{#if back}
 		<a
 			href={back === 'history' ? `${__WEB_BASE__}/` : back}
-			onclick={goBack}
+			onclick={back_}
 			aria-label="Back"
 			class="size-12 grid place-items-center"
 		>
@@ -73,7 +73,7 @@
 		{#if back}
 			<a
 				href={back === 'history' ? `${__WEB_BASE__}/` : back}
-				onclick={goBack}
+				onclick={back_}
 				aria-label="Back"
 				class="relative -ml-3 size-12 grid place-items-center"
 			>

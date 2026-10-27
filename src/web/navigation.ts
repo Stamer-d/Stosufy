@@ -69,13 +69,41 @@ export function openTab(id: TabId) {
 	});
 }
 
+// --- Going back -------------------------------------------------------------------------
+// Only to pages of this visit: going back past them would leave the app (iOS then loads it
+// again: a black screen for seconds, and the song stops)
+
+/** How many pages of this visit lie behind this one */
+let depth = 0;
+let replacing = false;
+
+/** Back to the page before; if there's none in this visit, to `fallback` (in its place) */
+export function goBack(fallback?: string) {
+	if (depth > 0) {
+		history.back();
+		return;
+	}
+	replacing = true;
+	goto(fallback ?? TABS.find((tab) => tab.id === get(currentTab))!.root, { replaceState: true });
+}
+
+/** Whether there's a page of this visit to go back to */
+export const canGoBack = () => depth > 0;
+
 const standalone = () =>
 	matchMedia('(display-mode: standalone)').matches ||
 	!!(navigator as Navigator & { standalone?: boolean }).standalone;
 
 /** Set up in the layout: the slides between pages, and the tabs following the pages */
 export function setupNavigation(page: () => HTMLElement | undefined) {
-	afterNavigate(({ to }) => {
+	afterNavigate((navigation) => {
+		const { to } = navigation;
+		// (counting the pages of this visit behind this one)
+		if (navigation.type === 'enter') depth = 0;
+		else if (navigation.type === 'popstate')
+			depth = Math.max(0, depth + ((navigation as { delta?: number }).delta ?? -1));
+		else if (navigation.from && navigation.from.url.href !== to?.url.href && !replacing) depth++;
+		replacing = false;
 		const path = to?.url.pathname;
 		if (!path) return;
 		const root = rootOf(path);
@@ -110,12 +138,13 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			resetAfterBack = false;
 			element.style.transition = 'none';
 			element.style.transform = '';
+			element.style.boxShadow = '';
 			element.animate(
 				[
-					{ transform: 'translateX(-28px)', opacity: 0.4 },
+					{ transform: 'translate3d(-25%, 0, 0)', opacity: 0.6 },
 					{ transform: 'none', opacity: 1 }
 				],
-				{ duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+				{ duration: 240, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
 			);
 			return;
 		}
@@ -135,21 +164,24 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		kind = 'none';
 	});
 
-	// Swipe from the left edge: back
+	// Swipe from the left edge: back. The page follows the finger; let go far or fast enough
+	// and it slides away, the page before slides in.
 	let start: { x: number; y: number } | null = null;
 	let dx = 0;
 	let tracking = false;
-	const EDGE = 24;
+	let samples: { x: number; t: number }[] = [];
+	const EDGE = 28;
 	window.addEventListener(
 		'touchstart',
 		(event) => {
 			const touch = event.touches[0];
 			if (!standalone() || touch.clientX > EDGE || rootOf(location.pathname)) return;
-			// (what swipes across itself keeps its swipe)
-			if ((event.target as HTMLElement).closest?.('[data-no-edge]')) return;
+			// (what swipes across itself keeps its swipe; nothing while a sheet is open)
+			if ((event.target as HTMLElement).closest?.('[data-no-edge], .fixed')) return;
 			start = { x: touch.clientX, y: touch.clientY };
 			dx = 0;
 			tracking = false;
+			samples = [{ x: touch.clientX, t: performance.now() }];
 		},
 		{ passive: true }
 	);
@@ -162,14 +194,18 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			const y = touch.clientY - start.y;
 			if (!tracking) {
 				if (Math.abs(y) > Math.abs(x) && Math.abs(y) > 10) return void (start = null);
-				if (x < 10) return;
+				if (x < 8) return;
 				tracking = true;
 			}
+			const now = performance.now();
+			samples.push({ x: touch.clientX, t: now });
+			while (samples.length > 2 && now - samples[0].t > 100) samples.shift();
 			dx = Math.max(0, x);
 			const element = page();
 			if (element) {
 				element.style.transition = 'none';
-				element.style.transform = `translateX(${dx}px)`;
+				element.style.transform = `translate3d(${dx}px, 0, 0)`;
+				element.style.boxShadow = '-12px 0 30px rgb(0 0 0 / 0.5)';
 			}
 		},
 		{ passive: true }
@@ -179,15 +215,34 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		start = null;
 		const element = page();
 		if (!tracking || !element) return;
-		if (dx > 90) {
-			// Back: the page stays where the finger left it until the one before is there
-			swipedBack = true;
-			resetAfterBack = true;
+		const first = samples[0];
+		const last = samples[samples.length - 1];
+		const speed = first && last && last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
+		const width = window.innerWidth;
+		const back = speed > 0.35 || (dx > width * 0.35 && speed > -0.2);
+		if (back) {
 			haptic();
-			history.back();
+			// Slides away the rest of the way, then the page before comes
+			const duration = Math.max(90, Math.min(220, (width - dx) / Math.max(speed, 1.2)));
+			element.style.transition = `transform ${duration}ms cubic-bezier(0.2, 0.7, 0.3, 1)`;
+			element.style.transform = `translate3d(${width}px, 0, 0)`;
+			setTimeout(() => {
+				swipedBack = true;
+				resetAfterBack = true;
+				goBack();
+				// (if the page before doesn't come, this one doesn't stay away)
+				setTimeout(() => {
+					if (!resetAfterBack) return;
+					resetAfterBack = false;
+					element.style.transition = 'transform 200ms ease-out';
+					element.style.transform = '';
+					element.style.boxShadow = '';
+				}, 1500);
+			}, duration);
 		} else {
-			element.style.transition = 'transform 200ms ease-out';
+			element.style.transition = 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)';
 			element.style.transform = '';
+			setTimeout(() => (element.style.boxShadow = ''), 220);
 		}
 	};
 	window.addEventListener('touchend', end);

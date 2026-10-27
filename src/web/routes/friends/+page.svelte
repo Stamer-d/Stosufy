@@ -1,5 +1,6 @@
 <script>
 	const base = __WEB_BASE__;
+	import { goBack } from '../../navigation';
 	// Friends: who's on, what they listen to (tap to listen along), and who sees you
 	import { onMount } from 'svelte';
 	import {
@@ -46,7 +47,13 @@
 </script>
 
 <header class="px-4 pt-5 pb-2 flex items-center gap-1">
-	<a href="{base}/" aria-label="Back" class="-ml-3 size-11 grid place-items-center">
+	<a
+		href="{base}/"
+		onclick={(e) => {
+			e.preventDefault();
+			goBack(`${base}/`);
+		}}
+		aria-label="Back" class="-ml-3 size-11 grid place-items-center">
 		<span class="icon-[mingcute--left-line] size-7"></span>
 	</a>
 	<h1 class="text-2xl font-bold tracking-tight">Friends</h1>
