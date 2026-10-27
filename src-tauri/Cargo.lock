@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Stosfy"
-version = "0.6.54"
+version = "0.6.55"
 dependencies = [
  "objc2-avf-audio",
  "reqwest 0.13.5",
