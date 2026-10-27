@@ -368,6 +368,38 @@ function knownBeatmaps() {
 const BEATMAPS_PER_REQUEST = 50;
 const REQUESTS_AT_ONCE = 4;
 
+/** A request osu! turned down is tried again this often */
+const BEATMAP_RETRIES = 3;
+/** Waited at most this long before trying again (ms) */
+const LONGEST_WAIT = 30_000;
+
+/**
+ * One request for osu!'s beatmaps: tried again when osu! has too much to do (429), hiccups
+ * (5xx) or the token ran out (401), after as long as it asks for. Without a connection it
+ * fails right away (the playlist then shows its songs from before).
+ */
+async function fetchBeatmapChunk(mapIds: string[]): Promise<any[]> {
+	const url = `https://osu.ppy.sh/api/v2/beatmaps?ids[]=${mapIds.join('&ids[]=')}`;
+	let status = 0;
+	for (let attempt = 0; ; attempt++) {
+		const response = await fetch(url, {
+			headers: {
+				Authorization: `Bearer ${await freshToken(status === 401)}`,
+				'Content-Type': 'application/json'
+			}
+		});
+		if (response.ok) return (await response.json()).beatmaps ?? [];
+		status = response.status;
+		const worthAgain = status === 401 || status === 429 || status >= 500;
+		if (!worthAgain || attempt >= BEATMAP_RETRIES) {
+			throw new Error(`OSU API error! status: ${status}`);
+		}
+		const asked = Number(response.headers.get('retry-after')) * 1000;
+		const wait = asked > 0 ? asked : 1000 * 2 ** attempt;
+		await new Promise((resolve) => setTimeout(resolve, Math.min(wait, LONGEST_WAIT)));
+	}
+}
+
 /** osu!'s beatmaps (each with its set) of these ids */
 async function fetchBeatmaps(mapIds: string[]): Promise<any[]> {
 	const chunks: string[][] = [];
@@ -376,17 +408,7 @@ async function fetchBeatmaps(mapIds: string[]): Promise<any[]> {
 	}
 	const found: any[] = [];
 	for (let i = 0; i < chunks.length; i += REQUESTS_AT_ONCE) {
-		const osuToken = await freshToken();
-		const results = await Promise.all(
-			chunks.slice(i, i + REQUESTS_AT_ONCE).map(async (chunk) => {
-				const response = await fetch(
-					`https://osu.ppy.sh/api/v2/beatmaps?ids[]=${chunk.join('&ids[]=')}`,
-					{ headers: { Authorization: `Bearer ${osuToken}`, 'Content-Type': 'application/json' } }
-				);
-				if (!response.ok) throw new Error(`OSU API error! status: ${response.status}`);
-				return (await response.json()).beatmaps ?? [];
-			})
-		);
+		const results = await Promise.all(chunks.slice(i, i + REQUESTS_AT_ONCE).map(fetchBeatmapChunk));
 		for (const beatmaps of results) {
 			for (const beatmap of beatmaps) for (const key of UNUSED) delete beatmap[key];
 			found.push(...beatmaps);
