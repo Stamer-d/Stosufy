@@ -25,10 +25,12 @@
 			? page.url.pathname === `${base}/` || page.url.pathname.startsWith(`${base}/playlist`)
 			: page.url.pathname.startsWith(href);
 
-	// (the checks and the downloads work without a login: downloads play offline after it ran out)
+	// (the checks and the downloads work without a login: downloads play offline after it ran
+	// out; the way back from osu!'s login is the login)
 	let needsLogin = $derived(
 		(!$keyStore.access_token || $loginExpired) &&
 			!page.url.pathname.startsWith(`${base}/check`) &&
+			!page.url.pathname.startsWith(`${base}/callback`) &&
 			!page.url.pathname.startsWith(`${base}/downloads`)
 	);
 

@@ -3,7 +3,7 @@
 	// (the Stosufy and osu! servers and the mirror have to allow a web page to ask them)
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { keyStore } from '../../shims/auth';
+	import { keyStore, webLoginSetup } from '../../shims/auth';
 	import { getStosufyUser } from '../../../lib/api';
 	import { playlistSongsCache } from '../../../lib/stores/playlist';
 	import { streamUrl } from '../../player';
@@ -54,6 +54,14 @@
 			if (!token) return { state: 'info', detail: 'Log in first' };
 			const user = await getStosufyUser(token);
 			return { detail: `Logged in as ${user.username}` };
+		});
+		await check('osu! login', async () => {
+			const keys = get(keyStore);
+			if (keys.refresh_token) return { detail: 'Logged in with osu!: it renews itself' };
+			const setup = await webLoginSetup();
+			return setup
+				? { state: 'info', detail: 'Set up: log out and back in with osu! to stay logged in' }
+				: { state: 'info', detail: 'Not set up on the server yet: the pasted login lasts a day' };
 		});
 		await check('osu! API (song details, search)', async () => {
 			if (!token) return { state: 'info', detail: 'Log in first' };
