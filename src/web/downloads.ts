@@ -149,17 +149,18 @@ export function stopDownloadAll() {
 
 export async function removeDownload(song: MapSet) {
 	const key = keyOf(song);
-	await run(AUDIO, 'readwrite', (store) => store.delete(key));
-	await run(SONGS, 'readwrite', (store) => store.delete(key));
+	// Shown gone right away, then taken off the phone
 	downloaded.update((all) => without(all, key));
 	downloadedSongs.update((all) => all.filter((other) => keyOf(other) !== key));
+	await run(AUDIO, 'readwrite', (store) => store.delete(key));
+	await run(SONGS, 'readwrite', (store) => store.delete(key));
 }
 
 export async function removeAllDownloads() {
-	await run(AUDIO, 'readwrite', (store) => store.clear());
-	await run(SONGS, 'readwrite', (store) => store.clear());
 	downloaded.set(new Set());
 	downloadedSongs.set([]);
+	await run(AUDIO, 'readwrite', (store) => store.clear());
+	await run(SONGS, 'readwrite', (store) => store.clear());
 }
 
 /** A song's kept audio to play (null: not kept) */

@@ -3,6 +3,7 @@
 	// Home, as the desktop app's (its normal layout, scrolled through): a hello, the song
 	// playing (or heard last) big on its background, your playlists, what you heard last (here
 	// and in the desktop app), today's mixes, radios, your top songs and beatmaps to discover
+	import { untrack } from 'svelte';
 	import { playlists } from '../../lib/stores/playlist';
 	import { showToast } from '../../lib/stores/toast';
 	import { sameSong } from '../../lib/tracks';
@@ -97,8 +98,9 @@
 			discovering = false;
 		}
 	}
+	// (once there's a connection and nothing yet; what loading changes doesn't ask again)
 	$effect(() => {
-		if (!discover.length && !$offline) loadDiscover();
+		if (!discover.length && !$offline) untrack(() => loadDiscover());
 	});
 </script>
 

@@ -31,10 +31,13 @@
 
 	const close = () => songMenu.set(null);
 
+	/** Does it for the song (and the playlist it's in), with the menu closed right away */
 	function act(run, note, icon = 'icon-[mingcute--check-line]') {
+		// (taken before closing: closing forgets which song and playlist the menu was for)
 		const target = song;
+		const playlistId = from;
 		close();
-		Promise.resolve(run(target)).then(
+		Promise.resolve(run(target, playlistId)).then(
 			// (false: it said so itself)
 			(result) => result !== false && note && showToast(note, icon),
 			(e) => showToast(e instanceof Error ? e.message : String(e), 'icon-[mingcute--warning-line]')
@@ -153,7 +156,10 @@
 					)}
 					{#if removable}
 						{@render item('icon-[mingcute--delete-2-line]', 'Remove from this playlist', () =>
-							act((target) => removeSongFromPlaylist(from, target.songInfo.id), 'Removed')
+							act(
+								(target, playlistId) => removeSongFromPlaylist(playlistId, target.songInfo.id),
+								'Removed'
+							)
 						)}
 					{/if}
 					{#if $downloading.has(String(song.beatmaps?.[0]?.id))}

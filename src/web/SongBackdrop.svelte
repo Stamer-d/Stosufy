@@ -2,6 +2,8 @@
 	// The song's background, blurred, behind the app or the full player (as in the desktop
 	// app). Cheap for a phone: a small cover, blurred at a quarter of the size and scaled up;
 	// a new song's comes in only once it's loaded (no black in between).
+	import { untrack } from 'svelte';
+
 	/** @type {{ song: import('../lib/types').MapSet | null, dim?: number }} */
 	let { song, dim = 0.75 } = $props();
 
@@ -12,7 +14,7 @@
 	$effect(() => {
 		const id = song?.id;
 		if (!id) return;
-		if (layers.at(-1)?.id === id) return;
+		if (untrack(() => layers.at(-1)?.id) === id) return;
 		const url = `https://assets.ppy.sh/beatmaps/${id}/covers/list@2x.jpg`;
 		const image = new Image();
 		image.onload = () => {

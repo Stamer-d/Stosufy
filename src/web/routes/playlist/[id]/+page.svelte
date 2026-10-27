@@ -13,6 +13,7 @@
 		deletePlaylist
 	} from '../../../../lib/stores/playlist';
 	import { goto } from '$app/navigation';
+	import { untrack } from 'svelte';
 	import { songsLength } from '../../../../lib/tracks';
 	import { showToast } from '../../../../lib/stores/toast';
 	import { play } from '../../../player';
@@ -86,11 +87,16 @@
 		loading = true;
 		error = '';
 		// (the songs of before right away, then osu!'s of now)
-		getPlaylistSongs(wanted, !!$playlistSongsCache[wanted])
+		// (the cache only says whether to ask again: read without following it, else each answer,
+		// changing the cache, would ask again)
+		getPlaylistSongs(
+			wanted,
+			untrack(() => !!$playlistSongsCache[wanted])
+		)
 			.then((result) => {
 				if (wanted === id && result.error && !songs.length) error = result.error;
 				// Kept downloaded: its new songs too
-				if (wanted === id && autoOn && keptCount < songs.length) keepAll();
+				if (wanted === id && untrack(() => autoOn && keptCount < songs.length)) keepAll();
 			})
 			.finally(() => wanted === id && (loading = false));
 	});
@@ -233,8 +239,10 @@
 					? 'text-primary-500'
 					: 'text-white/60'}"
 				onclick={() => {
-					setAutoDownload(id, !autoOn);
-					if (!autoOn) keepAll();
+					// (what it was before the tap: setting it changes autoOn right away)
+					const turnOn = !autoOn;
+					setAutoDownload(id, turnOn);
+					if (turnOn) keepAll();
 				}}
 			>
 				<span
