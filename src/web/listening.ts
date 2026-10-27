@@ -31,7 +31,7 @@ function fromHistory(song: HistorySong): MapSet {
 }
 
 /** The playlists' song of a history entry (it has the length), else the entry */
-const known = (song: HistorySong) => libraryByKey().get(songKey(song)) ?? fromHistory(song);
+export const known = (song: HistorySong) => libraryByKey().get(songKey(song)) ?? fromHistory(song);
 
 /** The songs heard last, the newest first, each once */
 export const recentSongs = derived([history, libraryPool], ([{ songs, plays }]) => {

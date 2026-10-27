@@ -21,6 +21,10 @@
 	import SongRow from '../SongRow.svelte';
 	import { onMount } from 'svelte';
 	import { friendActivity, watchFriends } from '../friends';
+	import { history } from '../../lib/stores/history';
+	import { recap } from '../../lib/wrapped';
+
+	let wrappedMinutes = $derived(Math.round(recap($history, 'month').seconds / 60));
 
 	// (how many friends are on, at the friends button)
 	onMount(watchFriends);
@@ -204,6 +208,25 @@
 				</a>
 			{/each}
 		</div>
+	{/if}
+
+	{#if $recentSongs.length}
+		<a
+			href="{base}/wrapped"
+			class="relative -my-2 flex items-center gap-4 p-4 rounded-xl overflow-hidden bg-gradient-to-br from-primary-400/70 via-primary-700/40 to-white/[0.04] active:opacity-80"
+		>
+			<Triangles count={6} seed={11} />
+			<span class="relative size-12 shrink-0 grid place-items-center rounded-lg bg-black/25">
+				<span class="icon-[mingcute--chart-bar-line] size-7"></span>
+			</span>
+			<span class="relative min-w-0 flex-1">
+				<span class="block font-bold">Your Wrapped</span>
+				<span class="block text-sm text-white/75"
+					>{wrappedMinutes.toLocaleString()} minutes in the last 30 days</span
+				>
+			</span>
+			<span class="relative icon-[mingcute--right-line] size-6 text-white/70"></span>
+		</a>
 	{/if}
 
 	{#if $recentSongs.length}
