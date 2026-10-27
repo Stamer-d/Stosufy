@@ -23,7 +23,8 @@
 	} from '#lib/stores/osuImport.ts';
 	import { osuFolder as findOsuFolder } from '#lib/stores/osuFolder.ts';
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
-	import { keyStore, sessionKeyNeeded } from '#lib/stores/auth.ts';
+	import { keyStore, sessionKeyNeeded, freshToken } from '#lib/stores/auth.ts';
+	import { showToast } from '#lib/stores/toast.ts';
 	import VisibilityPicker from './VisibilityPicker.svelte';
 	import KeybindSettings from './KeybindSettings.svelte';
 	import HitsoundSettings from './HitsoundSettings.svelte';
@@ -522,6 +523,23 @@
 							}}
 						>
 							{$keyStore.sessionKey ? 'Change' : 'Add key'}
+						</Button>
+					</div>
+					<div class="mt-2 flex items-center justify-between gap-4 p-3 rounded-lg bg-white/[0.04]">
+						<span class="min-w-0">
+							<span class="block font-semibold text-white">Web app on your phone</span>
+							<span class="block text-xs text-secondary-600">
+								Copies your login to paste into the web app (it lasts a day).
+							</span>
+						</span>
+						<Button
+							type="normal"
+							onclick={async () => {
+								await navigator.clipboard.writeText(await freshToken());
+								showToast('Login copied', 'icon-[mingcute--copy-2-line]');
+							}}
+						>
+							Copy login
 						</Button>
 					</div>
 				</section>
