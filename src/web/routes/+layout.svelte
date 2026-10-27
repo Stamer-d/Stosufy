@@ -55,6 +55,15 @@
 	});
 	/** The background behind the app, dimmed as set in the desktop app (osu!'s background dim) */
 	let dim = $derived(song && appearance.background ? appearance.dim / 100 : 1);
+
+	/** Scrolled down: the bar behind the clock shows */
+	let scrolled = $state(false);
+	onMount(() => {
+		const onScroll = () => (scrolled = window.scrollY > 4);
+		onScroll();
+		window.addEventListener('scroll', onScroll, { passive: true });
+		return () => window.removeEventListener('scroll', onScroll);
+	});
 </script>
 
 <!-- The song's background behind the app, blurred and dimmed (like the desktop app's) -->
@@ -62,26 +71,27 @@
 	<SongBackdrop {song} {dim} />
 </div>
 
-<div
-	class="min-h-dvh pt-[env(safe-area-inset-top)] px-2 pb-[calc(env(safe-area-inset-bottom)+8.5rem)]"
->
-	{#if $offline}
-		<div
-			class="sticky top-[calc(env(safe-area-inset-top)+0.5rem)] z-20 mt-2 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[#2b2410] ring-1 ring-amber-300/25 text-amber-100"
-		>
-			<span class="icon-[mingcute--wifi-off-line] size-6 shrink-0 text-amber-300"></span>
-			<span class="min-w-0">
-				<span class="block font-semibold">You're offline</span>
-				<span class="block text-sm text-amber-100/70">Your downloaded songs still play.</span>
-			</span>
-		</div>
-	{/if}
+<!-- The app on the whole screen, edge to edge: the pages start under the clock (their
+     header's color reaches up behind it); once scrolled, a bar behind the clock keeps what
+     scrolls from showing there -->
+<div class="min-h-dvh pb-[calc(env(safe-area-inset-bottom)+8.5rem)]">
 	<main
 		bind:this={panel}
-		class="mt-3 min-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-9.5rem)] rounded-xl {song
+		class="min-h-dvh pt-[env(safe-area-inset-top)] {song
 			? 'bg-panel/80'
 			: 'bg-panel'} overflow-clip"
 	>
+		{#if $offline}
+			<div
+				class="sticky top-[calc(env(safe-area-inset-top)+0.5rem)] z-20 mx-2 mt-2 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[#2b2410] ring-1 ring-amber-300/25 text-amber-100"
+			>
+				<span class="icon-[mingcute--wifi-off-line] size-6 shrink-0 text-amber-300"></span>
+				<span class="min-w-0">
+					<span class="block font-semibold">You're offline</span>
+					<span class="block text-sm text-amber-100/70">Your downloaded songs still play.</span>
+				</span>
+			</div>
+		{/if}
 		{#if needsLogin}
 			<Login />
 		{:else}
@@ -91,14 +101,11 @@
 </div>
 
 <Dock />
-<!-- What scrolls doesn't show behind the clock and the notch: the background is there, the
-     same as around the panel (a copy of it, cut to the top) -->
 <div
-	class="fixed inset-0 z-20 pointer-events-none"
-	style="clip-path: inset(0 0 calc(100% - env(safe-area-inset-top)) 0)"
->
-	<SongBackdrop {song} {dim} />
-</div>
+	class="fixed inset-x-0 top-0 z-20 h-[env(safe-area-inset-top)] bg-panel pointer-events-none transition-opacity duration-150 {scrolled
+		? 'opacity-100'
+		: 'opacity-0'}"
+></div>
 <FullPlayer />
 <SongMenu />
 <Toasts />

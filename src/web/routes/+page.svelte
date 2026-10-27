@@ -41,7 +41,8 @@
 					: 'Good evening';
 
 	const background = (song) => `https://assets.ppy.sh/beatmaps/${song.id}/covers/cover@2x.jpg`;
-	const square = (song) => `https://assets.ppy.sh/beatmaps/${song.id}/covers/list@2x.jpg`;
+	// (the cards are big: the banner's middle is sharper than the small square)
+	const square = (song) => `https://assets.ppy.sh/beatmaps/${song.id}/covers/cover@2x.jpg`;
 
 	let current = $derived($queue.songs[$queue.index] ?? null);
 	/** The big one at the top: the song playing, else the one heard last */

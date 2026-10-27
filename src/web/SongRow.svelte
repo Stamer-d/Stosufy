@@ -1,4 +1,5 @@
 <script>
+	import { haptic } from './haptics';
 	// A song of a list, as in the desktop app: its cover, title and artist, and whether it's
 	// on the phone or streams. Tap it to play, hold it or ⋯ for what else can be done with it.
 	import SongCover from '../lib/components/SongCover.svelte';
@@ -27,6 +28,7 @@
 		pressedAt = { x: event.clientX, y: event.clientY };
 		pressTimer = setTimeout(() => {
 			longPressed = true;
+			haptic('medium');
 			songMenu.set({ song, playlistId });
 		}, 500);
 	}

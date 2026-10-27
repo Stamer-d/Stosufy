@@ -1,4 +1,5 @@
 <script>
+	import { haptic } from './haptics';
 	// Swiping between songs, as in Spotify: the song before and the next one wait left and
 	// right and come along with the finger; let go far or fast enough, the next one slides
 	// in (else it springs back). Touch events: on iOS they're the dependable ones.
@@ -60,6 +61,7 @@
 		animate = true;
 		if (possible && (Math.abs(offset) > width * 0.3 || fast)) {
 			busy = true;
+			haptic();
 			offset = -direction * width;
 			setTimeout(() => {
 				// The neighbour becomes the song: it's in the middle at once, without sliding

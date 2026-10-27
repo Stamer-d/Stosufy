@@ -2,6 +2,8 @@
 // others make room, near the top or the bottom of the screen the page scrolls along. Let go,
 // it says where the song went. (All rows are as high as each other.)
 
+import { haptic } from './haptics';
+
 interface Options {
 	/** The song at `from` goes to `to` */
 	onmove: (from: number, to: number) => void;
@@ -31,6 +33,7 @@ export function sortable(list: HTMLElement, options: Options) {
 			0,
 			Math.min(drag.rows.length - 1, drag.from + Math.round(moved / drag.height))
 		);
+		if (to !== drag.to) haptic();
 		drag.to = to;
 		drag.row.style.transform = `translateY(${moved}px)`;
 		drag.rows.forEach((row, i) => {
@@ -92,7 +95,7 @@ export function sortable(list: HTMLElement, options: Options) {
 		row.style.position = 'relative';
 		row.style.zIndex = '5';
 		row.classList.add('dragging');
-		navigator.vibrate?.(10);
+		haptic('medium');
 		drag.frame = requestAnimationFrame(scrollAlong);
 	}
 

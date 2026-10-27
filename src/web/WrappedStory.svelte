@@ -5,6 +5,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import { showToast } from '../lib/stores/toast';
+	import { haptic } from './haptics';
 	import { swipe } from './gestures';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongCover from '../lib/components/SongCover.svelte';
@@ -124,6 +125,7 @@
 		const short = performance.now() - downAt < 250;
 		downAt = 0;
 		if (wasHeld || !short) return;
+		haptic();
 		if (event.clientX < window.innerWidth / 3) previous();
 		else next();
 	}
@@ -345,6 +347,7 @@
 						track={top.song.track}
 						title={top.song.title}
 						class="w-full max-w-72 aspect-square rounded-xl shadow-2xl shadow-black/50"
+						large
 					/>
 					<p class="text-4xl font-extrabold leading-tight line-clamp-3">{top.song.title}</p>
 					<p class="text-xl text-white/80">{top.song.artist}</p>

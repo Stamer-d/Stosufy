@@ -4,9 +4,17 @@
 	/**
 	 * The small square cover of a beatmap set: the copy saved with the download, or online.
 	 * The songs of a set with several (track) show their own background.
-	 * @type {{ setId: number | string, track?: number, title?: string, class?: string, lazy?: boolean }}
+	 * `large`: a big cover (the web app loads a sharper image for it)
+	 * @type {{ setId: number | string, track?: number, title?: string, class?: string, lazy?: boolean, large?: boolean }}
 	 */
-	let { setId, track = 0, title = '', class: className = '', lazy = false } = $props();
+	let {
+		setId,
+		track = 0,
+		title = '',
+		class: className = '',
+		lazy = false,
+		large = false
+	} = $props();
 
 	let url = $state(null);
 	// Lazy covers load once they come near the screen: reading hundreds of files at once
@@ -34,7 +42,7 @@
 		if (!visible) return;
 		const id = setId;
 		const which = track ?? 0;
-		thumbnailUrl(id, which).then((result) => {
+		thumbnailUrl(id, which, large).then((result) => {
 			if (setId === id && (track ?? 0) === which) url = result;
 		});
 	});

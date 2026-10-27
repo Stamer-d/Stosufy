@@ -1,4 +1,5 @@
 <script>
+	import { haptic } from './haptics';
 	// The bar at the bottom, the song bar of the desktop app on a phone: the song playing
 	// (tap it for the whole screen player, swipe it for the next one or the one before) and the
 	// tabs
@@ -46,7 +47,10 @@
 				<button
 					aria-label={$isFavourite(song) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
 					class="size-10 shrink-0 grid place-items-center"
-					onclick={() => toggleFavourite(song)}
+					onclick={() => {
+						haptic();
+						toggleFavourite(song);
+					}}
 				>
 					<span
 						class="{$isFavourite(song)
@@ -57,7 +61,10 @@
 				<button
 					aria-label={$playing ? 'Pause' : 'Play'}
 					class="size-10 shrink-0 grid place-items-center rounded-full bg-white text-black active:scale-95 transition"
-					onclick={toggle}
+					onclick={() => {
+						haptic();
+						toggle();
+					}}
 				>
 					<span
 						class="{$playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-5"

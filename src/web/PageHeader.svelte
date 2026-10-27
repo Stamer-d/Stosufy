@@ -35,7 +35,7 @@
 </script>
 
 <div
-	class="sticky top-[env(safe-area-inset-top)] z-10 -mb-14 h-14 px-1 flex items-center gap-1 rounded-t-xl transition-[background-color,opacity] duration-200 {gone
+	class="sticky top-0 z-[25] -mt-[env(safe-area-inset-top)] -mb-[calc(3.5rem+env(safe-area-inset-top))] h-[calc(3.5rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] px-1 flex items-center gap-1 transition-[background-color,opacity] duration-200 {gone
 		? 'opacity-100'
 		: 'opacity-0 pointer-events-none'}"
 	style="background-color: color-mix(in oklab, {color ??
@@ -63,9 +63,10 @@
 	{/if}
 </div>
 
+<!-- (its color reaches up behind the clock) -->
 <div
-	class="transition-colors duration-500"
-	style="background: linear-gradient(to bottom, {color ?? 'transparent'} 0, transparent 24rem)"
+	class="-mt-[env(safe-area-inset-top)] pt-[env(safe-area-inset-top)] transition-colors duration-500"
+	style="background: linear-gradient(to bottom, {color ?? 'transparent'} 0, transparent 26rem)"
 >
 	<header class="relative px-4 pt-2 pb-4 overflow-hidden" use:watch>
 		<Triangles count={12} {seed} />

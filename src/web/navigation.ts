@@ -5,6 +5,7 @@
 // - installed on the home screen, a swipe from the left edge goes back (iOS has no back
 //   gesture for web apps there)
 
+import { haptic } from './haptics';
 import { writable, get } from 'svelte/store';
 import { goto, onNavigate, afterNavigate } from '$app/navigation';
 
@@ -51,6 +52,7 @@ const lastPath: Partial<Record<TabId, string>> = {};
 const scrollOf: Record<string, number> = {};
 
 export function openTab(id: TabId) {
+	haptic();
 	const tab = TABS.find((t) => t.id === id)!;
 	const here = location.pathname;
 	if (get(currentTab) === id) {
@@ -181,6 +183,7 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			// Back: the page stays where the finger left it until the one before is there
 			swipedBack = true;
 			resetAfterBack = true;
+			haptic();
 			history.back();
 		} else {
 			element.style.transition = 'transform 200ms ease-out';

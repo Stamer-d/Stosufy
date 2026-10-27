@@ -25,6 +25,7 @@
 		autoplay,
 		toggleAutoplay
 	} from './player';
+	import { haptic } from './haptics';
 	import Lyrics from './Lyrics.svelte';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongSwipe from './SongSwipe.svelte';
@@ -173,8 +174,8 @@
 								<img
 									src={bigCoverUrl(shown)}
 									alt=""
-									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300"
-									style="max-width: min(100%, 46dvh)"
+									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300 bg-cover bg-center"
+									style="max-width: min(100%, 46dvh); background-image: url({coverUrl(shown)})"
 									onerror={handleImageError}
 								/>
 							</div>
@@ -197,7 +198,10 @@
 				<button
 					aria-label={$isFavourite(song) ? 'Unlike' : 'Like'}
 					class="size-11 grid place-items-center"
-					onclick={() => toggleFavourite(song)}
+					onclick={() => {
+						haptic();
+						toggleFavourite(song);
+					}}
 				>
 					<span
 						class="{$isFavourite(song)
@@ -242,23 +246,43 @@
 					aria-label="Shuffle"
 					aria-pressed={$shuffle}
 					class="size-12 grid place-items-center {$shuffle ? 'text-primary-400' : 'text-white/70'}"
-					onclick={toggleShuffle}
+					onclick={() => {
+						haptic();
+						toggleShuffle();
+					}}
 				>
 					<span class="icon-[mingcute--shuffle-2-line] size-6"></span>
 				</button>
-				<button aria-label="Back" class="size-14 grid place-items-center" onclick={previous}>
+				<button
+					aria-label="Back"
+					class="size-14 grid place-items-center"
+					onclick={() => {
+						haptic();
+						previous();
+					}}
+				>
 					<span class="icon-[mingcute--skip-previous-fill] size-9"></span>
 				</button>
 				<button
 					aria-label={$playing ? 'Pause' : 'Play'}
 					class="size-18 grid place-items-center rounded-full bg-white text-black"
-					onclick={toggle}
+					onclick={() => {
+						haptic('medium');
+						toggle();
+					}}
 				>
 					<span
 						class="{$playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-9"
 					></span>
 				</button>
-				<button aria-label="Next" class="size-14 grid place-items-center" onclick={() => next()}>
+				<button
+					aria-label="Next"
+					class="size-14 grid place-items-center"
+					onclick={() => {
+						haptic();
+						next();
+					}}
+				>
 					<span class="icon-[mingcute--skip-forward-fill] size-9"></span>
 				</button>
 				<button
@@ -266,7 +290,10 @@
 					class="size-12 grid place-items-center {$repeat !== 'off'
 						? 'text-primary-400'
 						: 'text-white/70'}"
-					onclick={cycleRepeat}
+					onclick={() => {
+						haptic();
+						cycleRepeat();
+					}}
 				>
 					<span
 						class="{$repeat === 'one'

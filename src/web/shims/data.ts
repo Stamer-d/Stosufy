@@ -39,12 +39,29 @@ export const librarySetSongs = (setId: number | string): MapSet[] =>
 /** The S of the app, grey, where a cover can't be loaded */
 const LOGO = `${__WEB_BASE__}/logo.png`;
 
-export async function thumbnailUrl(setId: number | string): Promise<string> {
-	return `https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`;
+/** A cover: the small square (300×300), or for big ones the whole background */
+export async function thumbnailUrl(
+	setId: number | string,
+	_track = 0,
+	large = false
+): Promise<string> {
+	return `https://assets.ppy.sh/beatmaps/${setId}/covers/${large ? 'fullsize' : 'list@2x'}.jpg`;
 }
+
+/** What to try when a cover can't be loaded: the whole background, the banner, the square */
+const SMALLER: [RegExp, string][] = [
+	[/\/covers\/fullsize\.jpg$/, '/covers/cover@2x.jpg'],
+	[/\/covers\/cover@2x\.jpg$/, '/covers/list@2x.jpg']
+];
 
 export function handleImageError(event: Event) {
 	const image = event.target as HTMLImageElement;
+	for (const [from, to] of SMALLER) {
+		if (from.test(image.src)) {
+			image.src = image.src.replace(from, to);
+			return;
+		}
+	}
 	image.src = LOGO;
 	image.style.filter = 'grayscale(100%)';
 	image.style.opacity = '0.7';

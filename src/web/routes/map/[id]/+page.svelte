@@ -116,6 +116,7 @@
 				track={song.track}
 				title={song.title}
 				class="size-48 rounded-md shadow-2xl shadow-black/50"
+				large
 			/>
 		{/snippet}
 		{#if status}

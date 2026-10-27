@@ -60,7 +60,7 @@
 	const hourLabel = (h) => `${String(h).padStart(2, '0')}:00`;
 </script>
 
-<div class="relative overflow-hidden">
+<div class="relative -mt-[env(safe-area-inset-top)] pt-[env(safe-area-inset-top)] overflow-hidden">
 	<div
 		class="absolute inset-0 bg-gradient-to-br from-primary-400/70 via-primary-700/40 to-secondary-200"
 	></div>

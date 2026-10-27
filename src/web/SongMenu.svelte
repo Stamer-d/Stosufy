@@ -2,6 +2,7 @@
 	const base = __WEB_BASE__;
 	// What can be done with a song (the ⋯ of a row): play it next, like it, add it to a
 	// playlist, take it out of the playlist it's in, keep it on the phone
+	import { haptic } from './haptics';
 	import { songMenu, ownPlaylists } from './library';
 	import { startRadio } from './listening';
 	import { swipe } from './gestures';
@@ -45,6 +46,7 @@
 		// (taken before closing: closing forgets which song and playlist the menu was for)
 		const target = song;
 		const playlistId = from;
+		haptic();
 		close();
 		Promise.resolve(run(target, playlistId)).then(
 			// (false: it said so itself)

@@ -9,8 +9,12 @@ export const streamUrl = (song: MapSet) => `${MIRROR}/preview/audio/${song.beatm
 export const previewUrl = (song: MapSet) => `https://b.ppy.sh/preview/${song.id}.mp3`;
 export const coverUrl = (song: MapSet) =>
 	`https://assets.ppy.sh/beatmaps/${song.id}/covers/list@2x.jpg`;
+/** The whole background (sharp on the big cover; falls back to the banner, see handleImageError) */
 export const bigCoverUrl = (song: MapSet) =>
-	`https://assets.ppy.sh/beatmaps/${song.id}/covers/card@2x.jpg`;
+	`https://assets.ppy.sh/beatmaps/${song.id}/covers/fullsize.jpg`;
+/** The banner (1800×500): its middle as a square is sharp enough for covers of a card */
+export const mediumCoverUrl = (song: MapSet) =>
+	`https://assets.ppy.sh/beatmaps/${song.id}/covers/cover@2x.jpg`;
 
 /** A song's key among the downloads: the difficulty it's of */
 export const keyOf = (song: MapSet) => String(song.beatmaps?.[0]?.id ?? song.id);

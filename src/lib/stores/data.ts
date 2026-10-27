@@ -1294,7 +1294,12 @@ function smallImageUrl(imagePath: string) {
  * The small square cover of a beatmap set: saved in the songs folder or online. The songs
  * of a set with several (track > 0) show their own background when they have one.
  */
-export async function thumbnailUrl(setId: number | string, track = 0): Promise<string> {
+export async function thumbnailUrl(
+	setId: number | string,
+	track = 0,
+	// (the web app shows big covers sharper; here the copy kept with the download)
+	_large = false
+): Promise<string> {
 	const set = get(mapDataStore)[setId];
 	if (track > 0 && set) {
 		const own = trackGroups(set)[track]?.find((map) => map.background)?.background;

@@ -1,6 +1,8 @@
 // use:swipe: a finger dragging an element, across or down (whichever way it starts going);
 // the element follows it, and lets go with `onswipe` when it went far or fast enough.
 
+import { haptic } from './haptics';
+
 interface SwipeOptions {
 	/** Which way it can be dragged */
 	axis: 'x' | 'y';
@@ -75,7 +77,10 @@ export function swipe(node: HTMLElement, options: SwipeOptions) {
 		const counts =
 			(Math.abs(offset) > FAR || Math.abs(offset) / time > FAST) &&
 			(!current.only || direction === current.only);
-		if (counts) current.onswipe(direction);
+		if (counts) {
+			haptic();
+			current.onswipe(direction);
+		}
 		place(0, true);
 		if (event.type === 'pointercancel') place(0, true);
 	}
