@@ -3,6 +3,8 @@
 // the radio picks from.
 
 import { get, writable } from 'svelte/store';
+import { fetch as webFetch } from './http';
+import { freshToken } from './auth';
 import type { MapSet, StoredMapSet } from '../../lib/types';
 
 export const mapDataStore = writable<Record<string, StoredMapSet>>({});
@@ -94,4 +96,32 @@ export function colorFromImage(url: string): Promise<string | null> {
 			})
 		);
 	return imageColors.get(url)!;
+}
+
+// osu!'s search and a beatmap set (the smart playlists' autofill and the beatmap page ask)
+
+export async function fetchMaps(
+	search = '',
+	cursorString = '',
+	filters: { status?: string; sort?: string; genre?: string; language?: string } = {}
+) {
+	const params = new URLSearchParams({ q: search });
+	if (filters.status) params.set('s', filters.status);
+	if (filters.sort) params.set('sort', filters.sort);
+	if (cursorString) params.set('cursor_string', cursorString);
+	if (filters.genre) params.set('g', filters.genre);
+	if (filters.language) params.set('l', filters.language);
+	const response = await webFetch(`https://osu.ppy.sh/api/v2/beatmapsets/search?${params}`, {
+		headers: { Authorization: `Bearer ${await freshToken()}` }
+	});
+	if (!response.ok) throw new Error(`osu! answered ${response.status}`);
+	return response.json();
+}
+
+export async function fetchBeatmapset(setId: number | string) {
+	const response = await webFetch(`https://osu.ppy.sh/api/v2/beatmapsets/${setId}`, {
+		headers: { Authorization: `Bearer ${await freshToken()}` }
+	});
+	if (!response.ok) throw new Error(`osu! answered ${response.status}`);
+	return response.json();
 }

@@ -16,6 +16,7 @@ import { offline, whenOnline } from '../lib/stores/network';
 import { keyStore } from './shims/auth';
 import { favourites, loadFavourites, LIKED_ID } from '../lib/stores/favourites';
 import { getStosufyUser } from '../lib/api';
+import { user } from './shims/user';
 import type { MapSet, Playlist } from '../lib/types';
 
 const KEY = 'stosufy-web-playlists';
@@ -75,7 +76,11 @@ export async function loadLibrary(token: string, again = false) {
 			getPlaylists(token),
 			loadFavourites().catch(() => {}),
 			getStosufyUser(token)
-				.then((user) => webUser.set(user))
+				.then((profile) => {
+					webUser.set(profile);
+					// (the desktop app's stores know the user by it: the settings sync starts)
+					user.set(profile);
+				})
 				.catch(() => {})
 		]);
 		playlists.set([liked(get(favourites).length), ...own]);

@@ -13,6 +13,9 @@
 	import { offline } from '../../lib/stores/network';
 	import { queue } from '../player';
 	import { setupNavigation } from '../navigation';
+	import { onMount } from 'svelte';
+	import { startSettingsSync } from '../../lib/stores/settingsSync';
+	import { userSettings } from '../../lib/stores/user';
 	import Dock from '../Dock.svelte';
 	import SongBackdrop from '../SongBackdrop.svelte';
 	import FullPlayer from '../FullPlayer.svelte';
@@ -38,11 +41,25 @@
 	$effect(() => {
 		if ($keyStore.access_token && !$loginExpired) loadLibrary($keyStore.access_token);
 	});
+
+	// The account's settings, as in the desktop app (its accent color, smart playlists…)
+	onMount(startSettingsSync);
+	let appearance = $derived({
+		accent: 'violet',
+		background: true,
+		dim: 75,
+		...$userSettings.settings?.appearance
+	});
+	$effect(() => {
+		document.documentElement.dataset.accent = appearance.accent;
+	});
+	/** The background behind the app, dimmed as set in the desktop app (osu!'s background dim) */
+	let dim = $derived(song && appearance.background ? appearance.dim / 100 : 1);
 </script>
 
 <!-- The song's background behind the app, blurred and dimmed (like the desktop app's) -->
 <div class="fixed inset-0 -z-10">
-	<SongBackdrop {song} dim={song ? 0.75 : 1} />
+	<SongBackdrop {song} {dim} />
 </div>
 
 <div
@@ -80,7 +97,7 @@
 	class="fixed inset-0 z-20 pointer-events-none"
 	style="clip-path: inset(0 0 calc(100% - env(safe-area-inset-top)) 0)"
 >
-	<SongBackdrop {song} dim={song ? 0.75 : 1} />
+	<SongBackdrop {song} {dim} />
 </div>
 <FullPlayer />
 <SongMenu />
