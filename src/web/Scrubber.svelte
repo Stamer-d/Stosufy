@@ -2,7 +2,6 @@
 	// Where the song is, to drag (as in Spotify): touch anywhere on the line and it's there,
 	// the line grows and follows the finger, the song jumps there when it's let go. It runs
 	// smoothly with the song (read every frame, not only when the browser says so).
-	import { onMount } from 'svelte';
 	import { time, audioElement, seek } from './player';
 	import { haptic } from './haptics';
 
@@ -13,15 +12,68 @@
 	let duration = $derived($time.duration || 0);
 	let shown = $derived(dragging ?? now);
 
-	onMount(() => {
-		let frame;
-		const step = () => {
-			const audio = $audioElement;
-			if (audio && dragging == null) now = audio.currentTime;
-			frame = requestAnimationFrame(step);
+	// While it plays, the line runs to the end by itself (an animation the phone's graphics
+	// chip plays, nothing to do here each frame); started again on play, pause, seek, speed
+	let fill = $state();
+	let thumb = $state();
+	let running = [];
+	function place(f) {
+		fill.style.transform = `scaleX(${f})`;
+		thumb.style.transform = `translateX(${f * 100}%)`;
+	}
+	function sync() {
+		for (const animation of running) animation.cancel();
+		running = [];
+		const audio = $audioElement;
+		if (!fill || !thumb || !audio || !audio.duration) return;
+		if (dragging != null) return place(Math.min(1, dragging / audio.duration));
+		now = audio.currentTime;
+		const f = Math.min(1, audio.currentTime / audio.duration);
+		place(f);
+		if (audio.paused) return;
+		const timing = {
+			duration: Math.max(
+				0,
+				((audio.duration - audio.currentTime) * 1000) / (audio.playbackRate || 1)
+			),
+			easing: 'linear',
+			fill: /** @type {const} */ ('forwards')
 		};
-		frame = requestAnimationFrame(step);
-		return () => cancelAnimationFrame(frame);
+		running = [
+			fill.animate([{ transform: `scaleX(${f})` }, { transform: 'scaleX(1)' }], timing),
+			thumb.animate(
+				[{ transform: `translateX(${f * 100}%)` }, { transform: 'translateX(100%)' }],
+				timing
+			)
+		];
+	}
+	const EVENTS = [
+		'play',
+		'playing',
+		'pause',
+		'seeked',
+		'ratechange',
+		'loadedmetadata',
+		'durationchange'
+	];
+	$effect(() => {
+		const audio = $audioElement;
+		if (!audio) return;
+		for (const type of EVENTS) audio.addEventListener(type, sync);
+		sync();
+		return () => {
+			for (const type of EVENTS) audio.removeEventListener(type, sync);
+			for (const animation of running) animation.cancel();
+		};
+	});
+	// (the time under it, as often as the song says where it is)
+	$effect(() => {
+		if (dragging == null) now = $time.current;
+	});
+	// Dragging: the line is where the finger is
+	$effect(() => {
+		void dragging;
+		sync();
 	});
 
 	const at = (x) => {
@@ -85,19 +137,21 @@
 			? 'h-2'
 			: 'h-1'}"
 	>
-		<div
-			class="absolute inset-y-0 left-0 rounded-full {dragging != null
-				? 'bg-primary-400'
-				: 'bg-white'}"
-			style="width: {duration ? (shown / duration) * 100 : 0}%"
-		></div>
-		<div
-			class="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md transition-[width,height] duration-150 {dragging !=
-			null
-				? 'size-5'
-				: 'size-3'}"
-			style="left: {duration ? (shown / duration) * 100 : 0}%"
-		></div>
+		<!-- (moved by transform, not width or left: nothing is painted again every frame) -->
+		<div class="absolute inset-0 overflow-hidden rounded-full">
+			<div
+				bind:this={fill}
+				class="absolute inset-0 origin-left {dragging != null ? 'bg-primary-400' : 'bg-white'}"
+			></div>
+		</div>
+		<div bind:this={thumb} class="absolute inset-0 pointer-events-none">
+			<div
+				class="absolute top-1/2 left-0 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md transition-[width,height] duration-150 {dragging !=
+				null
+					? 'size-5'
+					: 'size-3'}"
+			></div>
+		</div>
 	</div>
 </div>
 <div

@@ -82,13 +82,17 @@
 	}
 }
 
-/* Triangles drifting upwards, like the osu!lazer backgrounds */
+/* Triangles drifting upwards, like the osu!lazer backgrounds (each in a lane as high as its
+   box: a percent of the lane is a percent of the box) */
+.animate-triangle {
+	will-change: transform;
+}
 @keyframes triangle-rise {
 	from {
-		top: 100%;
+		transform: translate3d(0, 100%, 0);
 	}
 	to {
-		top: -40%;
+		transform: translate3d(0, -40%, 0);
 	}
 }
 

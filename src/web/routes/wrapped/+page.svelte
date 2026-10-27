@@ -69,12 +69,14 @@
 	<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/40 to-transparent"></div>
 	<div class="relative px-4 pt-2 pb-6">
 		<a
-		href="{base}/"
-		onclick={(e) => {
-			e.preventDefault();
-			goBack(`${base}/`);
-		}}
-		aria-label="Back" class="-ml-3 size-12 grid place-items-center">
+			href="{base}/"
+			onclick={(e) => {
+				e.preventDefault();
+				goBack(`${base}/`);
+			}}
+			aria-label="Back"
+			class="-ml-3 size-12 grid place-items-center"
+		>
 			<span class="icon-[mingcute--left-line] size-7"></span>
 		</a>
 		<p class="mt-2 text-sm font-bold uppercase tracking-wide text-white/70">Your Wrapped</p>

@@ -3,6 +3,7 @@
 	import { goBack } from '../../navigation';
 	// Friends: who's on, what they listen to (tap to listen along), and who sees you
 	import { onMount } from 'svelte';
+	import Bars from '../../Bars.svelte';
 	import {
 		friendActivity,
 		watchFriends,
@@ -53,7 +54,9 @@
 			e.preventDefault();
 			goBack(`${base}/`);
 		}}
-		aria-label="Back" class="-ml-3 size-11 grid place-items-center">
+		aria-label="Back"
+		class="-ml-3 size-11 grid place-items-center"
+	>
 		<span class="icon-[mingcute--left-line] size-7"></span>
 	</a>
 	<h1 class="text-2xl font-bold tracking-tight">Friends</h1>
@@ -122,9 +125,7 @@
 					{#if song}
 						<span class="flex items-center gap-1.5 text-sm text-secondary-600">
 							{#if friend.online && song.playing}
-								<span
-									class="icon-[svg-spinners--bars-scale-middle] size-3.5 shrink-0 text-primary-500"
-								></span>
+								<Bars class="size-3.5 shrink-0" />
 							{/if}
 							<span class="truncate">{song.title} · {song.artist}</span>
 						</span>

@@ -2,6 +2,7 @@
 	import { haptic } from './haptics';
 	// A song of a list, as in the desktop app: its cover, title and artist, and whether it's
 	// on the phone or streams. Tap it to play, hold it or ⋯ for what else can be done with it.
+	import Bars from './Bars.svelte';
 	import SongCover from '../lib/components/SongCover.svelte';
 	import { queue, playing } from './player';
 	import { downloaded, downloading, isDownloaded } from './downloads';
@@ -73,7 +74,7 @@
 					: 'text-secondary-600'}"
 			>
 				{#if current && $playing}
-					<span class="icon-[svg-spinners--bars-scale-middle] size-4 text-primary-500"></span>
+					<Bars class="size-4" />
 				{:else}
 					{index + 1}
 				{/if}
@@ -89,7 +90,7 @@
 			/>
 			{#if index == null && current && $playing}
 				<span class="absolute inset-0 grid place-items-center rounded bg-black/50">
-					<span class="icon-[svg-spinners--bars-scale-middle] size-5 text-primary-500"></span>
+					<Bars class="size-5" />
 				</span>
 			{/if}
 		</span>

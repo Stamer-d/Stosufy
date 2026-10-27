@@ -263,20 +263,35 @@ if (typeof window !== 'undefined') {
 		audio.addEventListener('loadstart', applyCurrentMod);
 		audio.addEventListener('seeked', () => (restart = true));
 	});
-	setInterval(tick, TICK);
-
-	// The Nightcore beat (the desktop app's), with the timing points read here
-	startBeats(() => {
-		const audio = get(audioElement);
-		const mapId = mapIdOf();
-		return {
-			audio: document.hidden ? null : audio,
-			setId: String(currentSong()?.id ?? ''),
-			mapId,
-			timing: timing?.key === mapId ? timing.points : null,
-			volume: 0.6
-		};
-	});
+	// The timers run only while they have something to do (a phone feels each one)
+	let ticking: ReturnType<typeof setInterval> | null = null;
+	let beats = false;
+	const timers = () => {
+		const on = settings().on;
+		if (on && !ticking) ticking = setInterval(tick, TICK);
+		if (!on && ticking) {
+			clearInterval(ticking);
+			ticking = null;
+			stopScheduled();
+		}
+		// The Nightcore beat (the desktop app's), with the timing points read here: from the
+		// first time Nightcore is on (then it waits quietly while it's off)
+		if (!beats && currentMod() === 'NC') {
+			beats = true;
+			startBeats(() => {
+				const audio = get(audioElement);
+				const mapId = mapIdOf();
+				return {
+					audio: document.hidden ? null : audio,
+					setId: String(currentSong()?.id ?? ''),
+					mapId,
+					timing: timing?.key === mapId ? timing.points : null,
+					volume: 0.6
+				};
+			});
+		}
+	};
+	userSettings.subscribe(timers);
 
 	// Sound only after a tap (browsers' rule): wake the audio up on every one
 	const wake = () => {

@@ -32,24 +32,6 @@ img {
 	-webkit-touch-callout: none;
 }
 
-/* osu!'s triangles (the desktop app's Triangles) rise by transform here, not by their top:
-   moving top lays the page out again every frame, which a phone feels */
-div:has(> .animate-triangle) {
-	container-type: size;
-}
-.animate-triangle {
-	top: 0;
-	will-change: transform;
-}
-@keyframes triangle-rise {
-	from {
-		transform: translateY(100cqh);
-	}
-	to {
-		transform: translateY(-40cqh);
-	}
-}
-
 /* A song moved by its handle: lifted above the others */
 li.dragging {
 	background: var(--color-secondary-200);

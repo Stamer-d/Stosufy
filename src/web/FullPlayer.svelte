@@ -220,6 +220,7 @@
 								<img
 									src={bigCoverUrl(shown)}
 									alt=""
+									decoding="async"
 									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300 bg-cover bg-center"
 									style="max-width: min(100%, 46dvh); background-image: url({coverUrl(shown)})"
 									onerror={handleImageError}

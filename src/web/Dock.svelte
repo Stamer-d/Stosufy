@@ -18,8 +18,8 @@
 >
 	{#if song}
 		<div class="relative">
-			<div class="absolute inset-x-0 top-0 h-0.5 bg-white/10">
-				<div class="h-full bg-primary-400" style="width: {progress * 100}%"></div>
+			<div class="absolute inset-x-0 top-0 h-0.5 bg-white/10 overflow-hidden">
+				<div class="h-full origin-left bg-primary-400" style="transform: scaleX({progress})"></div>
 			</div>
 			<div class="flex items-center gap-1 pl-3 pr-2 pt-2.5 pb-2">
 				<SongSwipe class="min-w-0 flex-1">

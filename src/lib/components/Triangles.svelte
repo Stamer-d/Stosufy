@@ -24,10 +24,16 @@
 
 <div class="pointer-events-none absolute inset-0 overflow-hidden {className}" aria-hidden="true">
 	{#each triangles as triangle, i (i)}
+		<!-- (a lane as high as the box, moved by transform: the GPU moves it, nothing is laid
+		     out or painted again while it rises) -->
 		<div
-			class="animate-triangle absolute"
-			style="left: {triangle.left}%; width: {triangle.size}px; height: {triangle.size *
-				0.866}px; opacity: {triangle.opacity}; background: {color}; clip-path: polygon(50% 0, 100% 100%, 0 100%); animation: triangle-rise {triangle.duration}s linear {triangle.delay}s infinite;"
-		></div>
+			class="animate-triangle absolute inset-y-0"
+			style="left: {triangle.left}%; width: {triangle.size}px; animation: triangle-rise {triangle.duration}s linear {triangle.delay}s infinite;"
+		>
+			<div
+				style="height: {triangle.size *
+					0.866}px; opacity: {triangle.opacity}; background: {color}; clip-path: polygon(50% 0, 100% 100%, 0 100%);"
+			></div>
+		</div>
 	{/each}
 </div>

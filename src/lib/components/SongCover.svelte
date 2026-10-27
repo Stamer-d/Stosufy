@@ -53,6 +53,7 @@
 		src={url}
 		alt=""
 		loading={lazy ? 'lazy' : 'eager'}
+		decoding="async"
 		class="object-cover shrink-0 {className}"
 		onerror={handleImageError}
 	/>
