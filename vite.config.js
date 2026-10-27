@@ -44,7 +44,15 @@ export default defineConfig(({ mode }) => {
 	const web = process.env.STOSUFY_WEB === '1';
 	return {
 		// (the web app's path on its server, e.g. /Stosufy on GitHub Pages)
-		define: web ? { __WEB_BASE__: JSON.stringify(process.env.WEB_BASE ?? '') } : {},
+		define: web
+			? {
+					__WEB_BASE__: JSON.stringify(process.env.WEB_BASE ?? ''),
+					// (which build is on the phone: the commit, or when it was built)
+					__WEB_VERSION__: JSON.stringify(
+						process.env.GITHUB_SHA?.slice(0, 7) ?? new Date().toISOString().slice(0, 16)
+					)
+				}
+			: {},
 		plugins: [
 			web && webModules(),
 			sveltekit({

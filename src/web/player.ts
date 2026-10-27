@@ -7,6 +7,7 @@
 import { get, writable } from 'svelte/store';
 import { downloaded, localUrl } from './downloads';
 import { coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
+import { log } from './log';
 import type { MapSet } from '../lib/types';
 
 export { streamUrl, coverUrl, bigCoverUrl, slim } from './songs';
@@ -30,6 +31,10 @@ let objectUrl: string | null = null;
 /** The next song's downloaded audio, read ahead: iOS starts a song with the screen locked
  * only if it's started right away when the one before ends (no waiting on anything) */
 let readAhead: { key: string; url: string } | null = null;
+/** Where the song was at the last timeupdate (to see it go round to the start) */
+let lastTime = 0;
+/** The position was changed by hand (going back to the start isn't the song's end then) */
+let seekedByHand = false;
 /** The song in the <audio> element (none after a start: it loads at the first play) */
 let loaded: MapSet | null = null;
 
@@ -42,18 +47,43 @@ function shuffled<T>(list: T[]) {
 	return copy;
 }
 
+/**
+ * The <audio> element. It loops: when a song ends by itself, iOS closes the app's audio and
+ * doesn't let it start again with the screen locked, so a song never ends: going round to
+ * its start is its end, and the next one starts in the same running audio.
+ */
 function element() {
 	if (audio) return audio;
 	audio = new Audio();
 	audio.preload = 'auto';
+	audio.loop = true;
 	audio.addEventListener('play', () => playing.set(true));
 	audio.addEventListener('pause', () => playing.set(false));
+	// iOS forgets the lock screen's buttons when a song starts: set again each time
+	audio.addEventListener('playing', () => {
+		setupMediaSession();
+		updatePosition();
+		log(`playing ${current()?.title ?? ''}`);
+	});
 	audio.addEventListener('timeupdate', () => {
-		time.set({ current: audio!.currentTime, duration: audio!.duration || 0 });
+		const now = audio!.currentTime;
+		const duration = audio!.duration || 0;
+		time.set({ current: now, duration });
+		const wentRound = duration > 0 && lastTime > duration - 3 && now < 2 && now < lastTime;
+		lastTime = now;
+		if (wentRound && !seekedByHand) {
+			log('song went round: its end');
+			songEnded();
+		}
+		seekedByHand = false;
 		saveSoon();
 	});
 	audio.addEventListener('loadedmetadata', updatePosition);
-	audio.addEventListener('ended', () => next(true));
+	// (it loops, so only if that didn't work)
+	audio.addEventListener('ended', () => {
+		log('ended');
+		songEnded();
+	});
 	audio.addEventListener('error', () => {
 		const song = current();
 		if (!song || audio!.src.startsWith('blob:')) return;
@@ -65,7 +95,8 @@ function element() {
 			return;
 		}
 		// Not even that (offline, and it isn't downloaded): the next one
-		setTimeout(() => current() === song && next(true), 800);
+		log(`can't play ${song.title} (error ${audio!.error?.code})`);
+		setTimeout(() => current() === song && next(), 800);
 	});
 	setupMediaSession();
 	return audio;
@@ -91,9 +122,11 @@ function load(at = 0) {
 	const start = (url: string, own: boolean) => {
 		if (objectUrl && objectUrl !== url) URL.revokeObjectURL(objectUrl);
 		objectUrl = own ? url : null;
+		lastTime = 0;
 		player.src = url;
 		if (at) player.currentTime = at;
-		player.play().catch(() => {});
+		log(`start ${song.title} (${own ? 'downloaded' : 'stream'})`);
+		player.play().catch((error) => log(`play() turned down: ${error?.name}`));
 		save();
 		readNext();
 	};
@@ -147,16 +180,21 @@ export function toggle() {
 	else player.pause();
 }
 
-/** The next song (`ended`: the one before ended by itself, so repeat one plays it again) */
-export function next(ended = false) {
+/** A song ended by itself: the next one (repeat one: it plays on, as it loops) */
+function songEnded() {
+	if (get(repeat) === 'one') return;
 	const { songs, index } = get(queue);
-	if (ended && get(repeat) === 'one') {
+	// The last one: stop at its start
+	if (index + 1 >= songs.length && get(repeat) !== 'all') {
+		element().pause();
 		element().currentTime = 0;
-		element()
-			.play()
-			.catch(() => {});
 		return;
 	}
+	next();
+}
+
+export function next() {
+	const { songs, index } = get(queue);
 	if (index + 1 >= songs.length) {
 		if (get(repeat) !== 'all' || !songs.length) return;
 		queue.set({ songs, index: 0 });
@@ -168,6 +206,7 @@ export function previous() {
 	const { songs, index } = get(queue);
 	// A bit into the song: back to its start, else the one before
 	if (element().currentTime > 3 || (index === 0 && get(repeat) !== 'all')) {
+		seekedByHand = true;
 		element().currentTime = 0;
 		return;
 	}
@@ -176,6 +215,7 @@ export function previous() {
 }
 
 export function seek(seconds: number) {
+	seekedByHand = true;
 	element().currentTime = seconds;
 	updatePosition();
 }
@@ -291,8 +331,14 @@ function setupMediaSession() {
 	const session = navigator.mediaSession;
 	session.setActionHandler('play', () => element().play());
 	session.setActionHandler('pause', () => element().pause());
-	session.setActionHandler('nexttrack', () => next());
-	session.setActionHandler('previoustrack', previous);
+	session.setActionHandler('nexttrack', () => {
+		log('lock screen: next');
+		next();
+	});
+	session.setActionHandler('previoustrack', () => {
+		log('lock screen: back');
+		previous();
+	});
 	// (with these, iOS shows ±10 s on the lock screen instead of back and next)
 	for (const action of ['seekbackward', 'seekforward'] as const) {
 		try {

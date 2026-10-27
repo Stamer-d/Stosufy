@@ -78,7 +78,12 @@ worker.addEventListener('fetch', (event) => {
 				if (kept) return kept;
 			}
 			try {
-				return await fetch(event.request);
+				// (the page asked again each time, not taken from the browser's cache: GitHub
+				// Pages lets it be kept 10 minutes, a new version would wait that long)
+				return await fetch(
+					event.request,
+					event.request.mode === 'navigate' ? { cache: 'no-cache' } : {}
+				);
 			} catch (error) {
 				// Offline: a page of the app is the app (it's one page)
 				const page =

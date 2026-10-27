@@ -5,6 +5,9 @@
 	import { get } from 'svelte/store';
 	import { keyStore, webLoginSetup } from '../../shims/auth';
 	import { osuApi } from '../../shims/http';
+	import { playerLog, clearLog } from '../../log';
+
+	const version = __WEB_VERSION__;
 	import { getStosufyUser } from '../../../lib/api';
 	import { playlistSongsCache } from '../../../lib/stores/playlist';
 	import { streamUrl } from '../../player';
@@ -134,7 +137,7 @@
 
 <header class="px-5 pt-6 pb-3">
 	<h1 class="text-3xl font-extrabold">Checks</h1>
-	<p class="mt-1 text-sm text-secondary-600">What works in this browser</p>
+	<p class="mt-1 text-sm text-secondary-600">What works in this browser · version {version}</p>
 </header>
 <ul class="px-5 flex flex-col gap-3">
 	{#each checks as item (item.name)}
@@ -150,3 +153,20 @@
 		</li>
 	{/each}
 </ul>
+
+<section class="px-5 pt-6">
+	<div class="flex items-center justify-between">
+		<h2 class="font-bold">What the player did</h2>
+		<button class="text-sm text-secondary-600" onclick={clearLog}>Clear</button>
+	</div>
+	<p class="text-xs text-secondary-600">The newest last. Play, lock the screen, then look here.</p>
+	<ol
+		class="mt-2 p-3 rounded-xl bg-white/[0.04] text-xs font-mono flex flex-col gap-0.5 select-text"
+	>
+		{#each $playerLog as line, i (i)}
+			<li class="break-words">{line}</li>
+		{:else}
+			<li class="text-secondary-600">Nothing yet</li>
+		{/each}
+	</ol>
+</section>
