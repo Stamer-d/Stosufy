@@ -6,7 +6,6 @@ import { get } from 'svelte/store';
 import { readFile, writeFile, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs';
 import { fetch } from '@tauri-apps/plugin-http';
 import * as path from '@tauri-apps/api/path';
-import { filesRoot } from './platform';
 import { colorFromString, mapDataStore } from './stores/data';
 import { trackGroups } from './tracks';
 import type { Recap } from './wrapped';
@@ -208,7 +207,7 @@ export async function wrappedImage({ recap, period, username }: WrappedPicture):
 
 /** Saves the picture in ~/Stosufy/Wrapped; returns where */
 export async function saveWrappedImage(picture: Blob, period: string) {
-	const dir = await path.join(await filesRoot(), 'Stosufy', 'Wrapped');
+	const dir = await path.join(await path.homeDir(), 'Stosufy', 'Wrapped');
 	await mkdir(dir, { recursive: true });
 	const stamp = new Date().toISOString().slice(0, 10);
 	const name = `Wrapped ${period.replace(/[^\w ]+/g, '')} ${stamp}.png`;

@@ -13,7 +13,6 @@ import {
 	mkdir
 } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
-import { filesRoot } from '../platform';
 import { fetch } from '@tauri-apps/plugin-http';
 import { currentSong, songQueue } from '../stores/audio';
 import { userSettings, updateUserSettings } from '../stores/user';
@@ -316,7 +315,7 @@ interface Chart {
 let chart: Chart | null = null;
 
 async function chartsDir(setId: string | number) {
-	return path.join(await filesRoot(), 'Stosufy', 'Songs', `${setId}-hitsounds`);
+	return path.join(await path.homeDir(), 'Stosufy', 'Songs', `${setId}-hitsounds`);
 }
 
 /** The .osu file of a difficulty and the folder with the beatmap's own samples */

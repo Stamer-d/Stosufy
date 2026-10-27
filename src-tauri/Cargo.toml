@@ -29,8 +29,10 @@ tauri-plugin-shell = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-persisted-scope = "2"
+tauri-plugin-drpc = "*"
 tauri-plugin-process = "2"
-tauri-plugin-websocket = "2"
+tauri-plugin-prevent-default = "6.0.1"
 
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
@@ -39,11 +41,5 @@ tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
-tauri-plugin-persisted-scope = "2"
-tauri-plugin-drpc = "*"
-tauri-plugin-prevent-default = "6.0.1"
-
-# iOS: the audio session, so the music plays on with the screen locked
-[target.'cfg(target_os = "ios")'.dependencies]
-objc2-avf-audio = "0.3"
+tauri-plugin-websocket = "2"
 

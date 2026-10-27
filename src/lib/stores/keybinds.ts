@@ -3,7 +3,6 @@
 
 import { derived, get, writable } from 'svelte/store';
 import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
-import { isMobile } from '../platform';
 import { userSettings, updateUserSettings } from './user';
 import { setVolume, toggleMute, DEFAULT_VOLUME } from './mixer';
 import { goto } from '$app/navigation';
@@ -270,8 +269,6 @@ function registerGlobal() {
 }
 
 async function setGlobalShortcuts() {
-	// (a phone has no global shortcuts)
-	if (isMobile) return;
 	const wanted = get(recordingKeybind) ? {} : keybinds().global;
 	for (const shortcut of registered) await unregister(shortcut).catch(() => {});
 	registered = [];
