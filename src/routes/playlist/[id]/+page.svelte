@@ -793,8 +793,9 @@
 									on:click={async (e) => {
 										e.stopPropagation();
 										if (isDownloadedPlaylist) {
-											await deleteSong(song.id);
-											songs = songs.filter((s) => s.id != song.id);
+											// (just this song of a set with several)
+											await deleteSong(song.id, song.track);
+											songs = songs.filter((s) => !sameSong(s, song));
 										} else {
 											removeSong(song.songInfo.id);
 										}

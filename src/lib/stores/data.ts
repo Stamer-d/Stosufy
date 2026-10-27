@@ -295,57 +295,62 @@ export async function fetchBeatmapset(setId: number | string): Promise<MapSet> {
 	return response.json();
 }
 
-// TODO - Adjust to remove specific beatmap songs
-export async function deleteSong(setId: number | string) {
+/** Removes a file of the songs folder (songs imported from osu! keep their files) */
+async function removeOwnFile(filePath: string | null | undefined) {
+	if (!filePath?.startsWith(mapSetsDir)) return;
+	if (await exists(filePath, { baseDir: BaseDirectory.Home })) {
+		await remove(filePath, { baseDir: BaseDirectory.Home });
+	}
+}
+
+/**
+ * Deletes a downloaded song: with `track`, just that song of a set with several (the set
+ * goes once its last song does), else the whole set with all its files
+ */
+export async function deleteSong(setId: number | string, track?: number) {
 	const mapData = get(mapDataStore);
+	const set = mapData[setId];
+	if (!set?.beatmaps) return null;
+	const groups = trackGroups(set);
+	const whole = track == null || groups.length <= 1;
+	const gone = whole ? groups.flat() : (groups[track] ?? []);
+	if (!gone.length) return null;
+	const goneIds = new Set(gone.map((map) => String(map.id)));
+	const isGone = (song: MapSet) =>
+		song.id == setId && (whole || song.beatmaps?.some((map) => goneIds.has(String(map.id))));
 
-	if (!mapData[setId]?.beatmaps) return null;
-
-	// Get current song queue state
-	const queue = get(songQueue);
-
-	// Find the index of the song in the formatted data
-	const formattedSongs = librarySongs();
-	const deletedIndex = formattedSongs.findIndex((song) => song.id.toString() === setId.toString());
-
-	const beatmapIds = Object.keys(mapData[setId].beatmaps);
-	if (beatmapIds.length === 0) return null;
-	const firstBeatmapId = beatmapIds[0];
-	const audioFilePath = mapData[setId].beatmaps[firstBeatmapId].audioFile;
-	const { background, thumbnail, video } = mapData[setId];
-	// The hitsounds (also the .osu files fetched for songs downloaded before they were saved)
-	await remove(`${mapSetsDir}/${setId}-hitsounds`, {
-		baseDir: BaseDirectory.Home,
-		recursive: true
-	}).catch(() => {});
-	// Only files in Stosufy's own folder: songs imported from osu! keep their files
-	for (const filePath of [audioFilePath, background, thumbnail, video]) {
-		if (!filePath?.startsWith(mapSetsDir)) continue;
-		if (await exists(filePath, { baseDir: BaseDirectory.Home })) {
-			await remove(filePath, { baseDir: BaseDirectory.Home });
+	// Each song's audio, and the backgrounds of its own difficulties
+	const kept = Object.values(set.beatmaps).filter((map) => !goneIds.has(String(map.id)));
+	const stillUsed = new Set(kept.flatMap((map) => [map.audioFile, map.background]));
+	for (const map of gone) {
+		for (const file of [map.audioFile, map.background]) {
+			if (!stillUsed.has(file)) await removeOwnFile(file);
 		}
 	}
-	delete mapData[setId];
+	if (whole) {
+		// The hitsounds (also the .osu files fetched for songs downloaded before they were saved)
+		await remove(`${mapSetsDir}/${setId}-hitsounds`, {
+			baseDir: BaseDirectory.Home,
+			recursive: true
+		}).catch(() => {});
+		for (const file of [set.background, set.thumbnail, set.video]) await removeOwnFile(file);
+		delete mapData[setId];
+	} else {
+		for (const id of goneIds) delete set.beatmaps[id];
+	}
 	mapDataStore.set(mapData);
 	await saveMapData();
 
-	if (queue && queue.type === 'playlist') {
-		const playlistId = queue.playlistId;
-		const currentIndex = queue.currentIndex;
-
-		if (currentIndex !== undefined) {
-			const updatedSongs = librarySongs();
-
-			if (deletedIndex < currentIndex) {
-				await updateSongQueue(currentIndex - 1, updatedSongs, 'playlist', playlistId);
-			} else if (deletedIndex === currentIndex) {
-				if (updatedSongs.length > 0) {
-					const newIndex = Math.min(currentIndex, updatedSongs.length - 1);
-					await updateSongQueue(newIndex, updatedSongs, 'playlist', playlistId);
-				}
-			} else {
-				await updateSongQueue(currentIndex, updatedSongs, 'playlist', playlistId);
-			}
+	// Playing the downloaded songs: the song is out of the queue (other queues keep it, it
+	// streams from there)
+	const queue = get(songQueue);
+	if (queue?.type === 'playlist' && queue.playlistId == -1 && queue.queue?.length) {
+		const current = queue.currentIndex ?? 0;
+		const left = queue.queue.filter((song) => !isGone(song));
+		if (left.length) {
+			// (where it goes on if the song playing was deleted: the one after it)
+			const before = queue.queue.slice(0, current).filter((song) => !isGone(song)).length;
+			await updateSongQueue(Math.min(before, left.length - 1), left, 'playlist', -1);
 		}
 	}
 	await getPlaylistSongs(-1, true);
