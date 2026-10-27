@@ -25,14 +25,92 @@ type OfflineCopy = {
 };
 let offlineCopy: Promise<OfflineCopy | null> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** The copy as it was written last */
+let lastWritten = '';
 
 /** The library as it was the last time the app was online */
 export function offlineLibrary() {
 	offlineCopy ??= load('offline-library.json')
-		.then((store) => store.get<OfflineCopy>('library'))
-		.then((copy) => copy ?? null)
+		.then((store) => store.get<KeptCopy>('library'))
+		.then((kept) => {
+			if (!kept) return null;
+			// (unchanged, it isn't written again)
+			if (kept.sets) lastWritten = JSON.stringify(kept);
+			return unpack(kept);
+		})
 		.catch(() => null);
 	return offlineCopy;
+}
+
+// The copy as it's written: each beatmap set once, the songs and their difficulties pointing
+// to it (from osu! every song and every difficulty of it came with the whole set, so the copy
+// of a big library was mostly the same sets again and again)
+
+type KeptCopy = OfflineCopy & { sets?: Record<string, any> };
+/** Where a song or difficulty points to its set */
+const SET = '$set';
+/** What osu! sends with each difficulty that isn't used (how far players got: 200 numbers) */
+const UNUSED = new Set(['failtimes']);
+
+const same = (a: unknown, b: unknown) =>
+	a === b || (typeof a === 'object' && JSON.stringify(a) === JSON.stringify(b));
+
+function pack(copy: OfflineCopy): KeptCopy {
+	const sets: Record<string, any> = {};
+	const packMap = (map: any) => {
+		const kept: any = {};
+		for (const [key, value] of Object.entries<any>(map)) {
+			if (UNUSED.has(key)) continue;
+			if (key === 'beatmapset') {
+				sets[value.id] ??= value;
+				kept[SET] = value.id;
+			} else kept[key] = value;
+		}
+		return kept;
+	};
+	const packSong = (song: MapSet) => {
+		// (a song added from the library or the search has no set with it: kept as it is)
+		const set = song.beatmaps?.find((map) => map?.beatmapset)?.beatmapset;
+		if (!set) return song;
+		const kept: any = {};
+		for (const [key, value] of Object.entries(song)) {
+			if (key === 'beatmaps')
+				kept.beatmaps = value.map((map: any) => (map?.beatmapset ? packMap(map) : map));
+			// (copies from before had the beatmap in there again)
+			else if (key === 'songInfo') kept.songInfo = { ...value, beatmap: undefined };
+			// (what the song has of its set is the set's, unless the song has its own, e.g. title)
+			else if (!(key in set) || !same(value, set[key])) kept[key] = value;
+		}
+		kept[SET] = set.id;
+		return kept;
+	};
+	const songs: OfflineCopy['songs'] = {};
+	for (const [id, list] of Object.entries(copy.songs)) {
+		songs[id] = { songs: (list?.songs ?? []).map(packSong) };
+	}
+	return { ...copy, songs, sets };
+}
+
+function unpack(kept: KeptCopy): OfflineCopy {
+	// (a copy from before is as it was)
+	if (!kept.sets) return kept;
+	const { sets, ...copy } = kept;
+	const unpackMap = (map: any) => {
+		if (map?.[SET] == null) return map;
+		const { [SET]: setId, ...rest } = map;
+		return { ...rest, beatmapset: sets[setId] };
+	};
+	const songs: OfflineCopy['songs'] = {};
+	for (const [id, list] of Object.entries(copy.songs)) {
+		songs[id] = {
+			songs: (list?.songs ?? []).map((song: any) => {
+				if (song[SET] == null) return song;
+				const { [SET]: setId, ...rest } = song;
+				return { ...sets[setId], ...rest, beatmaps: (rest.beatmaps ?? []).map(unpackMap) };
+			})
+		};
+	}
+	return { ...copy, songs };
 }
 
 /** Keeps the playlists and their songs on this computer (a moment after they change) */
@@ -48,9 +126,14 @@ function keepOffline() {
 		};
 		offlineCopy = Promise.resolve(copy);
 		try {
+			const kept = pack(copy);
+			// Only written when something changed (each playlist checked at the start changes it)
+			const written = JSON.stringify(kept);
+			if (written === lastWritten) return;
 			const store = await load('offline-library.json');
-			await store.set('library', copy);
+			await store.set('library', kept);
 			await store.save();
+			lastWritten = written;
 		} catch (error) {
 			console.warn('Could not keep the library for offline use:', error);
 		}
@@ -304,7 +387,10 @@ async function fetchBeatmaps(mapIds: string[]): Promise<any[]> {
 				return (await response.json()).beatmaps ?? [];
 			})
 		);
-		for (const beatmaps of results) found.push(...beatmaps);
+		for (const beatmaps of results) {
+			for (const beatmap of beatmaps) for (const key of UNUSED) delete beatmap[key];
+			found.push(...beatmaps);
+		}
 	}
 	return found;
 }
@@ -419,7 +505,8 @@ export async function getPlaylistSongs(
 				beatmapsetGroups[key] = {
 					...song.beatmap.beatmapset,
 					...named,
-					songInfo: { ...song },
+					// (without its beatmap: the song has it already, it would be every set twice)
+					songInfo: { ...song, beatmap: undefined },
 					beatmaps: [],
 					// Store the position for sorting
 					position: song.position
