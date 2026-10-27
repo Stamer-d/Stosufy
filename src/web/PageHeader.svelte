@@ -17,6 +17,13 @@
 		actions
 	} = $props();
 
+	/** Back to the page before (opened from anywhere), or to `back` */
+	function goBack(event) {
+		if (back !== 'history') return;
+		event.preventDefault();
+		history.back();
+	}
+
 	let gone = $state(false);
 	function watch(node) {
 		const observer = new IntersectionObserver(([entry]) => (gone = !entry.isIntersecting), {
@@ -35,7 +42,12 @@
 		'var(--color-panel)'} 55%, var(--color-panel));"
 >
 	{#if back}
-		<a href={back} aria-label="Back" class="size-12 grid place-items-center">
+		<a
+			href={back === 'history' ? `${__WEB_BASE__}/` : back}
+			onclick={goBack}
+			aria-label="Back"
+			class="size-12 grid place-items-center"
+		>
 			<span class="icon-[mingcute--left-line] size-7"></span>
 		</a>
 	{/if}
@@ -58,7 +70,12 @@
 	<header class="relative px-4 pt-2 pb-4 overflow-hidden" use:watch>
 		<Triangles count={12} {seed} />
 		{#if back}
-			<a href={back} aria-label="Back" class="relative -ml-3 size-12 grid place-items-center">
+			<a
+				href={back === 'history' ? `${__WEB_BASE__}/` : back}
+				onclick={goBack}
+				aria-label="Back"
+				class="relative -ml-3 size-12 grid place-items-center"
+			>
 				<span class="icon-[mingcute--left-line] size-7"></span>
 			</a>
 		{/if}

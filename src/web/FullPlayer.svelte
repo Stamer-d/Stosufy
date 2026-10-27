@@ -1,4 +1,5 @@
 <script>
+	const base = __WEB_BASE__;
 	// The player on the whole screen: the cover (or the lyrics, or what comes next), where
 	// the song is, shuffle and repeat, the sleep timer. Swipe it down to close it, swipe the
 	// cover for the next song or the one before.
@@ -184,7 +185,11 @@
 
 			<div class="mt-6 flex items-center gap-3">
 				<div class="min-w-0 flex-1">
-					<p class="text-xl font-bold truncate">{song.title}</p>
+					<a
+						class="block text-xl font-bold truncate"
+						href="{base}/map/{song.id}{song.track ? `?track=${song.track}` : ''}"
+						onclick={close}>{song.title}</a
+					>
 					<p class="text-white/60 truncate">
 						{song.artist}{$previewOnly ? ' · preview' : ''}
 					</p>

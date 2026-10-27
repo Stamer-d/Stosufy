@@ -1,11 +1,12 @@
 <script>
+	const base = __WEB_BASE__;
 	// What can be done with a song (the ⋯ of a row): play it next, like it, add it to a
 	// playlist, take it out of the playlist it's in, keep it on the phone
 	import { songMenu, ownPlaylists } from './library';
 	import { startRadio } from './listening';
 	import { swipe } from './gestures';
 	import { fade, fly } from 'svelte/transition';
-	import { playNext, addToQueue, coverUrl } from './player';
+	import { playNext, addToQueue, coverUrl, playerOpen } from './player';
 	import { downloaded, downloading, download, removeDownload, isDownloaded } from './downloads';
 	import {
 		playlists,
@@ -231,6 +232,19 @@
 							'icon-[mingcute--copy-2-line]'
 						)
 					)}
+					<li>
+						<a
+							class="w-full flex items-center gap-4 px-5 py-3.5 active:bg-white/5"
+							href="{base}/map/{song.id}{song.track ? `?track=${song.track}` : ''}"
+							onclick={() => {
+								close();
+								playerOpen.set(false);
+							}}
+						>
+							<span class="icon-[mingcute--music-2-line] size-6 shrink-0"></span>
+							Go to beatmap
+						</a>
+					</li>
 					<li>
 						<a
 							class="w-full flex items-center gap-4 px-5 py-3.5 active:bg-white/5"

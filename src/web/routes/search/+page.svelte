@@ -1,11 +1,69 @@
 <script>
 	// Search: your playlists' songs first, then osu!'s (they stream); the searches of before
-	// while nothing is typed
-	import { freshToken } from '../../shims/auth';
-	import { osuApi } from '../../shims/http';
+	// while nothing is typed. osu!'s songs by status, genre, language and order, as in the
+	// desktop app (the same filters: they're in the account's settings).
+	import { page } from '$app/state';
 	import { play, slim } from '../../player';
 	import SongRow from '../../SongRow.svelte';
-	import { libraryPool } from '../../shims/data';
+	import { libraryPool, fetchMaps } from '../../shims/data';
+	import { userSettings, updateUserSettings } from '../../shims/user';
+	import { BEATMAP_STATUS } from '../../../lib/beatmapStatus';
+	import { GENRES, LANGUAGES } from '../../../lib/genres';
+	import { fade, fly } from 'svelte/transition';
+
+	const FILTERS = {
+		status: {
+			label: 'Status',
+			options: [
+				{ value: 'any', label: 'All' },
+				...['ranked', 'loved', 'qualified', 'pending', 'graveyard'].map((value) => ({
+					value,
+					label: BEATMAP_STATUS[value].label,
+					dot: BEATMAP_STATUS[value].dot
+				}))
+			]
+		},
+		sort: {
+			label: 'Sort',
+			options: [
+				{ value: '', label: 'Relevance' },
+				{ value: 'plays_desc', label: 'Most played' },
+				{ value: 'favourites_desc', label: 'Most favourited' },
+				{ value: 'rating_desc', label: 'Highest rated' },
+				{ value: 'ranked_desc', label: 'Newest' },
+				{ value: 'title_asc', label: 'Title (A-Z)' }
+			]
+		},
+		genre: {
+			label: 'Genre',
+			options: [
+				{ value: '', label: 'Any genre' },
+				...Object.entries(GENRES).map(([value, label]) => ({ value, label }))
+			]
+		},
+		language: {
+			label: 'Language',
+			options: [
+				{ value: '', label: 'Any language' },
+				...Object.entries(LANGUAGES).map(([value, label]) => ({ value, label }))
+			]
+		}
+	};
+	const DEFAULTS = { status: 'any', sort: '', genre: '', language: '' };
+	let filters = $derived({ ...DEFAULTS, ...$userSettings.settings?.searchFilters });
+	let filtered = $derived(
+		Object.keys(DEFAULTS).some((key) => (filters[key] ?? '') !== DEFAULTS[key])
+	);
+	/** The filter whose options are shown */
+	let choosing = $state(null);
+	function setFilter(key, value) {
+		choosing = null;
+		updateUserSettings({ searchFilters: { ...filters, [key]: value } });
+	}
+	const chipLabel = (key) =>
+		filters[key] !== DEFAULTS[key]
+			? (FILTERS[key].options.find((o) => o.value === filters[key])?.label ?? FILTERS[key].label)
+			: FILTERS[key].label;
 
 	const RECENT_KEY = 'stosufy-web-recent-searches';
 	let recent = $state(readRecent());
@@ -48,7 +106,12 @@
 	});
 
 	const KEY = 'stosufy-web-search';
-	let query = $state(sessionStorage.getItem(KEY) ?? '');
+	let query = $state(page.url.searchParams.get('q') ?? sessionStorage.getItem(KEY) ?? '');
+	// (opened for an artist, a mapper, an anime: from a beatmap's page)
+	$effect(() => {
+		const asked = page.url.searchParams.get('q');
+		if (asked != null) query = asked;
+	});
 	let results = $state([]);
 	let searching = $state(false);
 	let error = $state('');
@@ -69,50 +132,55 @@
 	}
 
 	async function search(words, after = '') {
-		const params = new URLSearchParams({ q: words });
-		if (after) params.set('cursor_string', after);
-		const response = await osuApi(`beatmapsets/search?${params}`, await freshToken());
-		if (!response.ok) throw new Error(`osu! answered ${response.status}`);
-		const data = await response.json();
+		const data = await fetchMaps(words, after, filters);
 		return { songs: (data.beatmapsets ?? []).map(songOf), cursor: data.cursor_string ?? '' };
 	}
+
+	/** What's searched: the words and the filters (filters alone browse osu!) */
+	let asking = $derived(`${query.trim()}|${JSON.stringify(filters)}`);
 
 	// A moment after the typing stops
 	$effect(() => {
 		const words = query.trim();
+		const wanted = asking;
+		const browse = !words && filtered;
 		try {
 			sessionStorage.setItem(KEY, query);
 		} catch {
 			// (private browsing)
 		}
 		error = '';
-		if (!words) {
+		if (!words && !browse) {
 			results = [];
 			cursor = '';
 			return;
 		}
 		searching = true;
-		const timer = setTimeout(async () => {
-			try {
-				const found = await search(words);
-				if (query.trim() !== words) return;
-				results = found.songs;
-				cursor = found.cursor;
-			} catch (e) {
-				if (query.trim() === words) error = e instanceof Error ? e.message : String(e);
-			} finally {
-				if (query.trim() === words) searching = false;
-			}
-		}, 400);
+		const timer = setTimeout(
+			async () => {
+				try {
+					const found = await search(words);
+					if (asking !== wanted) return;
+					results = found.songs;
+					cursor = found.cursor;
+				} catch (e) {
+					if (asking === wanted) error = e instanceof Error ? e.message : String(e);
+				} finally {
+					if (asking === wanted) searching = false;
+				}
+			},
+			browse ? 0 : 400
+		);
 		return () => clearTimeout(timer);
 	});
 
 	async function more() {
 		const words = query.trim();
+		const wanted = asking;
 		searching = true;
 		try {
 			const found = await search(words, cursor);
-			if (query.trim() !== words) return;
+			if (asking !== wanted) return;
 			results = [...results, ...found.songs];
 			cursor = found.cursor;
 		} catch (e) {
@@ -148,9 +216,69 @@
 			</button>
 		{/if}
 	</label>
+	<div class="-mx-3 mt-3 px-3 flex gap-2 overflow-x-auto [scrollbar-width:none]" data-no-swipe>
+		{#each Object.keys(FILTERS) as key (key)}
+			{@const on = filters[key] !== DEFAULTS[key]}
+			<button
+				class="shrink-0 h-9 pl-3.5 pr-2.5 flex items-center gap-1 rounded-full text-sm font-semibold transition {on
+					? 'bg-primary-300 text-white'
+					: 'bg-white/[0.08] text-white/80'}"
+				onclick={() => (choosing = key)}
+			>
+				{chipLabel(key)}
+				<span class="icon-[mingcute--down-line] size-4 opacity-70"></span>
+			</button>
+		{/each}
+		{#if filtered}
+			<button
+				class="shrink-0 h-9 px-3 rounded-full text-sm text-secondary-600"
+				onclick={() => updateUserSettings({ searchFilters: { ...DEFAULTS } })}
+			>
+				Reset
+			</button>
+		{/if}
+	</div>
 </header>
 
-{#if !query.trim() && recent.length}
+{#if choosing}
+	{@const filter = FILTERS[choosing]}
+	<div class="fixed inset-0 z-40 flex flex-col justify-end">
+		<button
+			class="absolute inset-0 bg-black/60"
+			aria-label="Close"
+			onclick={() => (choosing = null)}
+			transition:fade={{ duration: 150 }}
+		></button>
+		<div
+			class="relative max-h-[75dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+			transition:fly={{ y: 400, duration: 220, opacity: 1 }}
+		>
+			<div class="pt-2 flex justify-center">
+				<span class="w-10 h-1 rounded-full bg-white/20"></span>
+			</div>
+			<p class="px-5 pt-3 pb-2 text-lg font-bold">{filter.label}</p>
+			<ul class="pb-2">
+				{#each filter.options as option (option.value)}
+					{@const picked = (filters[choosing] ?? '') === option.value}
+					<li>
+						<button
+							class="w-full flex items-center gap-4 px-5 py-3.5 text-start active:bg-white/5 {picked
+								? 'text-primary-400 font-semibold'
+								: ''}"
+							onclick={() => setFilter(choosing, option.value)}
+						>
+							{#if option.dot}<span class="size-2.5 rounded-full {option.dot}"></span>{/if}
+							<span class="flex-1">{option.label}</span>
+							{#if picked}<span class="icon-[mingcute--check-line] size-5"></span>{/if}
+						</button>
+					</li>
+				{/each}
+			</ul>
+		</div>
+	</div>
+{/if}
+
+{#if !query.trim() && !filtered && recent.length}
 	<section class="px-4 pt-2">
 		<div class="flex items-center justify-between">
 			<h2 class="font-bold">Searched before</h2>
@@ -196,12 +324,12 @@
 
 {#if error}
 	<p class="px-5 text-sm text-red-400">Couldn't search: {error}</p>
-{:else if query.trim() && !searching && !results.length && !yours.length}
+{:else if (query.trim() || filtered) && !searching && !results.length && !yours.length}
 	<p class="px-5 text-sm text-secondary-600">No songs found</p>
 {/if}
 
 {#if results.length}
-	<h2 class="px-4 pt-2 pb-1 text-lg font-bold">On osu!</h2>
+	<h2 class="px-4 pt-2 pb-1 text-lg font-bold">{query.trim() ? 'On osu!' : 'Songs on osu!'}</h2>
 {/if}
 <ul class="px-2 pb-4">
 	{#each results as song, i (`${song.id}:${i}`)}
