@@ -3,7 +3,7 @@
 	// shuffle, and the songs
 	import { setSongQueue, togglePlayback, songQueue, currentSong } from '#lib/stores/audio.ts';
 	import { mapDataStore } from '#lib/stores/data.ts';
-	import { sameSong, songKey } from '#lib/tracks.ts';
+	import { sameSong, songKey, songsLength } from '#lib/tracks.ts';
 	import MixCover from './MixCover.svelte';
 	import SongCover from './SongCover.svelte';
 	import PlayButton from './PlayButton.svelte';
@@ -39,14 +39,7 @@
 	} = $props();
 
 	let playingThis = $derived($songQueue.playlistId === queueId && $currentSong.isPlaying);
-	let seconds = $derived(
-		songs.reduce((sum, song) => sum + (Number(song.beatmaps?.[0]?.total_length) || 0), 0)
-	);
-	const length = (s) => {
-		const h = Math.floor(s / 3600);
-		const m = Math.round((s % 3600) / 60);
-		return h ? `${h} h ${m} min` : `${m} min`;
-	};
+	let length = $derived(songsLength(songs));
 	const time = (s) =>
 		s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '';
 
@@ -92,7 +85,7 @@
 			{/if}
 			<p class="mt-1 text-sm text-secondary-600">
 				{songs.length}
-				{songs.length === 1 ? 'song' : 'songs'}{seconds ? ` · ${length(seconds)}` : ''}
+				{songs.length === 1 ? 'song' : 'songs'}{length ? ` · ${length}` : ''}
 			</p>
 		</div>
 	</header>

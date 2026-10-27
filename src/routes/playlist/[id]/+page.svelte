@@ -3,7 +3,7 @@
 	import { offline } from '#lib/stores/network.ts';
 	import { cancelHoverPrefetch, prefetchOnHover } from '#lib/stores/stream.ts';
 	import { onDestroy } from 'svelte';
-	import { sameSong, songKey } from '#lib/tracks.ts';
+	import { sameSong, songKey, songsLength } from '#lib/tracks.ts';
 	import SongCover from '#lib/components/SongCover.svelte';
 	import Button from '#lib/components/Button.svelte';
 	import { deleteSong, getImageUrl, downloadBeatmap, downloads } from '#lib/stores/data.ts';
@@ -75,6 +75,8 @@
 	}
 	$: isLoadingSongs = $playlistLoadingStatus[playlistId] || false;
 	$: songs = $playlistSongsCache[playlistId]?.songs || [];
+	// How long it lasts (once its songs are loaded)
+	$: duration = songsLength(songs);
 
 	// Sorting (remembered per playlist) and filtering; playing follows what's shown
 	let filterText = '';
@@ -436,7 +438,7 @@
 					{/if}
 					<span class="text-white/70">
 						{playlistData.song_amount}
-						{playlistData.song_amount === 1 ? 'song' : 'songs'}
+						{playlistData.song_amount === 1 ? 'song' : 'songs'}{duration ? ` · ${duration}` : ''}
 					</span>
 				</p>
 			</div>

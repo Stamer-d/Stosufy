@@ -51,3 +51,15 @@ export function artistsOf(artist: string) {
 		.map((name) => name.trim())
 		.filter(Boolean);
 }
+
+/** How long songs last together, like "1 h 5 min" (empty without their lengths) */
+export function songsLength(songs: MapSet[]) {
+	const seconds = songs.reduce(
+		(sum, song) => sum + (Number(song.beatmaps?.[0]?.total_length) || 0),
+		0
+	);
+	if (!seconds) return '';
+	const minutes = Math.max(1, Math.round(seconds / 60));
+	const hours = Math.floor(minutes / 60);
+	return hours ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+}
