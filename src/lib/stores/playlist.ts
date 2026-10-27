@@ -454,6 +454,44 @@ function knownBeatmaps() {
 	return beatmapIndex;
 }
 
+/**
+ * Beatmaps osu! didn't have (deleted, or hidden), by id with when: not asked for again at
+ * each start, only once a week (one might be back)
+ */
+const MISSING_FILE = 'offline-missing.json';
+const ASK_AGAIN_AFTER = 7 * 24 * 3600 * 1000;
+let missingBeatmaps: Promise<Record<string, number>> | null = null;
+function missingMaps() {
+	missingBeatmaps ??= load(MISSING_FILE)
+		.then((store) => store.get<Record<string, number>>('missing'))
+		.then((missing) => missing ?? {})
+		.catch(() => ({}));
+	return missingBeatmaps;
+}
+
+/** What osu! answered for these ids: the ones it didn't have are noted, the ones back aren't */
+async function noteMissing(asked: string[], found: Set<string>) {
+	const missing = await missingMaps();
+	let changed = false;
+	for (const id of asked) {
+		if (!found.has(id)) {
+			missing[id] = Date.now();
+			changed = true;
+		} else if (id in missing) {
+			delete missing[id];
+			changed = true;
+		}
+	}
+	if (!changed) return;
+	try {
+		const store = await load(MISSING_FILE);
+		await store.set('missing', missing);
+		await store.save();
+	} catch (error) {
+		console.warn('Could not keep the missing beatmaps:', error);
+	}
+}
+
 /** At most this many beatmaps per request (osu!'s limit), and this many requests at a time */
 const BEATMAPS_PER_REQUEST = 50;
 const REQUESTS_AT_ONCE = 4;
@@ -566,17 +604,21 @@ export async function getPlaylistSongs(
 		// What osu! knows about the songs: asked only for the ones no playlist knew yet (one
 		// unchanged since the last time asks for none)
 		const known = await knownBeatmaps();
+		const missing = await missingMaps();
 		const beatmapsById = new Map<string, any>();
 		const unknown: string[] = [];
 		for (const mapId of new Set(playlistSongs.map((song) => String(song.map_id)))) {
 			const beatmap = known.get(mapId);
 			if (beatmap) beatmapsById.set(mapId, beatmap);
-			else unknown.push(mapId);
+			// (one osu! didn't have a moment ago isn't asked for again yet)
+			else if (Date.now() - (missing[mapId] ?? 0) >= ASK_AGAIN_AFTER) unknown.push(mapId);
 		}
-		for (const beatmap of await fetchBeatmaps(unknown)) {
+		const fetched = await fetchBeatmaps(unknown);
+		for (const beatmap of fetched) {
 			beatmapsById.set(String(beatmap.id), beatmap);
 			known.set(String(beatmap.id), beatmap);
 		}
+		if (unknown.length) noteMissing(unknown, new Set(fetched.map((map) => String(map.id))));
 
 		const enhancedSongs = playlistSongs.map((song) => {
 			const beatmap = beatmapsById.get(String(song.map_id));
