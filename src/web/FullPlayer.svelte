@@ -1,6 +1,7 @@
 <script>
-	// The player on the whole screen: the cover, where the song is, shuffle and repeat, and
-	// what comes next (tap one to play it, ✕ takes it out)
+	// The player on the whole screen: the cover (or the lyrics, or what comes next), where
+	// the song is, shuffle and repeat, the sleep timer. Swipe it down to close it, swipe the
+	// cover for the next song or the one before.
 	import {
 		queue,
 		playing,
@@ -19,9 +20,14 @@
 		cycleRepeat,
 		bigCoverUrl,
 		coverUrl,
-		sleepTimer
+		sleepTimer,
+		autoplay,
+		toggleAutoplay
 	} from './player';
+	import Lyrics from './Lyrics.svelte';
 	import { songMenu } from './library';
+	import { swipe } from './gestures';
+	import { fly } from 'svelte/transition';
 	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
 
 	let song = $derived($queue.songs[$queue.index] ?? null);
@@ -31,7 +37,11 @@
 			at: $queue.index + 1 + i
 		}))
 	);
-	let showQueue = $state(false);
+	/** What's in the middle: the cover, the lyrics or what comes next */
+	let view = $state('cover');
+	const toggleView = (which) => (view = view === which ? 'cover' : which);
+	/** Where the finger has the position slider (it seeks once let go) */
+	let dragging = $state(null);
 
 	// The sleep timer: what's left of it, looked at every 15 s
 	let choosingSleep = $state(false);
@@ -69,8 +79,11 @@
 </script>
 
 {#if $playerOpen && song}
+	<!-- (swiped down, it closes) -->
 	<div
 		class="fixed inset-0 z-30 flex flex-col bg-app pt-[env(safe-area-inset-top)] pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+		transition:fly={{ y: 900, duration: 280, opacity: 1 }}
+		use:swipe={{ axis: 'y', only: 1, onswipe: close }}
 	>
 		<img
 			src={bigCoverUrl(song)}
@@ -82,7 +95,7 @@
 				<span class="icon-[mingcute--down-line] size-7"></span>
 			</button>
 			<p class="text-xs font-bold uppercase tracking-wide text-white/70">
-				{showQueue ? 'Up next' : 'Playing'}
+				{view === 'queue' ? 'Up next' : view === 'lyrics' ? 'Lyrics' : 'Playing'}
 			</p>
 			<button
 				aria-label="More"
@@ -94,8 +107,32 @@
 		</div>
 
 		<div class="relative flex-1 min-h-0 px-6 flex flex-col">
-			{#if showQueue}
-				<ol class="flex-1 overflow-y-auto -mx-3">
+			{#if view === 'lyrics'}
+				<Lyrics />
+			{:else if view === 'queue'}
+				<button
+					class="-mx-1 mb-1 px-1 py-2 flex items-center justify-between text-start"
+					role="switch"
+					aria-checked={$autoplay}
+					onclick={toggleAutoplay}
+				>
+					<span>
+						<span class="block text-sm font-semibold">Autoplay</span>
+						<span class="block text-xs text-white/60">Songs like these play on at the end</span>
+					</span>
+					<span
+						class="relative w-11 h-6 shrink-0 rounded-full transition {$autoplay
+							? 'bg-primary-400'
+							: 'bg-white/20'}"
+					>
+						<span
+							class="absolute top-0.5 left-0.5 size-5 rounded-full bg-white transition-transform {$autoplay
+								? 'translate-x-5'
+								: ''}"
+						></span>
+					</span>
+				</button>
+				<ol class="flex-1 overflow-y-auto overscroll-contain -mx-3" data-no-swipe>
 					{#each upNext as { song: upcoming, at } (at)}
 						<li class="flex items-center">
 							<button
@@ -126,7 +163,10 @@
 					{/each}
 				</ol>
 			{:else}
-				<div class="flex-1 min-h-0 grid place-items-center">
+				<div
+					class="flex-1 min-h-0 grid place-items-center"
+					use:swipe={{ axis: 'x', onswipe: (direction) => (direction < 0 ? next() : previous()) }}
+				>
 					<img
 						src={bigCoverUrl(song)}
 						alt=""
@@ -160,13 +200,17 @@
 				min="0"
 				max={$time.duration || 0}
 				step="1"
-				value={$time.current}
-				oninput={(e) => seek(Number(e.currentTarget.value))}
+				value={dragging ?? $time.current}
+				oninput={(e) => (dragging = Number(e.currentTarget.value))}
+				onchange={(e) => {
+					seek(Number(e.currentTarget.value));
+					dragging = null;
+				}}
 				class="mt-4 w-full accent-white"
 				aria-label="Position"
 			/>
 			<div class="flex justify-between text-xs text-white/60 tabular-nums">
-				<span>{clock($time.current)}</span>
+				<span>{clock(dragging ?? $time.current)}</span>
 				<span>{clock($time.duration)}</span>
 			</div>
 
@@ -248,14 +292,28 @@
 						{/if}
 					</div>
 				{/if}
-				<button
-					aria-label="Up next"
-					aria-pressed={showQueue}
-					class="size-11 grid place-items-center {showQueue ? 'text-primary-400' : 'text-white/70'}"
-					onclick={() => (showQueue = !showQueue)}
-				>
-					<span class="icon-[mingcute--playlist-line] size-6"></span>
-				</button>
+				<div class="flex">
+					<button
+						aria-label="Lyrics"
+						aria-pressed={view === 'lyrics'}
+						class="size-11 grid place-items-center {view === 'lyrics'
+							? 'text-primary-400'
+							: 'text-white/70'}"
+						onclick={() => toggleView('lyrics')}
+					>
+						<span class="icon-[mingcute--mic-line] size-6"></span>
+					</button>
+					<button
+						aria-label="Up next"
+						aria-pressed={view === 'queue'}
+						class="size-11 grid place-items-center {view === 'queue'
+							? 'text-primary-400'
+							: 'text-white/70'}"
+						onclick={() => toggleView('queue')}
+					>
+						<span class="icon-[mingcute--playlist-line] size-6"></span>
+					</button>
+				</div>
 			</div>
 		</div>
 	</div>

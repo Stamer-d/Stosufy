@@ -3,6 +3,8 @@
 	// playlist, take it out of the playlist it's in, keep it on the phone
 	import { songMenu, ownPlaylists } from './library';
 	import { startRadio } from './listening';
+	import { swipe } from './gestures';
+	import { fade, fly } from 'svelte/transition';
 	import { playNext, addToQueue, coverUrl } from './player';
 	import { downloaded, downloading, download, removeDownload, isDownloaded } from './downloads';
 	import {
@@ -33,7 +35,8 @@
 		const target = song;
 		close();
 		Promise.resolve(run(target)).then(
-			() => note && showToast(note, icon),
+			// (false: it said so itself)
+			(result) => result !== false && note && showToast(note, icon),
 			(e) => showToast(e instanceof Error ? e.message : String(e), 'icon-[mingcute--warning-line]')
 		);
 	}
@@ -57,10 +60,21 @@
 
 {#if song}
 	<div class="fixed inset-0 z-40 flex flex-col justify-end">
-		<button class="absolute inset-0 bg-black/60" aria-label="Close" onclick={close}></button>
+		<button
+			class="absolute inset-0 bg-black/60"
+			aria-label="Close"
+			onclick={close}
+			transition:fade={{ duration: 150 }}
+		></button>
+		<!-- (swiped down, it closes) -->
 		<div
-			class="relative max-h-[80dvh] overflow-y-auto rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+			class="relative max-h-[80dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+			transition:fly={{ y: 400, duration: 220, opacity: 1 }}
+			use:swipe={{ axis: 'y', only: 1, onswipe: close }}
 		>
+			<div class="pt-2 flex justify-center">
+				<span class="w-10 h-1 rounded-full bg-white/20"></span>
+			</div>
 			<div class="sticky top-0 bg-panel flex items-center gap-3 p-4 border-b border-white/5">
 				<img src={coverUrl(song)} alt="" class="size-12 rounded object-cover bg-secondary-300" />
 				<div class="min-w-0 flex-1">
@@ -153,6 +167,21 @@
 							act(download, 'Downloaded')
 						)}
 					{/if}
+					{@render item('icon-[mingcute--share-forward-line]', 'Share', () =>
+						act(
+							async (target) => {
+								const url = `https://osu.ppy.sh/beatmapsets/${target.id}`;
+								const text = `${target.artist} - ${target.title}`;
+								if (navigator.share) {
+									await navigator.share({ title: text, text, url }).catch(() => {});
+									return false;
+								}
+								await navigator.clipboard.writeText(`${text} ${url}`);
+							},
+							'Link copied',
+							'icon-[mingcute--copy-2-line]'
+						)
+					)}
 					<li>
 						<a
 							class="w-full flex items-center gap-4 px-5 py-3.5 active:bg-white/5"

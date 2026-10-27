@@ -109,6 +109,16 @@
 				? { detail: `Allowed (${first?.value?.byteLength ?? 0} bytes read)` }
 				: { state: 'fail', detail: `HTTP ${response.status}` };
 		});
+		await check('Lyrics (LRCLIB)', async () => {
+			const response = await withTimeout(
+				fetch('https://lrclib.net/api/search?q=disco%20prince'),
+				15000,
+				'LRCLIB'
+			);
+			return response.ok
+				? { detail: 'Allowed' }
+				: { state: 'fail', detail: `HTTP ${response.status}` };
+		});
 		await check('Storage', async () => {
 			const estimate = await navigator.storage?.estimate?.();
 			const persisted = await navigator.storage?.persisted?.();

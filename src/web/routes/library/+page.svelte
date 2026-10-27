@@ -6,6 +6,8 @@
 	import { playlists, savedPlaylists, createPlaylist } from '../../../lib/stores/playlist';
 	import { showToast } from '../../../lib/stores/toast';
 	import { libraryState, loadLibrary } from '../../library';
+	import PlaylistCover from '../../PlaylistCover.svelte';
+	import { offline } from '../../../lib/stores/network';
 
 	let all = $derived([...$playlists, ...$savedPlaylists]);
 	let creating = $state(false);
@@ -85,7 +87,7 @@
 	</form>
 {/if}
 
-{#if $libraryState.error}
+{#if $libraryState.error && !$offline}
 	<p class="px-5 pb-2 text-sm text-red-400">
 		Couldn't load the playlists: {$libraryState.error}{all.length ? ' (these are from before)' : ''}
 	</p>
@@ -100,19 +102,7 @@
 				href="{base}/playlist/{playlist.id}"
 				class="flex items-center gap-3 p-2 rounded-lg active:bg-white/5"
 			>
-				{#if playlist.id == -2}
-					<span
-						class="size-14 shrink-0 grid place-items-center rounded-md bg-gradient-to-br from-primary-300 to-primary-700"
-					>
-						<span class="icon-[mingcute--heart-fill] size-6"></span>
-					</span>
-				{:else if playlist.image_url}
-					<img src={playlist.image_url} alt="" class="size-14 shrink-0 rounded-md object-cover" />
-				{:else}
-					<span class="size-14 shrink-0 grid place-items-center rounded-md bg-secondary-300">
-						<span class="icon-[mingcute--music-2-line] size-6 text-secondary-600"></span>
-					</span>
-				{/if}
+				<PlaylistCover {playlist} />
 				<span class="min-w-0">
 					<span class="block font-semibold truncate">{playlist.title}</span>
 					<span class="block text-sm text-secondary-600 truncate">

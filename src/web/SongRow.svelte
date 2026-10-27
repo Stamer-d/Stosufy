@@ -4,6 +4,8 @@
 	import { downloaded, downloading, isDownloaded } from './downloads';
 	import { songMenu } from './library';
 	import { sameSong } from '../lib/tracks';
+	import { offline } from '../lib/stores/network';
+	import { showToast } from '../lib/stores/toast';
 
 	/** @type {{ song: import('../lib/types').MapSet, playlistId?: string | number, onplay: () => void }} */
 	let { song, playlistId, onplay } = $props();
@@ -11,14 +13,50 @@
 	let current = $derived(sameSong($queue.songs[$queue.index], song));
 	let kept = $derived(isDownloaded($downloaded, song));
 	let busy = $derived($downloading.has(String(song.beatmaps?.[0]?.id)));
+	/** Offline, only the downloaded songs play */
+	let unavailable = $derived($offline && !kept);
+
+	// Held down: the menu (as ⋯)
+	let pressTimer = null;
+	let longPressed = false;
+	let pressedAt = { x: 0, y: 0 };
+	function pressStart(event) {
+		longPressed = false;
+		pressedAt = { x: event.clientX, y: event.clientY };
+		pressTimer = setTimeout(() => {
+			longPressed = true;
+			songMenu.set({ song, playlistId });
+		}, 500);
+	}
+	function pressEnd() {
+		clearTimeout(pressTimer);
+	}
+
+	function tap() {
+		if (longPressed) {
+			longPressed = false;
+			return;
+		}
+		if (unavailable)
+			showToast('Offline: only downloaded songs play', 'icon-[mingcute--wifi-off-line]');
+		else onplay();
+	}
 	const clock = (s) =>
 		s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '';
 </script>
 
-<li class="flex items-center">
+<li class="flex items-center {unavailable ? 'opacity-40' : ''}">
 	<button
 		class="min-w-0 flex-1 flex items-center gap-3 p-2 rounded-lg text-start active:bg-white/5"
-		onclick={onplay}
+		onclick={tap}
+		onpointerdown={pressStart}
+		onpointerup={pressEnd}
+		onpointercancel={pressEnd}
+		onpointerleave={pressEnd}
+		onpointermove={(e) =>
+			(Math.abs(e.clientY - pressedAt.y) > 8 || Math.abs(e.clientX - pressedAt.x) > 8) &&
+			pressEnd()}
+		oncontextmenu={(e) => e.preventDefault()}
 	>
 		<span class="relative size-11 shrink-0">
 			<img

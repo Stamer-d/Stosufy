@@ -3,7 +3,17 @@
 // their songs are kept by the shared playlist store.
 
 import { get, writable } from 'svelte/store';
-import { playlists, getPlaylists, loadSavedPlaylists } from '../lib/stores/playlist';
+import {
+	playlists,
+	getPlaylists,
+	loadSavedPlaylists,
+	getPlaylistSongs,
+	playlistSongsCache,
+	offlineLibrary
+} from '../lib/stores/playlist';
+import { autoDownload, downloadAll } from './downloads';
+import { offline, whenOnline } from '../lib/stores/network';
+import { keyStore } from './shims/auth';
 import { favourites, loadFavourites, LIKED_ID } from '../lib/stores/favourites';
 import type { MapSet, Playlist } from '../lib/types';
 
@@ -51,6 +61,8 @@ export async function loadLibrary(token: string, again = false) {
 		playlists.set([liked(get(favourites).length), ...own]);
 		loadSavedPlaylists().catch(() => {});
 		libraryState.set({ loading: false, error: '' });
+		keepDownloaded();
+		showKeptSongs();
 	} catch (e) {
 		loadedFor = '';
 		libraryState.set({ loading: false, error: e instanceof Error ? e.message : String(e) });
@@ -59,3 +71,26 @@ export async function loadLibrary(token: string, again = false) {
 
 /** The playlists songs can be added to (the user's own) */
 export const ownPlaylists = (list: Playlist[]) => list.filter((p) => Number(p.id) > 0);
+
+/** The playlists kept downloaded: their new songs are downloaded, one playlist after another */
+async function keepDownloaded() {
+	for (const id of get(autoDownload)) {
+		if (get(offline)) return;
+		const { songs } = await getPlaylistSongs(id, true).catch(() => ({ songs: [] }));
+		if (songs?.length) await downloadAll(songs).catch(() => {});
+	}
+}
+
+/** The playlists' songs as they were last time, right away (their covers, the radio) */
+async function showKeptSongs() {
+	const kept = (await offlineLibrary())?.songs ?? {};
+	playlistSongsCache.update((cache) => {
+		const next = { ...cache };
+		for (const [id, entry] of Object.entries(kept)) if (!next[id]) next[id] = entry;
+		return next;
+	});
+}
+if (typeof window !== 'undefined') showKeptSongs();
+
+// Back online: what changed in the meantime
+if (typeof window !== 'undefined') whenOnline(() => loadLibrary(get(keyStore).access_token, true));

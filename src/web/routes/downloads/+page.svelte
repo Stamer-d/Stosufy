@@ -4,6 +4,9 @@
 	import { downloadedSongs, removeAllDownloads } from '../../downloads';
 	import { songsLength } from '../../../lib/tracks';
 	import SongRow from '../../SongRow.svelte';
+	import { nearView } from '../../visible';
+
+	let limit = $state(100);
 
 	let usage = $state('');
 	let confirmClear = $state(false);
@@ -69,7 +72,13 @@
 {/if}
 
 <ul class="px-3">
-	{#each $downloadedSongs as song, i (song.beatmaps?.[0]?.id ?? song.id)}
+	{#each $downloadedSongs.slice(0, limit) as song, i (song.beatmaps?.[0]?.id ?? song.id)}
 		<SongRow {song} onplay={() => play($downloadedSongs, i)} />
 	{/each}
 </ul>
+{#if $downloadedSongs.length > limit}
+	<!-- (made again each time: it calls back once it comes near) -->
+	{#key limit}
+		<div use:nearView={() => (limit += 100)} class="h-20"></div>
+	{/key}
+{/if}

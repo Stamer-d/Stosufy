@@ -8,6 +8,7 @@ import { get, writable } from 'svelte/store';
 import { downloaded, localUrl } from './downloads';
 import { coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
 import { log } from './log';
+import { offline } from '../lib/stores/network';
 import type { MapSet } from '../lib/types';
 
 export { streamUrl, coverUrl, bigCoverUrl, slim } from './songs';
@@ -23,6 +24,30 @@ export const shuffle = writable(false);
 export const repeat = writable<Repeat>('off');
 /** The full screen player is open */
 export const playerOpen = writable(false);
+/** At the end of the queue, songs like the ones before play on (the radio's) */
+export const autoplay = writable(true);
+/** Songs like these, without those (set by listening.ts: the radio) */
+let similarTo: ((seeds: MapSet[], exclude: MapSet[]) => MapSet[]) | null = null;
+export function setSimilarSongs(find: typeof similarTo) {
+	similarTo = find;
+}
+
+/**
+ * Autoplay: with fewer than two songs left, songs like the last ones are added, ahead of
+ * time (with the screen locked, the next song has to be there already when one ends)
+ */
+function topUp() {
+	const { songs, index } = get(queue);
+	if (!get(autoplay) || get(repeat) !== 'off' || !similarTo || songs.length - index - 1 >= 2)
+		return;
+	const more = similarTo(songs.slice(-5).reverse(), songs).slice(0, 20).map(slim);
+	if (!more.length) return;
+	log(`autoplay: ${more.length} songs like these`);
+	queue.update((q) => ({ ...q, songs: [...q.songs, ...more] }));
+	ordered.push(...more);
+	readNext();
+}
+
 /** The sleep timer: when it stops (ms), or at the end of the song playing */
 export const sleepTimer = writable<{ at: number } | { endOfSong: true } | null>(null);
 /** The <audio> element, once there (the listening history looks at it) */
@@ -139,6 +164,7 @@ function load(at = 0) {
 		log(`start ${song.title} (${own ? 'downloaded' : 'stream'})`);
 		player.play().catch((error) => log(`play() turned down: ${error?.name}`));
 		save();
+		topUp();
 		readNext();
 	};
 	if (readAhead?.key === key) {
@@ -202,8 +228,9 @@ function songEnded() {
 	}
 	if (get(repeat) === 'one') return;
 	const { songs, index } = get(queue);
-	// The last one: stop at its start
-	if (index + 1 >= songs.length && get(repeat) !== 'all') {
+	// The last one (offline: the last downloaded one): stop at its start
+	const after = playableAfter(songs, index);
+	if ((after < 0 || after >= songs.length) && get(repeat) !== 'all') {
 		element().pause();
 		element().currentTime = 0;
 		return;
@@ -211,8 +238,31 @@ function songEnded() {
 	next();
 }
 
+/** Offline, only the downloaded songs play: the next one of those (-1: none) */
+function playableAfter(songs: MapSet[], index: number, step = 1) {
+	if (!get(offline)) return index + step;
+	const kept = get(downloaded);
+	for (let i = index + step; i >= 0 && i < songs.length; i += step)
+		if (kept.has(keyOf(songs[i]))) return i;
+	return -1;
+}
+
 export function next() {
-	const { songs, index } = get(queue);
+	const { songs } = get(queue);
+	let { index } = get(queue);
+	// (offline: past the ones that aren't downloaded)
+	if (get(offline)) {
+		const at = playableAfter(songs, index);
+		if (at < 0) {
+			if (get(repeat) !== 'all') return;
+			const first = playableAfter(songs, -1);
+			if (first < 0) return;
+			queue.set({ songs, index: first });
+			load();
+			return;
+		}
+		index = at - 1;
+	}
 	if (index + 1 >= songs.length) {
 		if (get(repeat) !== 'all' || !songs.length) return;
 		queue.set({ songs, index: 0 });
@@ -228,7 +278,16 @@ export function previous() {
 		element().currentTime = 0;
 		return;
 	}
-	queue.set({ songs, index: index === 0 ? songs.length - 1 : index - 1 });
+	let before = index === 0 ? songs.length - 1 : index - 1;
+	if (get(offline)) {
+		before = playableAfter(songs, index, -1);
+		if (before < 0) {
+			seekedByHand = true;
+			element().currentTime = 0;
+			return;
+		}
+	}
+	queue.set({ songs, index: before });
 	load();
 }
 
@@ -294,6 +353,12 @@ export function toggleShuffle() {
 	readNext();
 }
 
+export function toggleAutoplay() {
+	autoplay.update((on) => !on);
+	save();
+	topUp();
+}
+
 export function cycleRepeat() {
 	repeat.update((mode) => (mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off'));
 	save();
@@ -319,7 +384,8 @@ function save() {
 				ordered,
 				at: audio?.currentTime ?? get(time).current,
 				shuffle: get(shuffle),
-				repeat: get(repeat)
+				repeat: get(repeat),
+				autoplay: get(autoplay)
 			})
 		);
 	} catch {
@@ -337,6 +403,7 @@ if (typeof localStorage !== 'undefined') {
 		}
 		shuffle.set(!!saved?.shuffle);
 		if (saved?.repeat) repeat.set(saved.repeat);
+		if (saved?.autoplay === false) autoplay.set(false);
 	} catch {
 		// (nothing to go on with)
 	}

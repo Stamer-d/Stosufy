@@ -1,6 +1,6 @@
 <script>
-	// The song playing, above the tabs: play and pause, back and next, where it is (tap it
-	// for the whole screen player)
+	// The song playing, above the tabs: tap it for the whole screen player, swipe it for the
+	// next or the one before; a thin line shows where the song is
 	import {
 		queue,
 		playing,
@@ -9,65 +9,64 @@
 		toggle,
 		next,
 		previous,
-		seek,
 		coverUrl,
 		playerOpen
 	} from './player';
+	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
+	import { swipe } from './gestures';
 
 	let song = $derived($queue.songs[$queue.index] ?? null);
-	const clock = (s) =>
-		s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
+	let progress = $derived($time.duration ? Math.min(1, $time.current / $time.duration) : 0);
 </script>
 
 {#if song}
-	<div class="px-3 pt-2">
-		<div class="flex items-center gap-3">
-			<button
-				class="min-w-0 flex-1 flex items-center gap-3 text-start"
-				aria-label="Open the player"
-				onclick={() => playerOpen.set(true)}
+	<div class="px-2 pt-2">
+		<div class="relative overflow-hidden rounded-xl bg-secondary-300/90 shadow-lg">
+			<div
+				class="flex items-center gap-2 p-1.5 pr-1"
+				use:swipe={{ axis: 'x', onswipe: (direction) => (direction < 0 ? next() : previous()) }}
 			>
-				<img
-					src={coverUrl(song)}
-					alt=""
-					class="size-11 shrink-0 rounded-md object-cover bg-secondary-300"
-				/>
-				<span class="min-w-0 flex-1">
-					<span class="block text-sm font-semibold truncate">{song.title}</span>
-					<span class="block text-xs text-secondary-600 truncate">
-						{song.artist}{$previewOnly ? ' · preview' : ''}
+				<button
+					class="min-w-0 flex-1 flex items-center gap-2.5 text-start"
+					aria-label="Open the player"
+					onclick={() => playerOpen.set(true)}
+				>
+					<img
+						src={coverUrl(song)}
+						alt=""
+						class="size-10 shrink-0 rounded-md object-cover bg-secondary-400"
+					/>
+					<span class="min-w-0 flex-1">
+						<span class="block text-sm font-semibold truncate">{song.title}</span>
+						<span class="block text-xs text-white/60 truncate">
+							{song.artist}{$previewOnly ? ' · preview' : ''}
+						</span>
 					</span>
-				</span>
-			</button>
-			<button aria-label="Back" class="size-10 grid place-items-center" onclick={previous}>
-				<span class="icon-[mingcute--skip-previous-fill] size-6"></span>
-			</button>
-			<button
-				aria-label={$playing ? 'Pause' : 'Play'}
-				class="size-11 grid place-items-center rounded-full bg-white text-black"
-				onclick={toggle}
-			>
-				<span
-					class="{$playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-6"
-				></span>
-			</button>
-			<button aria-label="Next" class="size-10 grid place-items-center" onclick={() => next()}>
-				<span class="icon-[mingcute--skip-forward-fill] size-6"></span>
-			</button>
-		</div>
-		<div class="mt-1.5 flex items-center gap-2 text-[11px] text-secondary-600 tabular-nums">
-			<span class="w-8">{clock($time.current)}</span>
-			<input
-				type="range"
-				min="0"
-				max={$time.duration || 0}
-				step="1"
-				value={$time.current}
-				oninput={(e) => seek(Number(e.currentTarget.value))}
-				class="flex-1 accent-primary-400 h-1"
-				aria-label="Position"
-			/>
-			<span class="w-8 text-end">{clock($time.duration)}</span>
+				</button>
+				<button
+					aria-label={$isFavourite(song) ? 'Unlike' : 'Like'}
+					class="size-10 shrink-0 grid place-items-center"
+					onclick={() => toggleFavourite(song)}
+				>
+					<span
+						class="{$isFavourite(song)
+							? 'icon-[mingcute--heart-fill] text-primary-400'
+							: 'icon-[mingcute--heart-line] text-white/80'} size-6"
+					></span>
+				</button>
+				<button
+					aria-label={$playing ? 'Pause' : 'Play'}
+					class="size-10 shrink-0 grid place-items-center"
+					onclick={toggle}
+				>
+					<span
+						class="{$playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-7"
+					></span>
+				</button>
+			</div>
+			<div class="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-white/15">
+				<div class="h-full rounded-full bg-white" style="width: {progress * 100}%"></div>
+			</div>
 		</div>
 	</div>
 {/if}

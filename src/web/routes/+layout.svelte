@@ -3,10 +3,12 @@
 	// The web app: the songs of your playlists on a phone. Installed from Safari (Share → Add
 	// to Home Screen) it opens as an app of its own and plays on with the screen locked.
 	import '../../app.css';
+	import '../web.css';
 	import { page } from '$app/state';
 	import { keyStore, loginExpired } from '../shims/auth';
 	import { loadLibrary } from '../library';
 	import '../listening';
+	import { offline } from '../../lib/stores/network';
 	import MiniPlayer from '../MiniPlayer.svelte';
 	import FullPlayer from '../FullPlayer.svelte';
 	import SongMenu from '../SongMenu.svelte';
@@ -23,7 +25,9 @@
 	];
 	const active = (href) =>
 		href === `${base}/`
-			? page.url.pathname === `${base}/` || page.url.pathname === base
+			? page.url.pathname === `${base}/` ||
+				page.url.pathname === base ||
+				page.url.pathname.startsWith(`${base}/mix`)
 			: href === `${base}/library`
 				? page.url.pathname.startsWith(href) || page.url.pathname.startsWith(`${base}/playlist`)
 				: page.url.pathname.startsWith(href);
@@ -43,6 +47,14 @@
 </script>
 
 <div class="min-h-dvh bg-app pt-[env(safe-area-inset-top)]">
+	{#if $offline}
+		<div
+			class="sticky top-[env(safe-area-inset-top)] z-20 px-4 py-1.5 bg-amber-400 text-black text-xs font-semibold flex items-center justify-center gap-1.5"
+		>
+			<span class="icon-[mingcute--wifi-off-line] size-4"></span>
+			Offline · your downloads play
+		</div>
+	{/if}
 	<main class="pb-44">
 		{#if needsLogin}
 			<Login />
@@ -68,6 +80,8 @@
 			{/each}
 		</nav>
 	</div>
+	<!-- (what scrolls doesn't show behind the clock and the notch) -->
+	<div class="fixed inset-x-0 top-0 z-20 h-[env(safe-area-inset-top)] bg-app"></div>
 	<FullPlayer />
 	<SongMenu />
 	<Toasts />

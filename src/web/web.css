@@ -1,0 +1,22 @@
+/* The web app on a phone: like an app, not a page */
+html {
+	/* (no grey flash on taps, no rubber band past the top and bottom of the app) */
+	-webkit-tap-highlight-color: transparent;
+	overscroll-behavior-y: none;
+	-webkit-text-size-adjust: 100%;
+}
+a,
+button {
+	/* (taps right away, without waiting for a double tap) */
+	touch-action: manipulation;
+	-webkit-touch-callout: none;
+}
+input,
+textarea {
+	/* (iOS zooms into fields with smaller text) */
+	font-size: max(16px, 1em);
+}
+img {
+	-webkit-user-drag: none;
+	-webkit-touch-callout: none;
+}

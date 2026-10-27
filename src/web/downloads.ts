@@ -46,6 +46,32 @@ export const downloaded = writable<Set<string>>(new Set());
 export const downloadedSongs = writable<(MapSet & { keptAt?: number })[]>([]);
 /** The songs being downloaded right now */
 export const downloading = writable<Set<string>>(new Set());
+/** The playlists kept downloaded: their new songs are downloaded too (by id) */
+const AUTO_KEY = 'stosufy-web-auto-download';
+function keptAuto(): Set<string> {
+	try {
+		return new Set(JSON.parse(localStorage.getItem(AUTO_KEY) ?? '[]'));
+	} catch {
+		return new Set();
+	}
+}
+export const autoDownload = writable<Set<string>>(
+	typeof localStorage === 'undefined' ? new Set() : keptAuto()
+);
+export function setAutoDownload(id: string | number, on: boolean) {
+	autoDownload.update((all) => {
+		const next = new Set(all);
+		if (on) next.add(String(id));
+		else next.delete(String(id));
+		try {
+			localStorage.setItem(AUTO_KEY, JSON.stringify([...next]));
+		} catch {
+			// (only for now)
+		}
+		return next;
+	});
+}
+
 /** A playlist being downloaded: how far it is */
 export const bulk = writable<{ done: number; total: number; failed: number } | null>(null);
 

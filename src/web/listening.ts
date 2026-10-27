@@ -4,10 +4,13 @@
 import { derived, get } from 'svelte/store';
 import { history, playCounts, songKey, syncHistory, type HistorySong } from '../lib/stores/history';
 import { radioSongs } from '../lib/stores/radio';
-import { playlistSongsCache, loadAllPlaylistSongs } from '../lib/stores/playlist';
-import { libraryPool, libraryByKey } from './shims/data';
+import { playlists, playlistSongsCache, loadAllPlaylistSongs } from '../lib/stores/playlist';
+import { libraryPool, libraryByKey, libraryReady } from './shims/data';
+import { allMixes } from '../lib/stores/mixes';
+import { offline } from '../lib/stores/network';
+import { keyStore } from './shims/auth';
 import { downloadedSongs } from './downloads';
-import { play } from './player';
+import { play, setSimilarSongs } from './player';
 import { normalized } from './songs';
 import type { MapSet } from '../lib/types';
 
@@ -65,14 +68,43 @@ derived([playlistSongsCache, downloadedSongs], ([cache, kept]) => {
 	return [...all.values()];
 }).subscribe((songs) => libraryPool.set(songs));
 
+// Autoplay: songs like the last ones of the queue
+setSimilarSongs((seeds, exclude) =>
+	radioSongs(
+		seeds.map((song) => libraryByKey().get(keyOfSong(song)) ?? normalized(song)),
+		exclude,
+		{ length: 20 }
+	)
+);
+
 let allLoaded: Promise<unknown> | null = null;
+
+/** All playlists' songs (once): the radio and the daily mixes are made of them */
+export function loadAllSongs() {
+	allLoaded ??= loadAllPlaylistSongs()
+		.then(() => libraryReady())
+		.catch(() => (allLoaded = null));
+	return allLoaded;
+}
+
+/** Today's mixes (as in the desktop app), made of your playlists' songs */
+export const mixes = derived(allMixes, (all) => [...all.values()]);
+
+// Once the playlists are there, all their songs in the background
+if (typeof window !== 'undefined') {
+	let waiting: ReturnType<typeof setTimeout> | null = null;
+	playlists.subscribe((list) => {
+		if (allLoaded || waiting || list.length < 2) return;
+		waiting = setTimeout(() => {
+			waiting = null;
+			if (get(keyStore).access_token && !get(offline)) loadAllSongs();
+		}, 3000);
+	});
+}
 
 /** A radio from a song: songs like it from your playlists (all of them loaded first) */
 export async function startRadio(song: MapSet) {
-	if (get(libraryPool).length < 200) {
-		allLoaded ??= loadAllPlaylistSongs().catch(() => (allLoaded = null));
-		await allLoaded;
-	}
+	if (get(libraryPool).length < 200) await loadAllSongs();
 	const seed = libraryByKey().get(keyOfSong(song)) ?? normalized(song);
 	const songs = radioSongs([seed]);
 	play([seed, ...songs], 0);

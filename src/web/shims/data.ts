@@ -7,6 +7,14 @@ import type { MapSet, StoredMapSet } from '../../lib/types';
 
 export const mapDataStore = writable<Record<string, StoredMapSet>>({});
 
+/**
+ * All playlists' songs are there: what follows the library (the daily mixes) goes on. (The
+ * desktop app's library has a beatmap set per key; this one only says it's ready.)
+ */
+export function libraryReady() {
+	mapDataStore.set({ web: {} as StoredMapSet });
+}
+
 /** The songs the radio can pick from */
 export const libraryPool = writable<MapSet[]>([]);
 

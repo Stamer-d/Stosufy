@@ -6,8 +6,10 @@
 	import { showToast } from '../../lib/stores/toast';
 	import { play, coverUrl } from '../player';
 	import { downloadedSongs } from '../downloads';
-	import { recentSongs, topSongs, startRadio } from '../listening';
+	import { recentSongs, topSongs, startRadio, mixes } from '../listening';
+	import Mosaic from '../Mosaic.svelte';
 	import SongRow from '../SongRow.svelte';
+	import PlaylistCover from '../PlaylistCover.svelte';
 
 	const hour = new Date().getHours();
 	const greeting =
@@ -64,19 +66,7 @@
 			href="{base}/playlist/{playlist.id}"
 			class="h-14 flex items-center gap-2 pr-2 rounded-md bg-white/[0.06] overflow-hidden active:bg-white/10"
 		>
-			{#if playlist.id == -2}
-				<span
-					class="size-14 shrink-0 grid place-items-center bg-gradient-to-br from-primary-300 to-primary-700"
-				>
-					<span class="icon-[mingcute--heart-fill] size-5"></span>
-				</span>
-			{:else if playlist.image_url}
-				<img src={playlist.image_url} alt="" class="size-14 shrink-0 object-cover" />
-			{:else}
-				<span class="size-14 shrink-0 grid place-items-center bg-secondary-300">
-					<span class="icon-[mingcute--music-2-line] size-5 text-secondary-600"></span>
-				</span>
-			{/if}
+			<PlaylistCover {playlist} class="size-14" icon="size-5" />
 			<span class="text-sm font-semibold line-clamp-2">{playlist.title}</span>
 		</a>
 	{/each}
@@ -111,6 +101,23 @@
 		{/each}
 	</ul>
 {/snippet}
+
+{#if $mixes.length}
+	<section class="mt-7">
+		<h2 class="px-5 mb-2 text-xl font-bold">Made for you</h2>
+		<ul class="flex gap-3 overflow-x-auto px-5 scroll-px-5 pb-1 snap-x [scrollbar-width:none]">
+			{#each $mixes as mix (mix.id)}
+				<li class="w-36 shrink-0 snap-start">
+					<a href="{base}/mix/{mix.id}" class="block">
+						<Mosaic songs={mix.songs} class="size-36 rounded-lg" />
+						<span class="mt-1.5 block text-sm font-semibold truncate">{mix.title}</span>
+						<span class="block text-xs text-secondary-600 line-clamp-2">{mix.description}</span>
+					</a>
+				</li>
+			{/each}
+		</ul>
+	</section>
+{/if}
 
 {#if $recentSongs.length}
 	<section class="mt-7">
