@@ -14,6 +14,8 @@
 	let { options, value, label, icon = '', hideLabel = false, onchange } = $props();
 
 	let open = $state(false);
+	/** It opens to the right, where to the left there's no room for it */
+	let toRight = $state(false);
 	let activeIndex = $state(0);
 	let container;
 	let listbox = $state();
@@ -26,7 +28,19 @@
 			0,
 			options.findIndex((option) => option.value === value)
 		);
+		toRight = !roomLeft(container.getBoundingClientRect().right - MENU_WIDTH);
 		open = true;
+	}
+
+	/** The menu's least width (min-w-52) */
+	const MENU_WIDTH = 208;
+	/**
+	 * Whether something starting at `left` is still on the page: the scrolling page cuts off
+	 * what goes past its left edge (it would go under the library next to it)
+	 */
+	function roomLeft(left) {
+		const page = container?.closest('[data-scroll-container]');
+		return left >= (page ? page.getBoundingClientRect().left : 0) + 8;
 	}
 
 	function choose(option) {
@@ -66,6 +80,12 @@
 	function handleWindowClick(event) {
 		if (open && container && !container.contains(event.target)) open = false;
 	}
+
+	// Wider than thought (long options): to the right after all
+	$effect(() => {
+		if (open && listbox && !toRight && !roomLeft(listbox.getBoundingClientRect().left))
+			toRight = true;
+	});
 
 	// Keep the highlighted option visible while navigating with the keyboard
 	$effect(() => {
@@ -113,7 +133,9 @@
 			bind:this={listbox}
 			role="listbox"
 			aria-label={label}
-			class="absolute right-0 top-full mt-1.5 z-40 min-w-52 max-h-80 overflow-y-auto p-1.5 rounded-lg bg-secondary-300 shadow-xl shadow-black/40 ring-1 ring-white/5"
+			class="absolute {toRight
+				? 'left-0'
+				: 'right-0'} top-full mt-1.5 z-40 min-w-52 max-h-80 overflow-y-auto p-1.5 rounded-lg bg-secondary-300 shadow-xl shadow-black/40 ring-1 ring-white/5"
 			transition:fly={{ y: -4, duration: 120 }}
 		>
 			{#each options as option, index (option.value)}

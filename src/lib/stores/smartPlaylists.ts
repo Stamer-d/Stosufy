@@ -1,272 +1,148 @@
-// Smart playlists: playlists that fill themselves from the library by rules ("170–190 BPM",
-// "liked, but not heard for 30 days", "from Demon Slayer"…). They're kept in the settings,
-// so they follow the user to every device; their songs are worked out where they're shown.
+// Smart playlists: the user puts in a few songs, autofill adds the songs like them, from the
+// library and (if they want) from osu!, songs they don't have yet too (those stream or
+// download when they play). They're kept in the settings, so they follow the user to every
+// device; a song is kept with just enough to show and play it without the library.
 
-import { derived, get } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './user';
-import { formatSongData, mapDataStore } from './data';
-import { favourites } from './favourites';
-import { counts, history, songKey } from './history';
-import { songBpm } from '../dj/library';
-import { artistsOf } from '../tracks';
+import { fetchMaps, formatSongData, mapDataStore } from './data';
+import { offline } from './network';
+import { fitTo } from './radio';
+import { artistsOf, songKey } from '../tracks';
+import { GENRES, LANGUAGES } from '../genres';
 import type { MapSet } from '../types';
 
-export type RuleField =
-	| 'bpm'
-	| 'genre'
-	| 'language'
-	| 'artist'
-	| 'mapper'
-	| 'title'
-	| 'from'
-	| 'liked'
-	| 'plays'
-	| 'lastPlayed'
-	| 'added'
-	| 'length'
-	| 'stars';
-
-export type RuleOp =
-	'between' | 'atLeast' | 'atMost' | 'contains' | 'is' | 'isNot' | 'within' | 'notWithin';
-
-export interface SmartRule {
-	field: RuleField;
-	op: RuleOp;
-	value?: string | number | null;
-	/** The upper end of "between" */
-	value2?: number | null;
+/** A song of a smart playlist */
+export interface SmartSong {
+	/** The beatmap set, its difficulty that plays, and which song of a set with several */
+	id: number | string;
+	mapId: number | string;
+	track?: number;
+	title: string;
+	artist: string;
+	creator?: string;
+	/** Its length (s) */
+	length?: number;
+	// What makes songs alike, kept with the songs the user put in (autofill asks about them)
+	genre?: string | null;
+	language?: string | null;
+	songSource?: string;
+	tags?: string;
+	bpm?: number;
 }
-
-export type SmartSort = 'random' | 'added' | 'plays' | 'lastPlayed' | 'title' | 'bpm';
 
 export interface SmartPlaylist {
 	id: string;
 	title: string;
-	/** Songs matching all the rules, or any of them */
-	match: 'all' | 'any';
-	rules: SmartRule[];
-	sort: SmartSort;
-	/** At most this many songs (null: all) */
-	limit: number | null;
+	/** The songs the user put in: autofill looks for songs like them */
+	seeds: SmartSong[];
+	/** What autofill added */
+	filled: SmartSong[];
+	/** Songs taken out (by key): autofill doesn't bring them back */
+	removed: string[];
+	/** Autofill also brings songs from osu! that aren't downloaded */
+	online: boolean;
+	/** Autofill fills it up to this many songs */
+	size: number;
 }
 
-/** What a rule can ask about a song */
-interface SongFacts {
-	song: MapSet;
-	bpm: number;
-	liked: boolean;
-	plays: number;
-	/** When it was last heard (Unix time, s; 0: never) */
-	last: number;
-	/** When it was downloaded (Unix time, s) */
-	added: number;
-	/** Its length (min) and the hardest difficulty's stars */
-	minutes: number;
-	stars: number;
-}
+export const SIZES = [25, 50, 100];
 
-type Input = 'number' | 'text' | 'choice' | 'none';
-
-export const FIELDS: Record<
-	RuleField,
-	{ label: string; ops: RuleOp[]; input: Input; unit?: string; choices?: 'genre' | 'language' }
-> = {
-	bpm: { label: 'BPM', ops: ['between', 'atLeast', 'atMost'], input: 'number' },
-	genre: { label: 'Genre', ops: ['is', 'isNot'], input: 'choice', choices: 'genre' },
-	language: { label: 'Language', ops: ['is', 'isNot'], input: 'choice', choices: 'language' },
-	artist: { label: 'Artist', ops: ['contains', 'isNot'], input: 'text' },
-	mapper: { label: 'Mapper', ops: ['contains', 'isNot'], input: 'text' },
-	title: { label: 'Title', ops: ['contains', 'isNot'], input: 'text' },
-	from: { label: 'From (anime, game…)', ops: ['contains', 'isNot'], input: 'text' },
-	liked: { label: 'Liked', ops: ['is', 'isNot'], input: 'none' },
-	plays: { label: 'Plays', ops: ['atLeast', 'atMost', 'between'], input: 'number' },
-	lastPlayed: {
-		label: 'Last played',
-		ops: ['notWithin', 'within'],
-		input: 'number',
-		unit: 'days'
-	},
-	added: { label: 'Downloaded', ops: ['within', 'notWithin'], input: 'number', unit: 'days' },
-	length: { label: 'Length', ops: ['atMost', 'atLeast', 'between'], input: 'number', unit: 'min' },
-	stars: { label: 'Stars', ops: ['atLeast', 'atMost', 'between'], input: 'number', unit: '★' }
-};
-
-export const OP_LABELS: Record<RuleOp, string> = {
-	between: 'between',
-	atLeast: 'at least',
-	atMost: 'at most',
-	contains: 'contains',
-	is: 'is',
-	isNot: 'is not',
-	within: 'in the last',
-	notWithin: 'not in the last'
-};
-
-export const SORTS: { value: SmartSort; label: string }[] = [
-	{ value: 'random', label: 'Random' },
-	{ value: 'added', label: 'Newest downloads' },
-	{ value: 'plays', label: 'Most played' },
-	{ value: 'lastPlayed', label: 'Heard longest ago' },
-	{ value: 'title', label: 'Title' },
-	{ value: 'bpm', label: 'BPM' }
-];
-
-/** A new rule for a field, with its first operator and an example value */
-export function newRule(field: RuleField): SmartRule {
-	const op = FIELDS[field].ops[0];
-	const examples: Partial<Record<RuleField, [number, number?]>> = {
-		bpm: [170, 190],
-		plays: [5],
-		lastPlayed: [30],
-		added: [14],
-		length: [3],
-		stars: [5]
+/** A smart playlist as saved, also one from before (made by rules: it starts out empty) */
+function normalize(playlist: Partial<SmartPlaylist> & { id: string }): SmartPlaylist {
+	return {
+		id: playlist.id,
+		title: playlist.title || 'Smart playlist',
+		seeds: playlist.seeds ?? [],
+		filled: playlist.filled ?? [],
+		removed: playlist.removed ?? [],
+		online: playlist.online ?? true,
+		size: playlist.size ?? 50
 	};
-	const choices: Partial<Record<RuleField, string>> = { genre: 'Anime', language: 'Japanese' };
-	const [value, value2] = examples[field] ?? [];
-	return { field, op, value: value ?? choices[field] ?? '', value2: value2 ?? null };
-}
-
-const DAY = 86400;
-const text = (value: unknown) =>
-	String(value ?? '')
-		.trim()
-		.toLowerCase();
-
-function matches(rule: SmartRule, facts: SongFacts, now: number) {
-	const number = Number(rule.value);
-	const compare = (actual: number) => {
-		if (rule.op === 'atLeast') return actual >= number;
-		if (rule.op === 'atMost') return actual <= number;
-		if (rule.op === 'between') {
-			const low = Math.min(number, Number(rule.value2 ?? number));
-			const high = Math.max(number, Number(rule.value2 ?? number));
-			return actual >= low && actual <= high;
-		}
-		return true;
-	};
-	const has = (haystack: string[]) => {
-		const needle = text(rule.value);
-		if (!needle) return true;
-		const found = haystack.some((value) => text(value).includes(needle));
-		return rule.op === 'isNot' ? !found : found;
-	};
-	const { song } = facts;
-	switch (rule.field) {
-		case 'bpm':
-			return facts.bpm > 0 && compare(facts.bpm);
-		case 'plays':
-			return compare(facts.plays);
-		case 'length':
-			return facts.minutes > 0 && compare(facts.minutes);
-		case 'stars':
-			return facts.stars > 0 && compare(facts.stars);
-		case 'genre':
-		case 'language': {
-			const same = text(rule.field === 'genre' ? song.genre : song.language) === text(rule.value);
-			return rule.op === 'isNot' ? !same : same;
-		}
-		case 'artist':
-			return has([song.artist ?? '', ...artistsOf(song.artist ?? '')]);
-		case 'mapper':
-			return has([song.creator ?? '']);
-		case 'title':
-			return has([song.title ?? '']);
-		case 'from':
-			return has([song.songSource ?? '']);
-		case 'liked':
-			return rule.op === 'isNot' ? !facts.liked : facts.liked;
-		case 'lastPlayed': {
-			const recent = facts.last > 0 && now - facts.last <= number * DAY;
-			return rule.op === 'within' ? recent : !recent;
-		}
-		case 'added': {
-			const recent = now - facts.added <= number * DAY;
-			return rule.op === 'within' ? recent : !recent;
-		}
-	}
-	return true;
-}
-
-/** The library with what the rules ask about each song */
-function libraryFacts(): SongFacts[] {
-	const data = get(mapDataStore);
-	const plays = new Map<string, { plays: number; last: number }>();
-	for (const [key, at, heard, length] of get(history).plays) {
-		const entry = plays.get(key) ?? { plays: 0, last: 0 };
-		if (counts(heard, length)) {
-			entry.plays++;
-			entry.last = Math.max(entry.last, at);
-		}
-		plays.set(key, entry);
-	}
-	const liked = get(favourites);
-	return formatSongData(data).map((song) => {
-		const key = songKey(song);
-		const created = Number(song.created_at) || 0;
-		const maps = song.beatmaps ?? [];
-		return {
-			song,
-			bpm: songBpm(song, data) || song.bpm || 0,
-			liked: liked.some((f) => f.setId == song.id && maps.some((map) => map.id == f.mapId)),
-			plays: plays.get(key)?.plays ?? 0,
-			last: plays.get(key)?.last ?? 0,
-			added: created > 1e12 ? created / 1000 : created,
-			minutes: (Number(maps[0]?.total_length) || 0) / 60,
-			stars: Math.max(0, ...maps.map((map) => Number(map.difficulty_rating) || 0))
-		};
-	});
-}
-
-/** The songs of a smart playlist, as its rules and order say */
-export function smartSongs(playlist: SmartPlaylist): MapSet[] {
-	const now = Date.now() / 1000;
-	const rules = playlist.rules.filter((rule) => FIELDS[rule.field]);
-	const found = libraryFacts().filter((facts) =>
-		!rules.length
-			? true
-			: playlist.match === 'any'
-				? rules.some((rule) => matches(rule, facts, now))
-				: rules.every((rule) => matches(rule, facts, now))
-	);
-	const sorters: Record<Exclude<SmartSort, 'random'>, (a: SongFacts, b: SongFacts) => number> = {
-		added: (a, b) => b.added - a.added,
-		plays: (a, b) => b.plays - a.plays,
-		lastPlayed: (a, b) => a.last - b.last,
-		title: (a, b) => (a.song.title ?? '').localeCompare(b.song.title ?? ''),
-		bpm: (a, b) => a.bpm - b.bpm
-	};
-	// (random: shuffled again each time it's opened)
-	if (playlist.sort === 'random') {
-		for (let i = found.length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1));
-			[found[i], found[j]] = [found[j], found[i]];
-		}
-	} else found.sort(sorters[playlist.sort] ?? sorters.added);
-	const songs = found.map(({ song }) => song);
-	return playlist.limit ? songs.slice(0, playlist.limit) : songs;
 }
 
 /** The user's smart playlists */
-export const smartPlaylists = derived(
-	userSettings,
-	($settings) => ($settings.settings?.smartPlaylists ?? []) as SmartPlaylist[]
+export const smartPlaylists = derived(userSettings, ($settings) =>
+	(($settings.settings?.smartPlaylists ?? []) as SmartPlaylist[]).map(normalize)
 );
 
 function save(list: SmartPlaylist[]) {
 	updateUserSettings({ smartPlaylists: list });
 }
 
-/** Makes a new smart playlist (liked songs not heard for a month, to start from); returns it */
-export function createSmartPlaylist(): SmartPlaylist {
-	const playlist: SmartPlaylist = {
-		id: Math.random().toString(36).slice(2, 10),
-		title: 'New smart playlist',
-		match: 'all',
-		rules: [newRule('liked'), newRule('lastPlayed')],
-		sort: 'random',
-		limit: null
+// --- Songs ---------------------------------------------------------------------------------
+
+/** A song as a smart playlist keeps it (`details`: also what makes songs alike) */
+export function toSmartSong(song: MapSet, details = false): SmartSong {
+	const map = song.beatmaps?.[0];
+	const kept: SmartSong = {
+		id: song.id,
+		mapId: map?.id ?? song.id,
+		title: song.title ?? '',
+		artist: song.artist ?? ''
 	};
+	if (song.track) kept.track = song.track;
+	if (song.creator) kept.creator = song.creator;
+	if (map?.total_length) kept.length = Math.round(Number(map.total_length));
+	if (details) {
+		// (a song straight from osu!'s search has them its own way)
+		const name = (value: any, names: Record<number, string>, id: number) =>
+			typeof value === 'string' ? value : (value?.name ?? names[id] ?? null);
+		kept.genre = name(song.genre, GENRES, song.genre_id);
+		kept.language = name(song.language, LANGUAGES, song.language_id);
+		const from = song.songSource ?? (song.source !== 'osu' ? song.source : '');
+		if (from) kept.songSource = from;
+		// (the first tags are enough, the settings shouldn't grow much)
+		if (song.tags) kept.tags = song.tags.split(/\s+/).slice(0, 20).join(' ');
+		if (song.bpm) kept.bpm = song.bpm;
+	}
+	return kept;
+}
+
+const keyOf = (song: { id: number | string; track?: number }) => `${song.id}:${song.track ?? 0}`;
+
+/** A kept song to play: the library's if it's downloaded, else what was kept of it */
+function resolve(song: SmartSong, library: Map<string, MapSet>): MapSet {
+	const own = library.get(keyOf(song)) ?? (song.track ? null : library.get(`${song.id}:0`));
+	if (own) return own;
+	return {
+		id: song.id,
+		title: song.title,
+		artist: song.artist,
+		creator: song.creator,
+		track: song.track,
+		genre: song.genre,
+		language: song.language,
+		songSource: song.songSource,
+		tags: song.tags,
+		bpm: song.bpm,
+		preview_url: `//b.ppy.sh/preview/${song.id}.mp3`,
+		beatmaps: [{ id: song.mapId, total_length: song.length }]
+	};
+}
+
+const libraryByKey = () =>
+	new Map(formatSongData(get(mapDataStore)).map((song) => [songKey(song), song]));
+
+/** The songs of a smart playlist: the ones put in first, then what autofill added */
+export function smartSongs(playlist: SmartPlaylist): MapSet[] {
+	const library = libraryByKey();
+	return [...playlist.seeds, ...playlist.filled].map((song) => resolve(song, library));
+}
+
+/** Whether a song is one the user put in (else autofill added it) */
+export const isSeed = (playlist: SmartPlaylist, song: MapSet) =>
+	playlist.seeds.some((seed) => keyOf(seed) === songKey(song));
+
+// --- Editing -------------------------------------------------------------------------------
+
+/** Makes a new smart playlist (from a song, if given); returns it */
+export function createSmartPlaylist(from?: MapSet): SmartPlaylist {
+	const playlist = normalize({
+		id: Math.random().toString(36).slice(2, 10),
+		title: from ? `Like ${from.title}` : 'New smart playlist',
+		seeds: from ? [toSmartSong(from, true)] : []
+	});
 	save([...get(smartPlaylists), playlist]);
 	return playlist;
 }
@@ -277,4 +153,231 @@ export function updateSmartPlaylist(id: string, change: Partial<SmartPlaylist>) 
 
 export function deleteSmartPlaylist(id: string) {
 	save(get(smartPlaylists).filter((p) => p.id !== id));
+}
+
+const find = (id: string) => get(smartPlaylists).find((p) => p.id === id);
+
+/** Puts a song in (one autofill added becomes one put in); false if it was in already */
+export function addSeed(id: string, song: MapSet) {
+	const playlist = find(id);
+	const key = songKey(song);
+	if (!playlist || playlist.seeds.some((seed) => keyOf(seed) === key)) return false;
+	// (the library knows more about a downloaded song)
+	const own = libraryByKey().get(key) ?? song;
+	updateSmartPlaylist(id, {
+		seeds: [...playlist.seeds, toSmartSong(own, true)],
+		filled: playlist.filled.filter((other) => keyOf(other) !== key),
+		removed: playlist.removed.filter((other) => other !== key)
+	});
+	return true;
+}
+
+/** Takes a song out; one autofill added it doesn't bring back */
+export function removeSong(id: string, song: MapSet) {
+	const playlist = find(id);
+	if (!playlist) return;
+	const key = songKey(song);
+	const wasFilled = playlist.filled.some((other) => keyOf(other) === key);
+	updateSmartPlaylist(id, {
+		seeds: playlist.seeds.filter((other) => keyOf(other) !== key),
+		filled: playlist.filled.filter((other) => keyOf(other) !== key),
+		removed: wasFilled ? [...playlist.removed, key].slice(-300) : playlist.removed
+	});
+}
+
+// --- Autofill ------------------------------------------------------------------------------
+
+/** The smart playlists autofill is filling right now (by id) */
+export const filling = writable<Record<string, boolean>>({});
+
+/** Songs this little like the ones put in aren't added (unless there's nothing better) */
+const ALIKE = 2;
+const SOMEWHAT = 0.5;
+/** At most this much of what autofill adds comes from osu!, while the library has songs */
+const ONLINE_SHARE = 0.6;
+/** How much more a downloaded song counts than one from osu! as alike */
+const OWN = 1;
+/** How many artists and anime/games of the songs put in are looked for on osu! */
+const ARTIST_SEARCHES = 6;
+const SOURCE_SEARCHES = 4;
+
+const normalized = (text: string | null | undefined) => (text ?? '').toLowerCase().trim();
+
+/**
+ * The song itself, whoever mapped it: osu! has many sets of the same song (a TV size, a cut,
+ * a sped up one), only one of them should come
+ */
+function sameSongName(song: MapSet) {
+	const title = normalized(song.title);
+	const bare = title.replace(/\s*[([（【][^)\]）】]*[)\]）】]/g, '').trim() || title;
+	return `${normalized(artistsOf(song.artist ?? '')[0])}|${bare.replace(/\s+/g, ' ')}`;
+}
+
+/** A beatmap set of osu!'s search as a song (its osu! difficulty plays) */
+export function songFromSearch(set: any): MapSet {
+	const maps = [...(set.beatmaps ?? [])].sort(
+		(a, b) => Number(b.mode === 'osu') - Number(a.mode === 'osu')
+	);
+	return {
+		id: set.id,
+		title: set.title,
+		artist: set.artist,
+		creator: set.creator,
+		user_id: set.user_id,
+		status: set.status,
+		tags: set.tags ?? '',
+		bpm: set.bpm,
+		genre: set.genre?.name ?? GENRES[set.genre_id] ?? null,
+		language: set.language?.name ?? LANGUAGES[set.language_id] ?? null,
+		songSource: set.source ?? '',
+		preview_url: set.preview_url,
+		play_count: set.play_count ?? 0,
+		beatmaps: maps
+	};
+}
+
+const mostCommon = (values: (string | null | undefined)[]) => {
+	const count = new Map<string, number>();
+	for (const value of values) if (value) count.set(value, (count.get(value) ?? 0) + 1);
+	return [...count].sort((a, b) => b[1] - a[1]).map(([value]) => value);
+};
+const idOf = (names: Record<number, string>, name: string | undefined) =>
+	Object.entries(names).find(([, other]) => other === name)?.[0] ?? '';
+
+/** Songs on osu! like the ones put in: their artists, anime and games, genre and language */
+async function searchOnline(seeds: MapSet[]): Promise<MapSet[]> {
+	const quote = (text: string) => `"${text.replace(/"/g, '')}"`;
+	const artists = mostCommon(seeds.map((seed) => artistsOf(seed.artist ?? '')[0]));
+	const sources = mostCommon(seeds.map((seed) => seed.songSource?.trim()));
+	const genre = mostCommon(seeds.map((seed) => seed.genre)).find((g) => g !== 'Other');
+	const language = mostCommon(seeds.map((seed) => seed.language)).find((l) => l !== 'Other');
+	const searches = [
+		...artists.slice(0, ARTIST_SEARCHES).map((artist) => ({ q: `artist=${quote(artist)}` })),
+		...sources.slice(0, SOURCE_SEARCHES).map((source) => ({ q: `source=${quote(source)}` })),
+		// The most played of the genre and language, for the rest
+		...(genre || language
+			? [{ q: '', genre: idOf(GENRES, genre), language: idOf(LANGUAGES, language) }]
+			: [])
+	];
+	const found: MapSet[] = [];
+	// A few at a time: osu! shouldn't be asked for all at once
+	for (let i = 0; i < searches.length; i += 3) {
+		const results = await Promise.all(
+			searches.slice(i, i + 3).map(({ q, ...filters }) =>
+				fetchMaps(q, '', { status: '', sort: 'plays_desc', ...filters })
+					.then((result) => (result?.beatmapsets ?? []) as any[])
+					.catch(() => [])
+			)
+		);
+		for (const sets of results) found.push(...sets.map(songFromSearch));
+	}
+	return found;
+}
+
+interface Candidate {
+	song: MapSet;
+	online: boolean;
+	score: number;
+	alike: number;
+}
+
+/**
+ * Fills a smart playlist up with songs like the ones put in: from the library, and from
+ * osu! if it may. What it added before is replaced (the songs taken out don't come back).
+ * Returns how many songs it added.
+ */
+export async function autofill(id: string): Promise<number> {
+	const start = find(id);
+	if (!start || !start.seeds.length || get(filling)[id]) return 0;
+	filling.update((all) => ({ ...all, [id]: true }));
+	try {
+		const library = libraryByKey();
+		const seeds = start.seeds.map((seed) => resolve(seed, library));
+		const fit = fitTo(seeds);
+		const removed = new Set(start.removed);
+		const taken = new Set([...seeds.map(songKey), ...removed]);
+		// The same song in another set counts as taken too
+		const takenNames = new Set(seeds.map(sameSongName));
+
+		const candidates: Candidate[] = [];
+		for (const song of library.values()) {
+			if (taken.has(songKey(song))) continue;
+			const { alike, taste } = fit(song);
+			// (a bit more for the user's own: they chose to download it)
+			candidates.push({ song, online: false, alike, score: alike + taste + OWN });
+		}
+		if (start.online && !get(offline)) {
+			const downloaded = get(mapDataStore);
+			const downloadedNames = new Set([...library.values()].map(sameSongName));
+			const seen = new Set<string>();
+			for (const song of await searchOnline(seeds)) {
+				const name = sameSongName(song);
+				if (downloaded[song.id] || taken.has(songKey(song))) continue;
+				if (downloadedNames.has(name) || seen.has(name)) continue;
+				seen.add(name);
+				const { alike } = fit(song);
+				// (a bit more for what many play: a stranger's song should be a good one)
+				const plays = Number(song.play_count) || 0;
+				const popular = Math.max(0, Math.min(1.5, (Math.log10(plays + 1) - 4) * 0.75));
+				candidates.push({ song, online: true, alike, score: alike + popular });
+			}
+		}
+
+		const wanted = Math.max(0, start.size - seeds.length);
+		const picked = pick(candidates, wanted, takenNames);
+		// The playlist may have changed while osu! was asked: only what autofill adds is replaced
+		const now = find(id);
+		if (!now) return 0;
+		const nowTaken = new Set([...now.seeds.map(keyOf), ...now.removed]);
+		const filled = picked
+			.filter((song) => !nowTaken.has(songKey(song)))
+			.map((song) => toSmartSong(song));
+		updateSmartPlaylist(id, { filled });
+		return filled.length;
+	} finally {
+		filling.update((all) => ({ ...all, [id]: false }));
+	}
+}
+
+/**
+ * The best `wanted` candidates: the most alike first, not one artist again and again, not
+ * the same song twice, and not only osu!'s while the library has songs that fit
+ */
+function pick(candidates: Candidate[], wanted: number, takenNames: Set<string>): MapSet[] {
+	const sorted = candidates.sort((a, b) => b.score - a.score);
+	// Alike ones; with too few, the somewhat alike ones too
+	let pool = sorted.filter((c) => c.alike >= ALIKE);
+	if (pool.length < wanted) pool = sorted.filter((c) => c.alike >= SOMEWHAT);
+	pool = pool.slice(0, Math.max(300, wanted * 3));
+
+	const onlineCap = Math.ceil(wanted * ONLINE_SHARE);
+	const picked: MapSet[] = [];
+	const names = new Set(takenNames);
+	const artistCount = new Map<string, number>();
+	let online = 0;
+	while (picked.length < wanted && pool.length) {
+		const libraryLeft = pool.some((c) => !c.online);
+		let best = -1;
+		let bestValue = -Infinity;
+		pool.forEach((candidate, i) => {
+			if (candidate.online && online >= onlineCap && libraryLeft) return;
+			let value = candidate.score;
+			for (const artist of artistsOf(candidate.song.artist ?? ''))
+				value -= (artistCount.get(normalized(artist)) ?? 0) * 0.7;
+			if (value > bestValue) {
+				bestValue = value;
+				best = i;
+			}
+		});
+		if (best < 0) break;
+		const [next] = pool.splice(best, 1);
+		const name = sameSongName(next.song);
+		if (names.has(name)) continue;
+		names.add(name);
+		picked.push(next.song);
+		if (next.online) online++;
+		for (const artist of artistsOf(next.song.artist ?? ''))
+			artistCount.set(normalized(artist), (artistCount.get(normalized(artist)) ?? 0) + 1);
+	}
+	return picked;
 }

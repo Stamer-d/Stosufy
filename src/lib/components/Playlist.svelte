@@ -370,6 +370,7 @@
 			</li>
 			{#each $smartPlaylists as smart (smart.id)}
 				{@const isActive = page.url?.pathname === `/smart/${smart.id}`}
+				{@const count = smart.seeds.length + smart.filled.length}
 				<li>
 					<ContextMenu>
 						<button
@@ -389,8 +390,8 @@
 									>{smart.title}</span
 								>
 								<span class="block text-sm text-secondary-600 truncate">
-									Smart playlist · {smart.rules.length}
-									{smart.rules.length === 1 ? 'rule' : 'rules'}
+									Smart playlist · {count}
+									{count === 1 ? 'song' : 'songs'}
 								</span>
 							</span>
 						</button>

@@ -2,6 +2,7 @@
 	// A list of songs to play as one (a mix, a smart playlist): its cover, title, play and
 	// shuffle, and the songs
 	import { setSongQueue, togglePlayback, songQueue, currentSong } from '#lib/stores/audio.ts';
+	import { mapDataStore } from '#lib/stores/data.ts';
 	import { sameSong, songKey } from '#lib/tracks.ts';
 	import MixCover from './MixCover.svelte';
 	import SongCover from './SongCover.svelte';
@@ -9,7 +10,8 @@
 
 	/**
 	 * `queueId`: the queue's playlist id while it plays (to show it as playing).
-	 * `heading`, `actions` and `children` (between the buttons and the songs) are its own.
+	 * `heading`, `actions` and `children` (between the buttons and the songs) are its own, and
+	 * `row` the buttons at the end of a song's row.
 	 * @type {{
 	 *   songs: import('#lib/types.ts').MapSet[],
 	 *   queueId: string,
@@ -19,6 +21,7 @@
 	 *   heading?: import('svelte').Snippet,
 	 *   actions?: import('svelte').Snippet,
 	 *   children?: import('svelte').Snippet,
+	 *   row?: import('svelte').Snippet<[import('#lib/types.ts').MapSet, number]>,
 	 *   empty?: import('svelte').Snippet
 	 * }}
 	 */
@@ -31,6 +34,7 @@
 		heading,
 		actions,
 		children,
+		row,
 		empty
 	} = $props();
 
@@ -118,9 +122,9 @@
 		<ol class="px-6">
 			{#each songs as song, i (songKey(song))}
 				{@const current = isCurrent(song)}
-				<li>
+				<li class="group flex items-center gap-1 rounded-md hover:bg-white/5 transition">
 					<button
-						class="w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-start hover:bg-white/5 cursor-pointer transition"
+						class="min-w-0 flex-1 flex items-center gap-3 px-2 py-1.5 text-start cursor-pointer"
 						onclick={() => (current ? togglePlayback() : play(i))}
 						title="Play {song.title}"
 					>
@@ -144,10 +148,17 @@
 							>
 							<span class="block truncate text-sm text-secondary-600">{song.artist}</span>
 						</span>
+						{#if !$mapDataStore[song.id]}
+							<span
+								class="icon-[mingcute--cloud-line] size-4 shrink-0 text-secondary-600"
+								title="Not downloaded: it streams from osu!"
+							></span>
+						{/if}
 						<span class="text-sm text-secondary-600 tabular-nums">
 							{time(Number(song.beatmaps?.[0]?.total_length))}
 						</span>
 					</button>
+					{@render row?.(song, i)}
 				</li>
 			{/each}
 		</ol>

@@ -24,8 +24,8 @@
 
 	const ITEM = 'w-full rounded-md text-sm hover:bg-secondary-400';
 	let queueId = $derived(kind === 'smart' ? `smart:${playlist.id}` : playlist.id);
-	// Smart playlists and Downloaded Songs only hold downloaded songs
-	let downloadable = $derived(kind !== 'smart' && playlist.id != -1);
+	// Downloaded Songs only holds downloaded songs
+	let downloadable = $derived(playlist.id != -1);
 
 	async function songsOf() {
 		if (kind === 'smart') return smartSongs(playlist);
@@ -78,7 +78,7 @@
 {/if}
 {#if onEdit}
 	<Button type="ghost" class={ITEM} icon="icon-[mingcute--pencil-line]" on:click={onEdit}>
-		{kind === 'smart' ? 'Edit rules' : 'Edit details'}
+		{kind === 'smart' ? 'Add songs' : 'Edit details'}
 	</Button>
 {/if}
 {#if kind === 'saved'}

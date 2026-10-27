@@ -9,6 +9,8 @@
 		playlists
 	} from '#lib/stores/playlist.ts';
 	import { userSettings } from '#lib/stores/user.ts';
+	import { smartPlaylists, addSeed, isSeed } from '#lib/stores/smartPlaylists.ts';
+	import { showToast } from '#lib/stores/toast.ts';
 	import Modal from './Modal.svelte';
 
 	export let map;
@@ -71,6 +73,31 @@
 							{playlist?.title}
 						</button>
 					{/if}
+				{/each}
+				<!-- Smart playlists: the song is one autofill looks for more like -->
+				{#each $smartPlaylists as smart (smart.id)}
+					{@const added = isSeed(smart, map)}
+					<button
+						class="p-2 rounded flex items-center gap-2 text-start hover:bg-secondary-300 {added
+							? 'cursor-not-allowed opacity-50'
+							: 'cursor-pointer'}"
+						onclick={() => {
+							if (added) return;
+							addSeed(smart.id, map);
+							open = false;
+							showToast(`Added to "${smart.title}"`, 'icon-[mingcute--magic-2-line]');
+						}}
+					>
+						<span
+							class="size-12 shrink-0 grid place-items-center rounded-md bg-gradient-to-br from-primary-300 to-primary-700"
+						>
+							<span class="icon-[mingcute--magic-2-line] size-6 text-white/90"></span>
+						</span>
+						<span class="min-w-0">
+							<span class="block truncate">{smart.title}</span>
+							<span class="block text-xs text-secondary-600">Smart playlist</span>
+						</span>
+					</button>
 				{/each}
 			</div>
 		</div>

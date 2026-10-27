@@ -185,6 +185,27 @@ export function radioSongs(
 	return order;
 }
 
+/**
+ * How well songs fit a few `seeds` (a smart playlist's autofill): `alike` from the songs
+ * themselves (like one of them counts more than a little like all), `taste` from the
+ * history and likes. Any song can be asked about, also one that isn't downloaded.
+ */
+export function fitTo(seeds: MapSet[]) {
+	const seedFeatures = seeds.map(featuresOf);
+	const plays = playCounts(get(history).plays);
+	const liked = new Set(get(favourites).map((f) => songKey(librarySongById(f.setId, f.mapId))));
+	return (song: MapSet) => {
+		const features = featuresOf(song);
+		const scores = seedFeatures.map((seed) => similarity(seed, features));
+		const mean = scores.reduce((sum, score) => sum + score, 0) / (scores.length || 1);
+		return {
+			alike: scores.length ? 0.6 * Math.max(...scores) + 0.4 * mean : 0,
+			// (how long ago it was heard doesn't matter for a playlist)
+			taste: taste(song, plays, liked, Infinity)
+		};
+	};
+}
+
 /** The most similar downloaded songs, without the seed and the excluded ones */
 export function similarSongs(seed: MapSet, exclude: MapSet[] = []): MapSet[] {
 	return radioSongs([seed], exclude);
