@@ -27,6 +27,8 @@
 	import { colorFromString, colorFromImage } from '../../../shims/data';
 	import { webUser } from '../../../library';
 	import { queue, playing, toggle, shuffle } from '../../../player';
+	import { sortable } from '../../../sortable';
+	import { moveSongInPlaylist } from '../../../../lib/stores/playlist';
 
 	/** Rows shown: more as the list is scrolled */
 	const STEP = 100;
@@ -104,6 +106,12 @@
 	// Your own playlists: rename and delete
 	let own = $derived(Number(id) > 0 && $playlists.some((p) => p.id == id));
 	let editing = $state(false);
+	/** The songs are moved by their handles (≡) */
+	let reordering = $state(false);
+	$effect(() => {
+		void id;
+		reordering = false;
+	});
 	let newTitle = $state('');
 	let confirmDelete = $state(false);
 
@@ -275,6 +283,19 @@
 						>
 							<span class="icon-[mingcute--edit-2-line] size-5"></span> Rename
 						</button>
+						{#if songs.length > 1}
+							<button
+								class="w-full flex items-center gap-3 px-3 py-2.5 text-start text-sm active:bg-white/5"
+								onclick={() => {
+									menuOpen = false;
+									filter = '';
+									limit = songs.length;
+									reordering = true;
+								}}
+							>
+								<span class="icon-[mingcute--menu-line] size-5"></span> Reorder songs
+							</button>
+						{/if}
 						<button
 							class="w-full flex items-center gap-3 px-3 py-2.5 text-start text-sm text-red-400 active:bg-white/5"
 							onclick={remove}
@@ -293,7 +314,20 @@
 </PageHeader>
 
 <div class="px-2 pb-4">
-	{#if songs.length > 15}
+	{#if reordering}
+		<div
+			class="sticky top-[calc(env(safe-area-inset-top)+3.5rem)] z-10 mx-1 mt-1 mb-2 flex items-center gap-3 px-3 py-2 rounded-lg bg-secondary-200 shadow-lg ring-1 ring-white/10"
+		>
+			<span class="icon-[mingcute--menu-line] size-5 text-secondary-600"></span>
+			<span class="flex-1 text-sm"
+				>Drag a song by <span class="font-semibold">≡</span> to move it</span
+			>
+			<button
+				class="h-8 px-4 rounded-full bg-white text-black text-sm font-semibold"
+				onclick={() => (reordering = false)}>Done</button
+			>
+		</div>
+	{:else if songs.length > 15}
 		<div class="relative mx-2 mt-1 mb-2 flex items-center">
 			<span
 				class="icon-[mingcute--search-line] absolute left-3 size-4 text-secondary-600 pointer-events-none"
@@ -316,9 +350,25 @@
 		</div>
 	{/if}
 
-	<ol>
+	<ol
+		use:sortable={{
+			onmove: (from, to) => reordering && moveSongInPlaylist(id, from, to)
+		}}
+	>
 		{#each shown.slice(0, limit) as { song, index } (`${song.id}:${song.track ?? 0}:${index}`)}
-			<SongRow {song} {index} playlistId={id} onplay={() => play(songs, index)} />
+			<SongRow {song} {index} playlistId={id} onplay={() => play(songs, index)}>
+				{#snippet extra()}
+					{#if reordering}
+						<span
+							data-handle
+							aria-label="Move {song.title}"
+							class="size-11 shrink-0 grid place-items-center text-secondary-600 touch-none"
+						>
+							<span class="icon-[mingcute--menu-line] size-6"></span>
+						</span>
+					{/if}
+				{/snippet}
+			</SongRow>
 		{/each}
 	</ol>
 	{#if shown.length > limit}

@@ -38,3 +38,10 @@ div:has(> .animate-triangle) {
 		transform: translateY(-40cqh);
 	}
 }
+
+/* A song moved by its handle: lifted above the others */
+li.dragging {
+	background: var(--color-secondary-200);
+	border-radius: 0.375rem;
+	box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+}
