@@ -74,8 +74,14 @@
 </div>
 
 <Dock />
-<!-- (what scrolls doesn't show behind the clock and the notch) -->
-<div class="fixed inset-x-0 top-0 z-20 h-[env(safe-area-inset-top)] bg-app"></div>
+<!-- What scrolls doesn't show behind the clock and the notch: the background is there, the
+     same as around the panel (a copy of it, cut to the top) -->
+<div
+	class="fixed inset-0 z-20 pointer-events-none"
+	style="clip-path: inset(0 0 calc(100% - env(safe-area-inset-top)) 0)"
+>
+	<SongBackdrop {song} dim={song ? 0.75 : 1} />
+</div>
 <FullPlayer />
 <SongMenu />
 <Toasts />
