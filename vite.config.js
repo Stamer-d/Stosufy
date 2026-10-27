@@ -19,7 +19,8 @@ const WEB_PACKAGES = {
 };
 const WEB_FILES = {
 	'src/lib/stores/auth.ts': 'src/web/shims/auth.ts',
-	'src/lib/stores/data.ts': 'src/web/shims/data.ts'
+	'src/lib/stores/data.ts': 'src/web/shims/data.ts',
+	'src/lib/stores/audio.ts': 'src/web/shims/audio.ts'
 };
 function webModules() {
 	return {

@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import { keyStore, loginExpired } from '../shims/auth';
 	import { loadLibrary } from '../library';
+	import '../listening';
 	import MiniPlayer from '../MiniPlayer.svelte';
 	import FullPlayer from '../FullPlayer.svelte';
 	import SongMenu from '../SongMenu.svelte';
@@ -15,15 +16,17 @@
 	let { children } = $props();
 
 	const TABS = [
-		{ href: `${base}/`, label: 'Playlists', icon: 'icon-[mingcute--playlist-2-line]' },
+		{ href: `${base}/`, label: 'Home', icon: 'icon-[mingcute--home-4-line]' },
+		{ href: `${base}/library`, label: 'Library', icon: 'icon-[mingcute--playlist-2-line]' },
 		{ href: `${base}/search`, label: 'Search', icon: 'icon-[mingcute--search-line]' },
-		{ href: `${base}/downloads`, label: 'Downloads', icon: 'icon-[mingcute--download-2-line]' },
-		{ href: `${base}/check`, label: 'Checks', icon: 'icon-[mingcute--check-circle-line]' }
+		{ href: `${base}/downloads`, label: 'Downloads', icon: 'icon-[mingcute--download-2-line]' }
 	];
 	const active = (href) =>
 		href === `${base}/`
-			? page.url.pathname === `${base}/` || page.url.pathname.startsWith(`${base}/playlist`)
-			: page.url.pathname.startsWith(href);
+			? page.url.pathname === `${base}/` || page.url.pathname === base
+			: href === `${base}/library`
+				? page.url.pathname.startsWith(href) || page.url.pathname.startsWith(`${base}/playlist`)
+				: page.url.pathname.startsWith(href);
 
 	// (the checks and the downloads work without a login: downloads play offline after it ran
 	// out; the way back from osu!'s login is the login)

@@ -18,7 +18,8 @@
 		toggleShuffle,
 		cycleRepeat,
 		bigCoverUrl,
-		coverUrl
+		coverUrl,
+		sleepTimer
 	} from './player';
 	import { songMenu } from './library';
 	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
@@ -31,6 +32,33 @@
 		}))
 	);
 	let showQueue = $state(false);
+
+	// The sleep timer: what's left of it, looked at every 15 s
+	let choosingSleep = $state(false);
+	let now = $state(Date.now());
+	$effect(() => {
+		const timer = setInterval(() => (now = Date.now()), 15_000);
+		return () => clearInterval(timer);
+	});
+	let sleepLabel = $derived(
+		!$sleepTimer
+			? ''
+			: 'endOfSong' in $sleepTimer
+				? 'End of song'
+				: `${Math.max(1, Math.ceil(($sleepTimer.at - now) / 60_000))} min`
+	);
+	const SLEEP_MINUTES = [15, 30, 45, 60, 90];
+	function setSleep(minutes) {
+		choosingSleep = false;
+		now = Date.now();
+		sleepTimer.set(
+			minutes === 'song'
+				? { endOfSong: true }
+				: minutes
+					? { at: Date.now() + minutes * 60_000 }
+					: null
+		);
+	}
 	const clock = (s) =>
 		s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
 	const close = () => playerOpen.set(false);
@@ -181,7 +209,45 @@
 				</button>
 			</div>
 
-			<div class="mt-2 flex justify-end">
+			<div class="relative mt-2 flex justify-between">
+				<button
+					aria-label="Sleep timer"
+					class="h-11 px-2 flex items-center gap-1.5 text-sm {$sleepTimer
+						? 'text-primary-400'
+						: 'text-white/70'}"
+					onclick={() => (choosingSleep = !choosingSleep)}
+				>
+					<span class="icon-[mingcute--moon-line] size-6"></span>
+					{sleepLabel}
+				</button>
+				{#if choosingSleep}
+					<div
+						class="absolute bottom-12 left-0 z-10 w-48 py-1 rounded-xl bg-secondary-300 shadow-2xl ring-1 ring-white/10"
+					>
+						{#each SLEEP_MINUTES as minutes (minutes)}
+							<button
+								class="w-full px-4 py-2.5 text-start active:bg-white/5"
+								onclick={() => setSleep(minutes)}
+							>
+								In {minutes} minutes
+							</button>
+						{/each}
+						<button
+							class="w-full px-4 py-2.5 text-start active:bg-white/5"
+							onclick={() => setSleep('song')}
+						>
+							At the end of the song
+						</button>
+						{#if $sleepTimer}
+							<button
+								class="w-full px-4 py-2.5 text-start text-red-400 active:bg-white/5"
+								onclick={() => setSleep(null)}
+							>
+								Turn off
+							</button>
+						{/if}
+					</div>
+				{/if}
 				<button
 					aria-label="Up next"
 					aria-pressed={showQueue}

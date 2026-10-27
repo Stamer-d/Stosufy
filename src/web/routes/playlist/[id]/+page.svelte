@@ -8,8 +8,11 @@
 		savedPlaylists,
 		otherPlaylists,
 		playlistSongsCache,
-		getPlaylistSongs
+		getPlaylistSongs,
+		editPlaylist,
+		deletePlaylist
 	} from '../../../../lib/stores/playlist';
+	import { goto } from '$app/navigation';
 	import { songsLength } from '../../../../lib/tracks';
 	import { showToast } from '../../../../lib/stores/toast';
 	import { play } from '../../../player';
@@ -48,6 +51,49 @@
 			.finally(() => wanted === id && (loading = false));
 	});
 
+	// Your own playlists: rename and delete
+	let own = $derived(Number(id) > 0 && $playlists.some((p) => p.id == id));
+	let editing = $state(false);
+	let newTitle = $state('');
+	let confirmDelete = $state(false);
+
+	async function rename() {
+		const title = newTitle.trim();
+		editing = false;
+		if (!title || !playlist || title === playlist.title) return;
+		const before = playlist.title;
+		playlists.update((list) => list.map((p) => (p.id == id ? { ...p, title } : p)));
+		try {
+			await editPlaylist(id, title, playlist.description ?? '', !!playlist.public);
+		} catch (e) {
+			playlists.update((list) => list.map((p) => (p.id == id ? { ...p, title: before } : p)));
+			showToast(
+				`Couldn't rename it: ${e instanceof Error ? e.message : e}`,
+				'icon-[mingcute--warning-line]'
+			);
+		}
+	}
+
+	async function remove() {
+		if (!confirmDelete) {
+			confirmDelete = true;
+			return;
+		}
+		const title = playlist?.title;
+		try {
+			await deletePlaylist(id);
+			playlists.update((list) => list.filter((p) => p.id != id));
+			showToast(`Deleted "${title}"`, 'icon-[mingcute--delete-2-line]');
+			goto(`${base}/library`, { replaceState: true });
+		} catch (e) {
+			confirmDelete = false;
+			showToast(
+				`Couldn't delete it: ${e instanceof Error ? e.message : e}`,
+				'icon-[mingcute--warning-line]'
+			);
+		}
+	}
+
 	async function keepAll() {
 		const result = await downloadAll(songs);
 		if (!result) return;
@@ -61,12 +107,57 @@
 </script>
 
 <header class="px-5 pt-4 pb-3">
-	<a href="{base}/" class="text-sm text-secondary-600 flex items-center gap-1">
-		<span class="icon-[mingcute--left-line] size-4"></span> Playlists
+	<a href="{base}/library" class="text-sm text-secondary-600 flex items-center gap-1">
+		<span class="icon-[mingcute--left-line] size-4"></span> Library
 	</a>
-	<h1 class="mt-2 text-3xl font-extrabold truncate">
-		{playlist?.title ?? (id == '-2' ? 'Liked Songs' : 'Playlist')}
-	</h1>
+	{#if editing}
+		<form
+			class="mt-2"
+			onsubmit={(e) => {
+				e.preventDefault();
+				rename();
+			}}
+		>
+			<!-- svelte-ignore a11y_autofocus -->
+			<input
+				bind:value={newTitle}
+				autofocus
+				maxlength="100"
+				onblur={rename}
+				class="w-full bg-transparent text-3xl font-extrabold outline-none border-b border-primary-400"
+				aria-label="Name"
+			/>
+		</form>
+	{:else}
+		<div class="mt-2 flex items-center gap-2">
+			<h1 class="min-w-0 flex-1 text-3xl font-extrabold truncate">
+				{playlist?.title ?? (id == '-2' ? 'Liked Songs' : 'Playlist')}
+			</h1>
+			{#if own}
+				<button
+					aria-label="Rename"
+					class="size-9 shrink-0 grid place-items-center text-secondary-600"
+					onclick={() => {
+						newTitle = playlist?.title ?? '';
+						editing = true;
+					}}
+				>
+					<span class="icon-[mingcute--edit-2-line] size-5"></span>
+				</button>
+				<button
+					aria-label="Delete"
+					class="h-9 shrink-0 px-2 flex items-center gap-1 text-sm {confirmDelete
+						? 'text-red-400'
+						: 'text-secondary-600'}"
+					onclick={remove}
+					onblur={() => (confirmDelete = false)}
+				>
+					<span class="icon-[mingcute--delete-2-line] size-5"></span>
+					{confirmDelete ? 'Delete?' : ''}
+				</button>
+			{/if}
+		</div>
+	{/if}
 	<p class="text-sm text-secondary-600">
 		{songs.length} songs{songs.length ? ` · ${songsLength(songs)}` : ''}{keptCount
 			? ` · ${keptCount} on the phone`

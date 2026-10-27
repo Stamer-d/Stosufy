@@ -15,8 +15,26 @@ export const bigCoverUrl = (song: MapSet) =>
 /** A song's key among the downloads: the difficulty it's of */
 export const keyOf = (song: MapSet) => String(song.beatmaps?.[0]?.id ?? song.id);
 
+/** osu!'s genre and language come as text or as `{ id, name }`: the text */
+const textOf = (value: unknown) =>
+	(typeof value === 'object' && value ? (value as { name?: string }).name : value) as
+		string | undefined;
+
+/**
+ * A song of osu!'s answers as the shared code wants it (the radio, the listening history):
+ * the genre and language as text, where it's from as `songSource`
+ */
+export function normalized(song: MapSet): MapSet {
+	const source = song.songSource ?? (song as { source?: string }).source ?? '';
+	const genre = textOf(song.genre);
+	const language = textOf(song.language);
+	if (genre === song.genre && language === song.language && source === song.songSource) return song;
+	return { ...song, genre, language, songSource: source } as MapSet;
+}
+
 /** Only what the player needs of a song (kept in localStorage) */
-export function slim(song: MapSet): MapSet {
+export function slim(original: MapSet): MapSet {
+	const song = normalized(original);
 	const map = song.beatmaps?.[0];
 	return {
 		id: song.id,
@@ -24,6 +42,11 @@ export function slim(song: MapSet): MapSet {
 		artist: song.artist,
 		creator: song.creator,
 		track: song.track,
+		// (for the listening history and the radio)
+		genre: song.genre,
+		language: song.language,
+		songSource: song.songSource,
+		bpm: song.bpm,
 		beatmaps: map ? [{ id: map.id, total_length: map.total_length, version: map.version }] : []
 	} as MapSet;
 }

@@ -2,6 +2,7 @@
 	// What can be done with a song (the ⋯ of a row): play it next, like it, add it to a
 	// playlist, take it out of the playlist it's in, keep it on the phone
 	import { songMenu, ownPlaylists } from './library';
+	import { startRadio } from './listening';
 	import { playNext, addToQueue, coverUrl } from './player';
 	import { downloaded, downloading, download, removeDownload, isDownloaded } from './downloads';
 	import {
@@ -114,6 +115,17 @@
 					)}
 					{@render item('icon-[mingcute--list-check-line]', 'Add to queue', () =>
 						act(addToQueue, 'Added to the queue')
+					)}
+					{@render item('icon-[mingcute--radio-line]', 'Start radio', () =>
+						act(
+							async (target) => {
+								showToast('Looking for songs like it…', 'icon-[mingcute--radio-line]');
+								if (!(await startRadio(target)))
+									throw new Error('Found no songs like it in your playlists');
+							},
+							'Radio started',
+							'icon-[mingcute--radio-line]'
+						)
 					)}
 					{@render item(
 						liked ? 'icon-[mingcute--heart-fill] text-primary-400' : 'icon-[mingcute--heart-line]',

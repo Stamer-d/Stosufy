@@ -23,6 +23,10 @@ export const shuffle = writable(false);
 export const repeat = writable<Repeat>('off');
 /** The full screen player is open */
 export const playerOpen = writable(false);
+/** The sleep timer: when it stops (ms), or at the end of the song playing */
+export const sleepTimer = writable<{ at: number } | { endOfSong: true } | null>(null);
+/** The <audio> element, once there (the listening history looks at it) */
+export const audioElement = writable<HTMLAudioElement | null>(null);
 
 /** The queue in the order it was played in (to go back to when shuffle is turned off) */
 let ordered: MapSet[] = [];
@@ -57,6 +61,7 @@ function element() {
 	audio = new Audio();
 	audio.preload = 'auto';
 	audio.loop = true;
+	audioElement.set(audio);
 	audio.addEventListener('play', () => playing.set(true));
 	audio.addEventListener('pause', () => playing.set(false));
 	// iOS forgets the lock screen's buttons when a song starts: set again each time
@@ -71,6 +76,12 @@ function element() {
 		time.set({ current: now, duration });
 		const wentRound = duration > 0 && lastTime > duration - 3 && now < 2 && now < lastTime;
 		lastTime = now;
+		const sleep = get(sleepTimer);
+		if (sleep && 'at' in sleep && Date.now() >= sleep.at) {
+			log('sleep timer: stop');
+			sleepTimer.set(null);
+			audio!.pause();
+		}
 		if (wentRound && !seekedByHand) {
 			log('song went round: its end');
 			songEnded();
@@ -182,6 +193,13 @@ export function toggle() {
 
 /** A song ended by itself: the next one (repeat one: it plays on, as it loops) */
 function songEnded() {
+	if (get(sleepTimer) && 'endOfSong' in get(sleepTimer)!) {
+		log('sleep timer: stop at the end of the song');
+		sleepTimer.set(null);
+		element().pause();
+		element().currentTime = 0;
+		return;
+	}
 	if (get(repeat) === 'one') return;
 	const { songs, index } = get(queue);
 	// The last one: stop at its start
