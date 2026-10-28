@@ -10,6 +10,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
+		"test:web": "tests/web/run.sh",
 		"build:web": "vite build --mode web && node -e \"require('fs').copyFileSync('build-web/404.html', 'build-web/index.html')\"",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json && node scripts/check-icons.js",

@@ -85,7 +85,7 @@
 			{#each PERIODS as option (option.id)}
 				<button
 					aria-pressed={period === option.id}
-					class="shrink-0 h-9 px-4 rounded-full text-sm font-semibold transition {period ===
+					class="shrink-0 h-10 px-4 rounded-full text-sm font-semibold transition {period ===
 					option.id
 						? 'bg-white text-black'
 						: 'bg-black/30 text-white/80'}"
@@ -178,7 +178,7 @@
 
 <div class="px-4 pt-8 pb-6 flex justify-center">
 	<button
-		class="h-9 px-4 rounded-full bg-white/[0.06] text-sm {confirmDelete
+		class="h-10 px-4 rounded-full bg-white/[0.06] text-sm {confirmDelete
 			? 'text-red-400'
 			: 'text-secondary-600'}"
 		onclick={removeHistory}

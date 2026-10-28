@@ -45,3 +45,27 @@ li.dragging {
 	animation-play-state: paused !important;
 	will-change: auto;
 }
+
+/* Sideways on a phone (little height): a slimmer tab bar, smaller headers, the player
+   without its cover (the controls fit) */
+@media (orientation: landscape) and (max-height: 500px) {
+	.dock-label {
+		display: none;
+	}
+	.dock nav button {
+		padding-top: 0.4rem;
+		padding-bottom: 0.4rem;
+	}
+	.page-cover > * {
+		width: min(12rem, 38dvh) !important;
+		height: min(12rem, 38dvh) !important;
+	}
+	.player-cover {
+		display: none;
+	}
+}
+
+/* Typing: the tab bar steps aside (on iOS it would float above the keyboard) */
+html.typing .dock {
+	transform: translateY(110%);
+}

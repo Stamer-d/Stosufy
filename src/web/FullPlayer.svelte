@@ -27,6 +27,7 @@
 	import { haptic } from './haptics';
 	import Lyrics from './Lyrics.svelte';
 	import Scrubber from './Scrubber.svelte';
+	import { marquee } from './marquee';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongSwipe from './SongSwipe.svelte';
 	import SongBackdrop from './SongBackdrop.svelte';
@@ -213,7 +214,7 @@
 					{/each}
 				</ol>
 			{:else}
-				<div class="flex-1 min-h-0 flex items-center">
+				<div class="player-cover flex-1 min-h-0 flex items-center">
 					<SongSwipe class="w-full">
 						{#snippet item(shown, middle)}
 							<div class="px-1">
@@ -224,7 +225,7 @@
 									alt=""
 									decoding="async"
 									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300 bg-cover bg-center"
-									style="max-width: min(100%, 46dvh); background-image: url({coverUrl(shown)})"
+									style="max-width: min(100%, 46dvh, calc(100dvh - 26rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))); background-image: url({coverUrl(shown)})"
 									onerror={handleImageError}
 								/>
 							</div>
@@ -236,9 +237,10 @@
 			<div class="mt-6 flex items-center gap-3">
 				<div class="min-w-0 flex-1">
 					<a
-						class="block text-xl font-bold truncate"
+						class="block text-xl font-bold overflow-hidden whitespace-nowrap"
 						href="{base}/map/{song.id}{song.track ? `?track=${song.track}` : ''}"
-						onclick={close}>{song.title}</a
+						use:marquee={song.title}
+						onclick={close}><span class="inline-block">{song.title}</span></a
 					>
 					<p class="text-white/60 truncate">
 						{song.artist}{$previewOnly ? ' · preview' : ''}
@@ -431,6 +433,7 @@
 				<div
 					class="relative rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
 					transition:fly={{ y: 400, duration: 220, opacity: 1 }}
+					use:swipe={{ axis: 'y', only: 1, onswipe: () => (choosingMods = false) }}
 				>
 					<div class="pt-2 flex justify-center">
 						<span class="w-10 h-1 rounded-full bg-white/20"></span>

@@ -11,6 +11,7 @@
 	import { BEATMAP_STATUS } from '../../../lib/beatmapStatus';
 	import { GENRES, LANGUAGES } from '../../../lib/genres';
 	import { fade, fly } from 'svelte/transition';
+	import { swipe } from '../../gestures';
 
 	const FILTERS = {
 		status: {
@@ -210,7 +211,7 @@
 		{:else if query}
 			<button
 				aria-label="Clear"
-				class="-mr-1 size-7 grid place-items-center text-secondary-600"
+				class="-mr-3 size-10 grid place-items-center text-secondary-600"
 				onclick={() => (query = '')}
 			>
 				<span class="icon-[mingcute--close-circle-fill] size-5"></span>
@@ -221,7 +222,7 @@
 		{#each Object.keys(FILTERS) as key (key)}
 			{@const on = filters[key] !== DEFAULTS[key]}
 			<button
-				class="shrink-0 h-9 pl-3.5 pr-2.5 flex items-center gap-1 rounded-full text-sm font-semibold transition {on
+				class="shrink-0 h-10 pl-4 pr-3 flex items-center gap-1 rounded-full text-sm font-semibold transition {on
 					? 'bg-primary-300 text-white'
 					: 'bg-white/[0.08] text-white/80'}"
 				onclick={() => (choosing = key)}
@@ -232,7 +233,7 @@
 		{/each}
 		{#if filtered}
 			<button
-				class="shrink-0 h-9 px-3 rounded-full text-sm text-secondary-600"
+				class="shrink-0 h-10 px-3 rounded-full text-sm text-secondary-600"
 				onclick={() => updateUserSettings({ searchFilters: { ...DEFAULTS } })}
 			>
 				Reset
@@ -253,6 +254,7 @@
 		<div
 			class="relative max-h-[75dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
 			transition:fly={{ y: 400, duration: 220, opacity: 1 }}
+			use:swipe={{ axis: 'y', only: 1, onswipe: () => (choosing = null) }}
 		>
 			<div class="pt-2 flex justify-center">
 				<span class="w-10 h-1 rounded-full bg-white/20"></span>
@@ -299,7 +301,9 @@
 	<section class="px-4 pt-2">
 		<div class="flex items-center justify-between">
 			<h2 class="font-bold">Searched before</h2>
-			<button class="text-sm text-secondary-600" onclick={() => keepRecent([])}>Clear</button>
+			<button class="-mr-2 h-10 px-2 text-sm text-secondary-600" onclick={() => keepRecent([])}
+				>Clear</button
+			>
 		</div>
 		<ul class="mt-1">
 			{#each recent as words (words)}

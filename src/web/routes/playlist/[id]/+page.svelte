@@ -352,7 +352,7 @@
 				bind:value={filter}
 				placeholder="Filter"
 				aria-label="Filter songs in this playlist"
-				class="w-full h-9 pl-9 pr-3 rounded-full bg-white/[0.06] focus:bg-white/10 text-white placeholder:text-secondary-600 outline-none ring-1 ring-transparent focus:ring-white/20 transition [&::-webkit-search-cancel-button]:hidden"
+				class="w-full h-10 pl-9 pr-3 rounded-full bg-white/[0.06] focus:bg-white/10 text-white placeholder:text-secondary-600 outline-none ring-1 ring-transparent focus:ring-white/20 transition [&::-webkit-search-cancel-button]:hidden"
 			/>
 		</div>
 	{/if}

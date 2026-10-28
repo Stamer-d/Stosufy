@@ -38,8 +38,12 @@ export function swipe(node: HTMLElement, options: SwipeOptions) {
 	function down(event: TouchEvent) {
 		if (event.touches.length > 1) return void (start = null);
 		const touch = event.touches[0];
-		// (sliders, fields and what scrolls or drags itself keep their own dragging)
-		if ((event.target as HTMLElement).closest('input, textarea, [data-no-swipe]')) return;
+		// (sliders, fields and what scrolls or drags itself keep their own dragging: what's
+		// marked so inside this element, not a sheet this element is itself part of)
+		const target = event.target as HTMLElement;
+		if (target.closest('input, textarea')) return;
+		const blocker = target.closest('[data-no-swipe]');
+		if (blocker && blocker !== node && node.contains(blocker)) return;
 		// (scrolled down in it: dragging down scrolls back up first)
 		if (current.axis === 'y' && node.scrollTop > 0) return;
 		start = { x: touch.clientX, y: touch.clientY };

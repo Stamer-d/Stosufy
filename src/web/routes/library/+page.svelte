@@ -177,7 +177,7 @@
 	</div>
 {/if}
 <div class="px-4 pb-6 flex justify-center">
-	<button class="h-9 px-4 rounded-full bg-white/[0.06] text-sm text-secondary-600" onclick={logOut}
+	<button class="h-10 px-4 rounded-full bg-white/[0.06] text-sm text-secondary-600" onclick={logOut}
 		>Log out</button
 	>
 </div>

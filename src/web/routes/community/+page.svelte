@@ -93,7 +93,7 @@
 		{#each SORTS as [value, label] (value)}
 			<button
 				aria-pressed={sort === value}
-				class="h-9 px-4 rounded-full text-sm font-semibold transition {sort === value
+				class="h-10 px-4 rounded-full text-sm font-semibold transition {sort === value
 					? 'bg-white text-black'
 					: 'bg-white/[0.08] text-white/80'}"
 				onclick={() => (sort = value)}

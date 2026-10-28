@@ -80,7 +80,7 @@
 				<span class="icon-[mingcute--left-line] size-7"></span>
 			</a>
 		{/if}
-		<div class="relative mt-2 flex justify-center">
+		<div class="page-cover relative mt-2 flex justify-center">
 			{@render cover()}
 		</div>
 		<div class="relative mt-5">

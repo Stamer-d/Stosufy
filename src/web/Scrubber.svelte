@@ -60,7 +60,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <div
-	class="relative -mx-2 px-2 h-9 flex items-center touch-none select-none"
+	class="relative -mx-2 px-2 h-11 flex items-center touch-none select-none"
 	data-no-swipe
 	data-no-edge
 	role="slider"

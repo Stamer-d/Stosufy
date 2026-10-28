@@ -42,18 +42,28 @@ function setOffline(value: boolean) {
 	}
 }
 
+/** Asked to see whether the connection is back: any answer counts (an error page too) */
+const CHECKS = ['https://api.stamer-d.de/v2/stosufy/web-login', 'https://osu.ppy.sh/favicon.ico'];
+
 async function check() {
 	if (!navigator.onLine) return;
-	try {
-		await fetch('https://osu.ppy.sh/favicon.ico', { method: 'HEAD' });
-		setOffline(false);
-	} catch {
-		// Still offline
+	for (const url of CHECKS) {
+		try {
+			await fetch(url, { method: url.endsWith('.ico') ? 'HEAD' : 'GET', cache: 'no-store' });
+			setOffline(false);
+			return;
+		} catch {
+			// (not this one: the next, else still offline)
+		}
 	}
 }
 
 if (typeof window !== 'undefined') {
 	window.addEventListener('offline', () => setOffline(true));
 	window.addEventListener('online', () => check());
+	// (back to the app: the connection may be back too)
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'visible' && get(offline)) check();
+	});
 	if (!navigator.onLine) checking = setInterval(check, 20_000);
 }

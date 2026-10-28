@@ -127,12 +127,12 @@
 			</span>
 		{/if}
 		<p class="mt-2 text-sm">
-			<button class="font-bold" onclick={() => searchFor(song.artist)}>{song.artist}</button>
+			<button class="py-2.5 font-bold" onclick={() => searchFor(song.artist)}>{song.artist}</button>
 		</p>
 		<p class="mt-1 text-sm text-white/70">
 			{#if info?.creator}
 				mapped by <button
-					class="font-semibold text-white"
+					class="py-2.5 font-semibold text-white"
 					onclick={() => searchFor(`creator=${info.creator}`)}>{info.creator}</button
 				>
 			{/if}
@@ -141,7 +141,9 @@
 		</p>
 		{#if songSource && songSource !== 'osu'}
 			<p class="mt-1 text-sm text-white/70 truncate">
-				From <button class="text-white" onclick={() => searchFor(songSource)}>{songSource}</button>
+				From <button class="py-2.5 text-white" onclick={() => searchFor(songSource)}
+					>{songSource}</button
+				>
 			</p>
 		{/if}
 		{#snippet actions()}

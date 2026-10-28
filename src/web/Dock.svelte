@@ -14,7 +14,7 @@
 </script>
 
 <div
-	class="fixed inset-x-0 bottom-0 z-20 bg-app border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)]"
+	class="dock fixed inset-x-0 bottom-0 z-20 bg-app border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-transform duration-200"
 >
 	{#if song}
 		<div class="relative">
@@ -84,7 +84,7 @@
 				onclick={() => openTab(tab.id)}
 			>
 				<span class="{active ? tab.activeIcon : tab.icon} size-6"></span>
-				{tab.label}
+				<span class="dock-label">{tab.label}</span>
 			</button>
 		{/each}
 	</nav>

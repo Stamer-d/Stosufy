@@ -152,7 +152,7 @@
 		<p class="font-semibold truncate">{$webUser?.username ?? 'Logged in'}</p>
 		<p class="text-sm text-secondary-600">osu! account · settings synced with the desktop app</p>
 	</div>
-	<button class="h-9 px-3 rounded-full bg-white/[0.08] text-sm font-semibold" onclick={logOut}>
+	<button class="h-10 px-3 rounded-full bg-white/[0.08] text-sm font-semibold" onclick={logOut}>
 		Log out
 	</button>
 </div>

@@ -344,8 +344,19 @@ export function previous() {
 }
 
 export function seek(seconds: number) {
-	seekedByHand = true;
-	element().currentTime = seconds;
+	// (only a jump to the start isn't the song's end: dragged to the very end, the song going
+	// round right after is its end)
+	seekedByHand = seconds < 2;
+	const player = element();
+	// Dragged to the very end: that's the song's end (it loops, so it would start over at once,
+	// before its end could be seen)
+	if (player.duration && seconds >= player.duration - 0.5) {
+		log('dragged to the end');
+		songEnded();
+		return;
+	}
+	lastTime = seconds;
+	player.currentTime = seconds;
 	updatePosition();
 }
 

@@ -58,6 +58,32 @@
 	/** The background behind the app, dimmed as set in the desktop app (osu!'s background dim) */
 	let dim = $derived(song && appearance.background ? appearance.dim / 100 : 1);
 
+	// Typing: the tab bar steps aside (html.typing); scrolling puts the keyboard away, as in
+	// the phone's own apps
+	const isField = (element) =>
+		element instanceof HTMLTextAreaElement ||
+		(element instanceof HTMLInputElement && !['range', 'checkbox', 'radio'].includes(element.type));
+	onMount(() => {
+		const focusIn = (event) =>
+			isField(event.target) && document.documentElement.classList.add('typing');
+		const focusOut = () =>
+			setTimeout(() => {
+				if (!isField(document.activeElement)) document.documentElement.classList.remove('typing');
+			}, 50);
+		const scrolled = (event) => {
+			if (isField(document.activeElement) && !isField(event.target))
+				/** @type {HTMLElement} */ (document.activeElement).blur();
+		};
+		document.addEventListener('focusin', focusIn);
+		document.addEventListener('focusout', focusOut);
+		window.addEventListener('touchmove', scrolled, { passive: true });
+		return () => {
+			document.removeEventListener('focusin', focusIn);
+			document.removeEventListener('focusout', focusOut);
+			window.removeEventListener('touchmove', scrolled);
+		};
+	});
+
 	/** Scrolled down: the bar behind the clock shows */
 	let scrolled = $state(false);
 	onMount(() => {
@@ -76,10 +102,10 @@
 <!-- The app on the whole screen, edge to edge: the pages start under the clock (their
      header's color reaches up behind it); once scrolled, a bar behind the clock keeps what
      scrolls from showing there -->
-<div class="min-h-dvh pb-[calc(env(safe-area-inset-bottom)+8.5rem)]">
+<div class="min-h-dvh">
 	<main
 		bind:this={panel}
-		class="min-h-dvh pt-[env(safe-area-inset-top)] {song
+		class="min-h-dvh pt-[env(safe-area-inset-top)] pb-[calc(env(safe-area-inset-bottom)+8.5rem)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] {song
 			? 'bg-panel/80'
 			: 'bg-panel'} overflow-clip"
 	>
