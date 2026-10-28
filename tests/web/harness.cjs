@@ -113,7 +113,7 @@ async function setup(ctx, { lyrics = true } = {}) {
       }
       return route.fulfill({ json: { data } });
     }
-    if (url.includes('catboy.best') || url.includes('b.ppy.sh')) {
+    if (url.includes('catboy.best') || url.includes('b.ppy.sh') || url.includes('/stosufy/preview/')) {
       // (with ranges, as the mirror: the audio can be seeked)
       const wav = TONE;
       const range = /bytes=(\d+)-(\d*)/.exec(req.headers()['range'] || '');

@@ -6,7 +6,9 @@ import type { MapSet } from '../lib/types';
 const MIRROR = 'https://catboy.best';
 
 export const streamUrl = (song: MapSet) => `${MIRROR}/preview/audio/${song.beatmaps?.[0]?.id}/full`;
-export const previewUrl = (song: MapSet) => `https://b.ppy.sh/preview/${song.id}.mp3`;
+/** osu!'s 30 s preview, through the Stosufy API (osu! doesn't let pages read it, and the
+ * songs' sound goes through Web Audio, which has to: see audioGraph.ts) */
+export const previewUrl = (song: MapSet) => `https://api.stamer-d.de/v2/stosufy/preview/${song.id}`;
 export const coverUrl = (song: MapSet) =>
 	`https://assets.ppy.sh/beatmaps/${song.id}/covers/list@2x.jpg`;
 /** The whole background (sharp on the big cover; falls back to the banner, see handleImageError) */

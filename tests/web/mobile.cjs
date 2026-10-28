@@ -38,7 +38,21 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   // (when each hitsound is set to play, ahead of now; and how many are called off)
   await ctx.addInitScript(() => {
     const play = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function (...a) { window.__audio = this; return play.apply(this, a); };
+    HTMLMediaElement.prototype.play = function (...a) { window.__audio = this; (window.__elements ||= new Set()).add(this); return play.apply(this, a); };
+    // (the songs' sound through Web Audio: each element's level and fade, as routed)
+    const route = AudioContext.prototype.createMediaElementSource;
+    AudioContext.prototype.createMediaElementSource = function (element) {
+      const source = route.call(this, element);
+      window.__routing = { element, gains: [] };
+      (window.__routes ||= []).push(window.__routing);
+      return source;
+    };
+    const gain = AudioContext.prototype.createGain;
+    AudioContext.prototype.createGain = function () {
+      const node = gain.call(this);
+      if (window.__routing && window.__routing.gains.length < 2) window.__routing.gains.push(node);
+      return node;
+    };
     // (Safari's audio session; the other engines have none)
     if (!navigator.audioSession) Object.defineProperty(navigator, 'audioSession', { value: { type: 'auto' } });
     const create = AudioContext.prototype.createBufferSource;
@@ -443,6 +457,75 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.locator('.fixed.inset-0.z-40 button:has-text("NM")').click(); await wait(300);
     await p.mouse.click(200, 60); await wait(400);
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+  });
+
+  await step('same loudness: the song through Web Audio, at the usual level first, then its own; off: as it is', async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(800);
+    const level = () => p.evaluate(() => {
+      const r = (window.__routes || []).find((x) => x.element === window.__audio);
+      return r ? Math.round(r.gains[0].gain.value * 1000) / 1000 : null;
+    });
+    const start = await level();
+    expect(start != null, 'the song isn\'t routed: ' + (await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-log') || '[]').slice(-4).join(' | '))));
+    expect(Math.abs(start - 0.562) < 0.05, 'not at the usual level at first: ' + start);
+    // (the mock's tone is quiet, -24 LUFS: brought up as far as it goes, to 1)
+    await wait(9000);
+    const own = await level();
+    expect(own > 0.9, 'not at its own level: ' + own);
+    // (the settings in the app: the song plays on)
+    await tab('Home'); if (path() !== '/') await tab('Home');
+    await p.click('main a[aria-label="Settings"]'); await wait(1000);
+    const toggle = p.locator('button[role="switch"]:has-text("Same loudness")');
+    expect((await toggle.getAttribute('aria-checked')) === 'true', 'off by default');
+    await toggle.click(); await wait(800);
+    expect((await level()) === 1, 'off: not as it is');
+    await toggle.click(); await wait(300);
+  });
+
+  await step('crossfade: the next song comes in on the other element while this one fades out; turned down, the next one at the end', async () => {
+    await p.goto(BASE + '/settings'); await wait(1000);
+    await p.locator('label:has-text("Crossfade") input[type="range"]').evaluate((input) => { input.value = '3'; input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await wait(300);
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(1500);
+    const state = () => p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player') || '{}'); return { index: s.index, title: s.songs?.[s.index]?.title }; });
+    const before = await state();
+    const first = await p.evaluate(() => { const a = window.__audio; a.currentTime = a.duration - 4.5; return a.duration; });
+    expect(first > 10, 'duration ' + first);
+    await wait(2600);
+    const during = await p.evaluate(() => [...window.__elements].filter((e) => !e.paused && e.src).length);
+    const after = await state();
+    expect(after.index === before.index + 1, 'not on to the next song: ' + JSON.stringify([before, after]));
+    expect(during === 2, 'both songs not playing together: ' + during);
+    const log = await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-log') || '[]').join(' | '));
+    expect(/crossfade into/.test(log), 'no crossfade in the log');
+    await wait(3500);
+    const playingNow = await p.evaluate(() => [...window.__elements].filter((e) => !e.paused && e.src).length);
+    expect(playingNow === 1, 'the old song still plays: ' + playingNow);
+    const title = await nowTitle();
+    expect(title === after.title, 'the song shown is ' + title);
+    // Turned down (iOS, with the screen locked, may not let the other element play): the next
+    // song when this one ends, as without crossfade
+    const at = await state();
+    await p.evaluate(() => {
+      window.__main = window.__audio;
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (...a) {
+        if (this !== window.__main) return Promise.reject(new DOMException('not now', 'NotAllowedError'));
+        return play.apply(this, a);
+      };
+      window.__restorePlay = () => (HTMLMediaElement.prototype.play = play);
+      const a = window.__audio; a.currentTime = a.duration - 4.5;
+    });
+    await wait(6500);
+    const then = await state();
+    await p.evaluate(() => window.__restorePlay());
+    expect(then.index === at.index + 1, 'not on to the next song after a turned-down crossfade: ' + JSON.stringify([at, then]));
+    const log2 = await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-log') || '[]').join(' | '));
+    expect(/crossfade turned down/.test(log2), 'not turned down');
+    expect(await p.evaluate(() => !window.__main.paused), 'stopped instead of going on');
+    await p.goto(BASE + '/settings'); await wait(1000);
+    await p.locator('label:has-text("Crossfade") input[type="range"]').evaluate((input) => { input.value = '0'; input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await wait(300);
   });
 
   await step("a touch at the edge is held from iOS' swipe, a tap there still taps", async () => {

@@ -1,5 +1,7 @@
-// The web app's player: one plain <audio> element (no Web Audio: iOS keeps that playing in
-// the background and on the lock screen, where its controls come from the Media Session).
+// The web app's player: an <audio> element (iOS keeps that playing in the background and on
+// the lock screen, where its controls come from the Media Session), its sound through Web
+// Audio once that runs (audioGraph.ts: every song at the same loudness, crossfades; a second
+// element takes the next song for a crossfade).
 // The songs stream from the beatmap mirror, like the desktop app's streaming, or play from
 // the phone if they were downloaded. The queue, shuffle and repeat are kept for the next
 // start, where it goes on where it was.
@@ -9,6 +11,18 @@ import { downloaded, localUrl } from './downloads';
 import { coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
 import { log } from './log';
 import { sharpArtwork } from './covers';
+import {
+	wakeGraph,
+	keepRunning,
+	isRouted,
+	graphRunning,
+	fadeTo,
+	unfade,
+	crossfadeSeconds
+} from './audioGraph';
+import { startLoudness, measure, applyNormalize } from './loudness';
+import { userSettings } from './shims/user';
+import { applyMod } from '../lib/stores/mods';
 import { offline } from '../lib/stores/network';
 import type { MapSet } from '../lib/types';
 
@@ -57,6 +71,12 @@ export const audioElement = writable<HTMLAudioElement | null>(null);
 /** The queue in the order it was played in (to go back to when shuffle is turned off) */
 let ordered: MapSet[] = [];
 let audio: HTMLAudioElement | null = null;
+/** The other element: the next song comes in on it in a crossfade (then they swap) */
+let spare: HTMLAudioElement | null = null;
+/** The song going out in a crossfade, while it fades */
+let outgoing: HTMLAudioElement | null = null;
+/** A crossfade into the next song is on its way (or was turned down for this song) */
+let crossfading = false;
 let objectUrl: string | null = null;
 /** The next song's downloaded audio, read ahead: iOS starts a song with the screen locked
  * only if it's started right away when the one before ends (no waiting on anything) */
@@ -77,6 +97,8 @@ function pauseHere(why: string) {
 	pausing = true;
 	log(`pause (${why})`);
 	element().pause();
+	// (the song going out of a crossfade stops with it)
+	endCrossfade();
 }
 
 function shuffled<T>(list: T[]) {
@@ -91,35 +113,54 @@ function shuffled<T>(list: T[]) {
 /**
  * The <audio> element. It loops: when a song ends by itself, iOS closes the app's audio and
  * doesn't let it start again with the screen locked, so a song never ends: going round to
- * its start is its end, and the next one starts in the same running audio.
+ * its start is its end, and the next one starts in the same running audio. (Or, with a
+ * crossfade, in the other element, which then is the one.)
  */
 function element() {
 	if (audio) return audio;
-	audio = new Audio();
-	audio.preload = 'auto';
-	audio.loop = true;
+	audio = create();
 	audioElement.set(audio);
-	audio.addEventListener('play', () => playing.set(true));
-	audio.addEventListener('pause', () => {
+	setupMediaSession();
+	return audio;
+}
+
+/** An element for the songs; what it tells counts only while it's the one (`audio`) */
+function create() {
+	const player = new Audio();
+	// (its sound is read by Web Audio: the songs' servers let it, see songs.ts)
+	player.crossOrigin = 'anonymous';
+	player.preload = 'auto';
+	player.loop = true;
+	const mine = () => player === audio;
+	player.addEventListener('play', () => {
+		if (!mine()) return;
+		playing.set(true);
+		keepRunning();
+	});
+	player.addEventListener('pause', () => {
+		if (!mine()) return;
 		playing.set(false);
 		// (not the app: it says who, so the log shows why a song stopped by itself)
-		if (!pausing && !audio!.ended)
+		if (!pausing && !player.ended)
 			log(
 				`paused by ${document.hidden ? 'the system, in the background' : 'the system'} (a call, Siri, headphones, another app's sound?)`
 			);
 		pausing = false;
+		endCrossfade();
 	});
-	audio.addEventListener('stalled', () => log('stream stalled'));
-	audio.addEventListener('waiting', () => log('waiting for the stream'));
+	player.addEventListener('stalled', () => mine() && log('stream stalled'));
+	player.addEventListener('waiting', () => mine() && log('waiting for the stream'));
 	// iOS forgets the lock screen's buttons when a song starts: set again each time
-	audio.addEventListener('playing', () => {
+	player.addEventListener('playing', () => {
+		if (!mine()) return;
 		setupMediaSession();
 		updatePosition();
 		log(`playing ${current()?.title ?? ''}`);
 	});
-	audio.addEventListener('timeupdate', () => {
-		const now = audio!.currentTime;
-		const duration = audio!.duration || 0;
+	player.addEventListener('timeupdate', () => {
+		if (!mine()) return;
+		const now = player.currentTime;
+		const duration = player.duration || 0;
 		time.set({ current: now, duration });
 		const wentRound = duration > 0 && lastTime > duration - 3 && now < 2 && now < lastTime;
 		lastTime = now;
@@ -129,25 +170,29 @@ function element() {
 			pauseHere('sleep timer');
 		}
 		if (now > 1) retries = 0;
+		// (its sound through Web Audio, which iOS stopped: a call, Siri. On again)
+		if (isRouted(player) && !graphRunning()) keepRunning();
+		measure();
 		if (wentRound && !seekedByHand) {
 			log('song went round: its end');
 			songEnded();
-		}
+		} else if (!seekedByHand) crossfadeIfDue(now, duration);
 		seekedByHand = false;
 		saveSoon();
 	});
-	audio.addEventListener('loadedmetadata', updatePosition);
+	player.addEventListener('loadedmetadata', () => mine() && updatePosition());
 	// (a speed mod: the lock screen's position runs at its speed)
-	audio.addEventListener('ratechange', updatePosition);
+	player.addEventListener('ratechange', () => mine() && updatePosition());
 	// (it loops, so only if that didn't work)
-	audio.addEventListener('ended', () => {
+	player.addEventListener('ended', () => {
+		if (!mine()) return;
 		log('ended');
 		songEnded();
 	});
-	audio.addEventListener('error', () => {
+	player.addEventListener('error', () => {
 		const song = current();
-		if (!song || audio!.src.startsWith('blob:')) return;
-		const code = audio!.error?.code;
+		if (!mine() || !song || player.src.startsWith('blob:')) return;
+		const code = player.error?.code;
 		// It played and the stream broke off (the connection, a moment): on from where it was,
 		// a few times, waiting a bit longer each time
 		const at = lastTime;
@@ -155,10 +200,10 @@ function element() {
 			retries++;
 			log(`stream broke off at ${Math.round(at)}s (error ${code}): again, try ${retries}`);
 			setTimeout(() => {
-				if (current() !== song) return;
-				audio!.src = streamUrl(song);
-				audio!.currentTime = at;
-				audio!.play().catch((error) => log(`play() turned down: ${error?.name}`));
+				if (current() !== song || !mine()) return;
+				player.src = streamUrl(song);
+				player.currentTime = at;
+				player.play().catch((error) => log(`play() turned down: ${error?.name}`));
 			}, 1000 * retries);
 			return;
 		}
@@ -166,18 +211,42 @@ function element() {
 		if (!get(previewOnly)) {
 			log(`no stream for ${song.title} (error ${code}): its preview`);
 			previewOnly.set(true);
-			audio!.src = previewUrl(song);
-			audio!.play().catch(() => {});
+			player.src = previewUrl(song);
+			player.play().catch(() => {});
 			return;
 		}
 		// Not even that (offline, and it isn't downloaded): the next one
-		log(`can't play ${song.title} (error ${audio!.error?.code})`);
+		log(`can't play ${song.title} (error ${player.error?.code})`);
 		setTimeout(() => current() === song && next(), 800);
 	});
-	setupMediaSession();
-	return audio;
+	return player;
 }
 
+/** A tiny silent sound: the spare element plays it once from a tap (iOS lets an element play
+ * by itself later only after it played from one) */
+const SILENCE =
+	'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+let spareReady = false;
+
+/**
+ * From a tap: the songs' Web Audio started (and the elements routed once it runs), and with
+ * crossfades on, the spare element made ready to play by itself
+ */
+export function wakeAudio() {
+	const main = element();
+	if (crossfadeSeconds() > 0) {
+		spare ??= create();
+		if (!spareReady && !spare.src) {
+			spareReady = true;
+			spare.src = SILENCE;
+			spare.play().then(
+				() => spare?.src === SILENCE && spare.pause(),
+				() => (spareReady = false)
+			);
+		}
+	}
+	wakeGraph([main, spare]);
+}
 const current = () => {
 	const { songs, index } = get(queue);
 	return songs[index] ?? null;
@@ -191,6 +260,7 @@ function load(at = 0) {
 	const song = current();
 	if (!song) return;
 	const player = element();
+	endCrossfade();
 	loaded = song;
 	previewOnly.set(false);
 	showInMediaSession(song);
@@ -199,6 +269,9 @@ function load(at = 0) {
 		if (objectUrl && objectUrl !== url) URL.revokeObjectURL(objectUrl);
 		objectUrl = own ? url : null;
 		lastTime = 0;
+		crossfading = false;
+		unfade(player);
+		startLoudness(player, key);
 		player.src = url;
 		// (where to start, once it knows how long the song is: before, browsers may forget it)
 		if (at) {
@@ -242,6 +315,108 @@ async function readNext() {
 	readAhead = { key, url };
 }
 
+/** (from a tap in the app: in the background there's none) */
+const wakeIfShown = () => !document.hidden && wakeAudio();
+
+// --- Crossfade ------------------------------------------------------------------------------
+// The next song starts in the spare element `crossfade` seconds before this one ends, fading
+// in while this one fades out; then it's the one. Only when the songs' sound goes through Web
+// Audio (else no fades), and if iOS lets the spare element play (else, as without: the next
+// song when this one ends).
+
+/** The song after this one when it ends by itself (null: none, the queue stops) */
+function upcomingIndex() {
+	const { songs, index } = get(queue);
+	const after = playableAfter(songs, index);
+	if (after >= 0 && after < songs.length) return after;
+	if (get(repeat) !== 'all') return null;
+	const first = playableAfter(songs, -1);
+	return first >= 0 && first < songs.length ? first : null;
+}
+
+function crossfadeIfDue(now: number, duration: number) {
+	const seconds = crossfadeSeconds();
+	if (!seconds || crossfading || !duration || duration < seconds * 3) return;
+	if (now < duration - seconds || now > duration - 0.5) return;
+	const sleep = get(sleepTimer);
+	if (get(repeat) === 'one' || (sleep && 'endOfSong' in sleep)) return;
+	const main = audio!;
+	if (!isRouted(main) || !spare || !isRouted(spare) || !graphRunning()) return;
+	const at = upcomingIndex();
+	if (at == null) return;
+	const { songs } = get(queue);
+	const song = songs[at];
+	const key = keyOf(song);
+	// (a downloaded song not read ahead would wait for the phone: as without crossfade then)
+	const url =
+		readAhead?.key === key ? readAhead.url : get(downloaded).has(key) ? null : streamUrl(song);
+	if (!url) return;
+	crossfading = true;
+	const incoming = spare;
+	const was = current();
+	if (readAhead?.key === key) readAhead = null;
+	fadeTo(incoming, 0, 0);
+	incoming.src = url;
+	// (at the speed of the mod: the beat goes on)
+	applyMod(incoming);
+	log(`crossfade into ${song.title} (${seconds}s)`);
+	incoming.play().then(
+		() => {
+			// (another song meanwhile, or paused: not this one then)
+			if (audio !== main || main.paused || current() !== was) {
+				incoming.pause();
+				incoming.removeAttribute('src');
+				return;
+			}
+			// The next song is the one now
+			outgoing = main;
+			spare = main;
+			audio = incoming;
+			// (the song going out still plays from its downloaded audio: let go of it at the end)
+			outgoingUrl = objectUrl;
+			objectUrl = url.startsWith('blob:') ? url : null;
+			queue.set({ songs: get(queue).songs, index: at });
+			loaded = song;
+			lastTime = 0;
+			// (its own end can crossfade again)
+			crossfading = false;
+			retries = 0;
+			previewOnly.set(false);
+			audioElement.set(incoming);
+			startLoudness(incoming, key);
+			showInMediaSession(song);
+			fadeTo(incoming, 1, seconds);
+			fadeTo(main, 0, seconds);
+			fadeTimer = setTimeout(endCrossfade, seconds * 1000 + 300);
+			save();
+			topUp();
+			readNext();
+		},
+		(error) => {
+			// (turned down: iOS, with the screen locked. The next song when this one ends then)
+			log(`crossfade turned down (${error?.name}): the next song at the end`);
+			incoming.removeAttribute('src');
+		}
+	);
+}
+
+let fadeTimer: ReturnType<typeof setTimeout> | null = null;
+let outgoingUrl: string | null = null;
+/** The song gone out of a crossfade stops (at its end, or a pause or another song now) */
+function endCrossfade() {
+	if (fadeTimer) clearTimeout(fadeTimer);
+	fadeTimer = null;
+	const gone = outgoing;
+	outgoing = null;
+	if (!gone) return;
+	gone.pause();
+	gone.removeAttribute('src');
+	gone.load();
+	unfade(gone);
+	if (outgoingUrl && outgoingUrl !== objectUrl) URL.revokeObjectURL(outgoingUrl);
+	outgoingUrl = null;
+}
+
 /** Plays `songs` from the one at `index` (shuffled when shuffle is on) */
 export function play(
 	songs: MapSet[],
@@ -249,6 +424,7 @@ export function play(
 	{ shuffled: shuffleThem = false, at = 0 }: { shuffled?: boolean; at?: number } = {}
 ) {
 	if (!songs.length) return;
+	wakeIfShown();
 	if (shuffleThem) shuffle.set(true);
 	ordered = songs.map(slim);
 	const first = ordered[index] ?? ordered[0];
@@ -265,6 +441,7 @@ export function play(
 
 export function toggle() {
 	const player = element();
+	wakeIfShown();
 	// After a start: the song of before, where it was
 	if (!loaded) return load(get(time).current);
 	if (player.paused) player.play().catch((error) => log(`play() turned down: ${error?.name}`));
@@ -301,6 +478,7 @@ function playableAfter(songs: MapSet[], index: number, step = 1) {
 }
 
 export function next() {
+	wakeIfShown();
 	const { songs } = get(queue);
 	let { index } = get(queue);
 	// (offline: past the ones that aren't downloaded)
@@ -324,6 +502,7 @@ export function next() {
 }
 
 export function previous() {
+	wakeIfShown();
 	const { songs, index } = get(queue);
 	// A bit into the song: back to its start, else the one before
 	if (element().currentTime > 3 || (index === 0 && get(repeat) !== 'all')) {
@@ -369,6 +548,7 @@ export function seek(seconds: number) {
 
 /** Plays the song at `index` of the queue */
 export function jumpTo(index: number) {
+	wakeIfShown();
 	queue.update((q) => ({ ...q, index }));
 	return load();
 }
@@ -449,6 +629,9 @@ export function cycleRepeat() {
 	save();
 	readNext();
 }
+
+// The loudness setting (the account's) applies at once
+if (typeof window !== 'undefined') userSettings.subscribe(() => applyNormalize());
 
 // Kept for the next start
 

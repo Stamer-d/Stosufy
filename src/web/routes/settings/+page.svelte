@@ -8,7 +8,7 @@
 	import { userSettings, updateUserSettings } from '../../shims/user';
 	import { logOut } from '../../shims/auth';
 	import { webUser } from '../../library';
-	import { autoplay, toggleAutoplay } from '../../player';
+	import { autoplay, toggleAutoplay, wakeAudio } from '../../player';
 	import { MODS, setMod } from '../../hitsounds';
 	import { VISIBILITY, setVisibility, visibility } from '../../friends';
 	import { downloadedSongs, removeAllDownloads } from '../../downloads';
@@ -200,6 +200,27 @@
 	'Songs like these play on when the queue ends',
 	$autoplay,
 	toggleAutoplay
+)}
+{@render toggle(
+	'Same loudness',
+	'Every song as loud as the others (a quieter one stays as it is)',
+	settings.normalize ?? true,
+	() => {
+		updateUserSettings({ normalize: !(settings.normalize ?? true) });
+		wakeAudio();
+	}
+)}
+{@render slider(
+	'Crossfade',
+	settings.crossfade ?? 0,
+	0,
+	12,
+	1,
+	(settings.crossfade ?? 0) ? ' s' : ' (off)',
+	(seconds) => {
+		updateUserSettings({ crossfade: seconds });
+		wakeAudio();
+	}
 )}
 <div class="px-4 py-3">
 	<p class="font-semibold">Speed</p>

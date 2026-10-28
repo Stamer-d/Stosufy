@@ -308,8 +308,13 @@ if (typeof window !== 'undefined') {
 		restart = true;
 		reload();
 	});
+	// (the player has two elements and swaps them in a crossfade: each is wired once)
+	const wired = new WeakSet<HTMLAudioElement>();
 	audioElement.subscribe((audio) => {
 		if (!audio) return;
+		applyCurrentMod();
+		if (wired.has(audio)) return;
+		wired.add(audio);
 		applyCurrentMod();
 		// (a new song resets the speed to the default one, which applyMod sets too)
 		audio.addEventListener('loadstart', applyCurrentMod);
@@ -317,13 +322,17 @@ if (typeof window !== 'undefined') {
 			restart = true;
 			if (document.hidden) tick();
 		};
-		audio.addEventListener('seeked', anew);
-		audio.addEventListener('ratechange', anew);
+		audio.addEventListener('seeked', () => mine() && anew());
+		audio.addEventListener('ratechange', () => mine() && anew());
+		// (only the one playing counts: the other may be loading the next song)
+		const mine = () => audio === get(audioElement);
 		audio.addEventListener('waiting', () => {
+			if (!mine()) return;
 			waiting = true;
 			stopScheduled();
 		});
 		audio.addEventListener('playing', () => {
+			if (!mine()) return;
 			waiting = false;
 			anew();
 		});
