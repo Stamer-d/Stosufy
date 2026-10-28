@@ -46,7 +46,7 @@
 				</SongSwipe>
 				<button
 					aria-label={$isFavourite(song) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
-					class="size-10 shrink-0 grid place-items-center"
+					class="size-11 shrink-0 grid place-items-center"
 					onclick={() => {
 						haptic();
 						toggleFavourite(song);
@@ -60,7 +60,7 @@
 				</button>
 				<button
 					aria-label={$playing ? 'Pause' : 'Play'}
-					class="size-10 shrink-0 grid place-items-center rounded-full bg-white text-black active:scale-95 transition"
+					class="tap size-10 shrink-0 grid place-items-center rounded-full bg-white text-black active:scale-95 transition"
 					onclick={() => {
 						haptic();
 						toggle();

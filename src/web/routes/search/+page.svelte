@@ -12,6 +12,7 @@
 	import { GENRES, LANGUAGES } from '../../../lib/genres';
 	import { fade, fly } from 'svelte/transition';
 	import { swipe } from '../../gestures';
+	import { searchField } from '../../searchField';
 
 	const FILTERS = {
 		status: {
@@ -201,8 +202,9 @@
 		<input
 			bind:value={query}
 			type="search"
+			use:searchField
 			enterkeyhint="search"
-			class="flex-1 min-w-0 bg-transparent outline-none placeholder:text-secondary-600 [&::-webkit-search-cancel-button]:hidden"
+			class="flex-1 min-w-0 self-stretch bg-transparent outline-none placeholder:text-secondary-600 [&::-webkit-search-cancel-button]:hidden"
 			placeholder="What do you want to listen to?"
 			aria-label="Search"
 		/>
@@ -211,7 +213,7 @@
 		{:else if query}
 			<button
 				aria-label="Clear"
-				class="-mr-3 size-10 grid place-items-center text-secondary-600"
+				class="-mr-3 size-11 grid place-items-center text-secondary-600"
 				onclick={() => (query = '')}
 			>
 				<span class="icon-[mingcute--close-circle-fill] size-5"></span>
@@ -317,7 +319,7 @@
 					</button>
 					<button
 						aria-label="Forget {words}"
-						class="size-10 grid place-items-center text-secondary-600"
+						class="size-11 grid place-items-center text-secondary-600"
 						onclick={() => keepRecent(recent.filter((w) => w !== words))}
 					>
 						<span class="icon-[mingcute--close-line] size-4"></span>

@@ -117,7 +117,7 @@
 	{@render extra?.()}
 	<button
 		aria-label="More for {song.title}"
-		class="size-10 shrink-0 grid place-items-center text-secondary-600"
+		class="size-11 shrink-0 grid place-items-center text-secondary-600"
 		onclick={() => songMenu.set({ song, playlistId })}
 	>
 		<span class="icon-[mingcute--more-2-fill] size-5"></span>

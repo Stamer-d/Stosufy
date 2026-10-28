@@ -29,6 +29,7 @@
 	import MixCover from '../../../../lib/components/MixCover.svelte';
 	import PlayButton from '../../../../lib/components/PlayButton.svelte';
 	import SongCover from '../../../../lib/components/SongCover.svelte';
+	import { searchField } from '../../../searchField';
 
 	let id = $derived(page.params.id);
 	let playlist = $derived($smartPlaylists.find((p) => p.id === id) ?? null);
@@ -207,7 +208,7 @@
 			/>
 			<button
 				aria-label="Shuffle"
-				class="size-10 grid place-items-center text-white/60 disabled:opacity-30"
+				class="size-11 grid place-items-center text-white/60 disabled:opacity-30"
 				disabled={!songs.length}
 				onclick={() => play(songs, 0, { shuffled: true })}
 			>
@@ -215,7 +216,7 @@
 			</button>
 			<button
 				aria-label="Download all"
-				class="size-10 grid place-items-center text-white/60 disabled:opacity-30"
+				class="size-11 grid place-items-center text-white/60 disabled:opacity-30"
 				disabled={!!$bulk || !songs.length}
 				onclick={() => downloadAll(songs)}
 			>
@@ -227,7 +228,7 @@
 			</button>
 			<button
 				aria-label="Rename"
-				class="size-10 grid place-items-center text-white/60"
+				class="size-11 grid place-items-center text-white/60"
 				onclick={() => (renaming = !renaming)}
 			>
 				<span class="icon-[mingcute--edit-2-line] size-6"></span>
@@ -287,8 +288,9 @@
 					bind:this={searchInput}
 					bind:value={query}
 					type="search"
+					use:searchField
 					enterkeyhint="search"
-					class="flex-1 min-w-0 bg-transparent outline-none placeholder:text-secondary-600 [&::-webkit-search-cancel-button]:hidden"
+					class="flex-1 min-w-0 self-stretch bg-transparent outline-none placeholder:text-secondary-600 [&::-webkit-search-cancel-button]:hidden"
 					placeholder="Search your songs and osu!"
 					aria-label="Search songs to add"
 				/>

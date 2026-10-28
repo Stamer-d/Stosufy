@@ -18,6 +18,7 @@
 	import PlayButton from '../../lib/components/PlayButton.svelte';
 	import PlaylistCover from '../../lib/components/PlaylistCover.svelte';
 	import MixCover from '../../lib/components/MixCover.svelte';
+	import InstallHint from '../InstallHint.svelte';
 	import SongRow from '../SongRow.svelte';
 	import { onMount } from 'svelte';
 	import { friendActivity, watchFriends } from '../friends';
@@ -118,7 +119,7 @@
 {#snippet playOn(playingThis, onclick, label)}
 	<button
 		aria-label={label}
-		class="absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 active:scale-95 transition"
+		class="tap absolute bottom-2 right-2 size-10 grid place-items-center rounded-full bg-primary-300 text-white shadow-lg shadow-black/40 active:scale-95 transition"
 		{onclick}
 	>
 		<span
@@ -155,6 +156,8 @@
 			</a>
 		</div>
 	</div>
+
+	<InstallHint />
 
 	{#if hero}
 		<section class="relative h-56 rounded-xl overflow-hidden">

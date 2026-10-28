@@ -98,7 +98,7 @@
 	}
 
 	const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-	const ACTION = 'size-10 grid place-items-center text-white/60 disabled:opacity-30';
+	const ACTION = 'size-11 grid place-items-center text-white/60 disabled:opacity-30';
 </script>
 
 {#if song}

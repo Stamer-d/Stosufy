@@ -29,6 +29,7 @@
 	import { webUser } from '../../../library';
 	import { queue, playing, toggle, shuffle } from '../../../player';
 	import { sortable } from '../../../sortable';
+	import { searchField } from '../../../searchField';
 	import { moveSongInPlaylist, toggleSavedPlaylist } from '../../../../lib/stores/playlist';
 
 	/** Rows shown: more as the list is scrolled */
@@ -224,7 +225,7 @@
 		/>
 		<button
 			aria-label="Shuffle"
-			class="relative size-10 grid place-items-center {$shuffle
+			class="relative size-11 grid place-items-center {$shuffle
 				? 'text-primary-500'
 				: 'text-white/60'}"
 			disabled={!songs.length}
@@ -245,7 +246,7 @@
 			<button
 				aria-label={autoOn ? 'Stop keeping it on the phone' : 'Keep it on the phone'}
 				aria-pressed={autoOn}
-				class="size-10 grid place-items-center {autoOn ||
+				class="size-11 grid place-items-center {autoOn ||
 				(songs.length && keptCount === songs.length)
 					? 'text-primary-500'
 					: 'text-white/60'}"
@@ -268,7 +269,7 @@
 			<button
 				aria-label={saved ? 'Remove from your library' : 'Save to your library'}
 				aria-pressed={saved}
-				class="size-10 grid place-items-center {saved ? 'text-primary-500' : 'text-white/60'}"
+				class="size-11 grid place-items-center {saved ? 'text-primary-500' : 'text-white/60'}"
 				onclick={() => toggleSavedPlaylist(playlist)}
 			>
 				<span
@@ -282,7 +283,7 @@
 			<div class="relative">
 				<button
 					aria-label="More"
-					class="size-10 grid place-items-center text-white/60"
+					class="size-11 grid place-items-center text-white/60"
 					onclick={() => (menuOpen = !menuOpen)}
 				>
 					<span class="icon-[mingcute--more-2-fill] size-6"></span>
@@ -352,6 +353,7 @@
 			></span>
 			<input
 				type="search"
+				use:searchField
 				bind:value={filter}
 				placeholder="Filter"
 				aria-label="Filter songs in this playlist"

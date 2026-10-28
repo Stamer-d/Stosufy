@@ -6,7 +6,7 @@
 
 import { get, writable } from 'svelte/store';
 import { downloaded, localUrl } from './downloads';
-import { coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
+import { bigCoverUrl, coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
 import { log } from './log';
 import { offline } from '../lib/stores/network';
 import type { MapSet } from '../lib/types';
@@ -94,6 +94,10 @@ function shuffled<T>(list: T[]) {
  */
 function element() {
 	if (audio) return audio;
+	// The app plays music (Safari 16.4+): its sound, the hitsounds' Web Audio included, goes on
+	// with the ring/silent switch on and in the background, as a music app's does
+	const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+	if (session) session.type = 'playback';
 	audio = new Audio();
 	audio.preload = 'auto';
 	audio.loop = true;
@@ -563,6 +567,11 @@ function showInMediaSession(song: MapSet) {
 	navigator.mediaSession.metadata = new MediaMetadata({
 		title: song.title ?? '',
 		artist: song.artist ?? '',
-		artwork: [{ src: coverUrl(song), sizes: '300x300', type: 'image/jpeg' }]
+		// (the big one too: the lock screen shows the cover large since iOS 16; osu!'s
+		// background isn't square, the system crops it)
+		artwork: [
+			{ src: coverUrl(song), sizes: '300x300', type: 'image/jpeg' },
+			{ src: bigCoverUrl(song), sizes: '1920x1080', type: 'image/jpeg' }
+		]
 	});
 }

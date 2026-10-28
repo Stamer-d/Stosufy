@@ -21,7 +21,9 @@ const WEB_FILES = {
 	'src/lib/stores/auth.ts': 'src/web/shims/auth.ts',
 	'src/lib/stores/data.ts': 'src/web/shims/data.ts',
 	'src/lib/stores/audio.ts': 'src/web/shims/audio.ts',
-	'src/lib/stores/user.ts': 'src/web/shims/user.ts'
+	'src/lib/stores/user.ts': 'src/web/shims/user.ts',
+	// (romaji from the server: kuromoji's dictionary is too big for a phone)
+	'src/lib/romaji.ts': 'src/web/shims/romaji.ts'
 };
 function webModules() {
 	return {

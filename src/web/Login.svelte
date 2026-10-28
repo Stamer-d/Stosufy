@@ -12,6 +12,7 @@
 		startOsuLogin
 	} from './shims/auth';
 	import { getStosufyUser } from '../lib/api';
+	import InstallHint from './InstallHint.svelte';
 
 	let token = $state('');
 	let checking = $state(false);
@@ -54,6 +55,8 @@
 		<h1 class="text-2xl font-extrabold">Stosufy</h1>
 		<p class="mt-1 text-sm text-secondary-600">Your playlists on your phone</p>
 	</div>
+	<!-- (before logging in: the installed app needs its own login) -->
+	<InstallHint />
 	{#if expired}
 		<p class="p-3 rounded-xl bg-amber-300/10 text-sm text-amber-200">
 			Your login ran out. Log in again; your downloads stay.

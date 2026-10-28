@@ -32,6 +32,17 @@ img {
 	-webkit-touch-callout: none;
 }
 
+/* A round button drawn smaller than a finger (40 px): the place to tap reaches around it to
+   the 44 points iOS asks for, its look stays */
+.tap:not(.absolute):not(.fixed) {
+	position: relative;
+}
+.tap::after {
+	content: '';
+	position: absolute;
+	inset: min(0px, calc(50% - 22px));
+}
+
 /* A song moved by its handle: lifted above the others */
 li.dragging {
 	background: var(--color-secondary-200);
@@ -53,8 +64,11 @@ li.dragging {
 		display: none;
 	}
 	.dock nav button {
-		padding-top: 0.4rem;
-		padding-bottom: 0.4rem;
+		/* (still the 44 points a finger needs) */
+		min-height: 44px;
+		justify-content: center;
+		padding-top: 0;
+		padding-bottom: 0;
 	}
 	.page-cover > * {
 		width: min(12rem, 38dvh) !important;

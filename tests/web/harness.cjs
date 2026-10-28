@@ -49,8 +49,16 @@ async function setup(ctx, { lyrics = true } = {}) {
     }
     if (url.includes('lrclib.net') || url.includes('/stosufy/lyrics/')) {
       if (!lyrics) return route.fulfill({ status: 404, json: {} });
-      const lrc = Array.from({ length: 30 }, (_, i) => `[00:${String(i).padStart(2, '0')}.00] Line number ${i} of the song`).join('\n');
+      // (and one in Japanese at the end: romaji)
+      const lrc = [...Array.from({ length: 30 }, (_, i) => `[00:${String(i).padStart(2, '0')}.00] Line number ${i} of the song`), '[00:30.00] 夜に駆ける'].join('\n');
       return route.fulfill({ json: [{ trackName: 'x', artistName: 'y', duration: 20, instrumental: false, plainLyrics: 'plain', syncedLyrics: lrc }], headers: { 'access-control-allow-origin': '*' } });
+    }
+    // (kuromoji's dictionary: the phone shouldn't ask for it)
+    if (url.includes('cdn.jsdelivr.net')) ops.push('dictionary');
+    if (url.includes('/stosufy/romaji')) {
+      const { lines } = JSON.parse(req.postData() || '{}');
+      ops.push('romaji:' + lines.length);
+      return route.fulfill({ json: { lines: lines.map((line) => (line === '夜に駆ける' ? 'Yoru ni kakeru' : line)) } });
     }
     if (url.includes('/stosufy/osufile/')) {
       ops.push('osufile:' + url.split('/').pop());

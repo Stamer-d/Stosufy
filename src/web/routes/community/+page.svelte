@@ -19,6 +19,7 @@
 	import PlaylistCover from '../../../lib/components/PlaylistCover.svelte';
 	import { nearView } from '../../visible';
 	import Skeleton from '../../Skeleton.svelte';
+	import { searchField } from '../../searchField';
 
 	const PAGE = 30;
 	const SORTS = [
@@ -87,11 +88,12 @@
 		<span class="icon-[mingcute--search-line] size-5 text-secondary-600"></span>
 		<input
 			type="search"
+			use:searchField
 			bind:value={search}
 			enterkeyhint="search"
 			placeholder="Search playlists or users"
 			aria-label="Search playlists or users"
-			class="flex-1 min-w-0 bg-transparent outline-none placeholder:text-secondary-600 [&::-webkit-search-cancel-button]:hidden"
+			class="flex-1 min-w-0 self-stretch bg-transparent outline-none placeholder:text-secondary-600 [&::-webkit-search-cancel-button]:hidden"
 		/>
 		{#if loading}
 			<span class="icon-[svg-spinners--ring-resize] size-5 text-secondary-600"></span>
@@ -159,7 +161,7 @@
 						? `Remove ${playlist.title} from your library`
 						: `Save ${playlist.title} to your library`}
 					aria-pressed={saved}
-					class="absolute top-4 right-4 size-10 grid place-items-center rounded-full bg-black/60 {saved
+					class="tap absolute top-4 right-4 size-10 grid place-items-center rounded-full bg-black/60 {saved
 						? 'text-primary-400'
 						: 'text-white'}"
 					onclick={() => toggleSavedPlaylist(playlist)}

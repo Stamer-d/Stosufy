@@ -39,14 +39,14 @@
 			/>
 			<button
 				aria-label="Shuffle"
-				class="size-10 grid place-items-center text-white/60"
+				class="size-11 grid place-items-center text-white/60"
 				onclick={() => play(mix.songs, 0, { shuffled: true })}
 			>
 				<span class="icon-[mingcute--shuffle-line] size-7"></span>
 			</button>
 			<button
 				aria-label="Download all"
-				class="size-10 grid place-items-center text-white/60"
+				class="size-11 grid place-items-center text-white/60"
 				disabled={!!$bulk}
 				onclick={() => downloadAll(mix.songs)}
 			>

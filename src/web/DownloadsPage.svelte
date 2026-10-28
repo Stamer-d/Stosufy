@@ -63,7 +63,7 @@
 		<PlayButton disabled={!$downloadedSongs.length} onclick={() => play($downloadedSongs, 0)} />
 		<button
 			aria-label="Shuffle"
-			class="size-10 grid place-items-center text-white/60"
+			class="size-11 grid place-items-center text-white/60"
 			disabled={!$downloadedSongs.length}
 			onclick={() => play($downloadedSongs, 0, { shuffled: true })}
 		>

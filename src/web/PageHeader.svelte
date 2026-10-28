@@ -55,7 +55,7 @@
 	{#if onplay}
 		<button
 			aria-label="Play"
-			class="mr-1.5 size-10 grid place-items-center rounded-full bg-primary-300 shadow-md"
+			class="tap mr-1.5 size-10 grid place-items-center rounded-full bg-primary-300 shadow-md"
 			onclick={onplay}
 		>
 			<span class="icon-[mingcute--play-fill] size-6"></span>

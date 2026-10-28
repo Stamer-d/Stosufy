@@ -92,7 +92,9 @@
 		</div>
 		<div class="flex items-center justify-between px-2 pt-2 text-xs text-white/50">
 			<span class="truncate">
-				{found.otherVersion ? 'Lyrics of another version · ' : ''}LRCLIB
+				{romaji && $shownLyrics.error
+					? "Romaji didn't work, try again later · "
+					: ''}{found.otherVersion ? 'Lyrics of another version · ' : ''}LRCLIB
 			</span>
 			{#if $shownLyrics.japanese}
 				<button

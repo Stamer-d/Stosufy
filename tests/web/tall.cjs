@@ -116,6 +116,14 @@ async function touchDrag(x0, y0, dx, dy = 0) {
   });
   await step('player: autoplay switch', async () => { await p.click('button[role=switch]:has-text("Autoplay")'); await wait(200); expect((await playerState()).autoplay === false, 'autoplay still on'); await p.click('button[role=switch]:has-text("Autoplay")'); await wait(200); expect((await playerState()).autoplay === true, 'autoplay off'); });
   await step('player: lyrics', async () => { await p.click('button[aria-label="Lyrics"]'); await wait(2500); expect(await p.locator('button[data-line]').count() > 5, 'no lyric lines'); });
+  await step('player: romaji from the server, no dictionary on the phone', async () => {
+    await p.click('.fixed.inset-0.z-30 button:text-is("Romaji")'); await wait(1500);
+    expect(await p.locator('button[data-line]:has-text("Yoru ni kakeru")').count(), 'no romaji line');
+    expect(ops.some((o) => o.startsWith('romaji:')), 'server not asked');
+    expect(!ops.includes('dictionary'), 'the phone loaded the dictionary');
+    await p.click('.fixed.inset-0.z-30 button:text-is("Romaji")'); await wait(800);
+    expect(await p.locator('button[data-line]:has-text("夜に駆ける")').count(), 'not back to Japanese');
+  });
   await step('player: sleep timer', async () => { await p.click('button[aria-label="Sleep timer"]'); await p.click('text=In 30 minutes'); await wait(300); expect(await p.locator('button[aria-label="Sleep timer"]:has-text("30 min")').count(), 'no 30 min'); await p.click('button[aria-label="Sleep timer"]'); await p.click('text=Turn off'); await wait(200); expect(!(await p.locator('button[aria-label="Sleep timer"]:has-text("min")').count()), 'not off'); });
   await step('player: seek', async () => { await p.click('button[aria-label="Lyrics"]'); await wait(300); const r = await p.locator('.fixed.inset-0.z-30 [role="slider"][aria-label="Position"]').boundingBox(); const y = r.y + r.height / 2; await touch('touchStart', r.x + r.width * 0.2, y); for (let i = 1; i <= 6; i++) { await touch('touchMove', r.x + r.width * (0.2 + i * 0.05), y); await wait(16); } await touch('touchEnd'); await wait(400); const t = await p.locator('.fixed.inset-0.z-30 [role="slider"]').getAttribute('aria-valuenow'); expect(Number(t) >= 8 && Number(t) <= 12, 'seeked to ' + t); });
   await step('player: cover swipe = next', async () => { const a = (await playerState()).index; const bx = await p.locator('.fixed.inset-0.z-30 [aria-label^="Swipe for the next"]').boundingBox(); await touchDrag(bx.x + 300, bx.y + bx.height / 2, -220); await wait(600); expect((await playerState()).index === a + 1, `index ${a} -> ${(await playerState()).index}`); });
@@ -130,6 +138,15 @@ async function touchDrag(x0, y0, dx, dy = 0) {
     await p.click('button[aria-label="Clear"]'); await wait(300); expect(await p.locator('text=Searched before').count(), 'no recent');
     await p.locator('main section li button').first().click(); await wait(800); expect((await p.inputValue('input[aria-label="Search"]')) === 'number 4', 'recent not filled');
   });
+  await step('search: no autocorrect, the Search key puts the keyboard away', async () => {
+    const field = p.locator('input[aria-label="Search"]');
+    expect((await field.getAttribute('autocorrect')) === 'off' && (await field.getAttribute('autocapitalize')) === 'none' && (await field.getAttribute('spellcheck')) === 'false', 'autocorrect on');
+    await field.focus(); await wait(200);
+    expect(await p.evaluate(() => document.documentElement.classList.contains('typing')), 'not typing');
+    await field.press('Enter'); await wait(300);
+    expect(await p.evaluate(() => document.activeElement?.getAttribute('aria-label') !== 'Search'), 'still in the field');
+    expect(!(await p.evaluate(() => document.documentElement.classList.contains('typing'))), 'tab bar still away');
+  });
   await step('tabs: remember and go to start', async () => { await tab('Library'); expect(p.url().includes('/playlist/2'), 'Library tab forgot Chill: ' + p.url()); await tab('Library'); await p.click('main a:has-text("Gaming")'); await wait(1000); await tab('Home'); await tab('Library'); expect(p.url().includes('/playlist/3'), 'not remembered ' + p.url()); await tab('Library'); expect(p.url().endsWith('/library'), 'not to start ' + p.url()); });
   await step('checks page loads', async () => { await tab('Home'); await p.click('a[aria-label="Settings"]'); await wait(600); expect(await p.locator('text=Accent color').count(), 'no settings'); await p.click('a:has-text("Checks and player log")'); await wait(4000); expect(await p.locator('text=Lyrics (LRCLIB)').count(), 'no lyrics check'); expect(await p.locator('text=What the player did').count(), 'no log'); });
   await step('reload: the queue comes back and plays on', async () => { const before = await nowTitle(); await p.reload(); await wait(2500); const shown = await p.locator('[data-no-edge] span.block').allTextContents(); expect(shown.some((x) => x === before), 'dock shows ' + shown.slice(0, 3) + ' not ' + before); await p.click('nav ~ * button[aria-label="Play"], button[aria-label="Play"]'); await wait(800); });
@@ -140,6 +157,16 @@ async function touchDrag(x0, y0, dx, dy = 0) {
     await p.locator('main ol > li').nth(0).locator('button').first().click(); await wait(500);
     expect(await toast('Offline: only downloaded songs play'), 'no offline toast');
     await ctx.setOffline(false); await p.evaluate(() => window.dispatchEvent(new Event('online'))); await wait(500);
+  });
+  await step('install hint: in Safari it says how, × closes it for good', async () => {
+    await p.goto('http://127.0.0.1:5288/Stosufy/'); await wait(2500);
+    const hint = () => p.locator('main section[aria-label="Install Stosufy"]').count();
+    expect(await hint(), 'no install hint in the browser');
+    expect(await p.locator('text=Add to Home Screen').count(), 'no iOS steps');
+    await p.click('button[aria-label="Don\'t show this again"]'); await wait(300);
+    expect(!(await hint()), 'still there');
+    await p.reload(); await wait(2500);
+    expect(!(await hint()), 'back after a reload');
   });
   await step('no page errors', async () => { expect(!errors.length, errors.join(' | ')); });
   for (const r of results) console.log(r.join('  '));

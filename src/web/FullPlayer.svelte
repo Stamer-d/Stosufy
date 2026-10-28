@@ -203,7 +203,7 @@
 							</button>
 							<button
 								aria-label="Take {upcoming.title} out of the queue"
-								class="size-10 grid place-items-center text-white/60"
+								class="size-11 grid place-items-center text-white/60"
 								onclick={() => removeFromQueue(at)}
 							>
 								<span class="icon-[mingcute--close-line] size-5"></span>
@@ -237,7 +237,7 @@
 			<div class="mt-6 flex items-center gap-3">
 				<div class="min-w-0 flex-1">
 					<a
-						class="block text-xl font-bold overflow-hidden whitespace-nowrap"
+						class="block -my-2 py-2 text-xl font-bold overflow-hidden whitespace-nowrap"
 						href="{base}/map/{song.id}{song.track ? `?track=${song.track}` : ''}"
 						use:marquee={song.title}
 						onclick={close}><span class="inline-block">{song.title}</span></a
@@ -332,7 +332,7 @@
 			<div class="relative mt-2 flex justify-between">
 				<button
 					aria-label="Sleep timer"
-					class="h-11 px-2 flex items-center gap-1.5 text-sm {$sleepTimer
+					class="h-11 min-w-11 px-2 flex items-center gap-1.5 text-sm {$sleepTimer
 						? 'text-primary-400'
 						: 'text-white/70'}"
 					onclick={() => (choosingSleep = !choosingSleep)}
