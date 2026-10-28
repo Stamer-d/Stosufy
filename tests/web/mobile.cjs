@@ -255,6 +255,26 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });
 
+  await step("iOS' own back swipe: the app's steps aside, one page back, not two", async () => {
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Library'); await p.click('text=Chill'); await wait(900);
+    await p.click('text=Go to beatmap').catch(() => {});
+    await p.locator('main ol > li').first().locator('button[aria-label^="More"]').click(); await wait(300);
+    await p.click('text=Go to beatmap'); await wait(1200);
+    // the finger at the edge, and iOS going back itself as it's let go
+    await touch('touchStart', 8, 400); for (let i = 1; i <= 8; i++) { await touch('touchMove', 8 + i * 30, 400); await wait(16); }
+    await touch('touchEnd');
+    await p.evaluate(() => history.back());
+    await wait(1200);
+    expect(path() === '/playlist/2', 'at ' + path() + ' (want one page back: /playlist/2)');
+    expect((await underlays()) === 0 && !(await mainMoved()), 'left something behind');
+    expect(await p.evaluate(() => localStorage.getItem('stosufy-web-native-back') === '1'), 'not noted');
+    // from now on only iOS' swipe: the app's does nothing
+    await drag(8, 400, 250, 0); await wait(900);
+    expect(path() === '/playlist/2', 'the app swiped too: ' + path());
+    await p.evaluate(() => localStorage.removeItem('stosufy-web-native-back'));
+  });
+
   await step('no page errors', async () => expect(!errors.length, errors.slice(0, 3).join(' | ')));
   await b.close();
   const failed = results.filter(([r]) => r === 'FAIL').length;

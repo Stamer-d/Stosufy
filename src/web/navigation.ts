@@ -85,6 +85,7 @@ const sameTabBefore = () => depth > 0 && stack[depth - 1]?.tab === stack[depth]?
 /** Back to the page before in this tab; if there's none, to `fallback` (in its place) */
 export function goBack(fallback?: string) {
 	if (sameTabBefore()) {
+		ownBack = true;
 		history.back();
 		return;
 	}
@@ -96,6 +97,40 @@ export function goBack(fallback?: string) {
 }
 
 const tabRoot = () => TABS.find((tab) => tab.id === get(currentTab))!.root;
+
+// --- iOS' own back swipe ---------------------------------------------------------------------
+// Newer iOS has a back swipe of its own for apps on the home screen: then the app's must step
+// aside (both at once showed the screen twice, and went back two pages). Whether iOS has it is
+// seen once (a touch it takes away, or a going back the app didn't ask for during a swipe) and
+// kept for next time.
+
+const NATIVE_KEY = 'stosufy-web-native-back';
+let nativeBack = (() => {
+	try {
+		return localStorage.getItem(NATIVE_KEY) === '1';
+	} catch {
+		return false;
+	}
+})();
+/** Seen that iOS has no swipe of its own (a swipe went through without one) */
+let nativeAbsent = (() => {
+	try {
+		return localStorage.getItem(NATIVE_KEY) === '0';
+	} catch {
+		return false;
+	}
+})();
+/** The app went back itself (else it was iOS' swipe or the system) */
+let ownBack = false;
+function noteNativeBack() {
+	if (nativeBack) return;
+	nativeBack = true;
+	try {
+		localStorage.setItem(NATIVE_KEY, '1');
+	} catch {
+		// (seen again next time)
+	}
+}
 /** Where back goes: the page before in this tab, else the tab's start */
 const backTarget = () => (sameTabBefore() ? stack[depth - 1].path : tabRoot());
 let pendingScroll: number | null = null;
@@ -172,13 +207,16 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			navigation.type === 'popstate'
 				? ((navigation as { delta?: number }).delta ?? -1) < 0
 				: !!rootOf(to) && !rootOf(from);
-		kind = swipedBack
-			? 'none'
-			: switchingTab || (rootOf(from) && rootOf(to))
-				? 'fade'
-				: back
-					? 'back'
-					: 'forward';
+		const systemBack = navigation.type === 'popstate' && !ownBack;
+		ownBack = false;
+		kind =
+			swipedBack || systemBack
+				? 'none'
+				: switchingTab || (rootOf(from) && rootOf(to))
+					? 'fade'
+					: back
+						? 'back'
+						: 'forward';
 		swipedBack = false;
 		switchingTab = false;
 	});
@@ -228,7 +266,7 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		'touchstart',
 		(event) => {
 			const touch = event.touches[0];
-			if (!standalone() || touch.clientX > EDGE || rootOf(location.pathname)) return;
+			if (nativeBack || !standalone() || touch.clientX > EDGE || rootOf(location.pathname)) return;
 			// (what swipes across itself keeps its swipe; nothing while a sheet is open)
 			if ((event.target as HTMLElement).closest?.('[data-no-edge], .fixed')) return;
 			start = { x: touch.clientX, y: touch.clientY };
@@ -286,7 +324,22 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			swipedBack = true;
 			resetAfterBack = true;
 			// (with the page before under it, the swap waits until this one is gone: no jump)
-			setTimeout(() => goBack(), underlay ? duration : 0);
+			// (not known yet whether iOS swipes too: a moment longer, so its going back comes first
+			// and the app's doesn't go back a second page)
+			const wait = nativeAbsent ? (underlay ? duration : 0) : Math.max(duration, 450);
+			backTimer = setTimeout(() => {
+				backTimer = null;
+				if (nativeBack) return;
+				goBack();
+				if (!nativeAbsent) {
+					nativeAbsent = true;
+					try {
+						localStorage.setItem(NATIVE_KEY, '0');
+					} catch {
+						// (seen again next time)
+					}
+				}
+			}, wait);
 			// (if the page before doesn't come, this one doesn't stay away)
 			setTimeout(() => {
 				if (!resetAfterBack) return;
@@ -307,7 +360,36 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		}
 	};
 	window.addEventListener('touchend', end);
-	window.addEventListener('touchcancel', end);
+	// A touch taken away while swiping from the edge: iOS swipes back itself
+	window.addEventListener('touchcancel', () => {
+		if (!start) return;
+		const swiping = tracking;
+		start = null;
+		tracking = false;
+		if (swiping) {
+			noteNativeBack();
+			undoSwipe();
+		}
+	});
+	// Gone back without the app (iOS' swipe) while the app's swipe was on: iOS has its own
+	window.addEventListener('popstate', () => {
+		if (ownBack) return;
+		if (tracking || start || backTimer) {
+			noteNativeBack();
+			if (backTimer) clearTimeout(backTimer);
+			backTimer = null;
+			start = null;
+			tracking = false;
+			swipedBack = true;
+			undoSwipe();
+		}
+	});
+	function undoSwipe() {
+		resetAfterBack = false;
+		const element = page();
+		if (element) clearPage(element);
+		if (underlay) removeUnderlay(underlay);
+	}
 }
 
 // --- The page before, under the finger ----------------------------------------------------
@@ -384,6 +466,7 @@ function clearPage(element: HTMLElement) {
 	element.style.backgroundColor = '';
 }
 
+let backTimer: ReturnType<typeof setTimeout> | null = null;
 let swipedBack = false;
 let resetAfterBack = false;
 let switchingTab = false;
