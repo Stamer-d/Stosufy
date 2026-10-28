@@ -149,12 +149,16 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 	});
 
 	// Only the new page moves (sliding in, or fading for another tab): cheap for a phone, not
-	// a picture of the whole page as the View Transitions API takes
+	// a picture of the whole page as the View Transitions API takes. Never through transparent:
+	// that showed the empty background for a moment.
 	let kind: 'forward' | 'back' | 'fade' | 'none' = 'none';
 	onNavigate((navigation) => {
 		const from = navigation.from?.url.pathname;
 		const to = navigation.to?.url.pathname;
 		if (!from || !to || from === to) return void (kind = 'none');
+		// Going on to another page: a picture of this one kept, to show under the finger when
+		// swiping back (as iOS shows the page before)
+		if (navigation.type !== 'popstate' && !replacing) keepSnapshot(page(), from);
 		const back =
 			navigation.type === 'popstate'
 				? ((navigation as { delta?: number }).delta ?? -1) < 0
@@ -173,36 +177,37 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		const element = page();
 		if (element && resetAfterBack) {
 			resetAfterBack = false;
-			element.style.transition = 'none';
-			element.style.transform = '';
-			element.style.boxShadow = '';
-			element.animate(
-				[
-					{ transform: 'translate3d(-25%, 0, 0)', opacity: 0.6 },
-					{ transform: 'none', opacity: 1 }
-				],
-				{ duration: 240, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
-			);
+			const shown = underlay;
+			clearPage(element);
+			if (shown) {
+				// The page before was under it already, where it is: it just stays
+				requestAnimationFrame(() => requestAnimationFrame(() => removeUnderlay(shown)));
+				return;
+			}
+			element.animate([{ transform: 'translate3d(-25%, 0, 0)' }, { transform: 'none' }], {
+				duration: 240,
+				easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)'
+			});
 			return;
 		}
 		if (!element || kind === 'none' || matchMedia('(prefers-reduced-motion: reduce)').matches)
 			return;
 		const frames: Keyframe[] =
 			kind === 'fade'
-				? [{ opacity: 0 }, { opacity: 1 }]
+				? [{ opacity: 0.6 }, { opacity: 1 }]
 				: [
-						{ transform: `translateX(${kind === 'forward' ? 36 : -36}px)`, opacity: 0.3 },
-						{ transform: 'none', opacity: 1 }
+						{ transform: `translate3d(${kind === 'forward' ? 40 : -40}px, 0, 0)` },
+						{ transform: 'none' }
 					];
 		element.animate(frames, {
-			duration: kind === 'fade' ? 140 : 200,
+			duration: kind === 'fade' ? 120 : 200,
 			easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)'
 		});
 		kind = 'none';
 	});
 
-	// Swipe from the left edge: back. The page follows the finger; let go far or fast enough
-	// and it slides away, the page before slides in.
+	// Swipe from the left edge: back. The page follows the finger with the page before under
+	// it; let go far or fast enough and it slides away.
 	let start: { x: number; y: number } | null = null;
 	let dx = 0;
 	let tracking = false;
@@ -229,20 +234,21 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			const touch = event.touches[0];
 			const x = touch.clientX - start.x;
 			const y = touch.clientY - start.y;
+			const element = page();
 			if (!tracking) {
 				if (Math.abs(y) > Math.abs(x) && Math.abs(y) > 10) return void (start = null);
 				if (x < 8) return;
 				tracking = true;
+				if (element) showUnderlay(element);
 			}
 			const now = performance.now();
 			samples.push({ x: touch.clientX, t: now });
 			while (samples.length > 2 && now - samples[0].t > 100) samples.shift();
 			dx = Math.max(0, x);
-			const element = page();
 			if (element) {
 				element.style.transition = 'none';
 				element.style.transform = `translate3d(${dx}px, 0, 0)`;
-				element.style.boxShadow = '-12px 0 30px rgb(0 0 0 / 0.5)';
+				moveUnderlay(dx / window.innerWidth, 'none');
 			}
 		},
 		{ passive: true }
@@ -259,31 +265,111 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		const back = speed > 0.35 || (dx > width * 0.35 && speed > -0.2);
 		if (back) {
 			haptic();
-			// The page before is asked for right away; meanwhile this one slides away the rest
-			// of the way (when the page before is there, it slides in from the left)
-			// (not quicker than the page before takes to be there, mostly)
-			const duration = Math.max(170, Math.min(240, (width - dx) / Math.max(speed, 1.2)));
-			element.style.transition = `transform ${duration}ms cubic-bezier(0.2, 0.7, 0.3, 1)`;
+			// The rest of the way at the finger's speed; then the page before takes its place
+			// (it's under it already, if a picture of it was kept)
+			const duration = Math.max(140, Math.min(240, (width - dx) / Math.max(speed, 1.2)));
+			const curve = `${duration}ms cubic-bezier(0.2, 0.7, 0.3, 1)`;
+			element.style.transition = `transform ${curve}`;
 			element.style.transform = `translate3d(${width}px, 0, 0)`;
+			moveUnderlay(1, `transform ${curve}, opacity ${curve}`);
 			swipedBack = true;
 			resetAfterBack = true;
-			goBack();
+			// (with the page before under it, the swap waits until this one is gone: no jump)
+			setTimeout(() => goBack(), underlay ? duration : 0);
 			// (if the page before doesn't come, this one doesn't stay away)
 			setTimeout(() => {
 				if (!resetAfterBack) return;
 				resetAfterBack = false;
-				element.style.transition = 'transform 200ms ease-out';
-				element.style.transform = '';
-				element.style.boxShadow = '';
-			}, 1500);
+				clearPage(element);
+				if (underlay) removeUnderlay(underlay);
+			}, 2000);
 		} else {
-			element.style.transition = 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)';
+			const curve = '220ms cubic-bezier(0.2, 0.8, 0.2, 1)';
+			element.style.transition = `transform ${curve}`;
 			element.style.transform = '';
-			setTimeout(() => (element.style.boxShadow = ''), 220);
+			moveUnderlay(0, `transform ${curve}, opacity ${curve}`);
+			const shown = underlay;
+			setTimeout(() => {
+				clearPage(element);
+				if (shown) removeUnderlay(shown);
+			}, 230);
 		}
 	};
 	window.addEventListener('touchend', end);
 	window.addEventListener('touchcancel', end);
+}
+
+// --- The page before, under the finger ----------------------------------------------------
+
+/** Pictures of the pages left (a copy of their elements, and how far they were scrolled) */
+const snapshots = new Map<number, { path: string; node: HTMLElement; scroll: number }>();
+const MOST_SNAPSHOTS = 6;
+
+function keepSnapshot(element: HTMLElement | undefined, path: string) {
+	if (!element) return;
+	const node = element.cloneNode(true) as HTMLElement;
+	node.style.transform = '';
+	node.style.transition = '';
+	node.style.boxShadow = '';
+	node.removeAttribute('id');
+	snapshots.set(depth, { path, node, scroll: window.scrollY });
+	// (the oldest go)
+	for (const key of [...snapshots.keys()].sort((a, b) => a - b)) {
+		if (snapshots.size <= MOST_SNAPSHOTS) break;
+		snapshots.delete(key);
+	}
+}
+
+let underlay: HTMLElement | null = null;
+
+/** Puts the picture of the page before under this one (if there's one of it) */
+function showUnderlay(element: HTMLElement) {
+	if (underlay) removeUnderlay(underlay);
+	const before = sameTabBefore() ? snapshots.get(depth - 1) : null;
+	// This page above it, solid (else the one under it shows through)
+	element.style.position = 'relative';
+	element.style.zIndex = '6';
+	element.style.backgroundColor = 'var(--color-panel)';
+	element.style.boxShadow = '-12px 0 30px rgb(0 0 0 / 0.5)';
+	if (!before || before.path !== stack[depth - 1]?.path) return;
+	const layer = document.createElement('div');
+	layer.className = 'fixed inset-0 z-[5] overflow-hidden pointer-events-none';
+	layer.style.backgroundColor = 'var(--color-panel)';
+	const content = document.createElement('div');
+	content.style.willChange = 'transform';
+	const copy = before.node.cloneNode(true) as HTMLElement;
+	copy.style.marginTop = `${-before.scroll}px`;
+	content.append(copy);
+	const dim = document.createElement('div');
+	dim.className = 'absolute inset-0 bg-black';
+	layer.append(content, dim);
+	document.body.append(layer);
+	underlay = layer;
+	moveUnderlay(0, 'none');
+}
+
+/** How far the page above is away (0–1): the page before comes along a little, brightening */
+function moveUnderlay(progress: number, transition: string) {
+	if (!underlay) return;
+	const [content, dim] = underlay.children as unknown as HTMLElement[];
+	content.style.transition = transition;
+	dim.style.transition = transition;
+	content.style.transform = `translate3d(${-25 * (1 - progress)}%, 0, 0)`;
+	dim.style.opacity = String(0.35 * (1 - progress));
+}
+
+function removeUnderlay(layer: HTMLElement) {
+	layer.remove();
+	if (underlay === layer) underlay = null;
+}
+
+function clearPage(element: HTMLElement) {
+	element.style.transition = 'none';
+	element.style.transform = '';
+	element.style.boxShadow = '';
+	element.style.position = '';
+	element.style.zIndex = '';
+	element.style.backgroundColor = '';
 }
 
 let swipedBack = false;
