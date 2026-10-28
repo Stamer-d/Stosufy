@@ -35,6 +35,19 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   const ctx = await b.newContext({ ...devices['iPhone 13'], serviceWorkers: 'block' });
   await setup(ctx);
   await ctx.addInitScript(() => Object.defineProperty(navigator, 'standalone', { get: () => true }));
+  // (when each hitsound is set to play, ahead of now; and how many are called off)
+  await ctx.addInitScript(() => {
+    const create = AudioContext.prototype.createBufferSource;
+    AudioContext.prototype.createBufferSource = function () {
+      const source = create.call(this);
+      window.__hitContext = this;
+      const start = source.start.bind(source);
+      const stop = source.stop.bind(source);
+      source.start = (when = 0, ...rest) => { (window.__hitLeads ||= []).push(when - this.currentTime); return start(when, ...rest); };
+      source.stop = (...a) => { window.__hitStopped = (window.__hitStopped || 0) + 1; return stop(...a); };
+      return source;
+    };
+  });
   p = await ctx.newPage();
   p.setDefaultTimeout(6000);
   ({ cdp, touch: finger } = await touchInput(p));
@@ -253,6 +266,35 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     const playing = Number(await slider.getAttribute('aria-valuenow'));
     expect(playing >= 14, 'started at ' + playing);
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+  });
+
+  await step('hitsounds play on with the screen locked (scheduled seconds ahead), and stop on pause', async () => {
+    await p.goto(BASE + '/settings'); await wait(1200);
+    const toggle = p.locator('button[role="switch"]:has-text("Play the hitsounds")');
+    if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
+    await wait(300);
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(2500);
+    const leads = () => p.evaluate(() => { const l = window.__hitLeads || []; window.__hitLeads = []; return l; });
+    await leads();
+    await wait(1200);
+    const shown = await leads();
+    expect(shown.length > 0, 'no hitsounds while shown');
+    expect(Math.max(...shown) < 0.5, 'shown: scheduled too far ahead ' + Math.max(...shown));
+    // the screen locked
+    await p.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+    await wait(1500);
+    const locked = await leads();
+    expect(locked.length > 0, 'no hitsounds with the screen locked');
+    expect(Math.max(...locked) > 3, 'locked: not scheduled ahead (' + Math.max(...locked) + ' s)');
+    const running = await p.evaluate(() => window.__hitContext?.state);
+    expect(running === 'running', 'the hitsounds\' audio is ' + running);
+    // paused from the lock screen: what's scheduled is called off
+    await p.locator('button[aria-label="Pause"]').first().click(); await wait(400);
+    const stopped = await p.evaluate(() => window.__hitStopped || 0);
+    expect(stopped > 0, 'nothing called off on pause');
+    await p.evaluate(() => { delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+    await p.goto(BASE + '/settings'); await wait(1000);
+    await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
   });
 
   await step("a touch at the edge is held from iOS' swipe, a tap there still taps", async () => {

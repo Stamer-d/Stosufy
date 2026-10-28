@@ -4,8 +4,9 @@
 // 0.75×. The settings are the account's, the same as on the desktop.
 //
 // The samples are scheduled with Web Audio a moment ahead of where the song is. In the
-// background (screen locked) the phone stops the page's timers: then only the music plays on,
-// a bit faster or slower with a mod.
+// background (screen locked) the phone runs the page's timers seldom: then they're scheduled
+// seconds ahead (Web Audio plays them on time by itself), again on each of the song's time
+// updates, and anew on a pause, a seek, a speed change or the song waiting for data.
 
 import { get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './shims/user';
@@ -32,6 +33,8 @@ const DEFAULT_VOLUME = 0.8;
 /** How loud the hitsounds are next to the music (the phone plays the music at full volume) */
 const LEVEL = 0.6;
 const LOOKAHEAD = 0.2;
+/** In the background: this far ahead (the timers may come seconds late there) */
+const LOOKAHEAD_HIDDEN = 12;
 const TICK = 15;
 
 export const hitsoundStatus = writable<'off' | 'loading' | 'ready' | 'unavailable'>('off');
@@ -159,6 +162,8 @@ let next = 0;
 let lastTime: number | null = null;
 let restart = true;
 let scheduled: { source: AudioBufferSourceNode; at: number }[] = [];
+/** The song waits for data: what's scheduled would come early */
+let waiting = false;
 
 function stopScheduled() {
 	const now = context?.currentTime ?? 0;
@@ -178,30 +183,54 @@ function indexAt(events: ChartEvent[], time: number) {
 	return low;
 }
 
+/** A sound too quiet to hear while the hitsounds play: keeps the phone from putting the
+ * hitsounds' audio to sleep between two of them in the background */
+let keepAwake: ConstantSourceNode | null = null;
+function awake(on: boolean) {
+	if (on && !keepAwake && context && master) {
+		keepAwake = context.createConstantSource();
+		keepAwake.offset.value = 0.0001;
+		keepAwake.connect(context.destination);
+		keepAwake.start();
+	} else if (!on && keepAwake) {
+		keepAwake.stop();
+		keepAwake.disconnect();
+		keepAwake = null;
+	}
+}
+
 function tick() {
 	const audio = get(audioElement);
-	if (!chart || !audio || audio.paused || audio.ended || document.hidden) {
+	if (!chart || !audio || audio.paused || audio.ended || waiting) {
 		if (scheduled.length) stopScheduled();
+		awake(false);
 		lastTime = null;
 		return;
 	}
 	const ctx = audioContext();
-	if (ctx.state === 'suspended') {
+	if (ctx.state !== 'running') {
 		ctx.resume().catch(() => {});
 		return;
 	}
+	awake(true);
+	const hidden = document.hidden;
 	const { volume, offset } = settings();
 	master!.gain.value = volume * LEVEL;
 	const rate = audio.playbackRate || 1;
 	// (positive offsets play the hitsounds later)
 	const time = audio.currentTime * 1000 - offset;
-	if (restart || lastTime === null || time < lastTime - 50 || time > lastTime + 2000) {
+	if (
+		restart ||
+		lastTime === null ||
+		time < lastTime - 50 ||
+		time > lastTime + (hidden ? LOOKAHEAD_HIDDEN * 1000 : 2000)
+	) {
 		stopScheduled();
 		next = indexAt(chart.events, time);
 		restart = false;
 	}
 	lastTime = time;
-	const ahead = LOOKAHEAD * 1000 * rate;
+	const ahead = (hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD) * 1000 * rate;
 	const events = chart.events;
 	while (next < events.length && events[next].time <= time + ahead) {
 		const event = events[next++];
@@ -219,7 +248,7 @@ function tick() {
 			scheduled.push({ source, at });
 		}
 	}
-	if (scheduled.length > 64) scheduled = scheduled.filter((s) => s.at > ctx.currentTime);
+	if (scheduled.length > 64) scheduled = scheduled.filter((s) => s.at > ctx.currentTime - 1);
 }
 
 // --- Speed mods ----------------------------------------------------------------------------
@@ -261,7 +290,23 @@ if (typeof window !== 'undefined') {
 		applyCurrentMod();
 		// (a new song resets the speed to the default one, which applyMod sets too)
 		audio.addEventListener('loadstart', applyCurrentMod);
-		audio.addEventListener('seeked', () => (restart = true));
+		const anew = () => {
+			restart = true;
+			if (document.hidden) tick();
+		};
+		audio.addEventListener('seeked', anew);
+		audio.addEventListener('ratechange', anew);
+		audio.addEventListener('waiting', () => {
+			waiting = true;
+			stopScheduled();
+		});
+		audio.addEventListener('playing', () => {
+			waiting = false;
+			anew();
+		});
+		audio.addEventListener('pause', () => tick());
+		// (in the background the song's time updates come on time, the timers don't)
+		audio.addEventListener('timeupdate', () => document.hidden && tick());
 	});
 	// The timers run only while they have something to do (a phone feels each one)
 	let ticking: ReturnType<typeof setInterval> | null = null;
@@ -273,6 +318,7 @@ if (typeof window !== 'undefined') {
 			clearInterval(ticking);
 			ticking = null;
 			stopScheduled();
+			awake(false);
 		}
 		// The Nightcore beat (the desktop app's), with the timing points read here: only while
 		// Nightcore is on
@@ -305,15 +351,13 @@ if (typeof window !== 'undefined') {
 		if (currentMod() === 'NC') prepareBeats();
 	};
 	window.addEventListener('pointerdown', wake, true);
-	// In the background the timers stop: let the sounds rest, so they don't come in late
+	// To the background: the hitsounds scheduled seconds ahead from now on; back: a moment ahead
 	document.addEventListener('visibilitychange', () => {
+		restart = true;
 		if (document.hidden) {
-			stopScheduled();
-			context?.suspend().catch(() => {});
+			if (settings().on) tick();
+			else context?.suspend().catch(() => {});
 			suspendBeats();
-		} else {
-			restart = true;
-			wake();
-		}
+		} else wake();
 	});
 }
