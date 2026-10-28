@@ -2,8 +2,8 @@
 // - each tab keeps where you were in it (tapping it again goes back to its start, and at
 //   its start scrolls to the top)
 // - a new page slides in a little (from the right, or the left going back); tabs fade
-// - installed on the home screen, a swipe from the left edge goes back (iOS has no back
-//   gesture for web apps there)
+// - installed on the home screen, a swipe from the left edge goes back, the app's own (iOS'
+//   showed a black page where the page before should be)
 
 import { haptic } from './haptics';
 import { writable, get } from 'svelte/store';
@@ -99,12 +99,13 @@ export function goBack(fallback?: string) {
 const tabRoot = () => TABS.find((tab) => tab.id === get(currentTab))!.root;
 
 // --- iOS' own back swipe ---------------------------------------------------------------------
-// Newer iOS has a back swipe of its own for apps on the home screen: then the app's must step
-// aside (both at once showed the screen twice, and went back two pages). Whether iOS has it is
-// seen once (a touch it takes away, or a going back the app didn't ask for during a swipe) and
-// kept for next time.
+// Newer iOS has a back swipe of its own for apps on the home screen: it showed a black page
+// where the page before should be, and went back along with the app's (the screen twice, two
+// pages back). A touch at the edge is held from iOS, so the app's swipe is the only one. Should
+// iOS swipe anyway (a touch it takes away, or a going back the app didn't ask for during a
+// swipe), the app's steps aside from then on.
 
-const NATIVE_KEY = 'stosufy-web-native-back';
+const NATIVE_KEY = 'stosufy-web-native-back-2';
 let nativeBack = (() => {
 	try {
 		return localStorage.getItem(NATIVE_KEY) === '1';
@@ -137,6 +138,10 @@ let pendingScroll: number | null = null;
 
 /** Whether there's a page of this tab to go back to */
 export const canGoBack = sameTabBefore;
+
+/** How far from the left / right edge a touch is held from iOS' swipe */
+const SIDE = 24;
+const SIDE_RIGHT = 12;
 
 const standalone = () =>
 	matchMedia('(display-mode: standalone)').matches ||
@@ -255,6 +260,47 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		kind = 'none';
 	});
 
+	// A touch at the side edges: iOS' swipe held off (it would go back or forward itself). A tap
+	// there still taps (holding the touch from iOS holds its click too).
+	let heldTap: { target: Element; x: number; y: number } | null = null;
+	window.addEventListener(
+		'touchstart',
+		(event) => {
+			heldTap = null;
+			if (nativeBack || !standalone() || !event.cancelable || event.touches.length > 1) return;
+			const touch = event.touches[0];
+			if (touch.clientX > SIDE && touch.clientX < window.innerWidth - SIDE_RIGHT) return;
+			const target = event.target as HTMLElement;
+			if (target.closest?.('input, textarea, select, [contenteditable]')) return;
+			event.preventDefault();
+			heldTap = { target, x: touch.clientX, y: touch.clientY };
+		},
+		{ passive: false }
+	);
+	window.addEventListener(
+		'touchmove',
+		(event) => {
+			const touch = event.touches[0];
+			if (heldTap && Math.hypot(touch.clientX - heldTap.x, touch.clientY - heldTap.y) > 10)
+				heldTap = null;
+		},
+		{ passive: true }
+	);
+	window.addEventListener('touchend', () => {
+		if (!heldTap) return;
+		const { target, x, y } = heldTap;
+		heldTap = null;
+		target.dispatchEvent(
+			new MouseEvent('click', {
+				bubbles: true,
+				cancelable: true,
+				view: window,
+				clientX: x,
+				clientY: y
+			})
+		);
+	});
+
 	// Swipe from the left edge: back. The page follows the finger with the page before under
 	// it; let go far or fast enough and it slides away.
 	let start: { x: number; y: number } | null = null;
@@ -362,6 +408,7 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 	window.addEventListener('touchend', end);
 	// A touch taken away while swiping from the edge: iOS swipes back itself
 	window.addEventListener('touchcancel', () => {
+		heldTap = null;
 		if (!start) return;
 		const swiping = tracking;
 		start = null;

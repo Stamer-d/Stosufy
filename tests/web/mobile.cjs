@@ -255,6 +255,20 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });
 
+  await step("a touch at the edge is held from iOS' swipe, a tap there still taps", async () => {
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Library'); await p.click('text=Chill'); await wait(900);
+    await p.evaluate(() => window.addEventListener('touchstart', (e) => (window.__held = e.defaultPrevented)));
+    const held = async (x) => { await touch('touchStart', x, 500); await touch('touchEnd'); await wait(100); return p.evaluate(() => window.__held); };
+    expect(await held(6), 'left edge not held');
+    expect(!(await held(200)), 'middle held');
+    expect(path() === '/playlist/2', 'a touch at the edge went somewhere: ' + path());
+    const back = await p.locator('main header a[aria-label="Back"]').first().boundingBox();
+    expect(back && back.x < 24, 'no back button at the edge: ' + JSON.stringify(back));
+    await touch('touchStart', Math.max(back.x + 4, 6), back.y + back.height / 2); await touch('touchEnd'); await wait(900);
+    expect(path() === '/library', 'tap at the edge: at ' + path());
+  });
+
   await step("iOS' own back swipe: the app's steps aside, one page back, not two", async () => {
     await p.goto(BASE + '/'); await wait(1200);
     await tab('Library'); await p.click('text=Chill'); await wait(900);
@@ -268,11 +282,11 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await wait(1200);
     expect(path() === '/playlist/2', 'at ' + path() + ' (want one page back: /playlist/2)');
     expect((await underlays()) === 0 && !(await mainMoved()), 'left something behind');
-    expect(await p.evaluate(() => localStorage.getItem('stosufy-web-native-back') === '1'), 'not noted');
+    expect(await p.evaluate(() => localStorage.getItem('stosufy-web-native-back-2') === '1'), 'not noted');
     // from now on only iOS' swipe: the app's does nothing
     await drag(8, 400, 250, 0); await wait(900);
     expect(path() === '/playlist/2', 'the app swiped too: ' + path());
-    await p.evaluate(() => localStorage.removeItem('stosufy-web-native-back'));
+    await p.evaluate(() => localStorage.removeItem('stosufy-web-native-back-2'));
   });
 
   await step('no page errors', async () => expect(!errors.length, errors.slice(0, 3).join(' | ')));
