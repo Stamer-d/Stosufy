@@ -4,6 +4,8 @@
 import { get } from 'svelte/store';
 import { OSU_FILE_THROUGH_STOSUFY } from './shims/http';
 import { offline } from '../lib/stores/network';
+import { userSettings } from './shims/user';
+import type { MapSet } from '../lib/types';
 
 const CACHE = 'stosufy-osu-files';
 const files = new Map<string, Promise<string | null>>();
@@ -30,4 +32,12 @@ export function osuFile(mapId: string | number): Promise<string | null> {
 		promise.then((text) => text ?? files.delete(id));
 	}
 	return files.get(id)!;
+}
+
+/** The difficulty whose hitsounds play: the one chosen for the song's set (the account's
+ * choice, the desktop app's too), else the song's own */
+export function hitsoundMapId(song: MapSet | null | undefined) {
+	if (!song) return '';
+	const chosen = get(userSettings).settings?.gameplayDifficulty?.[String(song.id)];
+	return String(chosen ?? song.beatmaps?.[0]?.id ?? '');
 }

@@ -30,6 +30,7 @@
 	import { marquee } from './marquee';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongSwipe from './SongSwipe.svelte';
+	import HitsoundDifficulty from './HitsoundDifficulty.svelte';
 	import { preloadSharp, sharpReady } from './covers';
 	import SongBackdrop from './SongBackdrop.svelte';
 	import { handleImageError } from './shims/data';
@@ -508,9 +509,8 @@
 							aria-label="Hitsound volume"
 						/>
 					</label>
-					<p class="px-5 pt-3 text-xs text-white/50">
-						The same as in the desktop app. With the screen locked, only the music plays on.
-					</p>
+					<HitsoundDifficulty {song} disabled={!hitsoundsOn} />
+					<p class="px-5 pt-3 text-xs text-white/50">The same as in the desktop app.</p>
 				</div>
 			</div>
 		{/if}

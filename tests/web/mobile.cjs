@@ -1,7 +1,7 @@
 // The phone suite: gestures (and cancelling them), the keyboard, a long session (leaks), a
 // performance budget on a slowed-down CPU, offline, a breaking stream. Installed-app mode.
 const { devices } = require('playwright');
-const { setup, login, launch, touchInput, isChromium, BROWSER } = require('./harness.cjs');
+const { setup, login, launch, touchInput, isChromium, BROWSER, ops } = require('./harness.cjs');
 const BASE = 'http://127.0.0.1:5288/Stosufy';
 const results = [];
 let p, cdp, finger;
@@ -329,6 +329,32 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.evaluate(() => { delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
     await p.goto(BASE + '/settings'); await wait(1000);
     await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
+  });
+
+  await step("hitsounds: another difficulty's can be chosen (the set's, of the same song), and play", async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label^="Speed mod"]'); await wait(500);
+    const sheet = p.locator('.fixed.inset-0.z-40');
+    const toggle = sheet.locator('button[role="switch"]:has-text("Play the hitsounds")');
+    if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
+    await sheet.locator('button:has-text("Easy")').waitFor();
+    const names = await sheet.locator('button[aria-pressed]:has(span.rounded-full)').allTextContents();
+    expect(names.length === 2 && /Easy/.test(names[0]) && /Insane/.test(names[1]), 'difficulties: ' + names.join(' | '));
+    expect((await sheet.locator('button:has-text("Insane")').getAttribute('aria-pressed')) === 'true', "the song's own isn't the one chosen");
+    const setId = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player') || '{}'); return s.songs?.[s.index]?.id; });
+    ops.length = 0;
+    await sheet.locator('button:has-text("Easy")').click(); await wait(1200);
+    expect((await sheet.locator('button:has-text("Easy")').getAttribute('aria-pressed')) === 'true', 'Easy not chosen');
+    expect(ops.includes('osufile:' + (99000 + setId)), "Easy's beatmap not loaded: " + ops.filter((o) => o.startsWith('osufile')).join(','));
+    // (kept: the sheet again)
+    await p.mouse.click(200, 60); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label^="Speed mod"]'); await wait(500);
+    expect((await sheet.locator('button:has-text("Easy")').getAttribute('aria-pressed')) === 'true', 'the choice was not kept');
+    await sheet.locator('button:has-text("Insane")').click(); await wait(300);
+    await toggle.click(); await wait(300);
+    await p.mouse.click(200, 60); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });
 
   await step("a touch at the edge is held from iOS' swipe, a tap there still taps", async () => {

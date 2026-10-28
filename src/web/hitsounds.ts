@@ -11,7 +11,7 @@
 
 import { get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './shims/user';
-import { osuFile } from './osuFiles';
+import { osuFile, hitsoundMapId } from './osuFiles';
 import { queue, audioElement } from './player';
 import { parseHitsounds, type HitSample } from '../lib/hitsounds/chart';
 import { builtinSample } from '../lib/hitsounds/builtin';
@@ -25,9 +25,10 @@ import {
 	startBeats,
 	suspendBeats
 } from '../lib/stores/mods';
-import type { PlaybackMod } from '../lib/types';
+import type { MapSet, PlaybackMod } from '../lib/types';
 
 export type { PlaybackMod };
+export { hitsoundMapId };
 export { MODS };
 
 const DEFAULT_VOLUME = 0.8;
@@ -112,7 +113,14 @@ function currentSong() {
 	const { songs, index } = get(queue);
 	return songs[index] ?? null;
 }
-const mapIdOf = () => String(currentSong()?.beatmaps?.[0]?.id ?? '');
+const mapIdOf = () => hitsoundMapId(currentSong());
+
+/** Chooses the difficulty whose hitsounds play for a song's set */
+export function chooseHitsoundDifficulty(song: MapSet, mapId: string) {
+	const all = { ...get(userSettings).settings?.gameplayDifficulty };
+	all[String(song.id)] = mapId;
+	updateUserSettings({ gameplayDifficulty: all });
+}
 
 async function load() {
 	const mapId = mapIdOf();
