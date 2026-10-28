@@ -74,12 +74,17 @@ export function openTab(id: TabId) {
 // again: a black screen for seconds, and the song stops)
 
 /** How many pages of this visit lie behind this one */
+/** The pages of this visit, each with the tab it's in, and where in them this page is */
+let stack: { path: string; tab: TabId }[] = [];
 let depth = 0;
 let replacing = false;
 
-/** Back to the page before; if there's none in this visit, to `fallback` (in its place) */
+/** The page before, if it's of this visit and of the same tab (as an app's back goes) */
+const sameTabBefore = () => depth > 0 && stack[depth - 1]?.tab === stack[depth]?.tab;
+
+/** Back to the page before in this tab; if there's none, to `fallback` (in its place) */
 export function goBack(fallback?: string) {
-	if (depth > 0) {
+	if (sameTabBefore()) {
 		history.back();
 		return;
 	}
@@ -87,8 +92,8 @@ export function goBack(fallback?: string) {
 	goto(fallback ?? TABS.find((tab) => tab.id === get(currentTab))!.root, { replaceState: true });
 }
 
-/** Whether there's a page of this visit to go back to */
-export const canGoBack = () => depth > 0;
+/** Whether there's a page of this tab to go back to */
+export const canGoBack = sameTabBefore;
 
 const standalone = () =>
 	matchMedia('(display-mode: standalone)').matches ||
@@ -107,7 +112,8 @@ const PAGES = [
 	'/map/1',
 	'/community',
 	'/friends',
-	'/wrapped'
+	'/wrapped',
+	'/settings'
 ];
 
 export function setupNavigation(page: () => HTMLElement | undefined) {
@@ -119,18 +125,27 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 	});
 
 	afterNavigate((navigation) => {
-		const { to } = navigation;
-		// (counting the pages of this visit behind this one)
-		if (navigation.type === 'enter') depth = 0;
-		else if (navigation.type === 'popstate')
-			depth = Math.max(0, depth + ((navigation as { delta?: number }).delta ?? -1));
-		else if (navigation.from && navigation.from.url.href !== to?.url.href && !replacing) depth++;
-		replacing = false;
-		const path = to?.url.pathname;
+		const path = navigation.to?.url.pathname;
 		if (!path) return;
-		const root = rootOf(path);
-		if (root) currentTab.set(root);
-		lastPath[get(currentTab)] = path;
+		const tabFor = () => rootOf(path) ?? get(currentTab);
+		// (the pages of this visit: going back only to these, and in the same tab)
+		if (navigation.type === 'enter' || !stack.length) {
+			stack = [{ path, tab: tabFor() }];
+			depth = 0;
+		} else if (navigation.type === 'popstate') {
+			const delta = (navigation as { delta?: number }).delta ?? -1;
+			depth = Math.max(0, Math.min(stack.length - 1, depth + delta));
+			if (stack[depth]?.path !== path) stack[depth] = { path, tab: tabFor() };
+		} else if (replacing || navigation.from?.url.pathname === path) {
+			stack[depth] = { path, tab: tabFor() };
+		} else {
+			stack = [...stack.slice(0, depth + 1), { path, tab: tabFor() }];
+			depth = stack.length - 1;
+		}
+		replacing = false;
+		const tab = stack[depth].tab;
+		currentTab.set(tab);
+		lastPath[tab] = path;
 	});
 
 	// Only the new page moves (sliding in, or fading for another tab): cheap for a phone, not

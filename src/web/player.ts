@@ -66,6 +66,17 @@ let lastTime = 0;
 let seekedByHand = false;
 /** The song in the <audio> element (none after a start: it loads at the first play) */
 let loaded: MapSet | null = null;
+/** The app paused it itself (else it was the system: a call, Siri, headphones out…) */
+let pausing = false;
+/** Tries to get a stream going again after it broke off, for the song now */
+let retries = 0;
+
+/** Pauses, as the app (not the system) */
+function pauseHere(why: string) {
+	pausing = true;
+	log(`pause (${why})`);
+	element().pause();
+}
 
 function shuffled<T>(list: T[]) {
 	const copy = [...list];
@@ -88,7 +99,17 @@ function element() {
 	audio.loop = true;
 	audioElement.set(audio);
 	audio.addEventListener('play', () => playing.set(true));
-	audio.addEventListener('pause', () => playing.set(false));
+	audio.addEventListener('pause', () => {
+		playing.set(false);
+		// (not the app: it says who, so the log shows why a song stopped by itself)
+		if (!pausing && !audio!.ended)
+			log(
+				`paused by ${document.hidden ? 'the system, in the background' : 'the system'} (a call, Siri, headphones, another app's sound?)`
+			);
+		pausing = false;
+	});
+	audio.addEventListener('stalled', () => log('stream stalled'));
+	audio.addEventListener('waiting', () => log('waiting for the stream'));
 	// iOS forgets the lock screen's buttons when a song starts: set again each time
 	audio.addEventListener('playing', () => {
 		setupMediaSession();
@@ -103,10 +124,10 @@ function element() {
 		lastTime = now;
 		const sleep = get(sleepTimer);
 		if (sleep && 'at' in sleep && Date.now() >= sleep.at) {
-			log('sleep timer: stop');
 			sleepTimer.set(null);
-			audio!.pause();
+			pauseHere('sleep timer');
 		}
+		if (now > 1) retries = 0;
 		if (wentRound && !seekedByHand) {
 			log('song went round: its end');
 			songEnded();
@@ -125,8 +146,24 @@ function element() {
 	audio.addEventListener('error', () => {
 		const song = current();
 		if (!song || audio!.src.startsWith('blob:')) return;
+		const code = audio!.error?.code;
+		// It played and the stream broke off (the connection, a moment): on from where it was,
+		// a few times, waiting a bit longer each time
+		const at = lastTime;
+		if (!get(previewOnly) && at > 1 && retries < 4) {
+			retries++;
+			log(`stream broke off at ${Math.round(at)}s (error ${code}): again, try ${retries}`);
+			setTimeout(() => {
+				if (current() !== song) return;
+				audio!.src = streamUrl(song);
+				audio!.currentTime = at;
+				audio!.play().catch((error) => log(`play() turned down: ${error?.name}`));
+			}, 1000 * retries);
+			return;
+		}
 		// The mirror didn't have the song (or has a break): its preview instead
 		if (!get(previewOnly)) {
+			log(`no stream for ${song.title} (error ${code}): its preview`);
 			previewOnly.set(true);
 			audio!.src = previewUrl(song);
 			audio!.play().catch(() => {});
@@ -229,16 +266,15 @@ export function toggle() {
 	const player = element();
 	// After a start: the song of before, where it was
 	if (!loaded) return load(get(time).current);
-	if (player.paused) player.play().catch(() => {});
-	else player.pause();
+	if (player.paused) player.play().catch((error) => log(`play() turned down: ${error?.name}`));
+	else pauseHere('tapped');
 }
 
 /** A song ended by itself: the next one (repeat one: it plays on, as it loops) */
 function songEnded() {
 	if (get(sleepTimer) && 'endOfSong' in get(sleepTimer)!) {
-		log('sleep timer: stop at the end of the song');
 		sleepTimer.set(null);
-		element().pause();
+		pauseHere('sleep timer, at the end of the song');
 		element().currentTime = 0;
 		return;
 	}
@@ -247,7 +283,7 @@ function songEnded() {
 	// The last one (offline: the last downloaded one): stop at its start
 	const after = playableAfter(songs, index);
 	if ((after < 0 || after >= songs.length) && get(repeat) !== 'all') {
-		element().pause();
+		pauseHere('end of the queue');
 		element().currentTime = 0;
 		return;
 	}
@@ -401,7 +437,9 @@ function save() {
 				at: audio?.currentTime ?? get(time).current,
 				shuffle: get(shuffle),
 				repeat: get(repeat),
-				autoplay: get(autoplay)
+				autoplay: get(autoplay),
+				// (to tell at the next start whether the app was closed while a song played)
+				playing: get(playing)
 			})
 		);
 	} catch {
@@ -420,9 +458,38 @@ if (typeof localStorage !== 'undefined') {
 		shuffle.set(!!saved?.shuffle);
 		if (saved?.repeat) repeat.set(saved.repeat);
 		if (saved?.autoplay === false) autoplay.set(false);
+		log(
+			saved?.playing
+				? `app opened again: it was closed while ${saved.songs?.[saved.index]?.title ?? 'a song'} played (iOS closes apps in the background when it needs memory)`
+				: `app opened (${__WEB_VERSION__})`
+		);
 	} catch {
 		// (nothing to go on with)
 	}
+}
+
+// A stream that stands still while it should play (the connection, without an error): on
+// again from where it is, after a while
+if (typeof window !== 'undefined') {
+	let still = 0;
+	let last = -1;
+	setInterval(() => {
+		const song = current();
+		if (!audio || audio.paused || !song || document.hidden || audio.src.startsWith('blob:')) {
+			still = 0;
+			return;
+		}
+		still = audio.currentTime === last ? still + 1 : 0;
+		last = audio.currentTime;
+		if (still < 4 || !navigator.onLine || retries >= 4) return;
+		still = 0;
+		retries++;
+		const at = audio.currentTime;
+		log(`stream stood still at ${Math.round(at)}s: again, try ${retries}`);
+		audio.src = get(previewOnly) ? previewUrl(song) : streamUrl(song);
+		audio.currentTime = at;
+		audio.play().catch((error) => log(`play() turned down: ${error?.name}`));
+	}, 3000);
 }
 
 // The lock screen and Control Center
@@ -431,7 +498,7 @@ function setupMediaSession() {
 	if (!('mediaSession' in navigator)) return;
 	const session = navigator.mediaSession;
 	session.setActionHandler('play', () => element().play());
-	session.setActionHandler('pause', () => element().pause());
+	session.setActionHandler('pause', () => pauseHere('lock screen'));
 	session.setActionHandler('nexttrack', () => {
 		log('lock screen: next');
 		next();

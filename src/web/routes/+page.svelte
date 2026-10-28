@@ -147,8 +147,8 @@
 				{/if}
 			</a>
 			<a
-				href="{base}/check"
-				aria-label="Checks"
+				href="{base}/settings"
+				aria-label="Settings"
 				class="size-11 grid place-items-center text-secondary-600"
 			>
 				<span class="icon-[mingcute--settings-3-line] size-7"></span>
