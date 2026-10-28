@@ -1,7 +1,7 @@
 // The phone audit: every page and overlay, on three phone sizes: page errors, sideways
 // overflow, tap targets too small, the last of a page hidden behind the dock
-const { chromium, devices } = require('playwright');
-const { setup, login } = require('./harness.cjs');
+const { devices } = require('playwright');
+const { setup, login, launch } = require('./harness.cjs');
 const SIZES = [
   ['SE', { ...devices['iPhone SE'] }],
   ['13', { ...devices['iPhone 13'] }],
@@ -49,14 +49,15 @@ const bottomCheck = (p) => p.evaluate(async () => {
   return r.bottom > dockTop + 2 ? `last tappable "${(last.getAttribute('aria-label') || last.textContent).trim().slice(0, 30)}" under the dock (${Math.round(r.bottom)} > ${Math.round(dockTop)})` : null;
 });
 (async () => {
-  const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const b = await launch();
   for (const [name, device] of SIZES) {
     const ctx = await b.newContext({ ...device, serviceWorkers: 'block' });
     await setup(ctx);
     const p = await ctx.newPage();
     p.setDefaultTimeout(8000);
     const errors = [];
-    p.on('pageerror', (e) => errors.push(e.message));
+    // (WebKit reports a request cut off by a reload as "…due to access control checks": not the app's)
+    p.on('pageerror', (e) => !/due to access control checks/.test(e.message) && errors.push(e.message));
     p.on('console', (m) => m.type() === 'error' && !/Failed to load resource|404/.test(m.text()) && errors.push('console: ' + m.text().slice(0, 120)));
     await login(p);
     // something playing (the dock is at its tallest)

@@ -106,9 +106,14 @@ export async function download(song: MapSet) {
 	try {
 		const response = await fetch(streamUrl(song));
 		if (!response.ok) throw new Error(`The mirror answered ${response.status}`);
-		const blob = await response.blob();
+		// The bytes, not a Blob: Safari loses Blobs kept in IndexedDB (they can't be read after
+		// a while, or can't be kept at all in some modes); bytes it keeps
+		const kept: KeptAudio = {
+			data: await response.arrayBuffer(),
+			type: response.headers.get('content-type') || 'audio/mpeg'
+		};
 		const entry = { ...slim(song), keptAt: Date.now() };
-		await run(AUDIO, 'readwrite', (store) => store.put(blob, key));
+		await run(AUDIO, 'readwrite', (store) => store.put(kept, key));
 		await run(SONGS, 'readwrite', (store) => store.put(entry, key));
 		downloaded.update((all) => new Set(all).add(key));
 		downloadedSongs.update((all) => [entry, ...all.filter((other) => keyOf(other) !== key)]);
@@ -168,8 +173,17 @@ export async function removeAllDownloads() {
 
 /** A song's kept audio to play (null: not kept) */
 export async function localUrl(song: MapSet): Promise<string | null> {
-	const blob = await run<Blob | undefined>(AUDIO, 'readonly', (store) =>
+	const kept = await run<KeptAudio | Blob | undefined>(AUDIO, 'readonly', (store) =>
 		store.get(keyOf(song))
 	).catch(() => undefined);
-	return blob ? URL.createObjectURL(blob) : null;
+	if (!kept) return null;
+	// (downloads from before were kept as a Blob)
+	const blob = kept instanceof Blob ? kept : new Blob([kept.data], { type: kept.type });
+	return blob.size ? URL.createObjectURL(blob) : null;
+}
+
+/** A song's audio as kept on the phone */
+interface KeptAudio {
+	data: ArrayBuffer;
+	type: string;
 }

@@ -32,8 +32,14 @@ const state = {
   saved: new Set()
 };
 async function setup(ctx, { lyrics = true } = {}) {
-  await ctx.route(/^https?:\/\/(?!127\.0\.0\.1).*/, async (route) => {
+  await ctx.route(/^https?:\/\/(?!127\.0\.0\.1).*/, async (original) => {
+    // (every answer with CORS, as the real servers send: WebKit checks it, Chromium lets a
+    // mocked answer through without)
+    const asking = original.request().headers();
+    const cors = { 'access-control-allow-origin': asking.origin || '*', 'access-control-allow-credentials': 'true', 'access-control-allow-headers': asking['access-control-request-headers'] || 'authorization, content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS, HEAD', vary: 'Origin' };
+    const route = { request: () => original.request(), abort: (...a) => original.abort(...a), fallback: (...a) => original.fallback(...a), fulfill: (o = {}) => original.fulfill({ ...o, headers: { ...cors, ...(o.headers || {}) } }) };
     const req = route.request(); const url = req.url();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, body: '' });
     if (url.includes('assets.ppy.sh')) {
       const id = Number((url.match(/beatmaps\/(\d+)/) || [])[1] || 0);
       const c = colors[id % colors.length];
@@ -123,4 +129,47 @@ async function login(p) {
   await p.click('button:has-text("Log in")');
   await p.waitForTimeout(2500);
 }
-module.exports = { setup, login, ops, state };
+
+// The engine: Chromium, or WebKit (Safari's, as on the iPhone) with BROWSER=webkit
+const BROWSER = process.env.BROWSER || 'chromium';
+const isChromium = BROWSER === 'chromium';
+function launch() {
+  return require('playwright')[BROWSER].launch(isChromium ? { args: ['--autoplay-policy=no-user-gesture-required'] } : {});
+}
+/** Options for a context in this engine (WebKit knows no clipboard permissions) */
+const contextOptions = (options) => {
+  if (isChromium) return options;
+  const { permissions, ...rest } = options;
+  return rest;
+};
+
+/**
+ * A finger on the screen: touch(type, x, y) with type touchStart / touchMove / touchEnd.
+ * Chromium: real touches (DevTools protocol). WebKit: touch events the page gets as from a
+ * finger (on the element under it, moves and the end to the same one), without the browser's
+ * own scrolling. `cdp` is Chromium's session (null in WebKit).
+ */
+async function touchInput(p) {
+  if (isChromium) {
+    const cdp = await p.context().newCDPSession(p);
+    return { cdp, touch: (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] }) };
+  }
+  const touch = (type, x, y) => p.evaluate(({ type, x, y }) => {
+    const name = { touchStart: 'touchstart', touchMove: 'touchmove', touchEnd: 'touchend', touchCancel: 'touchcancel' }[type];
+    if (name === 'touchstart') window.__finger = { target: document.elementFromPoint(x, y) || document.body, x, y };
+    const finger = window.__finger;
+    if (!finger) return;
+    if (x != null) { finger.x = x; finger.y = y; }
+    const point = { identifier: 1, target: finger.target, clientX: finger.x, clientY: finger.y, pageX: finger.x + scrollX, pageY: finger.y + scrollY, screenX: finger.x, screenY: finger.y, force: 1 };
+    const event = new Event(name, { bubbles: true, cancelable: name !== 'touchcancel', composed: true });
+    const touches = name === 'touchend' || name === 'touchcancel' ? [] : [point];
+    Object.defineProperty(event, 'touches', { value: touches });
+    Object.defineProperty(event, 'targetTouches', { value: touches });
+    Object.defineProperty(event, 'changedTouches', { value: [point] });
+    finger.target.dispatchEvent(event);
+    if (name === 'touchend' || name === 'touchcancel') window.__finger = null;
+  }, { type, x, y });
+  return { cdp: null, touch };
+}
+
+module.exports = { setup, login, ops, state, launch, contextOptions, touchInput, BROWSER, isChromium };

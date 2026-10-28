@@ -1,17 +1,17 @@
 // The phone suite: gestures (and cancelling them), the keyboard, a long session (leaks), a
 // performance budget on a slowed-down CPU, offline, a breaking stream. Installed-app mode.
-const { chromium, devices } = require('playwright');
-const { setup, login } = require('./harness.cjs');
+const { devices } = require('playwright');
+const { setup, login, launch, touchInput, isChromium, BROWSER } = require('./harness.cjs');
 const BASE = 'http://127.0.0.1:5288/Stosufy';
 const results = [];
-let p, cdp;
+let p, cdp, finger;
 const wait = (ms) => p.waitForTimeout(ms);
 const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
 async function step(name, fn) {
   try { await fn(); results.push(['PASS', name]); console.log('PASS', name); }
   catch (e) { results.push(['FAIL', name]); console.log('FAIL', name, '—', String(e.message).split('\n')[0]); await p.screenshot({ path: `mfail-${results.length}.png` }).catch(() => {}); await p.goto(BASE + '/').catch(() => {}); await wait(1200); }
 }
-const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+const touch = (type, x, y) => finger(type, x, y);
 /** A drag: `steps` moves of `ms` each (slow drags and flicks) */
 async function drag(x0, y0, dx, dy, steps = 10, ms = 16, back = 0) {
   await touch('touchStart', x0, y0);
@@ -30,15 +30,17 @@ const playFirst = async () => { await p.locator('main ol > li').first().locator(
 const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player') || '{}'); return s.songs?.[s.index]?.title; });
 
 (async () => {
-  const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const b = await launch();
+  console.log('engine:', BROWSER);
   const ctx = await b.newContext({ ...devices['iPhone 13'], serviceWorkers: 'block' });
   await setup(ctx);
   await ctx.addInitScript(() => Object.defineProperty(navigator, 'standalone', { get: () => true }));
   p = await ctx.newPage();
   p.setDefaultTimeout(6000);
-  cdp = await ctx.newCDPSession(p);
+  ({ cdp, touch: finger } = await touchInput(p));
   const errors = [];
-  p.on('pageerror', (e) => errors.push(e.message));
+  // (WebKit reports a request cut off by a reload as "…due to access control checks": not the app's)
+  p.on('pageerror', (e) => !/due to access control checks/.test(e.message) && errors.push(e.message));
   await login(p);
   const W = 390;
 
@@ -172,7 +174,7 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   await step('long session: 60 page changes and 20 players later, no leaks', async () => {
     await p.goto(BASE + '/'); await wait(1500);
     const measure = () => p.evaluate(() => ({ nodes: document.getElementsByTagName('*').length, heap: Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1e6) }));
-    await cdp.send('HeapProfiler.collectGarbage');
+    if (cdp) await cdp.send('HeapProfiler.collectGarbage');
     start = await measure();
     for (let round = 0; round < 15; round++) {
       await tab('Library'); await p.click('text=Chill'); await wait(400);
@@ -182,7 +184,8 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
       if (round % 1 === 0) { await p.locator('button[aria-label="Open the player"]').first().click().catch(() => {}); await wait(300); await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]').catch(() => {}); await wait(300); }
     }
     await tab('Home'); await wait(800);
-    await cdp.send('HeapProfiler.collectGarbage'); await wait(500);
+    if (cdp) await cdp.send('HeapProfiler.collectGarbage');
+    await wait(500);
     const end = await measure();
     console.log('   start', JSON.stringify(start), 'end', JSON.stringify(end), 'underlays', await underlays());
     expect(end.nodes < start.nodes * 1.3 + 200, `DOM grew ${start.nodes} → ${end.nodes}`);
@@ -191,7 +194,7 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   });
 
   // --- Performance budget -------------------------------------------------------------------
-  await step('slowed-down CPU (4×): no interaction blocks > 300 ms, nothing drawn while idle', async () => {
+  if (isChromium) await step('slowed-down CPU (4×): no interaction blocks > 300 ms, nothing drawn while idle', async () => {
     await p.evaluate(() => { window.__long = []; new PerformanceObserver((l) => l.getEntries().forEach((e) => window.__long.push(Math.round(e.duration)))).observe({ type: 'longtask' }); });
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     const worst = [];

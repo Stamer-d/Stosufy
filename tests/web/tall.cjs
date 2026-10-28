@@ -1,8 +1,8 @@
-const { chromium, devices } = require('playwright');
+const { devices } = require('playwright');
 process.env.PWTIMEOUT = 1;
-const { setup, login, ops, state } = require('./harness.cjs');
+const { setup, login, ops, state, launch, contextOptions, touchInput } = require('./harness.cjs');
 const results = [];
-let p, ctx, cdp;
+let p, ctx, cdp, touch;
 async function step(name, fn) {
   try { await fn(); results.push(['PASS', name]); console.log('PASS', name); }
   catch (e) { results.push(['FAIL', name, String(e.message || e).split('\n')[0]]); console.log('FAIL', name, String(e.message || e).split('\n')[0]); await p.screenshot({ path: `fail-${results.length}.png` }).catch(() => {}); await reset(); }
@@ -24,20 +24,21 @@ const dockOpen = async () => { const b = await p.locator('[data-no-edge]').first
 const menuFor = async (n) => { await p.locator('main ol > li').nth(n).locator('button[aria-label^="More"]').click(); await wait(300); };
 const menuItem = async (text) => { await p.locator('.fixed.inset-0.z-40 button', { hasText: text }).first().click(); await wait(600); };
 async function touchDrag(x0, y0, dx, dy = 0) {
-  const t = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+  const t = (type, x, y) => touch(type, x, y);
   await t('touchStart', x0, y0);
   for (let i = 1; i <= 10; i++) { await t('touchMove', x0 + (dx * i) / 10, y0 + (dy * i) / 10); await wait(16); }
   await t('touchEnd');
 }
 (async () => {
-  const b = await chromium.launch();
-  ctx = await b.newContext({ ...devices['iPhone 13'], serviceWorkers: 'block', permissions: ['clipboard-read', 'clipboard-write'] });
+  const b = await launch();
+  ctx = await b.newContext(contextOptions({ ...devices['iPhone 13'], serviceWorkers: 'block', permissions: ['clipboard-read', 'clipboard-write'] }));
   await setup(ctx);
   p = await ctx.newPage();
   p.setDefaultTimeout(6000);
-  cdp = await ctx.newCDPSession(p);
+  ({ cdp, touch } = await touchInput(p));
   const errors = [];
-  p.on('pageerror', (e) => errors.push(e.message));
+  // (WebKit reports a request cut off by a reload as "…due to access control checks": not the app's)
+  p.on('pageerror', (e) => !/due to access control checks/.test(e.message) && errors.push(e.message));
 
   await step('login with pasted login', async () => { await login(p); await wait(3000); expect(await p.locator('text=Good').count(), 'no greeting'); });
   await step('home: sections', async () => {
@@ -98,7 +99,7 @@ async function touchDrag(x0, y0, dx, dy = 0) {
     await menuFor(0); expect(await p.locator('.fixed.inset-0.z-40 button:has-text("Remove from the phone")').count(), 'not downloaded again'); await reset();
   });
   await step('menu: start radio', async () => { await menuFor(2); await menuItem('Start radio'); await wait(2000); const s = await playerState(); expect(s.songs[0].title === 'Song number 23' && s.songs.length > 5, 'radio ' + s.songs.length + ' ' + s.songs[0].title); });
-  await step('menu: share copies the link', async () => { await menuFor(3); await menuItem('Share'); const clip = await p.evaluate(() => navigator.clipboard.readText()); expect(clip.includes('osu.ppy.sh/beatmapsets/'), 'clipboard: ' + clip); });
+  await step('menu: share copies the link', async () => { await menuFor(3); await menuItem('Share'); if (require('./harness.cjs').isChromium) { const clip = await p.evaluate(() => navigator.clipboard.readText()); expect(clip.includes('osu.ppy.sh/beatmapsets/'), 'clipboard: ' + clip); } else { /* (WebKit doesn't let a page read the clipboard: the share sheet or the note that it's copied) */ expect((await toast('Link copied')) || (await p.evaluate(() => !!navigator.share)), 'no share or copy'); } });
 
   await step('dock: tap opens the full player', async () => { await dockOpen(); expect(await p.locator('button[aria-label="Close"]').count(), 'not open'); });
   await step('player: pause/play', async () => { await p.click('.fixed.inset-0.z-30 button[aria-label="Pause"]'); await wait(300); expect(await p.locator('.fixed.inset-0.z-30 button[aria-label="Play"]').count(), 'not paused'); await p.click('.fixed.inset-0.z-30 button[aria-label="Play"]'); await wait(300); });
@@ -116,7 +117,7 @@ async function touchDrag(x0, y0, dx, dy = 0) {
   await step('player: autoplay switch', async () => { await p.click('button[role=switch]:has-text("Autoplay")'); await wait(200); expect((await playerState()).autoplay === false, 'autoplay still on'); await p.click('button[role=switch]:has-text("Autoplay")'); await wait(200); expect((await playerState()).autoplay === true, 'autoplay off'); });
   await step('player: lyrics', async () => { await p.click('button[aria-label="Lyrics"]'); await wait(2500); expect(await p.locator('button[data-line]').count() > 5, 'no lyric lines'); });
   await step('player: sleep timer', async () => { await p.click('button[aria-label="Sleep timer"]'); await p.click('text=In 30 minutes'); await wait(300); expect(await p.locator('button[aria-label="Sleep timer"]:has-text("30 min")').count(), 'no 30 min'); await p.click('button[aria-label="Sleep timer"]'); await p.click('text=Turn off'); await wait(200); expect(!(await p.locator('button[aria-label="Sleep timer"]:has-text("min")').count()), 'not off'); });
-  await step('player: seek', async () => { await p.click('button[aria-label="Lyrics"]'); await wait(300); const r = await p.locator('.fixed.inset-0.z-30 [role="slider"][aria-label="Position"]').boundingBox(); const y = r.y + r.height / 2; await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x + r.width * 0.2, y }] }); for (let i = 1; i <= 6; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: r.x + r.width * (0.2 + i * 0.05), y }] }); await wait(16); } await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await wait(400); const t = await p.locator('.fixed.inset-0.z-30 [role="slider"]').getAttribute('aria-valuenow'); expect(Number(t) >= 8 && Number(t) <= 12, 'seeked to ' + t); });
+  await step('player: seek', async () => { await p.click('button[aria-label="Lyrics"]'); await wait(300); const r = await p.locator('.fixed.inset-0.z-30 [role="slider"][aria-label="Position"]').boundingBox(); const y = r.y + r.height / 2; await touch('touchStart', r.x + r.width * 0.2, y); for (let i = 1; i <= 6; i++) { await touch('touchMove', r.x + r.width * (0.2 + i * 0.05), y); await wait(16); } await touch('touchEnd'); await wait(400); const t = await p.locator('.fixed.inset-0.z-30 [role="slider"]').getAttribute('aria-valuenow'); expect(Number(t) >= 8 && Number(t) <= 12, 'seeked to ' + t); });
   await step('player: cover swipe = next', async () => { const a = (await playerState()).index; const bx = await p.locator('.fixed.inset-0.z-30 [aria-label^="Swipe for the next"]').boundingBox(); await touchDrag(bx.x + 300, bx.y + bx.height / 2, -220); await wait(600); expect((await playerState()).index === a + 1, `index ${a} -> ${(await playerState()).index}`); });
   await step('player: swipe down closes', async () => { await touchDrag(200, 120, 0, 300); await wait(600); expect(!(await p.locator('.fixed.inset-0.z-30').count()), 'still open'); });
   await step('dock: swipe = next / back', async () => { const a = (await playerState()).index; const bx = await p.locator('[data-no-edge]').first().boundingBox(); await touchDrag(bx.x + 220, bx.y + bx.height / 2, -180); await wait(600); expect((await playerState()).index === a + 1, 'next'); await touchDrag(bx.x + 40, bx.y + bx.height / 2, 180); await wait(600); expect((await playerState()).index === a, 'back'); });
