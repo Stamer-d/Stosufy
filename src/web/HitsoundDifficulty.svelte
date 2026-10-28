@@ -8,7 +8,7 @@
 	import { haptic } from './haptics';
 	import {
 		setDifficulties,
-		sameSong,
+		hitsoundChoices,
 		hardest,
 		learnHardest,
 		chooseDifficulty
@@ -30,15 +30,7 @@
 	});
 
 	let own = $derived(String(song.beatmaps?.[0]?.id ?? ''));
-	/** Those of the same song, osu!standard ones if there are (the desktop app's gameplay shows
-	 * the choice too), easy ones first */
-	let difficulties = $derived.by(() => {
-		const same = sameSong(song, all ?? []);
-		const standard = same.filter((map) => map.mode === 'osu' || String(map.id) === own);
-		return (standard.length > 1 ? standard : same).sort(
-			(a, b) => a.difficulty_rating - b.difficulty_rating
-		);
-	});
+	let difficulties = $derived(hitsoundChoices(song, all ?? []));
 	let chosen = $derived(
 		String(
 			$userSettings.settings?.gameplayDifficulty?.[String(song.id)] ??

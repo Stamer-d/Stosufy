@@ -25,6 +25,9 @@
 		isDownloaded
 	} from '../../../downloads';
 	import { songMenu } from '../../../library';
+	import { userSettings } from '../../../shims/user';
+	import { hardest, learnHardest, hitsoundChoices, chooseDifficulty } from '../../../difficulties';
+	import { haptic } from '../../../haptics';
 	import PageHeader from '../../../PageHeader.svelte';
 	import SongRow from '../../../SongRow.svelte';
 	import SongCover from '../../../../lib/components/SongCover.svelte';
@@ -81,6 +84,26 @@
 	let kept = $derived(song ? isDownloaded($downloaded, song) : false);
 	let busy = $derived(!!song && $downloading.has(String(song.beatmaps?.[0]?.id)));
 	let liked = $derived(song ? $isFavourite(song) : false);
+
+	// Whose hitsounds play (the same choice as the player's): a difficulty of this song is tapped
+	$effect(() => {
+		if (song) learnHardest(song);
+	});
+	let choosable = $derived(
+		new Set(
+			song && fetched ? hitsoundChoices(song, fetched.beatmaps ?? []).map((m) => String(m.id)) : []
+		)
+	);
+	let hitsoundsFrom = $derived(
+		song
+			? String(
+					$userSettings.settings?.gameplayDifficulty?.[String(song.id)] ??
+						$hardest[String(song.id)] ??
+						song.beatmaps?.[0]?.id ??
+						''
+				)
+			: ''
+	);
 
 	let color = $state(null);
 	$effect(() => {
@@ -198,24 +221,44 @@
 	{/if}
 
 	{#if difficulties.length}
-		<h2 class="px-4 pt-4 pb-1 text-lg font-bold">
+		<h2 class="px-4 pt-4 text-lg font-bold">
 			{difficulties.length}
 			{difficulties.length === 1 ? 'difficulty' : 'difficulties'}
 		</h2>
+		<p class="px-4 pb-1 text-sm text-secondary-600">Tap one: its hitsounds play with the song</p>
 		<ul class="px-2 pb-4">
 			{#each difficulties as beatmap (beatmap.id)}
-				<li class="flex items-center gap-3 px-3 h-11">
-					<span
-						class="size-3 shrink-0 rounded-full ring-1 ring-black/30"
-						style="background-color: {difficultyColor(beatmap.difficulty_rating)}"
-					></span>
-					<span class="flex-1 min-w-0 truncate font-semibold">{beatmap.version}</span>
-					{#if beatmap.mode && beatmap.mode !== 'osu'}
-						<span class="text-xs text-secondary-600">{beatmap.mode}</span>
-					{/if}
-					<span class="w-16 text-end text-sm text-secondary-600 tabular-nums">
-						{beatmap.difficulty_rating?.toFixed(2)}★
-					</span>
+				{@const from = String(beatmap.id) === hitsoundsFrom}
+				<li>
+					<button
+						class="w-full flex items-center gap-3 px-3 h-11 rounded-md text-start disabled:opacity-60 {from
+							? 'bg-white/[0.08]'
+							: 'active:bg-white/[0.05]'}"
+						aria-pressed={from}
+						disabled={!choosable.has(String(beatmap.id))}
+						onclick={() => {
+							haptic();
+							chooseDifficulty(song, String(beatmap.id));
+						}}
+					>
+						<span
+							class="size-3 shrink-0 rounded-full ring-1 ring-black/30"
+							style="background-color: {difficultyColor(beatmap.difficulty_rating)}"
+						></span>
+						<span class="flex-1 min-w-0 truncate font-semibold">{beatmap.version}</span>
+						{#if beatmap.mode && beatmap.mode !== 'osu'}
+							<span class="text-xs text-secondary-600">{beatmap.mode}</span>
+						{/if}
+						<span class="w-16 text-end text-sm text-secondary-600 tabular-nums">
+							{beatmap.difficulty_rating?.toFixed(2)}★
+						</span>
+						<span
+							class="icon-[mingcute--drum-line] size-5 shrink-0 {from
+								? 'text-primary-400'
+								: 'invisible'}"
+							aria-label={from ? 'Its hitsounds play' : undefined}
+						></span>
+					</button>
 				</li>
 			{/each}
 		</ul>

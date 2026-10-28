@@ -48,6 +48,17 @@ export function sameSong(song: MapSet, all: Beatmap[]) {
 	);
 }
 
+/** The difficulties whose hitsounds can be chosen: the song's own, osu!standard ones if there
+ * are (the desktop app's gameplay shows the choice too), easy ones first */
+export function hitsoundChoices(song: MapSet, all: Beatmap[]) {
+	const own = String(song.beatmaps?.[0]?.id ?? '');
+	const same = sameSong(song, all);
+	const standard = same.filter((map) => map.mode === 'osu' || String(map.id) === own);
+	return (standard.length > 1 ? standard : same).sort(
+		(a, b) => (a.difficulty_rating ?? 0) - (b.difficulty_rating ?? 0)
+	);
+}
+
 /** The hardest osu!standard one (as the desktop app picks) */
 function hardestOf(maps: Beatmap[]) {
 	const standard = maps.filter((map) => map.mode === 'osu' || map.mode == null);

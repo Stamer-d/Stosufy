@@ -360,6 +360,21 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });
 
+  await step("beatmap page: a difficulty tapped is the one whose hitsounds play (the song's only)", async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    const setId = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player') || '{}'); return s.songs?.[s.index]?.id; });
+    await p.goto(BASE + '/map/' + setId); await wait(1500);
+    const row = (name) => p.locator(`main li button:has-text("${name}")`);
+    expect((await row('Expert').getAttribute('aria-pressed')) === 'true', "the hardest isn't marked");
+    expect(await row('Taiko hard').isDisabled(), 'a taiko one can be chosen');
+    expect(await row('Other song').isDisabled(), "another song's can be chosen");
+    await row('Easy').click(); await wait(300);
+    expect((await row('Easy').getAttribute('aria-pressed')) === 'true', 'Easy not chosen');
+    expect((await row('Expert').getAttribute('aria-pressed')) === 'false', 'two chosen');
+    await row('Expert').click(); await wait(300);
+    expect((await row('Expert').getAttribute('aria-pressed')) === 'true', 'back to the hardest');
+  });
+
   await step('up next: a song moved by its handle, the one playing stays', async () => {
     await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
     const order = () => p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player') || '{}'); return { titles: (s.songs || []).map((x) => x.title), index: s.index }; });
