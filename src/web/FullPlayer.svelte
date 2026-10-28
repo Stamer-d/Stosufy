@@ -30,6 +30,7 @@
 	import { marquee } from './marquee';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongSwipe from './SongSwipe.svelte';
+	import { preloadSharp, sharpReady } from './covers';
 	import SongBackdrop from './SongBackdrop.svelte';
 	import { handleImageError } from './shims/data';
 	import { songMenu } from './library';
@@ -78,6 +79,12 @@
 		);
 	}
 	const close = () => playerOpen.set(false);
+	// The big covers loaded ahead: this song's (opening the player shows it sharp at once), and
+	// while it's open the ones before and after (a swipe, the next song)
+	$effect(() => {
+		const { songs, index } = $queue;
+		preloadSharp($playerOpen ? [songs[index], songs[index + 1], songs[index - 1]] : [songs[index]]);
+	});
 
 	// Speed mods and hitsounds (the account's settings, as in the desktop app)
 	const MOD_COLOR = {
@@ -218,14 +225,18 @@
 					<SongSwipe class="w-full">
 						{#snippet item(shown, middle)}
 							<div class="px-1">
-								<!-- (the big picture only for the song in the middle: the ones waiting left
-								     and right have the small one, a few MB less for the phone) -->
+								<!-- (the big picture for the song in the middle, and for the ones left and right
+								     once it's loaded ahead: never the small one stretched while it loads) -->
 								<img
-									src={middle ? bigCoverUrl(shown) : coverUrl(shown)}
+									src={middle || $sharpReady.has(bigCoverUrl(shown))
+										? bigCoverUrl(shown)
+										: coverUrl(shown)}
 									alt=""
 									decoding="async"
 									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300 bg-cover bg-center"
-									style="max-width: min(100%, 46dvh, calc(100dvh - 26rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))); background-image: url({coverUrl(shown)})"
+									style="max-width: min(100%, 46dvh, calc(100dvh - 26rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))); background-image: url({coverUrl(
+										shown
+									)})"
 									onerror={handleImageError}
 								/>
 							</div>

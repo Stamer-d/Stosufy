@@ -8,6 +8,7 @@ import { get, writable } from 'svelte/store';
 import { downloaded, localUrl } from './downloads';
 import { coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
 import { log } from './log';
+import { sharpArtwork } from './covers';
 import { offline } from '../lib/stores/network';
 import type { MapSet } from '../lib/types';
 
@@ -564,5 +565,10 @@ function showInMediaSession(song: MapSet) {
 		title: song.title ?? '',
 		artist: song.artist ?? '',
 		artwork: [{ src: coverUrl(song), sizes: '300x300', type: 'image/jpeg' }]
+	});
+	// (then a sharp one, if it's still this song)
+	sharpArtwork(song).then((artwork) => {
+		const metadata = navigator.mediaSession.metadata;
+		if (artwork && metadata && current() === song) metadata.artwork = artwork;
 	});
 }
