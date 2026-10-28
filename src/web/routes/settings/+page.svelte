@@ -314,7 +314,7 @@
 </div>
 <div class="px-4 pb-2 flex gap-2">
 	<a
-		href="{base}/downloads"
+		href="{base}/library/downloads"
 		class="h-10 px-4 grid place-items-center rounded-full bg-white/[0.08] text-sm font-semibold"
 		>Show them</a
 	>

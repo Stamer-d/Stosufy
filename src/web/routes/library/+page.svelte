@@ -131,7 +131,7 @@
 
 <ul class="px-2 pb-4">
 	{@render entry(
-		`${base}/downloads`,
+		`${base}/library/downloads`,
 		{ id: -1, title: 'Downloaded Songs', song_amount: 0 },
 		'Downloaded Songs',
 		`On this phone · ${$downloadedSongs.length} songs`

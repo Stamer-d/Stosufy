@@ -36,7 +36,8 @@
 		(!$keyStore.access_token || $loginExpired) &&
 			!page.url.pathname.startsWith(`${base}/check`) &&
 			!page.url.pathname.startsWith(`${base}/callback`) &&
-			!page.url.pathname.startsWith(`${base}/downloads`)
+			!page.url.pathname.startsWith(`${base}/downloads`) &&
+			!page.url.pathname.startsWith(`${base}/library/downloads`)
 	);
 
 	$effect(() => {

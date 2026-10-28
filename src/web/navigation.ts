@@ -113,7 +113,8 @@ const PAGES = [
 	'/community',
 	'/friends',
 	'/wrapped',
-	'/settings'
+	'/settings',
+	'/library/downloads'
 ];
 
 export function setupNavigation(page: () => HTMLElement | undefined) {
