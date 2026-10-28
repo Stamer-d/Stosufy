@@ -89,8 +89,16 @@ export function goBack(fallback?: string) {
 		return;
 	}
 	replacing = true;
-	goto(fallback ?? TABS.find((tab) => tab.id === get(currentTab))!.root, { replaceState: true });
+	const target = fallback ?? tabRoot();
+	// (where it was scrolled to when it was left, as the picture of it shows)
+	pendingScroll = snapshots.get(target)?.scroll ?? null;
+	goto(target, { replaceState: true });
 }
+
+const tabRoot = () => TABS.find((tab) => tab.id === get(currentTab))!.root;
+/** Where back goes: the page before in this tab, else the tab's start */
+const backTarget = () => (sameTabBefore() ? stack[depth - 1].path : tabRoot());
+let pendingScroll: number | null = null;
 
 /** Whether there's a page of this tab to go back to */
 export const canGoBack = sameTabBefore;
@@ -180,6 +188,8 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			resetAfterBack = false;
 			const shown = underlay;
 			clearPage(element);
+			if (pendingScroll != null) window.scrollTo(0, pendingScroll);
+			pendingScroll = null;
 			if (shown) {
 				// The page before was under it already, where it is: it just stays
 				requestAnimationFrame(() => requestAnimationFrame(() => removeUnderlay(shown)));
@@ -302,9 +312,10 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 
 // --- The page before, under the finger ----------------------------------------------------
 
-/** Pictures of the pages left (a copy of their elements, and how far they were scrolled) */
-const snapshots = new Map<number, { path: string; node: HTMLElement; scroll: number }>();
-const MOST_SNAPSHOTS = 6;
+/** Pictures of the pages left, by page (a copy of their elements, how far they were scrolled):
+ * also the ones left for another tab, so back to a tab's start has its picture too */
+const snapshots = new Map<string, { node: HTMLElement; scroll: number }>();
+const MOST_SNAPSHOTS = 8;
 
 function keepSnapshot(element: HTMLElement | undefined, path: string) {
 	if (!element) return;
@@ -312,13 +323,13 @@ function keepSnapshot(element: HTMLElement | undefined, path: string) {
 	node.style.transform = '';
 	node.style.transition = '';
 	node.style.boxShadow = '';
-	node.removeAttribute('id');
-	snapshots.set(depth, { path, node, scroll: window.scrollY });
-	// (the oldest go)
-	for (const key of [...snapshots.keys()].sort((a, b) => a - b)) {
-		if (snapshots.size <= MOST_SNAPSHOTS) break;
-		snapshots.delete(key);
-	}
+	node.style.position = '';
+	node.style.zIndex = '';
+	node.style.backgroundColor = '';
+	// (the newest last; the oldest go)
+	snapshots.delete(path);
+	snapshots.set(path, { node, scroll: window.scrollY });
+	while (snapshots.size > MOST_SNAPSHOTS) snapshots.delete(snapshots.keys().next().value!);
 }
 
 let underlay: HTMLElement | null = null;
@@ -326,13 +337,13 @@ let underlay: HTMLElement | null = null;
 /** Puts the picture of the page before under this one (if there's one of it) */
 function showUnderlay(element: HTMLElement) {
 	if (underlay) removeUnderlay(underlay);
-	const before = sameTabBefore() ? snapshots.get(depth - 1) : null;
+	const before = snapshots.get(backTarget());
 	// This page above it, solid (else the one under it shows through)
 	element.style.position = 'relative';
 	element.style.zIndex = '6';
 	element.style.backgroundColor = 'var(--color-panel)';
 	element.style.boxShadow = '-12px 0 30px rgb(0 0 0 / 0.5)';
-	if (!before || before.path !== stack[depth - 1]?.path) return;
+	if (!before) return;
 	const layer = document.createElement('div');
 	layer.className = 'fixed inset-0 z-[5] overflow-hidden pointer-events-none';
 	layer.style.backgroundColor = 'var(--color-panel)';
