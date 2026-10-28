@@ -3,10 +3,11 @@
 // Double Time / Nightcore 1.5× (Nightcore higher, with its drum beat), Half Time / Daycore
 // 0.75×. The settings are the account's, the same as on the desktop.
 //
-// The samples are scheduled with Web Audio a moment ahead of where the song is. In the
-// background (screen locked) the phone runs the page's timers seldom: then they're scheduled
-// seconds ahead (Web Audio plays them on time by itself), again on each of the song's time
-// updates, and anew on a pause, a seek, a speed change or the song waiting for data.
+// The samples are scheduled with Web Audio a moment ahead of where the song is, on a clock of
+// their own (evenly spaced) that's set anew when the song is off it by more than a little. In
+// the background (screen locked) the phone runs the page's timers seldom: then they're
+// scheduled seconds ahead (Web Audio plays them on time by itself), topped up on each of the
+// song's time updates. The audio is a player's (iOS plays it on in the background then).
 
 import { get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './shims/user';
@@ -36,6 +37,10 @@ const LOOKAHEAD = 0.2;
 /** In the background: this far ahead (the timers may come seconds late there) */
 const LOOKAHEAD_HIDDEN = 12;
 const TICK = 15;
+/** How far (ms) the song may be off the hitsounds' clock before they're set anew (in the
+ * background the song's time is read more coarsely) */
+const DRIFT = 45;
+const DRIFT_HIDDEN = 90;
 
 export const hitsoundStatus = writable<'off' | 'loading' | 'ready' | 'unavailable'>('off');
 
@@ -58,6 +63,10 @@ let master: GainNode | null = null;
 
 function audioContext() {
 	if (!context) {
+		// A player's audio (iOS then lets it play on in the background: else it pauses it there,
+		// and the hitsounds came late or not at all with the screen locked)
+		const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+		if (session) session.type = 'playback';
 		context = new AudioContext({ latencyHint: 'interactive' });
 		master = context.createGain();
 		master.connect(context.destination);
@@ -159,7 +168,8 @@ async function load() {
 // --- Playing ---------------------------------------------------------------------------
 
 let next = 0;
-let lastTime: number | null = null;
+/** The song's time (ms) at a moment of the hitsounds' clock, and its speed then */
+let anchor: { song: number; ctx: number; rate: number } | null = null;
 let restart = true;
 let scheduled: { source: AudioBufferSourceNode; at: number }[] = [];
 /** The song waits for data: what's scheduled would come early */
@@ -204,12 +214,13 @@ function tick() {
 	if (!chart || !audio || audio.paused || audio.ended || waiting) {
 		if (scheduled.length) stopScheduled();
 		awake(false);
-		lastTime = null;
+		anchor = null;
 		return;
 	}
 	const ctx = audioContext();
 	if (ctx.state !== 'running') {
 		ctx.resume().catch(() => {});
+		anchor = null;
 		return;
 	}
 	awake(true);
@@ -219,24 +230,30 @@ function tick() {
 	const rate = audio.playbackRate || 1;
 	// (positive offsets play the hitsounds later)
 	const time = audio.currentTime * 1000 - offset;
+	// Where the song should be by the hitsounds' clock: off by more than a little (a seek, the
+	// song stalling, the hitsounds' audio put to sleep for a moment), all anew from here.
+	// Else the hitsounds keep their clock: evenly spaced, not shifted by each reading's jitter.
+	const expected = anchor
+		? anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * anchor.rate
+		: Number.NaN;
 	if (
 		restart ||
-		lastTime === null ||
-		time < lastTime - 50 ||
-		time > lastTime + (hidden ? LOOKAHEAD_HIDDEN * 1000 : 2000)
+		!anchor ||
+		anchor.rate !== rate ||
+		!(Math.abs(expected - time) <= (hidden ? DRIFT_HIDDEN : DRIFT))
 	) {
 		stopScheduled();
 		next = indexAt(chart.events, time);
+		anchor = { song: time, ctx: ctx.currentTime, rate };
 		restart = false;
 	}
-	lastTime = time;
+	const now = anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * rate;
 	const ahead = (hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD) * 1000 * rate;
 	const events = chart.events;
-	while (next < events.length && events[next].time <= time + ahead) {
+	while (next < events.length && events[next].time <= now + ahead) {
 		const event = events[next++];
-		const delay = (event.time - time) / rate / 1000;
-		if (delay < -0.03) continue;
-		const at = ctx.currentTime + Math.max(0, delay);
+		const at = anchor.ctx + (event.time - anchor.song) / rate / 1000;
+		if (at < ctx.currentTime - 0.03) continue;
 		for (const buffer of event.buffers) {
 			if (!buffer) continue;
 			const source = ctx.createBufferSource();
@@ -244,7 +261,7 @@ function tick() {
 			const gain = ctx.createGain();
 			gain.gain.value = event.volume;
 			source.connect(gain).connect(master!);
-			source.start(at);
+			source.start(Math.max(at, ctx.currentTime));
 			scheduled.push({ source, at });
 		}
 	}

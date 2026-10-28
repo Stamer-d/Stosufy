@@ -37,14 +37,25 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   await ctx.addInitScript(() => Object.defineProperty(navigator, 'standalone', { get: () => true }));
   // (when each hitsound is set to play, ahead of now; and how many are called off)
   await ctx.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (...a) { window.__audio = this; return play.apply(this, a); };
+    // (Safari's audio session; the other engines have none)
+    if (!navigator.audioSession) Object.defineProperty(navigator, 'audioSession', { value: { type: 'auto' } });
     const create = AudioContext.prototype.createBufferSource;
     AudioContext.prototype.createBufferSource = function () {
       const source = create.call(this);
       window.__hitContext = this;
       const start = source.start.bind(source);
       const stop = source.stop.bind(source);
-      source.start = (when = 0, ...rest) => { (window.__hitLeads ||= []).push(when - this.currentTime); return start(when, ...rest); };
-      source.stop = (...a) => { window.__hitStopped = (window.__hitStopped || 0) + 1; return stop(...a); };
+      // (and where in the song it lands, by the song's own time now)
+      source.start = (when = 0, ...rest) => {
+        const lead = when - this.currentTime;
+        const audio = window.__audio;
+        (window.__hitLeads ||= []).push({ lead, song: audio ? audio.currentTime * 1000 + lead * 1000 * audio.playbackRate : null });
+        (window.__hitPending ||= []).push({ source, when, context: this });
+        return start(when, ...rest);
+      };
+      source.stop = (...a) => { source.__stopped = true; window.__hitStopped = (window.__hitStopped || 0) + 1; return stop(...a); };
       return source;
     };
   });
@@ -270,18 +281,24 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });
 
-  await step('hitsounds play on with the screen locked (scheduled seconds ahead), and stop on pause', async () => {
+  await step('hitsounds: on the beat, also with the screen locked (seconds ahead) and after their audio slept; stop on pause', async () => {
     await p.goto(BASE + '/settings'); await wait(1200);
     const toggle = p.locator('button[role="switch"]:has-text("Play the hitsounds")');
     if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
     await wait(300);
     await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(2500);
-    const leads = () => p.evaluate(() => { const l = window.__hitLeads || []; window.__hitLeads = []; return l; });
-    await leads();
+    const all = () => p.evaluate(() => { const l = window.__hitLeads || []; window.__hitLeads = []; return l; });
+    const leads = async () => (await all()).map((h) => h.lead);
+    // (the mock's notes are every 500 ms: where each lands in the song, off the beat by how much)
+    const offBeat = (hits) => Math.max(0, ...hits.filter((h) => h.song != null).map((h) => { const r = ((h.song % 500) + 500) % 500; return Math.min(r, 500 - r); }));
+    await all();
     await wait(1200);
-    const shown = await leads();
+    const shownHits = await all();
+    const shown = shownHits.map((h) => h.lead);
     expect(shown.length > 0, 'no hitsounds while shown');
     expect(Math.max(...shown) < 0.5, 'shown: scheduled too far ahead ' + Math.max(...shown));
+    expect(offBeat(shownHits) < 60, 'shown: off the beat by ' + Math.round(offBeat(shownHits)) + ' ms');
+    expect(await p.evaluate(() => navigator.audioSession.type) === 'playback', 'not a player\'s audio session');
     // the screen locked
     await p.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
     await wait(1500);
@@ -290,6 +307,21 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect(Math.max(...locked) > 3, 'locked: not scheduled ahead (' + Math.max(...locked) + ' s)');
     const running = await p.evaluate(() => window.__hitContext?.state);
     expect(running === 'running', 'the hitsounds\' audio is ' + running);
+    // their audio put to sleep for a moment (as iOS may), the song going on: back on the beat
+    // (and not woken by the app meanwhile: iOS doesn't let it in the background)
+    await p.evaluate(() => { const c = window.__hitContext; c.__resume = c.resume; c.resume = () => Promise.resolve(); return c.suspend(); }); await wait(1250);
+    await p.evaluate(() => { const c = window.__hitContext; c.resume = c.__resume; return c.resume(); }); await all(); await wait(1200);
+    const after = await all();
+    expect(after.length > 0, 'no hitsounds after their audio slept');
+    expect(offBeat(after) < 60, 'after sleeping: off the beat by ' + Math.round(offBeat(after)) + ' ms');
+    // and the ones still to come (scheduled before it slept, too): where they'll land now
+    const pending = await p.evaluate(() => {
+      const audio = window.__audio;
+      return (window.__hitPending || []).filter((h) => !h.source.__stopped && h.when > h.context.currentTime + 0.05)
+        .map((h) => ({ song: audio.currentTime * 1000 + (h.when - h.context.currentTime) * 1000 * audio.playbackRate }));
+    });
+    expect(pending.length > 0, 'nothing scheduled ahead after sleeping');
+    expect(offBeat(pending) < 60, 'scheduled before sleeping: off the beat by ' + Math.round(offBeat(pending)) + ' ms');
     // paused from the lock screen: what's scheduled is called off
     await p.locator('button[aria-label="Pause"]').first().click(); await wait(400);
     const stopped = await p.evaluate(() => window.__hitStopped || 0);
