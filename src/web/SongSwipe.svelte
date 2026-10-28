@@ -7,7 +7,7 @@
 	import { haptic } from './haptics';
 	import { queue, repeat, next, previous } from './player';
 
-	/** @type {{ item: import('svelte').Snippet<[import('../lib/types').MapSet]>, class?: string }} */
+	/** @type {{ item: import('svelte').Snippet<[import('../lib/types').MapSet, boolean]>, class?: string }} */
 	let { item, class: className = '' } = $props();
 
 	let { songs, index } = $derived($queue);
@@ -140,7 +140,7 @@
 				style={pane.place === 0 ? '' : `left: ${pane.place * 100}%`}
 				aria-hidden={pane.place !== 0}
 			>
-				{@render item(pane.song)}
+				{@render item(pane.song, pane.place === 0)}
 			</div>
 		{/each}
 	</div>

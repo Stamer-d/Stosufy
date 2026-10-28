@@ -1,7 +1,8 @@
 <script>
 	// The song's background, blurred, behind the app or the full player (as in the desktop
-	// app). Cheap for a phone: a small cover, blurred at a quarter of the size and scaled up;
-	// a new song's comes in only once it's loaded (no black in between).
+	// app). Cheap for a phone: the cover drawn once into a tiny picture (24×24) that's shown
+	// stretched, which blurs it: no blur filter the graphics chip would work out again on
+	// every frame something moves over it. A new song's comes in only once it's loaded.
 	import { untrack } from 'svelte';
 
 	/** @type {{ song: import('../lib/types').MapSet | null, dim?: number }} */
@@ -10,6 +11,26 @@
 	/** The pictures shown: the one of now on top, the one before fading out under it */
 	let layers = $state([]);
 	let seen = 0;
+	const SIZE = 24;
+
+	/** Draws the cover small into the canvas (only shown: it's never read back) */
+	function paint(canvas, image) {
+		const context = canvas.getContext('2d');
+		if (!context) return;
+		// The middle of the cover, filling the square
+		const side = Math.min(image.naturalWidth, image.naturalHeight);
+		context.drawImage(
+			image,
+			(image.naturalWidth - side) / 2,
+			(image.naturalHeight - side) / 2,
+			side,
+			side,
+			0,
+			0,
+			SIZE,
+			SIZE
+		);
+	}
 
 	$effect(() => {
 		const id = song?.id;
@@ -20,7 +41,7 @@
 		image.onload = () => {
 			if (song?.id !== id) return;
 			const key = ++seen;
-			layers = [...layers.slice(-1), { id, url, key, shown: false }];
+			layers = [...layers.slice(-1), { id, image, key, shown: false }];
 			// (shown the frame after it's there, so it fades in)
 			requestAnimationFrame(() =>
 				requestAnimationFrame(() => {
@@ -33,19 +54,18 @@
 </script>
 
 <div class="absolute inset-0 overflow-hidden bg-app pointer-events-none" aria-hidden="true">
-	<div class="absolute top-0 left-0 w-1/4 h-1/4 origin-top-left scale-400">
-		{#each layers as layer (layer.key)}
-			<img
-				src={layer.url}
-				alt=""
-				class="absolute inset-0 size-full object-cover blur-[6px] scale-125 transition-opacity duration-700"
-				style="opacity: {layer.shown ? 1 : 0}"
-				ontransitionend={() => {
-					if (layer.shown && layers.at(-1)?.key === layer.key && layers.length > 1)
-						layers = layers.slice(-1);
-				}}
-			/>
-		{/each}
-	</div>
+	{#each layers as layer (layer.key)}
+		<canvas
+			width={SIZE}
+			height={SIZE}
+			use:paint={layer.image}
+			class="absolute -inset-[10%] size-[120%] transition-opacity duration-700"
+			style="opacity: {layer.shown ? 1 : 0}"
+			ontransitionend={() => {
+				if (layer.shown && layers.at(-1)?.key === layer.key && layers.length > 1)
+					layers = layers.slice(-1);
+			}}
+		></canvas>
+	{/each}
 	<div class="absolute inset-0 bg-app" style="opacity: {dim}"></div>
 </div>

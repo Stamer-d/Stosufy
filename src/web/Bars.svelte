@@ -1,7 +1,7 @@
 <script>
-	// The bars of the song playing. Three spans that grow by transform: the phone's graphics
-	// chip moves them. (The animated SVG icon before made the browser paint the whole page
-	// again every frame while a song played.)
+	// The bars of the song playing: three bars of different heights, standing still (moving,
+	// they had the screen drawn again 120 times a second as long as a song played: a warm
+	// phone, a quick battery)
 	/** @type {{ class?: string, playing?: boolean }} */
 	let { class: className = 'size-4', playing = true } = $props();
 </script>
@@ -24,26 +24,15 @@
 		border-radius: 1px;
 		background: currentColor;
 		transform-origin: bottom;
-		animation: bar 0.9s ease-in-out infinite;
-		will-change: transform;
+		transform: scaleY(0.55);
 	}
 	.bars span:nth-child(2) {
-		animation-delay: -0.3s;
+		transform: scaleY(1);
 	}
 	.bars span:nth-child(3) {
-		animation-delay: -0.6s;
+		transform: scaleY(0.75);
 	}
 	.still span {
-		animation: none;
-		transform: scaleY(0.4);
-	}
-	@keyframes bar {
-		0%,
-		100% {
-			transform: scaleY(0.3);
-		}
-		50% {
-			transform: scaleY(1);
-		}
+		transform: scaleY(0.35);
 	}
 </style>

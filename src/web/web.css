@@ -38,3 +38,10 @@ li.dragging {
 	border-radius: 0.375rem;
 	box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
 }
+
+/* osu!'s triangles stand still on the phone, spread as if caught rising: moving all the time
+   they kept the graphics chip busy at 120 frames a second (a warm phone, a quick battery) */
+.animate-triangle {
+	animation-play-state: paused !important;
+	will-change: auto;
+}

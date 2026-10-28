@@ -215,10 +215,12 @@
 			{:else}
 				<div class="flex-1 min-h-0 flex items-center">
 					<SongSwipe class="w-full">
-						{#snippet item(shown)}
+						{#snippet item(shown, middle)}
 							<div class="px-1">
+								<!-- (the big picture only for the song in the middle: the ones waiting left
+								     and right have the small one, a few MB less for the phone) -->
 								<img
-									src={bigCoverUrl(shown)}
+									src={middle ? bigCoverUrl(shown) : coverUrl(shown)}
 									alt=""
 									decoding="async"
 									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300 bg-cover bg-center"

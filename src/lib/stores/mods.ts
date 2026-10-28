@@ -200,7 +200,7 @@ export function startBeats(
 		volume?: number;
 	}
 ) {
-	setInterval(() => {
+	const timer = setInterval(() => {
 		const { audio, setId, mapId, timing: known, volume } = current();
 		const stored = setId ? get(mapDataStore)[setId] : null;
 		const timing =
@@ -245,4 +245,6 @@ export function startBeats(
 		}
 		scheduledUntil = until;
 	}, TICK_MS);
+	// (stops it, e.g. while Nightcore is off)
+	return () => clearInterval(timer);
 }

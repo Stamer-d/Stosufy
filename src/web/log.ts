@@ -44,3 +44,26 @@ if (typeof document !== 'undefined') {
 		log(document.hidden ? 'app hidden' : 'app shown')
 	);
 }
+
+// What went wrong, and when the app stood still, into the log too (a song or the app that
+// stops by itself can then be told apart)
+if (typeof window !== 'undefined') {
+	window.addEventListener('error', (event) =>
+		log(`error: ${event.message} (${String(event.filename).split('/').pop()}:${event.lineno})`)
+	);
+	window.addEventListener('unhandledrejection', (event) => {
+		const reason = event.reason;
+		log(`error: ${reason instanceof Error ? reason.message : String(reason)}`);
+	});
+	// A beat a second: one that comes much later means the app was stuck in between
+	let last = performance.now();
+	setInterval(() => {
+		const now = performance.now();
+		const late = now - last - 1000;
+		last = now;
+		if (late > 2000 && !document.hidden)
+			log(`the app was stuck for ${(late / 1000).toFixed(1)} s on ${location.pathname}`);
+	}, 1000);
+	// (in the background the beats stop: that's not stuck)
+	document.addEventListener('visibilitychange', () => (last = performance.now()));
+}

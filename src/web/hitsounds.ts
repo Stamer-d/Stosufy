@@ -265,7 +265,7 @@ if (typeof window !== 'undefined') {
 	});
 	// The timers run only while they have something to do (a phone feels each one)
 	let ticking: ReturnType<typeof setInterval> | null = null;
-	let beats = false;
+	let stopBeats: (() => void) | null = null;
 	const timers = () => {
 		const on = settings().on;
 		if (on && !ticking) ticking = setInterval(tick, TICK);
@@ -274,11 +274,11 @@ if (typeof window !== 'undefined') {
 			ticking = null;
 			stopScheduled();
 		}
-		// The Nightcore beat (the desktop app's), with the timing points read here: from the
-		// first time Nightcore is on (then it waits quietly while it's off)
-		if (!beats && currentMod() === 'NC') {
-			beats = true;
-			startBeats(() => {
+		// The Nightcore beat (the desktop app's), with the timing points read here: only while
+		// Nightcore is on
+		const nightcore = currentMod() === 'NC';
+		if (nightcore && !stopBeats)
+			stopBeats = startBeats(() => {
 				const audio = get(audioElement);
 				const mapId = mapIdOf();
 				return {
@@ -289,6 +289,9 @@ if (typeof window !== 'undefined') {
 					volume: 0.6
 				};
 			});
+		if (!nightcore && stopBeats) {
+			stopBeats();
+			stopBeats = null;
 		}
 	};
 	userSettings.subscribe(timers);

@@ -1,8 +1,7 @@
 <script>
 	// Where the song is, to drag (as in Spotify): touch anywhere on the line and it's there,
-	// the line grows and follows the finger, the song jumps there when it's let go. It runs
-	// smoothly with the song (read every frame, not only when the browser says so).
-	import { time, audioElement, seek } from './player';
+	// the line grows and follows the finger, the song jumps there when it's let go.
+	import { time, seek } from './player';
 	import { haptic } from './haptics';
 
 	let line = $state();
@@ -12,68 +11,19 @@
 	let duration = $derived($time.duration || 0);
 	let shown = $derived(dragging ?? now);
 
-	// While it plays, the line runs to the end by itself (an animation the phone's graphics
-	// chip plays, nothing to do here each frame); started again on play, pause, seek, speed
+	// The line moves as often as the song says where it is (four times a second): a couple of
+	// pixels each time, which looks the same as moving all along, and the screen isn't drawn
+	// again 120 times a second (that warmed the phone)
 	let fill = $state();
 	let thumb = $state();
-	let running = [];
-	function place(f) {
-		fill.style.transform = `scaleX(${f})`;
-		thumb.style.transform = `translateX(${f * 100}%)`;
-	}
-	function sync() {
-		for (const animation of running) animation.cancel();
-		running = [];
-		const audio = $audioElement;
-		if (!fill || !thumb || !audio || !audio.duration) return;
-		if (dragging != null) return place(Math.min(1, dragging / audio.duration));
-		now = audio.currentTime;
-		const f = Math.min(1, audio.currentTime / audio.duration);
-		place(f);
-		if (audio.paused) return;
-		const timing = {
-			duration: Math.max(
-				0,
-				((audio.duration - audio.currentTime) * 1000) / (audio.playbackRate || 1)
-			),
-			easing: 'linear',
-			fill: /** @type {const} */ ('forwards')
-		};
-		running = [
-			fill.animate([{ transform: `scaleX(${f})` }, { transform: 'scaleX(1)' }], timing),
-			thumb.animate(
-				[{ transform: `translateX(${f * 100}%)` }, { transform: 'translateX(100%)' }],
-				timing
-			)
-		];
-	}
-	const EVENTS = [
-		'play',
-		'playing',
-		'pause',
-		'seeked',
-		'ratechange',
-		'loadedmetadata',
-		'durationchange'
-	];
-	$effect(() => {
-		const audio = $audioElement;
-		if (!audio) return;
-		for (const type of EVENTS) audio.addEventListener(type, sync);
-		sync();
-		return () => {
-			for (const type of EVENTS) audio.removeEventListener(type, sync);
-			for (const animation of running) animation.cancel();
-		};
-	});
-	// (the time under it, as often as the song says where it is)
 	$effect(() => {
 		if (dragging == null) now = $time.current;
 	});
-	// Dragging: the line is where the finger is
 	$effect(() => {
-		void dragging;
-		sync();
+		const f = duration ? Math.min(1, shown / duration) : 0;
+		if (!fill || !thumb) return;
+		fill.style.transform = `scaleX(${f})`;
+		thumb.style.transform = `translateX(${f * 100}%)`;
 	});
 
 	const at = (x) => {
