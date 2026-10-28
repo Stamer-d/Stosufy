@@ -471,19 +471,25 @@ function showUnderlay(element: HTMLElement) {
 	element.style.position = 'relative';
 	element.style.zIndex = '6';
 	element.style.backgroundColor = 'var(--color-panel)';
-	element.style.boxShadow = '-12px 0 30px rgb(0 0 0 / 0.5)';
+	element.style.willChange = 'transform';
 	if (!before) return;
 	const layer = document.createElement('div');
 	layer.className = 'fixed inset-0 z-[5] overflow-hidden pointer-events-none';
 	layer.style.backgroundColor = 'var(--color-panel)';
 	const content = document.createElement('div');
 	content.style.willChange = 'transform';
-	const copy = before.node.cloneNode(true) as HTMLElement;
-	copy.style.marginTop = `${-before.scroll}px`;
-	content.append(copy);
+	// (the kept picture itself, not a copy of it: copying a long page at the start of the swipe
+	// made it stutter; it's shown once at a time)
+	before.node.style.marginTop = `${-before.scroll}px`;
+	content.append(before.node);
 	const dim = document.createElement('div');
 	dim.className = 'absolute inset-0 bg-black';
-	layer.append(content, dim);
+	// The shadow of the page above, at its edge (a shadow on the long page itself cost every
+	// frame of the swipe)
+	const edge = document.createElement('div');
+	edge.className = 'absolute inset-y-0 left-0 w-6 -ml-6';
+	edge.style.background = 'linear-gradient(to left, rgb(0 0 0 / 0.35), transparent)';
+	layer.append(content, dim, edge);
 	document.body.append(layer);
 	underlay = layer;
 	moveUnderlay(0, 'none');
@@ -492,10 +498,12 @@ function showUnderlay(element: HTMLElement) {
 /** How far the page above is away (0–1): the page before comes along a little, brightening */
 function moveUnderlay(progress: number, transition: string) {
 	if (!underlay) return;
-	const [content, dim] = underlay.children as unknown as HTMLElement[];
+	const [content, dim, edge] = underlay.children as unknown as HTMLElement[];
 	content.style.transition = transition;
 	dim.style.transition = transition;
+	edge.style.transition = transition;
 	content.style.transform = `translate3d(${-25 * (1 - progress)}%, 0, 0)`;
+	edge.style.transform = `translate3d(${progress * 100}vw, 0, 0)`;
 	dim.style.opacity = String(0.35 * (1 - progress));
 }
 
@@ -508,6 +516,7 @@ function clearPage(element: HTMLElement) {
 	element.style.transition = 'none';
 	element.style.transform = '';
 	element.style.boxShadow = '';
+	element.style.willChange = '';
 	element.style.position = '';
 	element.style.zIndex = '';
 	element.style.backgroundColor = '';

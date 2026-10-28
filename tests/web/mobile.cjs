@@ -132,7 +132,9 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect(await playerOpen(), 'not open');
     await drag(200, 150, 0, 60, 10, 40); await wait(500);
     expect(await playerOpen(), 'closed on a small drag');
-    await drag(200, 150, 0, 120, 4, 10); await wait(600);
+    // (a flick: fast; with the harness' own delay per move, 4 moves of 30 px at 10 ms came out
+    // right at the threshold, 0.45 px/ms, a finger's flick is about twice that)
+    await drag(200, 150, 0, 120, 3, 0); await wait(600);
     expect(!(await playerOpen()), 'still open after a flick');
   });
   await step('player: scrubber drag doesn\'t close the player', async () => {

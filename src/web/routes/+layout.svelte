@@ -99,10 +99,11 @@
 	<SongBackdrop {song} {dim} />
 </div>
 
-<!-- The app on the whole screen, edge to edge: the pages start under the clock (their
+<!-- The app on the whole screen, edge to edge (a page swiped aside doesn't widen it: that
+     painted the whole document again every frame): the pages start under the clock (their
      header's color reaches up behind it); once scrolled, a bar behind the clock keeps what
      scrolls from showing there -->
-<div class="min-h-dvh">
+<div class="min-h-dvh overflow-x-clip">
 	<main
 		bind:this={panel}
 		class="min-h-dvh pt-[env(safe-area-inset-top)] pb-[calc(env(safe-area-inset-bottom)+8.5rem)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] {song
