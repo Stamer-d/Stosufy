@@ -348,6 +348,12 @@ export function seek(seconds: number) {
 	// round right after is its end)
 	seekedByHand = seconds < 2;
 	const player = element();
+	// Not in the audio yet (after a start): the position for the first play
+	if (!loaded) {
+		time.update((t) => ({ ...t, current: Math.max(0, Math.min(seconds, t.duration || seconds)) }));
+		save();
+		return;
+	}
 	// Dragged to the very end: that's the song's end (it loops, so it would start over at once,
 	// before its end could be seen)
 	if (player.duration && seconds >= player.duration - 0.5) {
@@ -445,7 +451,9 @@ function save() {
 				songs,
 				index,
 				ordered,
-				at: audio?.currentTime ?? get(time).current,
+				// (before the first play the song isn't in the audio yet: where it was kept)
+				at: loaded && audio ? audio.currentTime : get(time).current,
+				duration: (loaded && audio?.duration) || get(time).duration,
 				shuffle: get(shuffle),
 				repeat: get(repeat),
 				autoplay: get(autoplay),
@@ -464,7 +472,12 @@ if (typeof localStorage !== 'undefined') {
 		if (saved?.songs?.length) {
 			queue.set({ songs: saved.songs, index: saved.index ?? 0 });
 			ordered = saved.ordered ?? saved.songs;
-			time.set({ current: saved.at ?? 0, duration: 0 });
+			// Where it was, on a line of the right length right away (not only once it plays)
+			const song = saved.songs[saved.index ?? 0];
+			time.set({
+				current: saved.at ?? 0,
+				duration: saved.duration || Number(song?.beatmaps?.[0]?.total_length) || 0
+			});
 		}
 		shuffle.set(!!saved?.shuffle);
 		if (saved?.repeat) repeat.set(saved.repeat);

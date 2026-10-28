@@ -232,6 +232,26 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });
 
+  await step('app start: the position line is right before play, and a drag sets where it starts', async () => {
+    await p.goto(BASE + '/playlist/2'); await wait(1500); await playFirst();
+    await p.locator('button[aria-label="Open the player"]').first().click(); await wait(500);
+    const r = await p.locator('.fixed.inset-0.z-30 [role="slider"]').boundingBox();
+    await drag(r.x + r.width * 0.3, r.y + r.height / 2, r.width * 0.2, 0, 4, 16); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Pause"]'); await wait(5500);
+    await p.reload(); await wait(2500);
+    await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
+    const slider = p.locator('.fixed.inset-0.z-30 [role="slider"]');
+    const now = Number(await slider.getAttribute('aria-valuenow'));
+    const max = Number(await slider.getAttribute('aria-valuemax'));
+    expect(max > 0 && now >= 8 && now <= 12, `line at ${now} of ${max}`);
+    const box = await slider.boundingBox();
+    await drag(box.x + box.width * 0.5, box.y + box.height / 2, box.width * 0.25, 0, 4, 16); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Play"]'); await wait(1200);
+    const playing = Number(await slider.getAttribute('aria-valuenow'));
+    expect(playing >= 14, 'started at ' + playing);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+  });
+
   await step('no page errors', async () => expect(!errors.length, errors.slice(0, 3).join(' | ')));
   await b.close();
   const failed = results.filter(([r]) => r === 'FAIL').length;
