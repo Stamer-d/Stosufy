@@ -7,7 +7,7 @@
 
 import { haptic } from './haptics';
 import { writable, get } from 'svelte/store';
-import { goto, onNavigate, afterNavigate } from '$app/navigation';
+import { goto, onNavigate, afterNavigate, preloadCode } from '$app/navigation';
 
 const base = __WEB_BASE__;
 
@@ -95,7 +95,29 @@ const standalone = () =>
 	!!(navigator as Navigator & { standalone?: boolean }).standalone;
 
 /** Set up in the layout: the slides between pages, and the tabs following the pages */
+/** Every page's code, so going anywhere (back too) doesn't wait for it to load */
+const PAGES = [
+	'/',
+	'/library',
+	'/search',
+	'/downloads',
+	'/playlist/1',
+	'/mix/x',
+	'/smart/x',
+	'/map/1',
+	'/community',
+	'/friends',
+	'/wrapped'
+];
+
 export function setupNavigation(page: () => HTMLElement | undefined) {
+	// (once the app is up and idle)
+	const idle = window.requestIdleCallback ?? ((run: () => void) => setTimeout(run, 1500));
+	idle(() => {
+		for (const path of PAGES)
+			preloadCode((base + path) as Parameters<typeof preloadCode>[0]).catch(() => {});
+	});
+
 	afterNavigate((navigation) => {
 		const { to } = navigation;
 		// (counting the pages of this visit behind this one)
@@ -222,23 +244,23 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		const back = speed > 0.35 || (dx > width * 0.35 && speed > -0.2);
 		if (back) {
 			haptic();
-			// Slides away the rest of the way, then the page before comes
-			const duration = Math.max(90, Math.min(220, (width - dx) / Math.max(speed, 1.2)));
+			// The page before is asked for right away; meanwhile this one slides away the rest
+			// of the way (when the page before is there, it slides in from the left)
+			// (not quicker than the page before takes to be there, mostly)
+			const duration = Math.max(170, Math.min(240, (width - dx) / Math.max(speed, 1.2)));
 			element.style.transition = `transform ${duration}ms cubic-bezier(0.2, 0.7, 0.3, 1)`;
 			element.style.transform = `translate3d(${width}px, 0, 0)`;
+			swipedBack = true;
+			resetAfterBack = true;
+			goBack();
+			// (if the page before doesn't come, this one doesn't stay away)
 			setTimeout(() => {
-				swipedBack = true;
-				resetAfterBack = true;
-				goBack();
-				// (if the page before doesn't come, this one doesn't stay away)
-				setTimeout(() => {
-					if (!resetAfterBack) return;
-					resetAfterBack = false;
-					element.style.transition = 'transform 200ms ease-out';
-					element.style.transform = '';
-					element.style.boxShadow = '';
-				}, 1500);
-			}, duration);
+				if (!resetAfterBack) return;
+				resetAfterBack = false;
+				element.style.transition = 'transform 200ms ease-out';
+				element.style.transform = '';
+				element.style.boxShadow = '';
+			}, 1500);
 		} else {
 			element.style.transition = 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)';
 			element.style.transform = '';
