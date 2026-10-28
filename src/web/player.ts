@@ -394,6 +394,21 @@ export function addToQueue(song: MapSet) {
 	readNext();
 }
 
+/** A song coming up moves to another place among those coming up */
+export function moveInQueue(from: number, to: number) {
+	const { index, songs } = get(queue);
+	if (from <= index || to <= index || from >= songs.length || to >= songs.length || from === to)
+		return;
+	queue.update(({ songs, index }) => {
+		const next = [...songs];
+		const [song] = next.splice(from, 1);
+		next.splice(to, 0, song);
+		return { songs: next, index };
+	});
+	save();
+	readNext();
+}
+
 export function removeFromQueue(at: number) {
 	queue.update(({ songs, index }) => ({
 		songs: songs.filter((_, i) => i !== at),

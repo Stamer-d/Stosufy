@@ -65,7 +65,7 @@ async function setup(ctx, { lyrics = true } = {}) {
       const set = sets.find((x) => x.id === sid) || mk(sid - 100);
       // (its difficulties as long as the song, but for one of another song of the set)
       const length = (beatmaps.find((m) => m.beatmapset_id === sid) || {}).total_length || 200;
-      return route.fulfill({ json: { ...set, title_unicode: set.title, artist_unicode: set.artist, status: 'ranked', user_id: 9, beatmaps: [{ id: 1000 + sid - 101, version: 'Insane', difficulty_rating: 4.6, mode: 'osu', total_length: length }, { id: 99000 + sid, version: 'Easy', difficulty_rating: 1.8, mode: 'osu', total_length: length }, { id: 98000 + sid, version: 'Other song', difficulty_rating: 3, mode: 'osu', total_length: length + 60 }] } });
+      return route.fulfill({ json: { ...set, title_unicode: set.title, artist_unicode: set.artist, status: 'ranked', user_id: 9, beatmaps: [{ id: 1000 + sid - 101, version: 'Insane', difficulty_rating: 4.6, mode: 'osu', total_length: length }, { id: 99000 + sid, version: 'Easy', difficulty_rating: 1.8, mode: 'osu', total_length: length }, { id: 97000 + sid, version: 'Expert', difficulty_rating: 5.5, mode: 'osu', total_length: length }, { id: 96000 + sid, version: 'Taiko hard', difficulty_rating: 6.2, mode: 'taiko', total_length: length }, { id: 98000 + sid, version: 'Other song', difficulty_rating: 3, mode: 'osu', total_length: length + 60 }] } });
     }
     if (url.includes('/stosufy/osu/beatmaps')) {
       const ids = [...new URL(url).searchParams.getAll('ids[]')].map(Number);

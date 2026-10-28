@@ -11,20 +11,14 @@
 
 import { get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './shims/user';
-import { osuFile, hitsoundMapId } from './osuFiles';
+import { osuFile } from './osuFiles';
+import { hitsoundMapId, learnHardest, hardest } from './difficulties';
 import { queue, audioElement } from './player';
 import { parseHitsounds, type HitSample } from '../lib/hitsounds/chart';
 import { builtinSample } from '../lib/hitsounds/builtin';
 import { bundledSamples, bundledSample } from '../lib/hitsounds/bundled';
 import { parseTimingPoints, type TimingPoint } from '../lib/osuFile';
-import {
-	MODS,
-	applyMod,
-	currentMod,
-	prepareBeats,
-	startBeats,
-	suspendBeats
-} from '../lib/stores/mods';
+import { MODS, applyMod, currentMod, prepareBeats, startBeats } from '../lib/stores/mods';
 import type { MapSet, PlaybackMod } from '../lib/types';
 
 export type { PlaybackMod };
@@ -64,10 +58,6 @@ let master: GainNode | null = null;
 
 function audioContext() {
 	if (!context) {
-		// A player's audio (iOS then lets it play on in the background: else it pauses it there,
-		// and the hitsounds came late or not at all with the screen locked)
-		const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
-		if (session) session.type = 'playback';
 		context = new AudioContext({ latencyHint: 'interactive' });
 		master = context.createGain();
 		master.connect(context.destination);
@@ -123,10 +113,12 @@ export function chooseHitsoundDifficulty(song: MapSet, mapId: string) {
 }
 
 async function load() {
+	const needsChart = settings().on;
+	const needsTiming = currentMod() === 'NC';
+	// (the set's hardest difficulty, as the desktop app's default, if not known yet)
+	if (needsChart || needsTiming) await learnHardest(currentSong());
 	const mapId = mapIdOf();
 	const s = settings();
-	const needsChart = s.on;
-	const needsTiming = currentMod() === 'NC';
 	const key = `${mapId}:${s.on}:${s.muted}:${needsTiming}`;
 	if (!mapId || (!needsChart && !needsTiming)) {
 		chart = null;
@@ -293,6 +285,11 @@ function applyCurrentMod() {
 // --- Start -----------------------------------------------------------------------------
 
 if (typeof window !== 'undefined') {
+	// The page's sounds are a player's (iOS then lets the hitsounds and the Nightcore beat play
+	// on in the background: else it pauses them there, and they came late or not at all with
+	// the screen locked)
+	const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+	if (session) session.type = 'playback';
 	let last = '';
 	const reload = () => {
 		const s = settings();
@@ -306,6 +303,7 @@ if (typeof window !== 'undefined') {
 		applyCurrentMod();
 		reload();
 	});
+	hardest.subscribe(() => reload());
 	queue.subscribe(() => {
 		restart = true;
 		reload();
@@ -331,11 +329,15 @@ if (typeof window !== 'undefined') {
 		});
 		audio.addEventListener('pause', () => tick());
 		// (in the background the song's time updates come on time, the timers don't)
-		audio.addEventListener('timeupdate', () => document.hidden && tick());
+		audio.addEventListener('timeupdate', () => {
+			if (!document.hidden) return;
+			tick();
+			stopBeats?.tick();
+		});
 	});
 	// The timers run only while they have something to do (a phone feels each one)
 	let ticking: ReturnType<typeof setInterval> | null = null;
-	let stopBeats: (() => void) | null = null;
+	let stopBeats: ReturnType<typeof startBeats> | null = null;
 	const timers = () => {
 		const on = settings().on;
 		if (on && !ticking) ticking = setInterval(tick, TICK);
@@ -353,11 +355,13 @@ if (typeof window !== 'undefined') {
 				const audio = get(audioElement);
 				const mapId = mapIdOf();
 				return {
-					audio: document.hidden ? null : audio,
+					audio,
 					setId: String(currentSong()?.id ?? ''),
 					mapId,
 					timing: timing?.key === mapId ? timing.points : null,
-					volume: 0.6
+					volume: 0.6,
+					// (in the background seconds ahead, as the hitsounds)
+					lookahead: document.hidden ? LOOKAHEAD_HIDDEN * 1000 : undefined
 				};
 			});
 		if (!nightcore && stopBeats) {
@@ -380,9 +384,9 @@ if (typeof window !== 'undefined') {
 	document.addEventListener('visibilitychange', () => {
 		restart = true;
 		if (document.hidden) {
+			stopBeats?.tick();
 			if (settings().on) tick();
 			else context?.suspend().catch(() => {});
-			suspendBeats();
 		} else wake();
 	});
 }

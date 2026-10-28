@@ -16,6 +16,7 @@
 		previous,
 		jumpTo,
 		removeFromQueue,
+		moveInQueue,
 		toggleShuffle,
 		cycleRepeat,
 		bigCoverUrl,
@@ -30,6 +31,7 @@
 	import { marquee } from './marquee';
 	import Triangles from '../lib/components/Triangles.svelte';
 	import SongSwipe from './SongSwipe.svelte';
+	import { sortable } from './sortable';
 	import HitsoundDifficulty from './HitsoundDifficulty.svelte';
 	import { preloadSharp, sharpReady } from './covers';
 	import SongBackdrop from './SongBackdrop.svelte';
@@ -51,6 +53,7 @@
 	);
 	/** What's in the middle: the cover, the lyrics or what comes next */
 	let view = $state('cover');
+	let upNextList = $state(null);
 	const toggleView = (which) => (view = view === which ? 'cover' : which);
 
 	// The sleep timer: what's left of it, looked at every 15 s
@@ -191,7 +194,16 @@
 						></span>
 					</span>
 				</button>
-				<ol class="flex-1 overflow-y-auto overscroll-contain -mx-3" data-no-swipe>
+				<!-- (moved by their handles ≡: only what comes next, the song playing stays) -->
+				<ol
+					class="flex-1 overflow-y-auto overscroll-contain -mx-3"
+					data-no-swipe
+					bind:this={upNextList}
+					use:sortable={{
+						onmove: (from, to) => moveInQueue($queue.index + 1 + from, $queue.index + 1 + to),
+						scroller: upNextList
+					}}
+				>
 					{#each upNext as { song: upcoming, at } (at)}
 						<li class="flex items-center">
 							<button
@@ -216,6 +228,13 @@
 							>
 								<span class="icon-[mingcute--close-line] size-5"></span>
 							</button>
+							<span
+								data-handle
+								aria-label="Move {upcoming.title}"
+								class="size-10 shrink-0 grid place-items-center text-white/60 touch-none"
+							>
+								<span class="icon-[mingcute--menu-line] size-5"></span>
+							</span>
 						</li>
 					{:else}
 						<li class="p-4 text-sm text-white/60">Nothing after this song</li>

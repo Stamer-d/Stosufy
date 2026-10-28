@@ -1,17 +1,18 @@
-<script module>
-	/** The difficulties of the sets asked for already */
-	const sets = new Map();
-</script>
-
 <script>
 	// Which difficulty's hitsounds play, for the song's beatmap set: its difficulties, the easy
 	// ones first (the hard ones have far more sounds). The choice is the account's, the desktop
-	// app's gameplay and hitsounds use it too.
-	import { fetchBeatmapset } from './shims/data';
+	// app's gameplay and hitsounds use it too; without one, the hardest (as the desktop's).
 	import { offline } from '../lib/stores/network';
-	import { userSettings, updateUserSettings } from './shims/user';
+	import { userSettings } from './shims/user';
 	import { difficultyColor } from '../lib/beatmapStatus';
 	import { haptic } from './haptics';
+	import {
+		setDifficulties,
+		sameSong,
+		hardest,
+		learnHardest,
+		chooseDifficulty
+	} from './difficulties';
 
 	let { song, disabled = false } = $props();
 
@@ -22,48 +23,33 @@
 		all = null;
 		failed = false;
 		if (!(Number(id) > 0)) return void (failed = true);
-		if (!sets.has(id))
-			sets.set(
-				id,
-				fetchBeatmapset(id)
-					.then((set) => set.beatmaps ?? [])
-					.catch((error) => {
-						sets.delete(id);
-						throw error;
-					})
-			);
-		sets
-			.get(id)
+		learnHardest(song);
+		setDifficulties(id)
 			.then((maps) => id === String(song.id) && (all = maps))
 			.catch(() => id === String(song.id) && (failed = true));
 	});
 
 	let own = $derived(String(song.beatmaps?.[0]?.id ?? ''));
-	let ownLength = $derived(Number(song.beatmaps?.[0]?.total_length) || 0);
-	/** Those of the same song (a set can have several, of different lengths), osu!standard
-	 * ones if there are (the desktop app's gameplay shows the choice too), easy ones first */
+	/** Those of the same song, osu!standard ones if there are (the desktop app's gameplay shows
+	 * the choice too), easy ones first */
 	let difficulties = $derived.by(() => {
-		const same = (all ?? []).filter(
-			(map) =>
-				String(map.id) === own ||
-				!ownLength ||
-				!map.total_length ||
-				Math.abs(map.total_length - ownLength) <= 3
-		);
+		const same = sameSong(song, all ?? []);
 		const standard = same.filter((map) => map.mode === 'osu' || String(map.id) === own);
 		return (standard.length > 1 ? standard : same).sort(
 			(a, b) => a.difficulty_rating - b.difficulty_rating
 		);
 	});
 	let chosen = $derived(
-		String($userSettings.settings?.gameplayDifficulty?.[String(song.id)] ?? own)
+		String(
+			$userSettings.settings?.gameplayDifficulty?.[String(song.id)] ??
+				$hardest[String(song.id)] ??
+				own
+		)
 	);
 
 	function choose(mapId) {
 		haptic();
-		const choices = { ...$userSettings.settings?.gameplayDifficulty };
-		choices[String(song.id)] = String(mapId);
-		updateUserSettings({ gameplayDifficulty: choices });
+		chooseDifficulty(song, mapId);
 	}
 </script>
 

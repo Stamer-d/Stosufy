@@ -331,7 +331,7 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
   });
 
-  await step("hitsounds: another difficulty's can be chosen (the set's, of the same song), and play", async () => {
+  await step("hitsounds: from the hardest osu!standard difficulty (as the desktop), another can be chosen, and play", async () => {
     await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
     await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
     await p.click('.fixed.inset-0.z-30 button[aria-label^="Speed mod"]'); await wait(500);
@@ -340,9 +340,11 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
     await sheet.locator('button:has-text("Easy")').waitFor();
     const names = await sheet.locator('button[aria-pressed]:has(span.rounded-full)').allTextContents();
-    expect(names.length === 2 && /Easy/.test(names[0]) && /Insane/.test(names[1]), 'difficulties: ' + names.join(' | '));
-    expect((await sheet.locator('button:has-text("Insane")').getAttribute('aria-pressed')) === 'true', "the song's own isn't the one chosen");
+    expect(names.length === 3 && /Easy/.test(names[0]) && /Insane/.test(names[1]) && /Expert/.test(names[2]), 'difficulties: ' + names.join(' | '));
+    expect((await sheet.locator('button:has-text("Expert")').getAttribute('aria-pressed')) === 'true', "the hardest isn't the one playing");
     const setId = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player') || '{}'); return s.songs?.[s.index]?.id; });
+    const known = await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-hardest') || '{}'));
+    expect(known[setId] === String(97000 + setId), 'hardest kept: ' + JSON.stringify(known));
     ops.length = 0;
     await sheet.locator('button:has-text("Easy")').click(); await wait(1200);
     expect((await sheet.locator('button:has-text("Easy")').getAttribute('aria-pressed')) === 'true', 'Easy not chosen');
@@ -351,8 +353,79 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.mouse.click(200, 60); await wait(400);
     await p.click('.fixed.inset-0.z-30 button[aria-label^="Speed mod"]'); await wait(500);
     expect((await sheet.locator('button:has-text("Easy")').getAttribute('aria-pressed')) === 'true', 'the choice was not kept');
-    await sheet.locator('button:has-text("Insane")').click(); await wait(300);
+    await sheet.locator('button:has-text("Expert")').click(); await wait(300);
+    expect((await sheet.locator('button:has-text("Expert")').getAttribute('aria-pressed')) === 'true', 'back to the hardest');
     await toggle.click(); await wait(300);
+    await p.mouse.click(200, 60); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+  });
+
+  await step('up next: a song moved by its handle, the one playing stays', async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    const order = () => p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player') || '{}'); return { titles: (s.songs || []).map((x) => x.title), index: s.index }; });
+    const before = await order();
+    await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Up next"]'); await wait(500);
+    const handles = p.locator('.fixed.inset-0.z-30 [data-handle]');
+    const a = await handles.nth(0).boundingBox();
+    const c = await handles.nth(2).boundingBox();
+    await p.mouse.move(a.x + a.width / 2, a.y + a.height / 2); await p.mouse.down();
+    for (let i = 1; i <= 8; i++) { await p.mouse.move(a.x + a.width / 2, a.y + a.height / 2 + ((c.y - a.y) * i) / 8); await wait(30); }
+    await p.mouse.up(); await wait(500);
+    const after = await order();
+    const i = before.index;
+    expect(after.index === i && after.titles[i] === before.titles[i], 'the song playing moved');
+    expect(after.titles[i + 3] === before.titles[i + 1] && after.titles[i + 1] === before.titles[i + 2], 'not moved: ' + after.titles.slice(i, i + 4).join(' | '));
+    expect(after.titles.length === before.titles.length, 'songs lost');
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Up next"]'); await wait(300);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+  });
+
+  await step('a song swiped to the right goes to the queue; a short or an up-and-down one does not', async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    const count = () => p.evaluate(() => (JSON.parse(localStorage.getItem('stosufy-web-player') || '{}').songs || []).length);
+    // (in the middle of the screen: not under the tab bar)
+    await p.locator('main ol > li').nth(4).evaluate((li) => li.scrollIntoView({ block: 'center' })); await wait(300);
+    const row = await p.locator('main ol > li').nth(4).boundingBox();
+    const y = row.y + row.height / 2;
+    const n = await count();
+    await drag(120, y, 60, 0, 6, 16); await wait(400);
+    expect((await count()) === n, 'a short swipe added it');
+    await drag(120, y, 10, -150, 8, 16); await wait(400);
+    expect((await count()) === n, 'scrolling added it');
+    // (the up-and-down one scrolled the page: the row in the middle again)
+    await p.locator('main ol > li').nth(4).evaluate((li) => li.scrollIntoView({ block: 'center' })); await wait(300);
+    const box = await p.locator('main ol > li').nth(4).boundingBox();
+    const title = (await p.locator('main ol > li').nth(4).locator('span.font-semibold').first().textContent()).trim();
+    await drag(120, box.y + box.height / 2, 170, 0, 10, 16); await wait(500);
+    expect((await count()) === n + 1, 'not added: ' + n + ' → ' + (await count()));
+    const last = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return s.songs[s.songs.length - 1].title; });
+    expect(last === title, 'added ' + last + ', not ' + title);
+    expect(await p.locator('text=Added to the queue').count(), 'no word of it');
+    expect(path() === '/playlist/2', 'the swipe went somewhere: ' + path());
+    // (the row back in place, nothing left behind it)
+    expect(!(await p.locator('main ol > li').nth(4).evaluate((li) => [...li.children].some((c) => c.style.transform))), 'the row stayed moved');
+  });
+
+  await step('the Nightcore beat plays on with the screen locked (seconds ahead), called off on pause', async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label^="Speed mod"]'); await wait(500);
+    await p.locator('.fixed.inset-0.z-40 button:has-text("NC")').click(); await wait(300);
+    await p.mouse.click(200, 60); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(1500);
+    await p.evaluate(() => { window.__hitLeads = []; window.__disconnects = 0; const d = GainNode.prototype.disconnect; GainNode.prototype.disconnect = function (...a) { window.__disconnects++; return d.apply(this, a); }; });
+    await p.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+    await wait(1500);
+    const leads = (await p.evaluate(() => window.__hitLeads)).map((h) => h.lead);
+    expect(leads.length > 0, 'no beat with the screen locked');
+    expect(Math.max(...leads) > 3, 'not scheduled ahead: ' + Math.max(...leads));
+    await p.locator('button[aria-label="Pause"]').first().click(); await wait(400);
+    expect((await p.evaluate(() => window.__disconnects)) > 0, 'the beat scheduled ahead was not called off on pause');
+    await p.evaluate(() => { delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+    await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label^="Speed mod"]'); await wait(500);
+    await p.locator('.fixed.inset-0.z-40 button:has-text("NM")').click(); await wait(300);
     await p.mouse.click(200, 60); await wait(400);
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });

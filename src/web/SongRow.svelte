@@ -1,10 +1,12 @@
 <script>
 	import { haptic } from './haptics';
 	// A song of a list, as in the desktop app: its cover, title and artist, and whether it's
-	// on the phone or streams. Tap it to play, hold it or ⋯ for what else can be done with it.
+	// on the phone or streams. Tap it to play, hold it or ⋯ for what else can be done with it,
+	// swipe it to the right to add it to the queue.
 	import Bars from './Bars.svelte';
 	import SongCover from '../lib/components/SongCover.svelte';
-	import { queue, playing } from './player';
+	import { queue, playing, addToQueue } from './player';
+	import { swipeToQueue } from './swipeToQueue';
 	import { downloaded, downloading, isDownloaded } from './downloads';
 	import { songMenu } from './library';
 	import { sameSong } from '../lib/tracks';
@@ -51,6 +53,16 @@
 </script>
 
 <li
+	use:swipeToQueue={() => {
+		if (unavailable)
+			return showToast('Offline: only downloaded songs play', 'icon-[mingcute--wifi-off-line]');
+		const nothingPlaying = $queue.index < 0 || !$queue.songs.length;
+		addToQueue(song);
+		showToast(
+			nothingPlaying ? 'Playing' : 'Added to the queue',
+			'icon-[mingcute--list-check-line]'
+		);
+	}}
 	class="flex items-center rounded-md {current ? 'bg-white/[0.08]' : ''} {unavailable
 		? 'opacity-40'
 		: ''}"

@@ -198,10 +198,25 @@ export function startBeats(
 		timing?: TimingPoint[] | null;
 		/** How loud (0–1); else the app's volume */
 		volume?: number;
+		/** How far ahead (ms of real time) to schedule: far in the web app's background, where
+		 * the timers come seldom */
+		lookahead?: number;
 	}
-) {
-	const timer = setInterval(() => {
-		const { audio, setId, mapId, timing: known, volume } = current();
+): (() => void) & { tick: () => void } {
+	/** Scheduled far ahead: then a pause or a seek calls off what's scheduled */
+	let farAhead = false;
+	const callOff = () => {
+		if (!farAhead || !context || !output) return;
+		farAhead = false;
+		// (what's scheduled plays into the old output, cut off; the beat goes on in a new one)
+		const gain = output.gain.value;
+		output.disconnect();
+		output = context.createGain();
+		output.gain.value = gain;
+		output.connect(context.destination);
+	};
+	const run = () => {
+		const { audio, setId, mapId, timing: known, volume, lookahead } = current();
 		const stored = setId ? get(mapDataStore)[setId] : null;
 		const timing =
 			known !== undefined ? known : (mapId && stored?.beatmaps?.[mapId]?.timing) || stored?.timing;
@@ -213,6 +228,7 @@ export function startBeats(
 			// Like osu!lazer: after a pause the beat waits for the next segment again
 			firstBeat = null;
 			scheduledUntil = null;
+			callOff();
 			return;
 		}
 		if (context.state === 'suspended') context.resume();
@@ -228,12 +244,15 @@ export function startBeats(
 			now < lastTime - 50 ||
 			now > scheduledUntil + 500
 		) {
+			if (scheduledUntil !== null) callOff();
 			scheduledUntil = now;
 		}
 		lastAudio = audio;
 		lastTime = now;
 
-		const until = now + LOOKAHEAD_MS * rate;
+		const ahead = lookahead ?? LOOKAHEAD_MS;
+		if (ahead > LOOKAHEAD_MS * 2) farAhead = true;
+		const until = Math.max(scheduledUntil, now + ahead * rate);
 		for (
 			let beat = nextBeat(timing, scheduledUntil);
 			beat.time <= until;
@@ -244,7 +263,14 @@ export function startBeats(
 				playBeat(beat.index, beat.point, Math.max(when, context.currentTime));
 		}
 		scheduledUntil = until;
-	}, TICK_MS);
-	// (stops it, e.g. while Nightcore is off)
-	return () => clearInterval(timer);
+	};
+	const timer = setInterval(run, TICK_MS);
+	// (stops it, e.g. while Nightcore is off; `tick` schedules now, without waiting for the timer)
+	return Object.assign(
+		() => {
+			clearInterval(timer);
+			callOff();
+		},
+		{ tick: run }
+	);
 }

@@ -2,7 +2,8 @@
 // what they are (title, artist…) for the Downloads tab. The browser lets the app read the
 // audio only if the mirror allows it (CORS): the checks page tells.
 
-import { osuFile, hitsoundMapId } from './osuFiles';
+import { osuFile } from './osuFiles';
+import { hitsoundMapId, learnHardest } from './difficulties';
 import { get, writable } from 'svelte/store';
 import { keyOf, slim, streamUrl } from './songs';
 import type { MapSet } from '../lib/types';
@@ -120,7 +121,9 @@ export async function download(song: MapSet) {
 		// Kept for good, as far as iOS lets it (else it may clear it when space runs out)
 		navigator.storage?.persist?.().catch(() => {});
 		// Its beatmap too: hitsounds and the Nightcore beat offline
-		osuFile(hitsoundMapId(song)).catch(() => {});
+		learnHardest(song)
+			.then(() => osuFile(hitsoundMapId(song)))
+			.catch(() => {});
 	} finally {
 		downloading.update((all) => without(all, key));
 	}

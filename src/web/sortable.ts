@@ -7,6 +7,8 @@ import { haptic } from './haptics';
 interface Options {
 	/** The song at `from` goes to `to` */
 	onmove: (from: number, to: number) => void;
+	/** What scrolls along near its edges, if not the page (a list scrolling in itself) */
+	scroller?: HTMLElement | null;
 }
 
 const EDGE = 90;
@@ -26,9 +28,11 @@ export function sortable(list: HTMLElement, options: Options) {
 		frame: number;
 	} | null = null;
 
+	const scrolled = () => (opts.scroller ? opts.scroller.scrollTop : window.scrollY);
+
 	function place() {
 		if (!drag) return;
-		const moved = drag.y - drag.startY + (window.scrollY - drag.startScroll);
+		const moved = drag.y - drag.startY + (scrolled() - drag.startScroll);
 		const to = Math.max(
 			0,
 			Math.min(drag.rows.length - 1, drag.from + Math.round(moved / drag.height))
@@ -56,15 +60,19 @@ export function sortable(list: HTMLElement, options: Options) {
 			drag.frame = requestAnimationFrame(scrollAlong);
 			return;
 		}
-		const bottom = window.innerHeight - 150;
+		const box = opts.scroller?.getBoundingClientRect();
+		const top = box ? box.top : 0;
+		const bottom = box ? box.bottom : window.innerHeight - 150;
+		const edge = box ? Math.min(EDGE, box.height / 4) : EDGE;
 		const speed =
-			drag.y < EDGE
-				? -(EDGE - drag.y) / 6
-				: drag.y > bottom - EDGE
-					? (drag.y - bottom + EDGE) / 6
+			drag.y < top + edge
+				? -(top + edge - drag.y) / 6
+				: drag.y > bottom - edge
+					? (drag.y - bottom + edge) / 6
 					: 0;
 		if (speed) {
-			window.scrollBy(0, speed);
+			if (opts.scroller) opts.scroller.scrollBy(0, speed);
+			else window.scrollBy(0, speed);
 			place();
 		}
 		drag.frame = requestAnimationFrame(scrollAlong);
@@ -86,7 +94,7 @@ export function sortable(list: HTMLElement, options: Options) {
 			to: from,
 			height: row.getBoundingClientRect().height,
 			startY: event.clientY,
-			startScroll: window.scrollY,
+			startScroll: scrolled(),
 			y: event.clientY,
 			pointer: event.pointerId,
 			frame: 0
