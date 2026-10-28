@@ -6,7 +6,7 @@
 
 import { writable, get } from 'svelte/store';
 import type { MapSet } from '../lib/types';
-import { bigCoverUrl, coverUrl } from './songs';
+import { bigCoverUrl } from './songs';
 
 const MIRROR = 'https://catboy.best';
 
@@ -50,11 +50,26 @@ export function preloadSharp(songs: (MapSet | undefined)[]) {
 	}
 }
 
-let artworkUrl: string | null = null;
-/** The lock screen's cover for a song: the small square right away, then a sharp one */
-export async function sharpArtwork(song: MapSet): Promise<MediaImage[] | null> {
+/** Sharp lock screen covers made already, by song (the next one is made ahead) */
+const artworks = new Map<string, Promise<MediaImage[] | null>>();
+
+/**
+ * The lock screen's sharp cover for a song, alone: Safari picks among several by how near they
+ * are to 512 px, and took osu!'s 300×300 square over a sharp 1024 one. As a data URL (iOS may
+ * load it again later; a blob's URL would be gone by then).
+ */
+export function sharpArtwork(song: MapSet): Promise<MediaImage[] | null> {
 	const map = song.beatmaps?.[0]?.id;
-	if (!map) return null;
+	if (!map) return Promise.resolve(null);
+	const key = String(map);
+	if (!artworks.has(key)) {
+		artworks.set(key, makeArtwork(map));
+		while (artworks.size > 4) artworks.delete(artworks.keys().next().value!);
+	}
+	return artworks.get(key)!;
+}
+
+async function makeArtwork(map: number | string): Promise<MediaImage[] | null> {
 	try {
 		// (the mirror hands out the background as it was uploaded, and lets it be read)
 		const response = await fetch(`${MIRROR}/preview/background/${map}`);
@@ -80,13 +95,8 @@ export async function sharpArtwork(song: MapSet): Promise<MediaImage[] | null> {
 				size
 			);
 		bitmap.close();
-		const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, 'image/jpeg', 0.9));
-		if (!blob) return null;
-		if (artworkUrl) URL.revokeObjectURL(artworkUrl);
-		artworkUrl = URL.createObjectURL(blob);
 		return [
-			{ src: artworkUrl, sizes: `${size}x${size}`, type: 'image/jpeg' },
-			{ src: coverUrl(song), sizes: '300x300', type: 'image/jpeg' }
+			{ src: canvas.toDataURL('image/jpeg', 0.9), sizes: `${size}x${size}`, type: 'image/jpeg' }
 		];
 	} catch {
 		// (offline, or the mirror didn't answer: the small one stays)

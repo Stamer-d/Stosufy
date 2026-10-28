@@ -561,14 +561,15 @@ function updatePosition() {
 
 function showInMediaSession(song: MapSet) {
 	if (!('mediaSession' in navigator)) return;
-	navigator.mediaSession.metadata = new MediaMetadata({
-		title: song.title ?? '',
-		artist: song.artist ?? '',
-		artwork: [{ src: coverUrl(song), sizes: '300x300', type: 'image/jpeg' }]
-	});
-	// (then a sharp one, if it's still this song)
-	sharpArtwork(song).then((artwork) => {
-		const metadata = navigator.mediaSession.metadata;
-		if (artwork && metadata && current() === song) metadata.artwork = artwork;
-	});
+	const show = (artwork: MediaImage[]) =>
+		(navigator.mediaSession.metadata = new MediaMetadata({
+			title: song.title ?? '',
+			artist: song.artist ?? '',
+			artwork
+		}));
+	show([{ src: coverUrl(song), sizes: '300x300', type: 'image/jpeg' }]);
+	// Then the sharp one, if it's still this song (made ahead for the next one: right away then)
+	sharpArtwork(song).then((artwork) => artwork && current() === song && show(artwork));
+	const { songs, index } = get(queue);
+	if (songs[index + 1]) sharpArtwork(songs[index + 1]);
 }
