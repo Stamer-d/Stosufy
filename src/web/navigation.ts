@@ -6,6 +6,7 @@
 //   showed a black page where the page before should be)
 
 import { haptic } from './haptics';
+import { log } from './log';
 import { writable, get } from 'svelte/store';
 import { goto, onNavigate, afterNavigate, preloadCode } from '$app/navigation';
 
@@ -102,36 +103,12 @@ const tabRoot = () => TABS.find((tab) => tab.id === get(currentTab))!.root;
 // Newer iOS has a back swipe of its own for apps on the home screen: it showed a black page
 // where the page before should be, and went back along with the app's (the screen twice, two
 // pages back). A touch at the edge is held from iOS, so the app's swipe is the only one. Should
-// iOS swipe anyway (a touch it takes away, or a going back the app didn't ask for during a
-// swipe), the app's steps aside from then on.
+// iOS go back anyway during a swipe, the app's swipe is called off (not a second page back).
+// (It used to step aside for good after once seeing that: once was also a false alarm now and
+// then, and then iOS' black swipe came back.)
 
-const NATIVE_KEY = 'stosufy-web-native-back-2';
-let nativeBack = (() => {
-	try {
-		return localStorage.getItem(NATIVE_KEY) === '1';
-	} catch {
-		return false;
-	}
-})();
-/** Seen that iOS has no swipe of its own (a swipe went through without one) */
-let nativeAbsent = (() => {
-	try {
-		return localStorage.getItem(NATIVE_KEY) === '0';
-	} catch {
-		return false;
-	}
-})();
 /** The app went back itself (else it was iOS' swipe or the system) */
 let ownBack = false;
-function noteNativeBack() {
-	if (nativeBack) return;
-	nativeBack = true;
-	try {
-		localStorage.setItem(NATIVE_KEY, '1');
-	} catch {
-		// (seen again next time)
-	}
-}
 /** Where back goes: the page before in this tab, else the tab's start */
 const backTarget = () => (sameTabBefore() ? stack[depth - 1].path : tabRoot());
 let pendingScroll: number | null = null;
@@ -267,7 +244,7 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		'touchstart',
 		(event) => {
 			heldTap = null;
-			if (nativeBack || !standalone() || !event.cancelable || event.touches.length > 1) return;
+			if (!standalone() || !event.cancelable || event.touches.length > 1) return;
 			const touch = event.touches[0];
 			if (touch.clientX > SIDE && touch.clientX < window.innerWidth - SIDE_RIGHT) return;
 			const target = event.target as HTMLElement;
@@ -312,7 +289,7 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		'touchstart',
 		(event) => {
 			const touch = event.touches[0];
-			if (nativeBack || !standalone() || touch.clientX > EDGE || rootOf(location.pathname)) return;
+			if (!standalone() || touch.clientX > EDGE || rootOf(location.pathname)) return;
 			// (what swipes across itself keeps its swipe; nothing while a sheet is open)
 			if ((event.target as HTMLElement).closest?.('[data-no-edge], .fixed')) return;
 			start = { x: touch.clientX, y: touch.clientY };
@@ -370,22 +347,13 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			swipedBack = true;
 			resetAfterBack = true;
 			// (with the page before under it, the swap waits until this one is gone: no jump)
-			// (not known yet whether iOS swipes too: a moment longer, so its going back comes first
-			// and the app's doesn't go back a second page)
-			const wait = nativeAbsent ? (underlay ? duration : 0) : Math.max(duration, 450);
-			backTimer = setTimeout(() => {
-				backTimer = null;
-				if (nativeBack) return;
-				goBack();
-				if (!nativeAbsent) {
-					nativeAbsent = true;
-					try {
-						localStorage.setItem(NATIVE_KEY, '0');
-					} catch {
-						// (seen again next time)
-					}
-				}
-			}, wait);
+			backTimer = setTimeout(
+				() => {
+					backTimer = null;
+					goBack();
+				},
+				underlay ? duration : 0
+			);
 			// (if the page before doesn't come, this one doesn't stay away)
 			setTimeout(() => {
 				if (!resetAfterBack) return;
@@ -406,7 +374,7 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		}
 	};
 	window.addEventListener('touchend', end);
-	// A touch taken away while swiping from the edge: iOS swipes back itself
+	// A touch taken away while swiping from the edge (by the system): the swipe called off
 	window.addEventListener('touchcancel', () => {
 		heldTap = null;
 		if (!start) return;
@@ -414,15 +382,16 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		start = null;
 		tracking = false;
 		if (swiping) {
-			noteNativeBack();
+			log('edge swipe: the touch was taken away');
 			undoSwipe();
 		}
 	});
-	// Gone back without the app (iOS' swipe) while the app's swipe was on: iOS has its own
+	// Gone back without the app (iOS' own swipe after all) while the app's swipe was on: the
+	// app's called off, so it isn't two pages back
 	window.addEventListener('popstate', () => {
 		if (ownBack) return;
-		if (tracking || start || backTimer) {
-			noteNativeBack();
+		if (tracking || backTimer) {
+			log('edge swipe: gone back by the system meanwhile');
 			if (backTimer) clearTimeout(backTimer);
 			backTimer = null;
 			start = null;
@@ -444,7 +413,9 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 /** Pictures of the pages left, by page (a copy of their elements, how far they were scrolled):
  * also the ones left for another tab, so back to a tab's start has its picture too */
 const snapshots = new Map<string, { node: HTMLElement; scroll: number }>();
-const MOST_SNAPSHOTS = 8;
+/** Kept of the pages besides the tabs' starts (those are always kept: back from another
+ * tab's page goes there, and after a while of going around they had gone, a black swipe) */
+const MOST_SNAPSHOTS = 12;
 
 function keepSnapshot(element: HTMLElement | undefined, path: string) {
 	if (!element) return;
@@ -458,12 +429,14 @@ function keepSnapshot(element: HTMLElement | undefined, path: string) {
 	// (the newest last; the oldest go)
 	snapshots.delete(path);
 	snapshots.set(path, { node, scroll: window.scrollY });
-	while (snapshots.size > MOST_SNAPSHOTS) snapshots.delete(snapshots.keys().next().value!);
+	const others = [...snapshots.keys()].filter((kept) => !rootOf(kept));
+	for (const old of others.slice(0, Math.max(0, others.length - MOST_SNAPSHOTS)))
+		snapshots.delete(old);
 }
 
 let underlay: HTMLElement | null = null;
 
-/** Puts the picture of the page before under this one (if there's one of it) */
+/** Puts the picture of the page before under this one (else the empty panel) */
 function showUnderlay(element: HTMLElement) {
 	if (underlay) removeUnderlay(underlay);
 	const before = snapshots.get(backTarget());
@@ -472,7 +445,7 @@ function showUnderlay(element: HTMLElement) {
 	element.style.zIndex = '6';
 	element.style.backgroundColor = 'var(--color-panel)';
 	element.style.willChange = 'transform';
-	if (!before) return;
+	// (no picture of it: the app's panel at least, not the black behind it)
 	const layer = document.createElement('div');
 	layer.className = 'fixed inset-0 z-[5] overflow-hidden pointer-events-none';
 	layer.style.backgroundColor = 'var(--color-panel)';
@@ -480,8 +453,10 @@ function showUnderlay(element: HTMLElement) {
 	content.style.willChange = 'transform';
 	// (the kept picture itself, not a copy of it: copying a long page at the start of the swipe
 	// made it stutter; it's shown once at a time)
-	before.node.style.marginTop = `${-before.scroll}px`;
-	content.append(before.node);
+	if (before) {
+		before.node.style.marginTop = `${-before.scroll}px`;
+		content.append(before.node);
+	}
 	const dim = document.createElement('div');
 	dim.className = 'absolute inset-0 bg-black';
 	// The shadow of the page above, at its edge (a shadow on the long page itself cost every

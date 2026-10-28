@@ -9,6 +9,7 @@
 	import { logOut } from '../../shims/auth';
 	import { webUser } from '../../library';
 	import { autoplay, toggleAutoplay, wakeAudio } from '../../player';
+	import { movingTriangles } from '../../motion';
 	import { MODS, setMod } from '../../hitsounds';
 	import { VISIBILITY, setVisibility, visibility } from '../../friends';
 	import { downloadedSongs, removeAllDownloads } from '../../downloads';
@@ -192,6 +193,12 @@
 	'%',
 	(dim) => updateAppearance({ dim }),
 	!appearance.background
+)}
+{@render toggle(
+	'Moving triangles',
+	"osu!'s triangles rising, as on the desktop. Uses a bit more battery",
+	$movingTriangles,
+	() => movingTriangles.update((on) => !on)
 )}
 
 {@render section('Playback')}

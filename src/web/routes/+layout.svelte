@@ -4,6 +4,7 @@
 	// looks like the desktop app: the song's background behind it all, dimmed like osu!'s, the
 	// pages on a panel over it, the song bar at the bottom.
 	const base = __WEB_BASE__;
+	import '../motion';
 	import '../../app.css';
 	import '../web.css';
 	import { page } from '$app/state';

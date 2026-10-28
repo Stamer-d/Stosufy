@@ -542,24 +542,56 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect(path() === '/library', 'tap at the edge: at ' + path());
   });
 
-  await step("iOS' own back swipe: the app's steps aside, one page back, not two", async () => {
+  await step('moving triangles: still unless turned on (this phone only)', async () => {
+    const state = async () => { await p.goto(BASE + '/playlist/2'); await wait(1200); return p.evaluate(() => getComputedStyle(document.querySelector('.animate-triangle')).animationPlayState); };
+    const flip = async () => { await p.goto(BASE + '/settings'); await wait(1000); await p.locator('button[role="switch"]:has-text("Moving triangles")').click(); await wait(200); };
+    expect((await state()) === 'paused', 'moving without being turned on');
+    await flip();
+    expect((await state()) === 'running', 'not moving when turned on (and kept)');
+    await flip();
+    expect((await state()) === 'paused', 'still moving when turned off');
+  });
+
+  await step("after going around many pages, back to a tab's start still has it under the finger", async () => {
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Search');
+    // (a search of before: cleared, the start of Search shows the community link)
+    const clear = p.locator('main button[aria-label="Clear"]');
+    if (await clear.count()) { await clear.first().click(); await wait(400); }
+    await p.click('main a[href$="/community"]'); await wait(900);
+    // (more pages than are kept, in another tab)
+    await tab('Library');
+    for (let i = 0; i < 7; i++) {
+      await p.click(`text=${['Chill', 'Gaming', 'Anime openings', 'Liked Songs'][i % 4]}`); await wait(600);
+      await p.locator('main ol > li').first().locator('button[aria-label^="More"]').click(); await wait(250);
+      await p.click('text=Go to beatmap'); await wait(600);
+      await tab('Library'); await tab('Library');
+    }
+    await tab('Search');
+    expect(path() === '/community', 'not back at the community page: ' + path());
+    await touch('touchStart', 8, 400); for (let i = 1; i <= 5; i++) { await touch('touchMove', 8 + i * 30, 400); await wait(16); }
+    const under = await p.evaluate(() => [...document.querySelectorAll('body > .fixed.inset-0.overflow-hidden.pointer-events-none')].filter((l) => l.firstElementChild?.firstElementChild).length);
+    await touch('touchEnd'); await wait(900);
+    expect(under === 1, 'no picture of Search under the finger');
+    expect(path() === '/search', 'at ' + path());
+  });
+
+  await step("iOS going back during the app's swipe: one page back, not two; the app's swipe stays", async () => {
     await p.goto(BASE + '/'); await wait(1200);
     await tab('Library'); await p.click('text=Chill'); await wait(900);
-    await p.click('text=Go to beatmap').catch(() => {});
     await p.locator('main ol > li').first().locator('button[aria-label^="More"]').click(); await wait(300);
     await p.click('text=Go to beatmap'); await wait(1200);
     // the finger at the edge, and iOS going back itself as it's let go
     await touch('touchStart', 8, 400); for (let i = 1; i <= 8; i++) { await touch('touchMove', 8 + i * 30, 400); await wait(16); }
-    await touch('touchEnd');
     await p.evaluate(() => history.back());
+    await touch('touchEnd');
     await wait(1200);
     expect(path() === '/playlist/2', 'at ' + path() + ' (want one page back: /playlist/2)');
     expect((await underlays()) === 0 && !(await mainMoved()), 'left something behind');
-    expect(await p.evaluate(() => localStorage.getItem('stosufy-web-native-back-2') === '1'), 'not noted');
-    // from now on only iOS' swipe: the app's does nothing
+    // (and not stepped aside for good: the app's swipe and the edge's hold go on)
     await drag(8, 400, 250, 0); await wait(900);
-    expect(path() === '/playlist/2', 'the app swiped too: ' + path());
-    await p.evaluate(() => localStorage.removeItem('stosufy-web-native-back-2'));
+    expect(path() === '/library', "the app's swipe stopped working: " + path());
+    expect(await p.evaluate(() => !localStorage.getItem('stosufy-web-native-back-2')), 'something kept');
   });
 
   await step('no page errors', async () => expect(!errors.length, errors.slice(0, 3).join(' | ')));
