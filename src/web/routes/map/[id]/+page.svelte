@@ -132,6 +132,7 @@
 		title={song.title}
 		back="history"
 		onplay={() => (playingThis ? toggle() : play([song], 0))}
+		playing={playingThis}
 	>
 		{#snippet cover()}
 			<SongCover

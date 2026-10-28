@@ -68,7 +68,7 @@ async function touchDrag(x0, y0, dx, dy = 0) {
 
   await step('playlist: open and play', async () => { await p.click('main a:has-text("Chill")'); await wait(1500); expect(await p.locator('main ol > li').count() === 25, 'rows ' + await p.locator('main ol > li').count()); await p.locator('main button[aria-label="Play"]').last().click(); await wait(800); expect(await nowTitle() === 'Song number 21', 'now ' + await nowTitle()); });
   await step('playlist: no reload loop', async () => { const n = ops.filter((o) => o === 'songs:2').length; await wait(5000); const m = ops.filter((o) => o === 'songs:2').length; expect(m - n <= 1, `asked for the songs ${m - n} times in 5 s`); });
-  await step('playlist: play button pauses', async () => { await p.locator('main button[aria-label="Pause"]').first().click(); await wait(400); expect(await p.locator('main button[aria-label="Play"]').count(), 'not paused'); await p.locator('main button[aria-label="Play"]').last().click(); await wait(400); });
+  await step('playlist: play button pauses', async () => { await p.locator('main button[aria-label="Pause"]').last().click(); await wait(400); expect(await p.locator('main button[aria-label="Play"]').count(), 'not paused'); await p.locator('main button[aria-label="Play"]').last().click(); await wait(400); });
   await step('playlist: shuffle', async () => { await p.click('main button[aria-label="Shuffle"]'); await wait(600); const s = await playerState(); expect(s.shuffle === true, 'shuffle off'); });
   await step('playlist: keep downloaded (one tap downloads)', async () => {
     await p.click('main button[aria-label="Keep it on the phone"]'); await wait(5000);

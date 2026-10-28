@@ -1,7 +1,8 @@
 <script>
 	// The songs kept on the phone: they play without a connection. The Downloads tab, and a
 	// page of another tab (opened from the library or the settings: back goes back there).
-	import { play } from './player';
+	import { play, playing, queue, toggle } from './player';
+	import { sameSong } from '../lib/tracks';
 	import { downloadedSongs, removeAllDownloads } from './downloads';
 	import { songsLength } from '../lib/tracks';
 	import SongRow from './SongRow.svelte';
@@ -14,6 +15,10 @@
 	let { back = '' } = $props();
 
 	let limit = $state(100);
+	/** One of these plays now (the buttons pause it then) */
+	let playingThis = $derived(
+		$playing && $downloadedSongs.some((song) => sameSong(song, $queue.songs[$queue.index]))
+	);
 
 	let usage = $state('');
 	let confirmClear = $state(false);
@@ -44,7 +49,10 @@
 	label="On this phone"
 	title="Downloaded Songs"
 	{back}
-	onplay={$downloadedSongs.length ? () => play($downloadedSongs, 0) : undefined}
+	onplay={$downloadedSongs.length
+		? () => (playingThis ? toggle() : play($downloadedSongs, 0))
+		: undefined}
+	playing={playingThis}
 >
 	{#snippet cover()}
 		<PlaylistCover
@@ -60,7 +68,11 @@
 			: ''}{usage ? ` · ${usage}` : ''}
 	</p>
 	{#snippet actions()}
-		<PlayButton disabled={!$downloadedSongs.length} onclick={() => play($downloadedSongs, 0)} />
+		<PlayButton
+			playing={playingThis}
+			disabled={!$downloadedSongs.length}
+			onclick={() => (playingThis ? toggle() : play($downloadedSongs, 0))}
+		/>
 		<button
 			aria-label="Shuffle"
 			class="size-10 grid place-items-center text-white/60"

@@ -337,7 +337,7 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect(pending.length > 0, 'nothing scheduled ahead after sleeping');
     expect(offBeat(pending) < 60, 'scheduled before sleeping: off the beat by ' + Math.round(offBeat(pending)) + ' ms');
     // paused from the lock screen: what's scheduled is called off
-    await p.locator('button[aria-label="Pause"]').first().click(); await wait(400);
+    await p.locator('.dock button[aria-label="Pause"]').first().click(); await wait(400);
     const stopped = await p.evaluate(() => window.__hitStopped || 0);
     expect(stopped > 0, 'nothing called off on pause');
     await p.evaluate(() => { delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
@@ -449,7 +449,7 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     const leads = (await p.evaluate(() => window.__hitLeads)).map((h) => h.lead);
     expect(leads.length > 0, 'no beat with the screen locked');
     expect(Math.max(...leads) > 3, 'not scheduled ahead: ' + Math.max(...leads));
-    await p.locator('button[aria-label="Pause"]').first().click(); await wait(400);
+    await p.locator('.dock button[aria-label="Pause"]').first().click(); await wait(400);
     expect((await p.evaluate(() => window.__disconnects)) > 0, 'the beat scheduled ahead was not called off on pause');
     await p.evaluate(() => { delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
     await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
@@ -540,6 +540,19 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect(back && back.x < 24, 'no back button at the edge: ' + JSON.stringify(back));
     await touch('touchStart', Math.max(back.x + 4, 6), back.y + back.height / 2); await touch('touchEnd'); await wait(900);
     expect(path() === '/library', 'tap at the edge: at ' + path());
+  });
+
+  await step("the bar's play button at the top shows pause while the playlist plays, and pauses it", async () => {
+    await p.goto(BASE + '/playlist/2'); await wait(1500);
+    await p.evaluate(() => window.scrollTo(0, 900)); await wait(600);
+    const bar = p.locator('main div.sticky.top-0 button[aria-label="Play"], main div.sticky.top-0 button[aria-label="Pause"]').first();
+    expect((await bar.getAttribute('aria-label')) === 'Play', 'not play at first');
+    await bar.click(); await wait(1000);
+    expect((await bar.getAttribute('aria-label')) === 'Pause', 'still play while it plays');
+    expect(await p.evaluate(() => !window.__audio.paused), 'not playing');
+    await bar.click(); await wait(600);
+    expect((await bar.getAttribute('aria-label')) === 'Play', 'not play again after pausing');
+    expect(await p.evaluate(() => window.__audio.paused), 'not paused');
   });
 
   await step('moving triangles: still unless turned on (this phone only)', async () => {

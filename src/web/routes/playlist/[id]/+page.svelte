@@ -173,7 +173,8 @@
 	label={id == '-2' ? 'Playlist' : playlist?.public ? 'Public playlist' : 'Private playlist'}
 	title={editing ? '' : title}
 	back="{base}/library"
-	onplay={songs.length ? () => play(songs, 0) : undefined}
+	onplay={songs.length ? () => (playingThis ? toggle() : play(songs, 0)) : undefined}
+	playing={playingThis}
 >
 	{#snippet cover()}
 		<PlaylistCover

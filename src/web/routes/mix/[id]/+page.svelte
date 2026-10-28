@@ -25,7 +25,8 @@
 		label="Made for you"
 		title={mix.title}
 		back="{base}/"
-		onplay={() => play(mix.songs, 0)}
+		onplay={() => (playingThis ? toggle() : play(mix.songs, 0))}
+		playing={playingThis}
 	>
 		{#snippet cover()}
 			<MixCover songs={mix.songs} class="size-48 rounded-md shadow-2xl shadow-black/50" />

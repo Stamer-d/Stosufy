@@ -5,7 +5,7 @@
 	import { goBack } from './navigation';
 	import Triangles from '../lib/components/Triangles.svelte';
 
-	/** @type {{ color?: string | null, seed?: number, label?: string, title: string, back?: string, onplay?: () => void, cover: import('svelte').Snippet, children?: import('svelte').Snippet, actions?: import('svelte').Snippet }} */
+	/** @type {{ color?: string | null, seed?: number, label?: string, title: string, back?: string, onplay?: () => void, playing?: boolean, cover: import('svelte').Snippet, children?: import('svelte').Snippet, actions?: import('svelte').Snippet }} */
 	let {
 		color = null,
 		seed = 7,
@@ -13,6 +13,7 @@
 		title,
 		back = '',
 		onplay,
+		playing = false,
 		cover,
 		children,
 		actions
@@ -53,12 +54,14 @@
 	{/if}
 	<p class="min-w-0 flex-1 text-lg font-bold truncate">{title}</p>
 	{#if onplay}
+		<!-- (as the big button below: pause while this plays) -->
 		<button
-			aria-label="Play"
+			aria-label={playing ? 'Pause' : 'Play'}
 			class="mr-1.5 size-10 grid place-items-center rounded-full bg-primary-300 shadow-md"
 			onclick={onplay}
 		>
-			<span class="icon-[mingcute--play-fill] size-6"></span>
+			<span class="{playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-6"
+			></span>
 		</button>
 	{/if}
 </div>

@@ -163,7 +163,8 @@
 		label="Smart playlist"
 		title={playlist.title}
 		back="{base}/library"
-		onplay={songs.length ? () => play(songs, 0) : undefined}
+		onplay={songs.length ? () => (playingThis ? toggle() : play(songs, 0)) : undefined}
+		playing={playingThis}
 	>
 		{#snippet cover()}
 			{#if songs.length}
