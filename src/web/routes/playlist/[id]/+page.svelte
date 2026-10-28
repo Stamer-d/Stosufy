@@ -19,6 +19,7 @@
 	import { play } from '../../../player';
 	import { downloaded, bulk, downloadAll, stopDownloadAll, isDownloaded } from '../../../downloads';
 	import SongRow from '../../../SongRow.svelte';
+	import Skeleton from '../../../Skeleton.svelte';
 	import { nearView } from '../../../visible';
 	import PlaylistCover from '../../../../lib/components/PlaylistCover.svelte';
 	import PlayButton from '../../../../lib/components/PlayButton.svelte';
@@ -69,6 +70,8 @@
 	let autoOn = $derived($autoDownload.has(String(id)));
 	let error = $state('');
 	let loading = $state(false);
+	/** How many songs (while they load, as many as the library says it has) */
+	let count = $derived(songs.length || (loading ? (playlist?.song_amount ?? 0) : 0));
 	let filter = $state('');
 	let shown = $derived.by(() => {
 		const words = filter.trim().toLowerCase();
@@ -209,8 +212,8 @@
 			<span class="font-bold">{$webUser.username}</span><span class="text-white/70"> · </span>
 		{/if}
 		<span class="text-white/70"
-			>{songs.length}
-			{songs.length === 1 ? 'song' : 'songs'}{songs.length ? ` · ${songsLength(songs)}` : ''}</span
+			>{count}
+			{count === 1 ? 'song' : 'songs'}{songs.length ? ` · ${songsLength(songs)}` : ''}</span
 		>
 	</p>
 	{#snippet actions()}
@@ -360,9 +363,7 @@
 	{#if error}
 		<p class="px-2 text-sm text-red-400">Couldn't load the songs: {error}</p>
 	{:else if loading && !songs.length}
-		<div class="py-10 grid place-items-center">
-			<span class="icon-[svg-spinners--ring-resize] size-7 text-secondary-600"></span>
-		</div>
+		<Skeleton rows={Math.min(Math.max(playlist?.song_amount ?? 8, 1), 10)} />
 	{/if}
 
 	<ol

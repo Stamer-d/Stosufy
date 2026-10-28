@@ -18,6 +18,7 @@
 	import { queue, playing } from '../../player';
 	import { sameSong } from '../../../lib/tracks';
 	import { handleImageError } from '../../shims/data';
+	import Skeleton from '../../Skeleton.svelte';
 
 	onMount(watchFriends);
 
@@ -86,9 +87,7 @@
 		<p class="text-sm text-secondary-600">Once they do, you see here what they listen to.</p>
 	</div>
 {:else if !friends.length}
-	<div class="py-12 grid place-items-center">
-		<span class="icon-[svg-spinners--ring-resize] size-7 text-secondary-600"></span>
-	</div>
+	<Skeleton rows={6} avatars />
 {/if}
 
 <ul class="px-2">

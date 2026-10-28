@@ -1,3 +1,8 @@
+<script module>
+	/** The first page of each order, as last shown */
+	const kept = {};
+</script>
+
 <script>
 	const base = __WEB_BASE__;
 	// Community playlists, as in the desktop app: everyone's public playlists, the most saved
@@ -13,6 +18,7 @@
 	import { offline } from '../../../lib/stores/network';
 	import PlaylistCover from '../../../lib/components/PlaylistCover.svelte';
 	import { nearView } from '../../visible';
+	import Skeleton from '../../Skeleton.svelte';
 
 	const PAGE = 30;
 	const SORTS = [
@@ -22,8 +28,9 @@
 
 	let search = $state('');
 	let sort = $state('popular');
-	let results = $state([]);
-	let loading = $state(false);
+	// (what was shown last time, right away when it's opened again; then osu!'s of now)
+	let results = $state(kept.popular ?? []);
+	let loading = $state(!$offline);
 	let error = $state('');
 	let more = $state(false);
 	let request = 0;
@@ -41,6 +48,7 @@
 			});
 			if (id !== request) return;
 			results = reset ? page : [...results, ...page];
+			if (reset && !search.trim()) kept[sort] = page;
 			more = page.length === PAGE;
 			otherPlaylists.update((all) => {
 				const next = { ...all };
@@ -110,6 +118,8 @@
 	</p>
 {:else if error}
 	<p class="px-4 py-10 text-center text-red-400">Couldn't load them: {error}</p>
+{:else if loading && !results.length}
+	<Skeleton grid rows={6} />
 {:else if !loading && !results.length}
 	<div class="px-8 py-16 flex flex-col items-center gap-2 text-center">
 		<span class="icon-[mingcute--earth-2-line] size-10 text-secondary-600"></span>

@@ -249,7 +249,15 @@
 		</p>
 	</div>
 {:else}
-	<div class="py-16 grid place-items-center">
-		<span class="icon-[svg-spinners--ring-resize] size-10 text-primary-300"></span>
-	</div>
+	<!-- (while osu! answers: the set's cover and where its name goes, not an empty page) -->
+	<PageHeader {color} seed={Number(id) || 7} label="Beatmap" title="" back="history">
+		{#snippet cover()}
+			<SongCover setId={id} title="" class="size-48 rounded-md shadow-2xl shadow-black/50" large />
+		{/snippet}
+		<div aria-busy="true" aria-label="Loading">
+			<div class="h-7 w-3/4 rounded-full bg-white/10"></div>
+			<div class="mt-4 h-3.5 w-1/3 rounded-full bg-white/[0.08]"></div>
+			<div class="mt-3 h-3.5 w-1/2 rounded-full bg-white/[0.06]"></div>
+		</div>
+	</PageHeader>
 {/if}

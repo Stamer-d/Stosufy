@@ -40,6 +40,8 @@ async function setup(ctx, { lyrics = true } = {}) {
     const route = { request: () => original.request(), abort: (...a) => original.abort(...a), fallback: (...a) => original.fallback(...a), fulfill: (o = {}) => original.fulfill({ ...o, headers: { ...cors, ...(o.headers || {}) } }) };
     const req = route.request(); const url = req.url();
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, body: '' });
+    // (DELAY=ms: a slow network, every answer that late)
+    if (process.env.DELAY) await new Promise((r) => setTimeout(r, Number(process.env.DELAY)));
     if (url.includes('assets.ppy.sh')) {
       const id = Number((url.match(/beatmaps\/(\d+)/) || [])[1] || 0);
       const c = colors[id % colors.length];
