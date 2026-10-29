@@ -24,7 +24,7 @@ import {
 import { startLoudness, measure, applyNormalize } from './loudness';
 import { userSettings } from './shims/user';
 import { applyMod } from '../lib/stores/mods';
-import { askDuration, songDuration } from './duration';
+import { askDuration, songDuration, formatOf } from './duration';
 import { offline } from '../lib/stores/network';
 import type { MapSet } from '../lib/types';
 
@@ -297,7 +297,8 @@ function load(at = 0) {
 				{ once: true }
 			);
 		}
-		log(`start ${song.title} (${own ? 'downloaded' : 'stream'})`);
+		const format = formatOf(song);
+		log(`start ${song.title} (${own ? 'downloaded' : 'stream'}${format ? `, ${format}` : ''})`);
 		player.play().catch((error) => log(`play() turned down: ${error?.name}`));
 		save();
 		topUp();

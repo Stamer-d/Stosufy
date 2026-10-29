@@ -33,6 +33,7 @@
 	import SongSwipe from './SongSwipe.svelte';
 	import { sortable } from './sortable';
 	import HitsoundDifficulty from './HitsoundDifficulty.svelte';
+	import SongOffset from './SongOffset.svelte';
 	import { preloadSharp, sharpReady } from './covers';
 	import SongBackdrop from './SongBackdrop.svelte';
 	import { handleImageError } from './shims/data';
@@ -464,7 +465,7 @@
 					transition:fade={{ duration: 150 }}
 				></button>
 				<div
-					class="relative rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
+					class="relative max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
 					transition:fly={{ y: 400, duration: 220, opacity: 1 }}
 					use:swipe={{ axis: 'y', only: 1, onswipe: () => (choosingMods = false) }}
 				>
@@ -531,6 +532,7 @@
 						/>
 					</label>
 					<HitsoundDifficulty {song} disabled={!hitsoundsOn} />
+					<SongOffset {song} disabled={!hitsoundsOn} />
 					<p class="px-5 pt-3 text-xs text-white/50">The same as in the desktop app.</p>
 				</div>
 			</div>

@@ -379,6 +379,33 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
   });
 
+  await step("hitsounds: a song's own offset moves its hitsounds (that song only), kept", async () => {
+    await p.goto(BASE + '/settings'); await wait(1200);
+    const toggle = p.locator('button[role="switch"]:has-text("Play the hitsounds")');
+    if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
+    await wait(300);
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(1500);
+    await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label^="Speed mod"]'); await wait(500);
+    const sheet = p.locator('.fixed.inset-0.z-40');
+    for (let i = 0; i < 16; i++) await sheet.locator('button[aria-label="Hitsounds of this song later"]').click();
+    expect((await sheet.locator('button[aria-label^="This song\'s offset"]').textContent()).trim() === '+80 ms', 'not +80');
+    await wait(800);
+    await p.evaluate(() => (window.__hitLeads = []));
+    await wait(1500);
+    const hits = (await p.evaluate(() => window.__hitLeads)).filter((h) => h.song != null);
+    const off = hits.map((h) => { const r = (((h.song - 80) % 500) + 500) % 500; return Math.min(r, 500 - r); });
+    expect(hits.length && Math.max(...off) < 45, 'not 80 ms later: ' + off.map(Math.round).join(','));
+    const setId = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return s.songs[s.index].id; });
+    expect(await p.evaluate((id) => JSON.parse(localStorage.getItem('stosufy-web-song-offsets') || '{}')[id] === 80, setId), 'not kept');
+    await sheet.locator('button[aria-label^="This song\'s offset"]').click(); await wait(200);
+    expect((await sheet.locator('button[aria-label^="This song\'s offset"]').textContent()).trim() === '0 ms', 'not back to 0');
+    await p.mouse.click(200, 60); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+    await p.goto(BASE + '/settings'); await wait(1000);
+    await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
+  });
+
   await step("hitsounds: from the hardest osu!standard difficulty (as the desktop), another can be chosen, and play", async () => {
     await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
     await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);

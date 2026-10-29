@@ -7,6 +7,7 @@
 import { get } from 'svelte/store';
 import { offline } from '../lib/stores/network';
 import { keyOf } from './songs';
+import { log } from './log';
 import type { MapSet } from '../lib/types';
 
 const API = 'https://api.stamer-d.de/v2/stosufy/duration/';
@@ -19,6 +20,16 @@ const known: Record<string, number> = (() => {
 	}
 })();
 const asking = new Set<string>();
+/** What kind of file each song's audio is (vorbis, mp3…), as the API says: for the log */
+const FORMATS = 'stosufy-web-formats';
+const formats: Record<string, string> = (() => {
+	try {
+		return JSON.parse(localStorage.getItem(FORMATS) || '{}');
+	} catch {
+		return {};
+	}
+})();
+export const formatOf = (song: MapSet | null | undefined) => (song ? formats[keyOf(song)] : '');
 
 function keep(key: string, seconds: number) {
 	delete known[key];
@@ -36,12 +47,24 @@ function keep(key: string, seconds: number) {
 /** Asks how long the song is, once (the answer is kept) */
 export function askDuration(song: MapSet | null | undefined) {
 	const key = song ? keyOf(song) : '';
-	if (!(Number(key) > 0) || key in known || asking.has(key) || get(offline)) return;
+	if (!(Number(key) > 0) || (key in known && key in formats) || asking.has(key) || get(offline))
+		return;
 	asking.add(key);
 	fetch(API + key)
 		.then((response) => (response.ok ? response.json() : null))
 		.then((answer) => {
 			if (answer?.seconds > 0) keep(key, answer.seconds);
+			if (typeof answer?.format === 'string') {
+				formats[key] = answer.format;
+				const keys = Object.keys(formats);
+				for (const old of keys.slice(0, Math.max(0, keys.length - 5000))) delete formats[old];
+				try {
+					localStorage.setItem(FORMATS, JSON.stringify(formats));
+				} catch {
+					// (asked again next time)
+				}
+				log(`${song!.title}: ${answer.format} audio`);
+			}
 		})
 		.catch(() => {})
 		.finally(() => asking.delete(key));

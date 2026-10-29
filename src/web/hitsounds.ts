@@ -13,6 +13,7 @@ import { get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './shims/user';
 import { osuFile } from './osuFiles';
 import { log } from './log';
+import { songOffsetOf } from './songOffset';
 import { hitsoundMapId, learnHardest, hardest } from './difficulties';
 import { queue, audioElement, reclaimNowPlaying } from './player';
 import { songContext, isRouted } from './audioGraph';
@@ -258,7 +259,8 @@ function tick() {
 	master!.gain.value = volume * LEVEL;
 	const rate = audio.playbackRate || 1;
 	// (positive offsets play the hitsounds later)
-	const time = audio.currentTime * 1000 - offset;
+	// (and the song's own offset on top: songOffset.ts)
+	const time = audio.currentTime * 1000 - offset - songOffsetOf(currentSong());
 	// Where the song should be by the hitsounds' clock. Far off (a seek, the song stalling, the
 	// audio put to sleep for a moment): all anew from here. A little off: the clock follows the
 	// song gently. Safari reads the song's place coarsely: setting everything anew on each
