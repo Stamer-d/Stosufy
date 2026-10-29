@@ -14,6 +14,7 @@ import { userSettings, updateUserSettings } from './shims/user';
 import { osuFile } from './osuFiles';
 import { hitsoundMapId, learnHardest, hardest } from './difficulties';
 import { queue, audioElement } from './player';
+import { songContext, isRouted } from './audioGraph';
 import { parseHitsounds, type HitSample } from '../lib/hitsounds/chart';
 import { builtinSample } from '../lib/hitsounds/builtin';
 import { bundledSamples, bundledSample } from '../lib/hitsounds/bundled';
@@ -34,8 +35,10 @@ const LOOKAHEAD_HIDDEN = 12;
 const TICK = 15;
 /** How far (ms) the song may be off the hitsounds' clock before they're set anew (in the
  * background the song's time is read more coarsely) */
-const DRIFT = 45;
-const DRIFT_HIDDEN = 90;
+const FAR_OFF = 150;
+const FAR_OFF_HIDDEN = 250;
+/** How much of a small difference the hitsounds' clock follows on each reading */
+const FOLLOW = 0.2;
 
 export const hitsoundStatus = writable<'off' | 'loading' | 'ready' | 'unavailable'>('off');
 
@@ -56,9 +59,10 @@ function settings() {
 let context: AudioContext | null = null;
 let master: GainNode | null = null;
 
+/** The songs' audio context (audioGraph.ts): the hitsounds play on the song's clock */
 function audioContext() {
 	if (!context) {
-		context = new AudioContext({ latencyHint: 'interactive' });
+		context = songContext() ?? new AudioContext({ latencyHint: 'interactive' });
 		master = context.createGain();
 		master.connect(context.destination);
 	}
@@ -230,29 +234,39 @@ function tick() {
 	const rate = audio.playbackRate || 1;
 	// (positive offsets play the hitsounds later)
 	const time = audio.currentTime * 1000 - offset;
-	// Where the song should be by the hitsounds' clock: off by more than a little (a seek, the
-	// song stalling, the hitsounds' audio put to sleep for a moment), all anew from here.
-	// Else the hitsounds keep their clock: evenly spaced, not shifted by each reading's jitter.
+	// Where the song should be by the hitsounds' clock. Far off (a seek, the song stalling, the
+	// audio put to sleep for a moment): all anew from here. A little off: the clock follows the
+	// song gently. Safari reads the song's place coarsely: setting everything anew on each
+	// reading that was a bit off shifted the hitsounds by its jitter, and a reading a bit late
+	// skipped the ones in between (slider ends, often)
 	const expected = anchor
 		? anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * anchor.rate
 		: Number.NaN;
+	const drift = time - expected;
 	if (
 		restart ||
 		!anchor ||
 		anchor.rate !== rate ||
-		!(Math.abs(expected - time) <= (hidden ? DRIFT_HIDDEN : DRIFT))
+		!(Math.abs(drift) <= (hidden ? FAR_OFF_HIDDEN : FAR_OFF))
 	) {
 		stopScheduled();
 		next = indexAt(chart.events, time);
 		anchor = { song: time, ctx: ctx.currentTime, rate };
 		restart = false;
-	}
+	} else if (Math.abs(drift) > 3) anchor.song += drift * FOLLOW;
+	// The song's sound goes through this context too (audioGraph.ts): it reaches the speaker
+	// as late as the hitsounds. Played by the element itself it doesn't: the hitsounds go
+	// as much earlier as this context takes to the speaker
+	const late = isRouted(audio)
+		? 0
+		: ((ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0) +
+			(ctx.baseLatency ?? 0);
 	const now = anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * rate;
 	const ahead = (hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD) * 1000 * rate;
 	const events = chart.events;
 	while (next < events.length && events[next].time <= now + ahead) {
 		const event = events[next++];
-		const at = anchor.ctx + (event.time - anchor.song) / rate / 1000;
+		const at = anchor.ctx + (event.time - anchor.song) / rate / 1000 - late;
 		if (at < ctx.currentTime - 0.03) continue;
 		for (const buffer of event.buffers) {
 			if (!buffer) continue;
@@ -395,7 +409,6 @@ if (typeof window !== 'undefined') {
 		if (document.hidden) {
 			stopBeats?.tick();
 			if (settings().on) tick();
-			else context?.suspend().catch(() => {});
 		} else wake();
 	});
 }

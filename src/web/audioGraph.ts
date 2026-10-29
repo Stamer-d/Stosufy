@@ -30,19 +30,28 @@ export const crossfadeSeconds = () => Math.max(0, get(userSettings).settings?.cr
 const wanted = () => normalizeOn() || crossfadeSeconds() > 0;
 
 /**
+ * The page's one audio context: the songs' and the hitsounds' (the same clock and the same
+ * delay to the speaker: two contexts, one for listening and one quick, put the hitsounds ahead
+ * of the song by the difference)
+ */
+export function songContext(): AudioContext | null {
+	if (!context) {
+		try {
+			context = new AudioContext({ latencyHint: 'interactive' });
+		} catch {
+			return null;
+		}
+		context.addEventListener('statechange', () => log(`song audio: ${context!.state}`));
+	}
+	return context;
+}
+
+/**
  * From a tap: starts the audio context (browsers allow sound only after one), and routes the
  * elements once it runs
  */
 export function wakeGraph(elements: (HTMLAudioElement | null)[]) {
-	if (!wanted()) return;
-	if (!context) {
-		try {
-			context = new AudioContext({ latencyHint: 'playback' });
-		} catch {
-			return;
-		}
-		context.addEventListener('statechange', () => log(`song audio: ${context!.state}`));
-	}
+	if (!wanted() || !songContext() || !context) return;
 	const ready = () => {
 		if (context?.state !== 'running') return;
 		for (const element of elements) if (element) route(element);

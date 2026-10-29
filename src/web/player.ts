@@ -281,6 +281,9 @@ function load(at = 0) {
 		unfade(player);
 		startLoudness(player, key);
 		askDuration(song);
+		// (the line at the new song's start right away, at its length as far as it's known:
+		// not the song before's place for a moment, then a length that jumps)
+		time.set({ current: at, duration: songDuration(song, Number.NaN) });
 		player.src = url;
 		// (where to start, once it knows how long the song is: before, browsers may forget it)
 		if (at) {
@@ -394,6 +397,7 @@ function crossfadeIfDue(now: number, duration: number) {
 			audioElement.set(incoming);
 			startLoudness(incoming, key);
 			askDuration(song);
+			time.set({ current: 0, duration: songDuration(song, Number.NaN) });
 			showInMediaSession(song);
 			fadeTo(incoming, 1, seconds);
 			fadeTo(main, 0, seconds);

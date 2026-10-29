@@ -347,6 +347,34 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
   });
 
+  await step("hitsounds: none left out, on the beat, while the song's place is read coarsely (as Safari does)", async () => {
+    await p.goto(BASE + '/settings'); await wait(1200);
+    const toggle = p.locator('button[role="switch"]:has-text("Play the hitsounds")');
+    if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
+    await wait(300);
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(1500);
+    // (each reading of the song's place up to 60 ms off)
+    await p.evaluate(() => {
+      const a = window.__audio;
+      const own = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+      Object.defineProperty(a, 'currentTime', { configurable: true, get() { return own.get.call(this) + (Math.random() - 0.5) * 0.12; }, set(v) { own.set.call(this, v); } });
+      window.__hitLeads = [];
+    });
+    await wait(5000);
+    const hits = await p.evaluate(() => { const l = window.__hitLeads; window.__hitLeads = []; delete window.__audio.currentTime; return l; });
+    // (the mock's notes: every 500 ms; each beat in the stretch heard once, near its time)
+    const beats = hits.filter((h) => h.song != null).map((h) => h.song / 500);
+    const round = [...new Set(beats.map(Math.round))].sort((a, b) => a - b);
+    const gaps = round.filter((b, i) => i && b - round[i - 1] > 1);
+    expect(round.length >= 8, 'too few hitsounds: ' + round.length);
+    expect(!gaps.length, 'left out after beats ' + gaps.join(', ') + ' of ' + round.join(','));
+    const counts = {};
+    for (const b of beats.map(Math.round)) counts[b] = (counts[b] || 0) + 1;
+    expect(Object.values(counts).every((n) => n <= 2), 'scheduled again and again (each reading set them all anew): ' + JSON.stringify(counts));
+    await p.goto(BASE + '/settings'); await wait(1000);
+    await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
+  });
+
   await step("hitsounds: from the hardest osu!standard difficulty (as the desktop), another can be chosen, and play", async () => {
     await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
     await p.locator('button[aria-label="Open the player"]').first().click(); await wait(600);
