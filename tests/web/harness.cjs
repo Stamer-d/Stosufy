@@ -31,7 +31,9 @@ const state = {
   publicLists: Array.from({ length: 40 }, (_, i) => ({ id: 500 + i, title: `Public list ${i}`, createdBy: 99, public: true, songAmount: 25, saves: 40 - i, creator: { osuId: 77, username: 'someone', avatarUrl: null } })),
   saved: new Set(),
   /** How long songs are, by difficulty (the duration API's answers) */
-  durations: {}
+  durations: {},
+  /** The .osu files have a spinner (2–6 s) */
+  spinner: false
 };
 async function setup(ctx, { lyrics = true } = {}) {
   await ctx.route(/^https?:\/\/(?!127\.0\.0\.1).*/, async (original) => {
@@ -56,8 +58,18 @@ async function setup(ctx, { lyrics = true } = {}) {
     }
     if (url.includes('/stosufy/osufile/')) {
       ops.push('osufile:' + url.split('/').pop());
-      const objs = Array.from({ length: 40 }, (_, i) => `256,192,${500 + i * 500},1,${i % 4 === 0 ? 2 : 0},0:0:0:0:`).join('\n');
+      // (with a spinner from 2 s to 6 s in place of the circles there, when the test asks)
+      const objs = Array.from({ length: 40 }, (_, i) => 500 + i * 500)
+        .filter((t) => !state.spinner || t < 2000 || t > 6000)
+        .map((t, i) => `256,192,${t},1,${i % 4 === 0 ? 2 : 0},0:0:0:0:`)
+        .concat(state.spinner ? ['256,192,2000,12,0,6000,0:0:0:0:'] : [])
+        .join('\n');
       return route.fulfill({ body: `osu file format v14\n\n[General]\nSampleSet: Soft\n\n[TimingPoints]\n0,500,4,2,0,80,1,0\n\n[HitObjects]\n${objs}\n`, headers: { 'access-control-allow-origin': '*' } });
+    }
+    // (the osu! default spinner sound)
+    if (url.includes('ppy/osu-resources')) {
+      ops.push('spinnerspin');
+      return route.fulfill({ body: TONE, contentType: 'audio/wav' });
     }
     // (how long a song is: as the test says, else not known)
     if (url.includes('/stosufy/duration/')) {

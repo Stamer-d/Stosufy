@@ -18,7 +18,7 @@ import { hitsoundMapId, learnHardest, hardest } from './difficulties';
 import { queue, audioElement, reclaimNowPlaying } from './player';
 import { songContext, isRouted } from './audioGraph';
 import { parseHitsounds, type HitSample } from '../lib/hitsounds/chart';
-import { builtinSample } from '../lib/hitsounds/builtin';
+import { builtinSample, builtinExtra } from '../lib/hitsounds/builtin';
 import { bundledSamples, bundledSample } from '../lib/hitsounds/bundled';
 import { parseTimingPoints, type TimingPoint } from '../lib/osuFile';
 import { MODS, applyMod, currentMod, prepareBeats, startBeats } from '../lib/stores/mods';
@@ -50,7 +50,7 @@ function settings() {
 		on: s.hitsounds ?? false,
 		volume: s.hitsoundVolume ?? DEFAULT_VOLUME,
 		offset: s.hitsoundOffset ?? 0,
-		muted: (['whistle', 'finish', 'clap', 'slidertick'] as const).filter(
+		muted: (['whistle', 'finish', 'clap', 'slidertick', 'spinner'] as const).filter(
 			(sound) => s.hitsoundParts?.[sound] === false
 		) as string[]
 	};
@@ -97,11 +97,91 @@ function sampleFor(sample: HitSample) {
 	);
 }
 
+// --- Spinners: their spin and bonus, as the desktop app plays autoplay's -------------------
+
+/** Autoplay's spin (turns per ms): the most osu! counts, 477 rpm */
+const AUTO_TURNS = (477 * 0.999) / 60000;
+const SPIN_VOLUME = 0.6;
+const BONUS_VOLUME = 0.7;
+/** The osu! default spin (Stosufy's sounds have none: the desktop app's comes from here too) */
+const SPIN_SOUND =
+	'https://raw.githubusercontent.com/ppy/osu-resources/HEAD/osu.Game.Resources/Samples/Gameplay/spinnerspin.wav';
+
+type Spinner = { start: number; end: number; required: number };
+
+/**
+ * An osu!standard map's spinners, with the spins they need (by the map's OD, like osu!), and
+ * the times of autoplay's bonus spins (each a "ping")
+ */
+function spinnersOf(content: string) {
+	const spinners: Spinner[] = [];
+	const bonuses: number[] = [];
+	if (Number(/^Mode\s*:\s*(\d+)/m.exec(content)?.[1] ?? 0) !== 0) return { spinners, bonuses };
+	const od = Number(/^OverallDifficulty\s*:\s*([\d.]+)/m.exec(content)?.[1] ?? 5);
+	const range = (min: number, mid: number, max: number) =>
+		od > 5 ? mid + ((max - mid) * (od - 5)) / 5 : od < 5 ? mid - ((mid - min) * (5 - od)) / 5 : mid;
+	const objects = content.slice(content.indexOf('[HitObjects]') + 12).split(/\r?\n/);
+	for (const line of objects) {
+		if (line.startsWith('[')) break;
+		const p = line.split(',');
+		const start = Number(p[2]);
+		if (!(Number(p[3]) & 8) || !isFinite(start)) continue;
+		const end = Math.max(start, Number(p[5]) || start);
+		const seconds = (end - start) / 1000;
+		const required = Math.floor((range(90, 150, 225) / 60) * seconds + 0.0001);
+		const most = Math.floor((range(250, 380, 430) / 60) * seconds + 0.0001);
+		spinners.push({ start, end, required });
+		// (a bonus for each spin from the second past the needed ones)
+		for (let spin = required + 2; spin < most; spin++) {
+			const at = start + spin / AUTO_TURNS;
+			if (at > end) break;
+			bonuses.push(Math.round(at));
+		}
+	}
+	return { spinners, bonuses };
+}
+
+/** The spin's pitch, rising as it's spun (osu!'s DrawableSpinner) */
+const spinPitch = (spinner: Spinner, time: number) =>
+	Math.min(
+		100000 / 44100,
+		(20000 + (((time - spinner.start) * AUTO_TURNS) / (spinner.required || 1)) * 40000) / 44100
+	);
+/** (it's at the top from two times the needed spins on) */
+const spinTop = (spinner: Spinner) => spinner.start + (2 * (spinner.required || 1)) / AUTO_TURNS;
+
+let spinLoad: Promise<AudioBuffer> | null = null;
+/** The spin's sound, kept for offline; a simple one of Stosufy's own if it can't be had */
+function spinSound() {
+	spinLoad ??= (async () => {
+		const cache =
+			typeof caches === 'undefined' ? null : await caches.open('stosufy-sounds').catch(() => null);
+		let response = await cache?.match(SPIN_SOUND);
+		if (!response) {
+			response = await fetch(SPIN_SOUND, { signal: AbortSignal.timeout(15000) });
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			await cache?.put(SPIN_SOUND, response.clone()).catch(() => {});
+		}
+		return audioContext().decodeAudioData(await response.arrayBuffer());
+	})().catch((error) => {
+		log(`hitsounds: the spinner's sound couldn't be had (${error?.message ?? error})`);
+		// (asked again with the next song)
+		spinLoad = null;
+		return builtinExtra(audioContext(), 'spinnerspin');
+	});
+	return spinLoad;
+}
+
 // --- The chart of the song playing ----------------------------------------------------------
 
 type ChartEvent = { time: number; volume: number; buffers: (AudioBuffer | null)[] };
 
-let chart: { key: string; events: ChartEvent[] } | null = null;
+let chart: {
+	key: string;
+	events: ChartEvent[];
+	spinners: Spinner[];
+	spin: AudioBuffer | null;
+} | null = null;
 let timing: { key: string; points: TimingPoint[] } | null = null;
 let loadingKey: string | null = null;
 
@@ -189,8 +269,25 @@ async function load() {
 			)
 		}))
 	);
+	// The spinners' sounds (unless turned off, like on the desktop)
+	const spinning = s.muted.includes('spinner') ? null : spinnersOf(content);
+	if (spinning?.bonuses.length) {
+		const bonus = await (bundled('spinnerbonus') ??
+			Promise.resolve(builtinExtra(audioContext(), 'spinnerbonus')));
+		for (const time of spinning.bonuses)
+			events.push({ time, volume: BONUS_VOLUME, buffers: [bonus] });
+		events.sort((a, b) => a.time - b.time);
+	}
 	if (loadingKey !== key) return;
-	chart = { key, events: events.filter((event) => event.buffers.some(Boolean)) };
+	const loaded = {
+		key,
+		events: events.filter((event) => event.buffers.some(Boolean)),
+		spinners: spinning?.spinners ?? [],
+		spin: null as AudioBuffer | null
+	};
+	chart = loaded;
+	// (the spin comes once it's there: the hitsounds don't wait for it)
+	if (loaded.spinners.length) spinSound().then((buffer) => (loaded.spin = buffer));
 	restart = true;
 	hitsoundStatus.set('ready');
 }
@@ -202,13 +299,25 @@ let next = 0;
 let anchor: { song: number; ctx: number; rate: number } | null = null;
 let restart = true;
 let scheduled: { source: AudioBufferSourceNode; at: number }[] = [];
+/** The next spinner whose spin isn't scheduled yet, and the spins scheduled (until they end) */
+let nextSpin = 0;
+let spins: { source: AudioBufferSourceNode; spinner: Spinner; end: number }[] = [];
 /** The song waits for data: what's scheduled would come early */
 let waiting = false;
 
-function stopScheduled() {
+/** Stops what's scheduled; the spinners' spin too unless `keepSpins` */
+function stopScheduled(keepSpins = false) {
 	const now = context?.currentTime ?? 0;
 	for (const { source, at } of scheduled) if (at > now) source.stop();
 	scheduled = [];
+	if (keepSpins) return;
+	for (const { source } of spins)
+		try {
+			source.stop();
+		} catch {
+			// (not started yet: WebKit may say so)
+		}
+	spins = [];
 }
 
 /** The first event at or after a time */
@@ -270,17 +379,6 @@ function tick() {
 		? anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * anchor.rate
 		: Number.NaN;
 	const drift = time - expected;
-	if (
-		restart ||
-		!anchor ||
-		anchor.rate !== rate ||
-		!(Math.abs(drift) <= (hidden ? FAR_OFF_HIDDEN : FAR_OFF))
-	) {
-		stopScheduled();
-		next = indexAt(chart.events, time);
-		anchor = { song: time, ctx: ctx.currentTime, rate };
-		restart = false;
-	} else if (Math.abs(drift) > 3) anchor.song += drift * FOLLOW;
 	// The song's sound goes through this context too (audioGraph.ts): it reaches the speaker
 	// as late as the hitsounds. Played by the element itself it doesn't: the hitsounds go
 	// as much earlier as this context takes to the speaker
@@ -288,6 +386,25 @@ function tick() {
 		? 0
 		: ((ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0) +
 			(ctx.baseLatency ?? 0);
+	/** When a time of the song is on the hitsounds' clock */
+	const when = (songTime: number) => anchor!.ctx + (songTime - anchor!.song) / rate / 1000 - late;
+	const jumped = restart || !anchor || anchor.rate !== rate;
+	if (jumped || !(Math.abs(drift) <= (hidden ? FAR_OFF_HIDDEN : FAR_OFF))) {
+		// (only off the clock, not moved: a spin going on goes on, ending where it now should;
+		// started anew it was heard as a click)
+		stopScheduled(!jumped);
+		next = indexAt(chart.events, time);
+		anchor = { song: time, ctx: ctx.currentTime, rate };
+		if (jumped) {
+			nextSpin = chart.spinners.findIndex((spinner) => spinner.end > time);
+			if (nextSpin < 0) nextSpin = chart.spinners.length;
+		} else
+			for (const going of spins) {
+				going.end = Math.max(when(going.spinner.end), ctx.currentTime);
+				going.source.stop(going.end);
+			}
+		restart = false;
+	} else if (Math.abs(drift) > 3) anchor.song += drift * FOLLOW;
 	const now = anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * rate;
 	const ahead = (hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD) * 1000 * rate;
 	const events = chart.events;
@@ -306,6 +423,33 @@ function tick() {
 			scheduled.push({ source, at });
 		}
 	}
+	// The spinners' spin: a loop from its start to its end, its pitch rising on the audio clock
+	// (so it plays on by itself in the background too)
+	const { spinners, spin } = chart;
+	while (spin && nextSpin < spinners.length && spinners[nextSpin].start <= now + ahead) {
+		const spinner = spinners[nextSpin++];
+		const from = Math.max(spinner.start, now);
+		if (from >= spinner.end) continue;
+		const source = ctx.createBufferSource();
+		source.buffer = spin;
+		source.loop = true;
+		const gain = ctx.createGain();
+		gain.gain.value = SPIN_VOLUME;
+		source.connect(gain).connect(master!);
+		const startAt = Math.max(when(from), ctx.currentTime);
+		const top = Math.min(spinTop(spinner), spinner.end);
+		source.playbackRate.setValueAtTime(spinPitch(spinner, from), startAt);
+		if (top > from)
+			source.playbackRate.linearRampToValueAtTime(
+				spinPitch(spinner, top),
+				Math.max(when(top), startAt)
+			);
+		source.start(startAt);
+		const end = Math.max(when(spinner.end), startAt);
+		source.stop(end);
+		spins.push({ source, spinner, end });
+	}
+	if (spins.length > 8) spins = spins.filter((s) => s.end > ctx.currentTime);
 	if (scheduled.length > 64) scheduled = scheduled.filter((s) => s.at > ctx.currentTime - 1);
 }
 

@@ -65,11 +65,13 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
       source.start = (when = 0, ...rest) => {
         const lead = when - this.currentTime;
         const audio = window.__audio;
-        (window.__hitLeads ||= []).push({ lead, song: audio ? audio.currentTime * 1000 + lead * 1000 * audio.playbackRate : null });
+        const song = audio ? audio.currentTime * 1000 + lead * 1000 * audio.playbackRate : null;
+        source.__song = song;
+        (window.__hitLeads ||= []).push({ lead, song });
         (window.__hitPending ||= []).push({ source, when, context: this });
         return start(when, ...rest);
       };
-      source.stop = (...a) => { source.__stopped = true; window.__hitStopped = (window.__hitStopped || 0) + 1; return stop(...a); };
+      source.stop = (...a) => { source.__stopped = true; source.__stops = (source.__stops || 0) + 1; window.__hitStopped = (window.__hitStopped || 0) + 1; return stop(...a); };
       return source;
     };
   });
@@ -402,6 +404,36 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect((await sheet.locator('button[aria-label^="This song\'s offset"]').textContent()).trim() === '0 ms', 'not back to 0');
     await p.mouse.click(200, 60); await wait(400);
     await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+    await p.goto(BASE + '/settings'); await wait(1000);
+    await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
+  });
+
+  await step("hitsounds: a spinner spins (its pitch rising) and pings its bonus spins, as on the desktop", async () => {
+    mock.spinner = true;
+    await p.evaluate(() => caches.delete('stosufy-osu-files'));
+    await p.goto(BASE + '/settings'); await wait(1200);
+    const toggle = p.locator('button[role="switch"]:has-text("Play the hitsounds")');
+    if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
+    await wait(300);
+    await p.evaluate(() => { window.__hitLeads = []; window.__hitPending = []; });
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    await p.waitForFunction(() => window.__audio && window.__audio.currentTime > 5.6, null, { timeout: 15000 });
+    const found = await p.evaluate(() => {
+      const spin = (window.__hitPending || []).filter((s) => s.source.loop);
+      // (the pings that played: not those called off when set anew)
+      const pings = (window.__hitPending || []).filter((s) => !s.source.loop && !s.source.__stops).map((s) => s.source.__song).filter((song) => song != null && song > 2100 && song < 5900);
+      // (set anew only when the song jumps: each before the last one stopped then)
+      const overlapping = spin.slice(0, -1).filter((s) => (s.source.__stops || 0) < 2).length;
+      return { spins: spin.length, overlapping, from: spin.map((s) => `${Math.round(s.source.__song)}/${s.source.__stops}`).join(' '), pitch: spin[0]?.source.playbackRate.value, pings: pings.map(Math.round) };
+    });
+    expect(ops.includes('spinnerspin'), "the spinner's sound wasn't asked for");
+    expect(found.spins >= 1 && !found.overlapping, `spin loops: ${found.spins}, ${found.overlapping} not stopped (from ${found.from})`);
+    expect(found.pitch > 0.45 && found.pitch < 2.3, 'pitch ' + found.pitch);
+    // (13 bonus spins of a 4 s spinner at OD 5, from 3.5 s on, about every 126 ms)
+    expect(found.pings.length === 13, 'bonus pings: ' + found.pings.join(','));
+    expect(Math.abs(found.pings[0] - 3510) < 60, 'first ping at ' + found.pings[0]);
+    mock.spinner = false;
+    await p.evaluate(() => caches.delete('stosufy-osu-files'));
     await p.goto(BASE + '/settings'); await wait(1000);
     await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
   });

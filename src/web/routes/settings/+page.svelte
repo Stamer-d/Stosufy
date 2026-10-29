@@ -32,7 +32,8 @@
 		['whistle', 'Whistle'],
 		['finish', 'Finish'],
 		['clap', 'Clap'],
-		['slidertick', 'Slider ticks']
+		['slidertick', 'Slider ticks'],
+		['spinner', 'Spinner']
 	];
 
 	let settings = $derived($userSettings.settings ?? {});
