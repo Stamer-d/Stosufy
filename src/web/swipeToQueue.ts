@@ -1,6 +1,9 @@
 // use:swipeToQueue on a song's row: dragged to the right (as in Spotify) it shows "add to
 // queue" behind it; let go past the mark, the song goes to the queue. The row springs back
 // either way. Across only: going up or down is the page scrolling.
+// Its touch listeners don't hold scrolling up (passive): the row only lets the browser pan up
+// and down (touch-action: pan-y), so a drag across needs nothing held off. A listener on every
+// row that could cancel the moves made the phone wait on the app for every scroll.
 
 import { haptic } from './haptics';
 
@@ -61,7 +64,6 @@ export function swipeToQueue(row: HTMLElement, onqueue: () => void) {
 			row.style.position = 'relative';
 			row.prepend(behind);
 		}
-		if (event.cancelable) event.preventDefault();
 		// (past the mark it gives a little only, like a rubber band)
 		const limit = mark();
 		offset = dx <= limit ? dx : limit + Math.sqrt(dx - limit) * 4;
@@ -108,7 +110,8 @@ export function swipeToQueue(row: HTMLElement, onqueue: () => void) {
 	}
 
 	row.addEventListener('touchstart', down, { passive: true });
-	row.addEventListener('touchmove', move, { passive: false });
+	row.addEventListener('touchmove', move, { passive: true });
+	row.style.touchAction = 'pan-y';
 	row.addEventListener('touchend', up);
 	row.addEventListener('touchcancel', cancel);
 	return {
