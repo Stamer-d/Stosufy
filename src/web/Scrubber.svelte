@@ -1,7 +1,7 @@
 <script>
 	// Where the song is, to drag (as in Spotify): touch anywhere on the line and it's there,
 	// the line grows and follows the finger, the song jumps there when it's let go.
-	import { time, seek } from './player';
+	import { time, seek, queue } from './player';
 	import { haptic } from './haptics';
 
 	let line = $state();
@@ -16,8 +16,23 @@
 	// again 120 times a second (that warmed the phone)
 	let fill = $state();
 	let thumb = $state();
+	/** Let go here: shown until the song is there (the song tells where it was a moment more,
+	 * while it gets there: the line jumped back for a moment) */
+	let landing = null;
 	$effect(() => {
-		if (dragging == null) now = $time.current;
+		const current = $time.current;
+		const song = $queue.index;
+		if (dragging != null) return;
+		// (another song meanwhile, e.g. dragged to the very end: not held)
+		if (
+			landing &&
+			landing.song === song &&
+			Math.abs(current - landing.at) > 1.5 &&
+			Date.now() < landing.until
+		)
+			return;
+		landing = null;
+		now = current;
 	});
 	$effect(() => {
 		const f = duration ? Math.min(1, shown / duration) : 0;
@@ -44,6 +59,7 @@
 	function end(event) {
 		if (dragging == null) return;
 		if (event.type === 'touchend') {
+			landing = { at: dragging, song: $queue.index, until: Date.now() + 3000 };
 			seek(dragging);
 			now = dragging;
 		}
@@ -51,7 +67,11 @@
 	}
 	// (a mouse: a click on the line)
 	function click(event) {
-		if (duration) seek(at(event.clientX));
+		if (!duration) return;
+		const to = at(event.clientX);
+		landing = { at: to, song: $queue.index, until: Date.now() + 3000 };
+		seek(to);
+		now = to;
 	}
 
 	const clock = (s) =>

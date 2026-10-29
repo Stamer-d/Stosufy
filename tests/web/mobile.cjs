@@ -599,6 +599,27 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     delete mock.durations[next];
   });
 
+  await step("the position line doesn't jump back after a drag while the song gets there", async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(800);
+    await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(600);
+    // (the song takes a while to get there, as a stream does: it tells its old place meanwhile)
+    await p.evaluate(() => {
+      const a = window.__audio;
+      const own = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+      Object.defineProperty(a, 'currentTime', { configurable: true, get() { return own.get.call(this); }, set(v) { setTimeout(() => own.set.call(this, v), 700); } });
+    });
+    const slider = p.locator('.fixed.inset-0.z-30 [role="slider"]');
+    const box = await slider.boundingBox();
+    const max = Number(await slider.getAttribute('aria-valuemax'));
+    await drag(box.x + box.width * 0.2, box.y + box.height / 2, box.width * 0.5, 0, 6, 16);
+    const target = max * 0.7;
+    const seen = [];
+    for (let i = 0; i < 12; i++) { seen.push(Number(await slider.getAttribute('aria-valuenow'))); await wait(100); }
+    await p.evaluate(() => delete window.__audio.currentTime);
+    expect(seen.every((v) => v >= target - 2), 'jumped back: ' + seen.join(','));
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+  });
+
   await step('moving triangles: still unless turned on (this phone only)', async () => {
     const state = async () => { await p.goto(BASE + '/playlist/2'); await wait(1200); return p.evaluate(() => getComputedStyle(document.querySelector('.animate-triangle')).animationPlayState); };
     const flip = async () => { await p.goto(BASE + '/settings'); await wait(1000); await p.locator('button[role="switch"]:has-text("Moving triangles")').click(); await wait(200); };
