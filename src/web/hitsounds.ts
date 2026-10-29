@@ -12,8 +12,9 @@
 import { get, writable } from 'svelte/store';
 import { userSettings, updateUserSettings } from './shims/user';
 import { osuFile } from './osuFiles';
+import { log } from './log';
 import { hitsoundMapId, learnHardest, hardest } from './difficulties';
-import { queue, audioElement } from './player';
+import { queue, audioElement, reclaimNowPlaying } from './player';
 import { songContext, isRouted } from './audioGraph';
 import { parseHitsounds, type HitSample } from '../lib/hitsounds/chart';
 import { builtinSample } from '../lib/hitsounds/builtin';
@@ -116,6 +117,30 @@ export function chooseHitsoundDifficulty(song: MapSet, mapId: string) {
 	updateUserSettings({ gameplayDifficulty: all });
 }
 
+const audioFileOf = (content: string) =>
+	/^AudioFilename\s*:\s*(.+?)\s*$/m.exec(content)?.[1]?.toLowerCase() ?? '';
+
+/**
+ * The chosen (or hardest) difficulty's .osu, if it's of the same audio file as the song's own
+ * difficulty, the one playing: a set's difficulties can have audio files of their own (cut,
+ * sped up, starting elsewhere), and the hitsounds were off by that, another amount each song.
+ * Else the song's own (as the desktop app picks only difficulties of the same audio).
+ */
+async function chartFile(song: MapSet | null, mapId: string) {
+	const own = String(song?.beatmaps?.[0]?.id ?? '');
+	const [content, ownContent] = await Promise.all([
+		osuFile(mapId),
+		own && own !== mapId ? osuFile(own) : Promise.resolve(null)
+	]);
+	if (!ownContent) return content;
+	if (!content) return ownContent;
+	if (audioFileOf(content) === audioFileOf(ownContent)) return content;
+	log(
+		`hitsounds: difficulty ${mapId} has an audio file of its own (${audioFileOf(content)}), the song's own difficulty's instead`
+	);
+	return ownContent;
+}
+
 async function load() {
 	const needsChart = settings().on;
 	const needsTiming = currentMod() === 'NC';
@@ -133,7 +158,7 @@ async function load() {
 	if (key === loadingKey) return;
 	loadingKey = key;
 	if (needsChart) hitsoundStatus.set('loading');
-	const content = await osuFile(mapId);
+	const content = await chartFile(currentSong(), mapId);
 	if (loadingKey !== key) return;
 	if (!content) {
 		chart = null;
@@ -288,7 +313,11 @@ export function setMod(choice: PlaybackMod | string) {
 	const mod = (choice in MODS ? choice : 'NM') as PlaybackMod;
 	updateUserSettings({ mod });
 	// (picked with a tap: the beat's audio may start now)
-	if (mod === 'NC') prepareBeats();
+	if (mod === 'NC') {
+		prepareBeats();
+		// (the beat's audio began playing last: the lock screen's controls back to the song)
+		setTimeout(reclaimNowPlaying, 50);
+	}
 }
 
 function applyCurrentMod() {
@@ -400,7 +429,10 @@ if (typeof window !== 'undefined') {
 			const ctx = audioContext();
 			if (ctx.state === 'suspended') ctx.resume().catch(() => {});
 		}
-		if (currentMod() === 'NC') prepareBeats();
+		if (currentMod() === 'NC') {
+			prepareBeats();
+			setTimeout(reclaimNowPlaying, 50);
+		}
 	};
 	window.addEventListener('pointerdown', wake, true);
 	// To the background: the hitsounds scheduled seconds ahead from now on; back: a moment ahead

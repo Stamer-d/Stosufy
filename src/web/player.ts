@@ -13,6 +13,7 @@ import { log } from './log';
 import { sharpArtwork } from './covers';
 import {
 	wakeGraph,
+	whenRunning,
 	keepRunning,
 	isRouted,
 	graphRunning,
@@ -644,6 +645,16 @@ export function cycleRepeat() {
 	save();
 	readNext();
 }
+
+// The lock screen's controls: iOS gives them to whatever began playing last. An audio context
+// started after the song (the songs' sound through Web Audio, the hitsounds, the Nightcore
+// beat) took them, and for one of those iOS has no position to drag. So the song begins
+// playing again (it plays on: only the order changes) whenever one starts.
+export function reclaimNowPlaying() {
+	if (audio && !audio.paused && audio.src)
+		audio.play().catch((error) => log(`play() turned down: ${error?.name}`));
+}
+if (typeof window !== 'undefined') whenRunning(() => setTimeout(reclaimNowPlaying, 50));
 
 // The loudness setting (the account's) applies at once
 if (typeof window !== 'undefined') userSettings.subscribe(() => applyNormalize());

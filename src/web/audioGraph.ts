@@ -41,9 +41,18 @@ export function songContext(): AudioContext | null {
 		} catch {
 			return null;
 		}
-		context.addEventListener('statechange', () => log(`song audio: ${context!.state}`));
+		context.addEventListener('statechange', () => {
+			log(`song audio: ${context!.state}`);
+			if (context!.state === 'running') for (const listener of onRunning) listener();
+		});
 	}
 	return context;
+}
+
+const onRunning = new Set<() => void>();
+/** Called each time the songs' audio context starts running (again) */
+export function whenRunning(listener: () => void) {
+	onRunning.add(listener);
 }
 
 /**
