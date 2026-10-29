@@ -690,6 +690,23 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     delete mock.durations[next];
   });
 
+  await step('screen locked: a song Safari thinks longer than it is ends at its known length, the queue goes on', async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    const next = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return String(s.songs[s.index + 1].beatmaps[0].id); });
+    // (its sound is 20 s long; the API knows better: 12.5)
+    mock.durations[next] = 12.5;
+    await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Next"]'); await wait(1500);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+    const song = await nowTitle();
+    await p.evaluate(() => { window.__audio.currentTime = 11; Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+    await wait(3000);
+    const after = await nowTitle();
+    await p.evaluate(() => { delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+    delete mock.durations[next];
+    expect(after !== song, 'still ' + song);
+  });
+
   await step("the position line doesn't jump back after a drag while the song gets there", async () => {
     await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(800);
     await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(600);

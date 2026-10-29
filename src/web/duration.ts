@@ -70,6 +70,9 @@ export function askDuration(song: MapSet | null | undefined) {
 		.finally(() => asking.delete(key));
 }
 
+/** The song's length (s) as the Stosufy API told it (0: not known) */
+export const knownDuration = (song: MapSet | null | undefined) => (song && known[keyOf(song)]) || 0;
+
 /**
  * The song's length (s): known, else the element's if it can be (not far past what osu! says
  * the beatmap is long), else osu!'s

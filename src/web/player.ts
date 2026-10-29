@@ -24,7 +24,7 @@ import {
 import { startLoudness, measure, applyNormalize } from './loudness';
 import { userSettings } from './shims/user';
 import { applyMod } from '../lib/stores/mods';
-import { askDuration, songDuration, formatOf } from './duration';
+import { askDuration, songDuration, knownDuration, formatOf } from './duration';
 import { offline } from '../lib/stores/network';
 import type { MapSet } from '../lib/types';
 
@@ -87,6 +87,8 @@ let readAhead: { key: string; url: string } | null = null;
 let lastTime = 0;
 /** The position was changed by hand (going back to the start isn't the song's end then) */
 let seekedByHand = false;
+/** The song's end was seen by its known length (once, until it's before its end again) */
+let endedHere = false;
 /** The song in the <audio> element (none after a start: it loads at the first play) */
 let loaded: MapSet | null = null;
 /** The app paused it itself (else it was the system: a call, Siri, headphones out…) */
@@ -167,6 +169,12 @@ function create() {
 		// (back at its start by itself: its end. Not by its length: Safari may get that wrong)
 		const wentRound = lastTime > 5 && now < 2 && now < lastTime - 3;
 		lastTime = now;
+		// (or at its end by the length the Stosufy API knows: Safari, thinking the song longer
+		// than it is, may stand at the end of its sound, and with the screen locked nothing else
+		// notices then: the queue stood still)
+		const sure = get(previewOnly) ? 0 : knownDuration(loaded);
+		if (sure && now < sure - 2) endedHere = false;
+		const atItsEnd = !!sure && now >= sure - 0.25 && !endedHere;
 		const sleep = get(sleepTimer);
 		if (sleep && 'at' in sleep && Date.now() >= sleep.at) {
 			sleepTimer.set(null);
@@ -178,6 +186,10 @@ function create() {
 		measure();
 		if (wentRound && !seekedByHand) {
 			log('song went round: its end');
+			songEnded();
+		} else if (atItsEnd && !seekedByHand) {
+			endedHere = true;
+			log('at its end (its known length)');
 			songEnded();
 		} else if (!seekedByHand) crossfadeIfDue(now, duration);
 		seekedByHand = false;
@@ -725,13 +737,14 @@ if (typeof window !== 'undefined') {
 	let last = -1;
 	setInterval(() => {
 		const song = current();
-		if (!audio || audio.paused || !song || document.hidden || audio.src.startsWith('blob:')) {
+		if (!audio || audio.paused || !song) {
 			still = 0;
 			return;
 		}
 		still = audio.currentTime === last ? still + 1 : 0;
 		last = audio.currentTime;
-		// (standing at its very end: that's its end, as Safari may think it longer than it is)
+		// (standing at its very end: that's its end, as Safari may think it longer than it is.
+		// Also in the background and for downloaded songs: the queue would stand still there)
 		const length = lengthOf(audio);
 		if (still >= 2 && length && audio.currentTime >= length - 1.5) {
 			still = 0;
@@ -739,6 +752,7 @@ if (typeof window !== 'undefined') {
 			songEnded();
 			return;
 		}
+		if (document.hidden || audio.src.startsWith('blob:')) return;
 		if (still < 4 || !navigator.onLine || retries >= 4) return;
 		still = 0;
 		retries++;
