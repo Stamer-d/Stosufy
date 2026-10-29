@@ -7,6 +7,7 @@
 
 import { haptic } from './haptics';
 import { log } from './log';
+import { frameMeter, gestureNote as note } from './frameMeter';
 import { writable, get } from 'svelte/store';
 import { goto, onNavigate, afterNavigate, preloadCode } from '$app/navigation';
 
@@ -284,6 +285,7 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 	let dx = 0;
 	let tracking = false;
 	let samples: { x: number; t: number }[] = [];
+	let meter: ReturnType<typeof frameMeter> | null = null;
 	const EDGE = 28;
 	window.addEventListener(
 		'touchstart',
@@ -296,6 +298,10 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			dx = 0;
 			tracking = false;
 			samples = [{ x: touch.clientX, t: performance.now() }];
+			// The page before put under this one already now, not at the first move: that work
+			// (a page's worth) then isn't in the first frames of the swipe
+			const element = page();
+			if (element) showUnderlay(element);
 		},
 		{ passive: true }
 	);
@@ -308,10 +314,15 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 			const y = touch.clientY - start.y;
 			const element = page();
 			if (!tracking) {
-				if (Math.abs(y) > Math.abs(x) && Math.abs(y) > 10) return void (start = null);
+				// (up or down: not this, the page as it was)
+				if (Math.abs(y) > Math.abs(x) && Math.abs(y) > 10) {
+					start = null;
+					undoSwipe();
+					return;
+				}
 				if (x < 8) return;
 				tracking = true;
-				if (element) showUnderlay(element);
+				meter = frameMeter('swipe back', note);
 			}
 			const now = performance.now();
 			samples.push({ x: touch.clientX, t: now });
@@ -329,7 +340,10 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		if (!start) return;
 		start = null;
 		const element = page();
-		if (!tracking || !element) return;
+		// (a tap at the edge, not a swipe: the page as it was)
+		if (!tracking || !element) return void undoSwipe();
+		meter?.release();
+		meter = null;
 		const first = samples[0];
 		const last = samples[samples.length - 1];
 		const speed = first && last && last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
@@ -381,10 +395,10 @@ export function setupNavigation(page: () => HTMLElement | undefined) {
 		const swiping = tracking;
 		start = null;
 		tracking = false;
-		if (swiping) {
-			log('edge swipe: the touch was taken away');
-			undoSwipe();
-		}
+		meter?.cancel();
+		meter = null;
+		if (swiping) log('edge swipe: the touch was taken away');
+		undoSwipe();
 	});
 	// Gone back without the app (iOS' own swipe after all) while the app's swipe was on: the
 	// app's called off, so it isn't two pages back

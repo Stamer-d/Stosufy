@@ -147,7 +147,7 @@
 	<div
 		class="fixed inset-0 z-30 flex flex-col bg-app pt-[env(safe-area-inset-top)] pb-[calc(env(safe-area-inset-bottom)+1rem)]"
 		transition:fly={{ y: 900, duration: 280, opacity: 1 }}
-		use:swipe={{ axis: 'y', only: 1, onswipe: close }}
+		use:swipe={{ axis: 'y', only: 1, onswipe: close, measure: 'player swiped down' }}
 	>
 		<!-- The song's background, dimmed like the desktop app's, with osu!'s triangles -->
 		<SongBackdrop {song} dim={0.7} />

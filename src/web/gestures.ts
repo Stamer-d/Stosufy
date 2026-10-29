@@ -6,6 +6,7 @@
 // events give up when the browser starts to scroll, and the drag stops halfway).
 
 import { haptic } from './haptics';
+import { frameMeter, gestureNote } from './frameMeter';
 
 interface SwipeOptions {
 	/** Which way it can be dragged */
@@ -14,6 +15,8 @@ interface SwipeOptions {
 	onswipe: (direction: -1 | 1) => void;
 	/** Only down (y) or only these directions count */
 	only?: -1 | 1;
+	/** Its smoothness measured and logged under this name */
+	measure?: string;
 }
 
 /** Of the element's size, how far counts without a flick */
@@ -28,6 +31,7 @@ export function swipe(node: HTMLElement, options: SwipeOptions) {
 	let offset = 0;
 	/** The last moments of the drag, for the speed at its end */
 	let samples: { v: number; t: number }[] = [];
+	let meter: ReturnType<typeof frameMeter> | null = null;
 
 	const place = (value: number, transition = 'none') => {
 		node.style.transition = transition;
@@ -72,6 +76,7 @@ export function swipe(node: HTMLElement, options: SwipeOptions) {
 				return;
 			}
 			dragging = true;
+			if (current.measure) meter = frameMeter(current.measure, gestureNote);
 		}
 		// (it's this drag now, not the page scrolling)
 		if (event.cancelable) event.preventDefault();
@@ -90,6 +95,8 @@ export function swipe(node: HTMLElement, options: SwipeOptions) {
 		const wasDragging = dragging;
 		start = null;
 		dragging = false;
+		meter?.release();
+		meter = null;
 		if (!wasDragging) return;
 		// (the drag isn't a tap on what's under the finger)
 		const stopClick = (click: Event) => {
