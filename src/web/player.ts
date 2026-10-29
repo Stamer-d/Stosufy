@@ -23,6 +23,7 @@ import {
 import { startLoudness, measure, applyNormalize } from './loudness';
 import { userSettings } from './shims/user';
 import { applyMod } from '../lib/stores/mods';
+import { askDuration, songDuration } from './duration';
 import { offline } from '../lib/stores/network';
 import type { MapSet } from '../lib/types';
 
@@ -160,9 +161,10 @@ function create() {
 	player.addEventListener('timeupdate', () => {
 		if (!mine()) return;
 		const now = player.currentTime;
-		const duration = player.duration || 0;
+		const duration = lengthOf(player);
 		time.set({ current: now, duration });
-		const wentRound = duration > 0 && lastTime > duration - 3 && now < 2 && now < lastTime;
+		// (back at its start by itself: its end. Not by its length: Safari may get that wrong)
+		const wentRound = lastTime > 5 && now < 2 && now < lastTime - 3;
 		lastTime = now;
 		const sleep = get(sleepTimer);
 		if (sleep && 'at' in sleep && Date.now() >= sleep.at) {
@@ -201,6 +203,7 @@ function create() {
 			log(`stream broke off at ${Math.round(at)}s (error ${code}): again, try ${retries}`);
 			setTimeout(() => {
 				if (current() !== song || !mine()) return;
+				lastTime = 0;
 				player.src = streamUrl(song);
 				player.currentTime = at;
 				player.play().catch((error) => log(`play() turned down: ${error?.name}`));
@@ -211,6 +214,7 @@ function create() {
 		if (!get(previewOnly)) {
 			log(`no stream for ${song.title} (error ${code}): its preview`);
 			previewOnly.set(true);
+			lastTime = 0;
 			player.src = previewUrl(song);
 			player.play().catch(() => {});
 			return;
@@ -247,6 +251,10 @@ export function wakeAudio() {
 	}
 	wakeGraph([main, spare]);
 }
+/** How long the song in this element is (Safari's guess only when it can be: duration.ts) */
+const lengthOf = (player: HTMLAudioElement) =>
+	songDuration(player === audio ? loaded : null, player.duration);
+
 const current = () => {
 	const { songs, index } = get(queue);
 	return songs[index] ?? null;
@@ -272,6 +280,7 @@ function load(at = 0) {
 		crossfading = false;
 		unfade(player);
 		startLoudness(player, key);
+		askDuration(song);
 		player.src = url;
 		// (where to start, once it knows how long the song is: before, browsers may forget it)
 		if (at) {
@@ -384,6 +393,7 @@ function crossfadeIfDue(now: number, duration: number) {
 			previewOnly.set(false);
 			audioElement.set(incoming);
 			startLoudness(incoming, key);
+			askDuration(song);
 			showInMediaSession(song);
 			fadeTo(incoming, 1, seconds);
 			fadeTo(main, 0, seconds);
@@ -536,7 +546,8 @@ export function seek(seconds: number) {
 	}
 	// Dragged to the very end: that's the song's end (it loops, so it would start over at once,
 	// before its end could be seen)
-	if (player.duration && seconds >= player.duration - 0.5) {
+	const duration = lengthOf(player);
+	if (duration && seconds >= duration - 0.5) {
 		log('dragged to the end');
 		songEnded();
 		return;
@@ -652,7 +663,7 @@ function save() {
 				ordered,
 				// (before the first play the song isn't in the audio yet: where it was kept)
 				at: loaded && audio ? audio.currentTime : get(time).current,
-				duration: (loaded && audio?.duration) || get(time).duration,
+				duration: (loaded && audio && lengthOf(audio)) || get(time).duration,
 				shuffle: get(shuffle),
 				repeat: get(repeat),
 				autoplay: get(autoplay),
@@ -704,11 +715,20 @@ if (typeof window !== 'undefined') {
 		}
 		still = audio.currentTime === last ? still + 1 : 0;
 		last = audio.currentTime;
+		// (standing at its very end: that's its end, as Safari may think it longer than it is)
+		const length = lengthOf(audio);
+		if (still >= 2 && length && audio.currentTime >= length - 1.5) {
+			still = 0;
+			log('stood still at its end: its end');
+			songEnded();
+			return;
+		}
 		if (still < 4 || !navigator.onLine || retries >= 4) return;
 		still = 0;
 		retries++;
 		const at = audio.currentTime;
 		log(`stream stood still at ${Math.round(at)}s: again, try ${retries}`);
+		lastTime = 0;
 		audio.src = get(previewOnly) ? previewUrl(song) : streamUrl(song);
 		audio.currentTime = at;
 		audio.play().catch((error) => log(`play() turned down: ${error?.name}`));
@@ -745,11 +765,12 @@ function setupMediaSession() {
 }
 
 function updatePosition() {
-	if (!audio || !('mediaSession' in navigator) || !audio.duration) return;
+	const duration = audio ? lengthOf(audio) : 0;
+	if (!audio || !('mediaSession' in navigator) || !duration) return;
 	try {
 		navigator.mediaSession.setPositionState({
-			duration: audio.duration,
-			position: Math.min(audio.currentTime, audio.duration),
+			duration,
+			position: Math.min(audio.currentTime, duration),
 			playbackRate: audio.playbackRate || 1
 		});
 	} catch {

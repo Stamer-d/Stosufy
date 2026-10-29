@@ -1,7 +1,7 @@
 // The phone suite: gestures (and cancelling them), the keyboard, a long session (leaks), a
 // performance budget on a slowed-down CPU, offline, a breaking stream. Installed-app mode.
 const { devices } = require('playwright');
-const { setup, login, launch, touchInput, isChromium, BROWSER, ops } = require('./harness.cjs');
+const { setup, login, launch, touchInput, isChromium, BROWSER, ops, state: mock } = require('./harness.cjs');
 const BASE = 'http://127.0.0.1:5288/Stosufy';
 const results = [];
 let p, cdp, finger;
@@ -335,7 +335,9 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
         .map((h) => ({ song: audio.currentTime * 1000 + (h.when - h.context.currentTime) * 1000 * audio.playbackRate }));
     });
     expect(pending.length > 0, 'nothing scheduled ahead after sleeping');
-    expect(offBeat(pending) < 60, 'scheduled before sleeping: off the beat by ' + Math.round(offBeat(pending)) + ' ms');
+    // (100 ms: read off the song's own clock, which WebKit updates coarsely on a slow machine;
+    // what this catches was 250 ms off)
+    expect(offBeat(pending) < 100, 'scheduled before sleeping: off the beat by ' + Math.round(offBeat(pending)) + ' ms');
     // paused from the lock screen: what's scheduled is called off
     await p.locator('.dock button[aria-label="Pause"]').first().click(); await wait(400);
     const stopped = await p.evaluate(() => window.__hitStopped || 0);
@@ -580,6 +582,21 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   await step('the library has no log out button (it is in the settings)', async () => {
     await tab('Library'); if (path() !== '/library') await tab('Library');
     expect(!(await p.locator('main button:has-text("Log out")').count()), 'still there');
+  });
+
+  await step("a song's length is the Stosufy API's when it knows (Safari may guess it twice as long)", async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    const next = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return String(s.songs[s.index + 1].beatmaps[0].id); });
+    mock.durations[next] = 12.5;
+    await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Next"]'); await wait(1500);
+    expect(ops.includes('duration:' + next), 'not asked');
+    const max = Number(await p.locator('.fixed.inset-0.z-30 [role="slider"]').getAttribute('aria-valuemax'));
+    expect(Math.abs(max - 12.5) < 0.6, 'length shown ' + max + ', not 12.5');
+    const kept = await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-durations') || '{}'));
+    expect(kept[next] === 12.5, 'not kept: ' + JSON.stringify(kept));
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+    delete mock.durations[next];
   });
 
   await step('moving triangles: still unless turned on (this phone only)', async () => {

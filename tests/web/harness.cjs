@@ -29,7 +29,9 @@ const state = {
   settings: { appearance: { accent: 'teal', background: true, dim: 60 }, smartPlaylists: [{ id: 'abc', title: 'Smart mix', seeds: [{ id: 103, mapId: 1002, title: 'Song number 3', artist: 'Artist 3', genre: 'Anime', language: 'Japanese' }], filled: [], removed: [], online: false, size: 25 }] },
   settingsAt: 1000,
   publicLists: Array.from({ length: 40 }, (_, i) => ({ id: 500 + i, title: `Public list ${i}`, createdBy: 99, public: true, songAmount: 25, saves: 40 - i, creator: { osuId: 77, username: 'someone', avatarUrl: null } })),
-  saved: new Set()
+  saved: new Set(),
+  /** How long songs are, by difficulty (the duration API's answers) */
+  durations: {}
 };
 async function setup(ctx, { lyrics = true } = {}) {
   await ctx.route(/^https?:\/\/(?!127\.0\.0\.1).*/, async (original) => {
@@ -56,6 +58,12 @@ async function setup(ctx, { lyrics = true } = {}) {
       ops.push('osufile:' + url.split('/').pop());
       const objs = Array.from({ length: 40 }, (_, i) => `256,192,${500 + i * 500},1,${i % 4 === 0 ? 2 : 0},0:0:0:0:`).join('\n');
       return route.fulfill({ body: `osu file format v14\n\n[General]\nSampleSet: Soft\n\n[TimingPoints]\n0,500,4,2,0,80,1,0\n\n[HitObjects]\n${objs}\n`, headers: { 'access-control-allow-origin': '*' } });
+    }
+    // (how long a song is: as the test says, else not known)
+    if (url.includes('/stosufy/duration/')) {
+      const id = url.split('/').pop();
+      ops.push('duration:' + id);
+      return state.durations[id] ? route.fulfill({ json: { seconds: state.durations[id] } }) : route.fulfill({ status: 404, json: {} });
     }
     if (url.includes('/stosufy/web-login')) return route.fulfill({ status: 503, json: {} });
     if (url.includes('/stosufy/osu/beatmapsets/search')) ops.push('search:' + new URL(url).search);

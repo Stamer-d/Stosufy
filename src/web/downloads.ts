@@ -4,6 +4,7 @@
 
 import { osuFile } from './osuFiles';
 import { hitsoundMapId, learnHardest } from './difficulties';
+import { askDuration } from './duration';
 import { get, writable } from 'svelte/store';
 import { keyOf, slim, streamUrl } from './songs';
 import type { MapSet } from '../lib/types';
@@ -124,6 +125,8 @@ export async function download(song: MapSet) {
 		learnHardest(song)
 			.then(() => osuFile(hitsoundMapId(song)))
 			.catch(() => {});
+		// (and how long it is: Safari may get that wrong, offline too)
+		askDuration(song);
 	} finally {
 		downloading.update((all) => without(all, key));
 	}
