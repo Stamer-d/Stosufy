@@ -3,7 +3,7 @@
 	// Your library, as the desktop app's sidebar: the downloads, the liked songs, your
 	// playlists and the ones you saved; + makes a new one
 	import { goto } from '$app/navigation';
-	import { keyStore, logOut } from '../../shims/auth';
+	import { keyStore } from '../../shims/auth';
 	import { playlists, savedPlaylists, createPlaylist } from '../../../lib/stores/playlist';
 	import { showToast } from '../../../lib/stores/toast';
 	import { libraryState, loadLibrary } from '../../library';
@@ -176,8 +176,3 @@
 		<span class="icon-[svg-spinners--ring-resize] size-6 text-secondary-600"></span>
 	</div>
 {/if}
-<div class="px-4 pb-6 flex justify-center">
-	<button class="h-10 px-4 rounded-full bg-white/[0.06] text-sm text-secondary-600" onclick={logOut}
-		>Log out</button
-	>
-</div>

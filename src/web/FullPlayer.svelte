@@ -242,9 +242,11 @@
 				</ol>
 			{:else}
 				<div class="player-cover flex-1 min-h-0 flex items-center">
-					<SongSwipe class="w-full">
+					<!-- (as wide as the screen: the cover's shadow has room at its sides; only the
+					     sides clip, so the shadow below isn't cut off) -->
+					<SongSwipe class="-mx-6 w-[calc(100%+3rem)]">
 						{#snippet item(shown, middle)}
-							<div class="px-1">
+							<div class="px-7">
 								<!-- (the big picture for the song in the middle, and for the ones left and right
 								     once it's loaded ahead: never the small one stretched while it loads) -->
 								<img
@@ -253,7 +255,7 @@
 										: coverUrl(shown)}
 									alt=""
 									decoding="async"
-									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-2xl shadow-black/50 bg-secondary-300 bg-cover bg-center"
+									class="mx-auto w-full aspect-square object-cover rounded-xl shadow-[0_12px_32px_-4px_rgb(0_0_0/0.55)] bg-secondary-300 bg-cover bg-center"
 									style="max-width: min(100%, 46dvh, calc(100dvh - 26rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))); background-image: url({coverUrl(
 										shown
 									)})"

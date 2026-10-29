@@ -6,6 +6,7 @@
 	// Touch events: on iOS they're the dependable ones.
 	import { haptic } from './haptics';
 	import { queue, repeat, next, previous } from './player';
+	import { songKey } from '../lib/tracks';
 
 	/** @type {{ item: import('svelte').Snippet<[import('../lib/types').MapSet, boolean]>, class?: string }} */
 	let { item, class: className = '' } = $props();
@@ -27,6 +28,14 @@
 			// (two songs on repeat: the other one waits on the right only)
 			.filter(([at, place]) => at >= 0 && songs[at] && !(place === -1 && at === afterAt))
 			.map(([at, place]) => ({ at, place, song: songs[at] }))
+			// Known by the song, not its place in the queue: shuffle turned on puts the song at
+			// the queue's start, and by its place it was a new element (its cover loaded again,
+			// a flicker). The same song twice side by side: by its place too
+			.map((pane, i, all) => {
+				const key = songKey(pane.song);
+				const twice = all.some((other, j) => j !== i && songKey(other.song) === key);
+				return { ...pane, key: twice ? `${key}@${pane.place}` : key };
+			})
 	);
 	let hasBefore = $derived(beforeAt >= 0);
 	let hasAfter = $derived(afterAt >= 0);
@@ -119,7 +128,7 @@
 
 <div
 	bind:this={box}
-	class="relative overflow-hidden {className}"
+	class="relative overflow-x-clip {className}"
 	style="touch-action: pan-y"
 	ontouchstart={touchstart}
 	ontouchmove={touchmove}
@@ -134,7 +143,7 @@
 		class="relative w-full"
 		style="transform: translate3d({offset}px, 0, 0); transition: {transition}"
 	>
-		{#each panes as pane (pane.at)}
+		{#each panes as pane (pane.key)}
 			<div
 				class={pane.place === 0 ? 'relative w-full' : 'absolute inset-y-0 w-full'}
 				style={pane.place === 0 ? '' : `left: ${pane.place * 100}%`}

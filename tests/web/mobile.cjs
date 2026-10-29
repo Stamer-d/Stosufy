@@ -555,6 +555,33 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect(await p.evaluate(() => window.__audio.paused), 'not paused');
   });
 
+  await step("shuffle turned on in the player: the cover stays (the same picture, not loaded again)", async () => {
+    // (a song not at the start: shuffle puts it there)
+    await tab('Library'); await p.click('text=Chill'); await wait(900);
+    if (await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-player') || '{}').shuffle)) {
+      await playFirst(); await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(600);
+      await p.click('.fixed.inset-0.z-30 button[aria-label="Shuffle"]'); await wait(300);
+      await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+    }
+    await p.locator('main ol > li').nth(3).evaluate((li) => li.scrollIntoView({ block: 'center' })); await wait(300);
+    await p.locator('main ol > li').nth(3).locator('button').first().click(); await wait(800);
+    await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(800);
+    const cover = () => p.locator('.fixed.inset-0.z-30 .player-cover [aria-hidden="false"] img');
+    await p.evaluate(() => (window.__cover = document.querySelector('.fixed.inset-0.z-30 .player-cover [aria-hidden="false"] img')));
+    const src = await cover().getAttribute('src');
+    for (let i = 0; i < 2; i++) {
+      await p.click('.fixed.inset-0.z-30 button[aria-label="Shuffle"]'); await wait(500);
+      expect(await p.evaluate(() => window.__cover?.isConnected && window.__cover === document.querySelector('.fixed.inset-0.z-30 .player-cover [aria-hidden="false"] img')), 'the cover was made again (flicker)');
+      expect((await cover().getAttribute('src')) === src, 'another picture');
+    }
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
+  });
+
+  await step('the library has no log out button (it is in the settings)', async () => {
+    await tab('Library'); if (path() !== '/library') await tab('Library');
+    expect(!(await p.locator('main button:has-text("Log out")').count()), 'still there');
+  });
+
   await step('moving triangles: still unless turned on (this phone only)', async () => {
     const state = async () => { await p.goto(BASE + '/playlist/2'); await wait(1200); return p.evaluate(() => getComputedStyle(document.querySelector('.animate-triangle')).animationPlayState); };
     const flip = async () => { await p.goto(BASE + '/settings'); await wait(1000); await p.locator('button[role="switch"]:has-text("Moving triangles")').click(); await wait(200); };
