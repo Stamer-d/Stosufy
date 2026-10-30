@@ -1,5 +1,6 @@
 // The skin's gameplay images (hit circles, approach circles, cursor, slider ball, numbers)
-// and colours from its skin.ini. Missing elements are drawn by the renderer itself.
+// and colours from its skin.ini, from a skin folder or Stosufy's own skin (./stosufy, made by
+// scripts/stosufy-skin.js). Missing elements are drawn by the renderer itself.
 
 import { readDir, readFile } from '@tauri-apps/plugin-fs';
 import * as path from '@tauri-apps/api/path';
@@ -139,28 +140,65 @@ const rgb = (text: string | undefined) => {
 		: null;
 };
 
+/** The skin that comes with Stosufy (its files are in ./stosufy), instead of a folder */
+export const STOSUFY_SKIN = 'stosufy:gameplay';
+
+const bundled = import.meta.glob('./stosufy/*', {
+	query: '?url',
+	import: 'default',
+	eager: true
+}) as Record<string, string>;
+
+/** Where a skin's files are: a folder, or the app's own files */
+interface SkinFiles {
+	/** The files in a folder of the skin ([]: the skin's own folder), by lowercase name */
+	list(folder: string[]): Promise<Map<string, string>>;
+	read(folder: string[], file: string): Promise<Uint8Array<ArrayBuffer> | ArrayBuffer>;
+}
+
+const folderFiles = (dir: string): SkinFiles => ({
+	async list(folder) {
+		const entries = await readDir(await path.join(dir, ...folder));
+		return new Map(entries.filter((e) => e.isFile).map((e) => [e.name.toLowerCase(), e.name]));
+	},
+	async read(folder, file) {
+		return readFile(await path.join(dir, ...folder, file));
+	}
+});
+
+const bundledFiles: SkinFiles = {
+	async list(folder) {
+		if (folder.length) return new Map();
+		const names = Object.keys(bundled).map((file) => file.split('/').pop()!);
+		return new Map(names.map((name) => [name.toLowerCase(), name]));
+	},
+	async read(_, file) {
+		const response = await globalThis.fetch(bundled[`./stosufy/${file}`]);
+		if (!response.ok) throw new Error(`HTTP ${response.status}`);
+		return response.arrayBuffer();
+	}
+};
+
 const cache = new Map<string, Promise<GameplaySkin>>();
 
-/** The gameplay elements of a skin folder (null: none, everything drawn) */
+/** The gameplay elements of a skin folder or STOSUFY_SKIN (null: none, everything drawn) */
 export function loadGameplaySkin(dir: string | null): Promise<GameplaySkin> {
 	if (!dir) return Promise.resolve(EMPTY_SKIN);
-	if (!cache.has(dir)) cache.set(dir, load(dir));
+	if (!cache.has(dir))
+		cache.set(dir, load(dir, dir === STOSUFY_SKIN ? bundledFiles : folderFiles(dir)));
 	return cache.get(dir)!;
 }
 
-async function load(dir: string): Promise<GameplaySkin> {
-	let entries: { name: string; isFile: boolean }[] = [];
+async function load(dir: string, source: SkinFiles): Promise<GameplaySkin> {
+	let byName: Map<string, string>;
 	try {
-		entries = await readDir(dir);
+		byName = await source.list([]);
 	} catch (error) {
 		console.warn('Could not read the skin for the gameplay', dir, error);
 		return EMPTY_SKIN;
 	}
-	const byName = new Map(
-		entries.filter((e) => e.isFile).map((e) => [e.name.toLowerCase(), e.name])
-	);
 
-	const image = async (folder: string, files: Map<string, string>, name: string) => {
+	const image = async (folder: string[], files: Map<string, string>, name: string) => {
 		for (const [suffix, scale] of [
 			['@2x.png', 0.5],
 			['.png', 1]
@@ -168,7 +206,7 @@ async function load(dir: string): Promise<GameplaySkin> {
 			const file = files.get((name + suffix).toLowerCase());
 			if (!file) continue;
 			try {
-				const data = await readFile(await path.join(folder, file));
+				const data = await source.read(folder, file);
 				// Skins use 1×1 transparent pictures to hide an element
 				const bitmap = await createImageBitmap(new Blob([data]));
 				return { image: bitmap, scale };
@@ -183,26 +221,22 @@ async function load(dir: string): Promise<GameplaySkin> {
 	const frames = async (name: string, separator: string) => {
 		const list: SkinImage[] = [];
 		for (let i = 0; i < 120; i++) {
-			const frame = await image(dir, byName, `${name}${separator}${i}`);
+			const frame = await image([], byName, `${name}${separator}${i}`);
 			if (!frame) break;
 			list.push(frame);
 		}
 		if (list.length) return list;
-		const still = await image(dir, byName, name);
+		const still = await image([], byName, name);
 		return still ? [still] : [];
 	};
 
 	const element = async (name: string) =>
-		(await image(dir, byName, name)) ??
-		(ANIMATED.has(name) ? await image(dir, byName, `${name}-0`) : null);
+		(await image([], byName, name)) ??
+		(ANIMATED.has(name) ? await image([], byName, `${name}-0`) : null);
 
 	const iniFile = byName.get('skin.ini');
 	const settings = iniFile
-		? ini(
-				new TextDecoder().decode(
-					await readFile(await path.join(dir, iniFile)).catch(() => new Uint8Array())
-				)
-			)
+		? ini(new TextDecoder().decode(await source.read([], iniFile).catch(() => new Uint8Array())))
 		: {};
 
 	const images: GameplaySkin['images'] = {};
@@ -217,17 +251,8 @@ async function load(dir: string): Promise<GameplaySkin> {
 	// prefixes from skin.ini (which can be in a folder)
 	const font = async (prefixSetting: string | undefined, fallback: string) => {
 		const prefix = (prefixSetting || fallback).replace(/\\/g, '/');
-		let folder = dir;
-		let files = byName;
-		if (prefix.includes('/')) {
-			folder = await path.join(dir, ...prefix.split('/').slice(0, -1));
-			try {
-				const inner = await readDir(folder);
-				files = new Map(inner.filter((e) => e.isFile).map((e) => [e.name.toLowerCase(), e.name]));
-			} catch {
-				files = new Map();
-			}
-		}
+		const folder = prefix.split('/').slice(0, -1);
+		const files = folder.length ? await source.list(folder).catch(() => new Map()) : byName;
 		const name = prefix.split('/').pop()!;
 		const glyphs: Record<string, SkinImage | null> = {};
 		await Promise.all([

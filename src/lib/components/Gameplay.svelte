@@ -18,7 +18,12 @@
 	import { beatmapContent, playSoundNow } from '#lib/hitsounds/player.ts';
 	import { skinFolder, skinsChanged, completeDefaultSkin, BUILTIN } from '#lib/hitsounds/skins.ts';
 	import { parseGameplay, MOD } from '#lib/gameplay/beatmap.ts';
-	import { loadGameplaySkin, forgetGameplaySkins, withFallback } from '#lib/gameplay/skin.ts';
+	import {
+		loadGameplaySkin,
+		forgetGameplaySkins,
+		withFallback,
+		STOSUFY_SKIN
+	} from '#lib/gameplay/skin.ts';
 	import { createGameplayRenderer, lastCursorPosition } from '#lib/gameplay/render.ts';
 	import {
 		autoplayFor,
@@ -174,8 +179,10 @@
 				message = content ? 'Gameplay is only for osu!standard maps' : "Couldn't load the beatmap";
 				return;
 			}
-			const dir = skin === BUILTIN ? null : await skinFolder(skin);
-			const fallbackDir = skin === BUILTIN ? null : await skinFolder(null);
+			// No skin chosen: Stosufy's own, which has all it needs (the osu! default skin fills
+			// in what a chosen skin lacks)
+			const dir = skin === BUILTIN ? null : skin ? await skinFolder(skin) : STOSUFY_SKIN;
+			const fallbackDir = skin === BUILTIN || !skin ? null : await skinFolder(null);
 			const [own, fallback] = await Promise.all([
 				loadGameplaySkin(dir),
 				loadGameplaySkin(fallbackDir)
