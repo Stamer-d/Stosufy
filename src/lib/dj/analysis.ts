@@ -50,6 +50,8 @@ export interface SongAnalysis {
 	peakMid: number;
 	/** The loudest bar's level (RMS): the bars' energies times this are levels */
 	loudest: number;
+	/** The loudest bar's bass, mids and highs (RMS): the bars' bands times these are levels */
+	bandsLoudest: { bass: number; mid: number; high: number };
 	key: { camelot: string; pitch: number; minor: boolean; confidence: number } | null;
 	/** How far the beatmap's grid was off the beats in this audio (s): added to it */
 	shift: number;
@@ -70,15 +72,20 @@ export function barIndex(a: SongAnalysis, time: number) {
 	return lo;
 }
 
-/** A time some bars after another (on the song's own bars, across tempo changes too) */
+/**
+ * A time some bars after another (on the song's own bars, across tempo changes too). Part of
+ * a bar (half time against double time) is that part of the main bar.
+ */
 export function barsLater(a: SongAnalysis, time: number, bars: number) {
 	const i = barIndex(a, time);
 	if (i < 0) return time + bars * a.bar;
+	const whole = Math.floor(bars + 1e-9);
+	const part = (bars - whole) * a.bar;
 	const into = time - a.bars[i].start;
-	const j = i + bars;
-	if (j < 0) return a.bars[0].start + j * a.bar + into;
-	if (j >= a.bars.length) return a.bars.at(-1)!.end + (j - a.bars.length) * a.bar + into;
-	return a.bars[j].start + into;
+	const j = i + whole;
+	if (j < 0) return a.bars[0].start + j * a.bar + into + part;
+	if (j >= a.bars.length) return a.bars.at(-1)!.end + (j - a.bars.length) * a.bar + into + part;
+	return a.bars[j].start + into + part;
 }
 
 /** Bars from one downbeat to another */
@@ -114,7 +121,10 @@ export function barCeil(a: SongAnalysis, time: number) {
  * as loud as its peaks (a verse with vocals, the full beat). What comes before is its intro.
  */
 export function kickIn(a: SongAnalysis, from: number) {
-	const peak = a.drops.find((d) => d.start > from + a.bar * 0.5)?.start ?? Infinity;
+	// (a peak of a few bars in an intro, a mapper's flash, isn't where it gets going)
+	const peak =
+		a.drops.find((d) => d.start > from + a.bar * 0.5 && d.end - d.start >= a.bar * 3.5)?.start ??
+		Infinity;
 	const i = Math.max(0, barIndex(a, from));
 	let loud = Infinity;
 	// (nearly as loud as its peaks, or with mids as full: a beat alone isn't the song yet)
@@ -595,6 +605,7 @@ export async function analyzeSong(
 		peakLevel,
 		peakMid,
 		loudest,
+		bandsLoudest: { bass: deepest, mid: fullest, high: brightest },
 		key: null,
 		shift
 	};
@@ -725,6 +736,7 @@ export function roughAnalysis(grid: Grid, duration: number, cue: number): SongAn
 		peakLevel: 1,
 		peakMid: 1,
 		loudest: 1,
+		bandsLoudest: { bass: 1, mid: 1, high: 1 },
 		key: null,
 		shift: 0
 	};
