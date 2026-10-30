@@ -10,7 +10,7 @@ Every song from osu!'s beatmaps, with playlists, lyrics, gameplay and a DJ mode.
 </p>
 
 <p align="center">
-<a href="https://github.com/Stamer-d/Stosufy/releases/latest"><img alt="Download for Windows" src="https://img.shields.io/github/v/release/Stamer-d/Stosufy?label=windows&style=flat-square&color=8b5cf6" /></a>
+<a href="https://github.com/Stamer-d/Stosufy/releases/latest"><img alt="Download" src="https://img.shields.io/github/v/release/Stamer-d/Stosufy?label=download&style=flat-square&color=8b5cf6" /></a>
 <a href="https://stamer-d.github.io/Stosufy/"><img alt="Web app for your phone" src="https://img.shields.io/badge/phone-web%20app-8b5cf6?style=flat-square" /></a>
 <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/github/license/Stamer-d/Stosufy?style=flat-square" /></a>
 </p>
@@ -27,13 +27,16 @@ Every song from osu!'s beatmaps, with playlists, lyrics, gameplay and a DJ mode.
 
 ## Install
 
-### 💻 Windows
+### 💻 Desktop
 
-1. Download the installer from **[Releases](https://github.com/Stamer-d/Stosufy/releases/latest)**.
-2. Run it and log in with your osu! account.
+Download it from **[Releases](https://github.com/Stamer-d/Stosufy/releases/latest)** and log in
+with your osu! account. Stosufy updates itself after that.
 
-Stosufy updates itself after that. If Windows warns you, click _More info → Run anyway_ (see
-the [FAQ](#faq)).
+- **Windows:** the `.exe` installer. If Windows warns you, click _More info → Run anyway_ (see
+  the [FAQ](#faq)).
+- **macOS:** the `.dmg` (`aarch64` for Apple Silicon, `x64` for Intel). The first time,
+  right-click the app and choose _Open_.
+- **Linux:** the `.AppImage` (any distribution), `.deb` or `.rpm`.
 
 ### 📱 Phone
 
