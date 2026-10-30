@@ -1511,6 +1511,7 @@ export class Mixer {
 		const tEnd = timeA(plan.endA);
 		const beat = (sectionAt(from.grid, plan.swapA)?.beat ?? 0.5) / plan.rateA;
 		// The old song stops: slowing to a halt (brake), or once it's gone
+		let stopA = tSwap;
 		if (plan.style === 'brake') {
 			const last = segmentsA.at(-1)!;
 			const start = Math.max(t0, tSwap - Math.min(1.4, beat * 3));
@@ -1523,6 +1524,7 @@ export class Mixer {
 		} else {
 			// (a segue lets what's left of the old song ring a bar under the new one)
 			const stop = Math.max(tEnd, tSwap + (plan.style === 'segue' ? beat * 4 : 0)) + 0.05;
+			stopA = stop;
 			segmentsA.push({
 				at: stop,
 				playing: false,
@@ -1644,7 +1646,9 @@ export class Mixer {
 			bassFree: freeFrom((bar) => bar.bass < 0.3),
 			quiet: a ? freeFrom((bar) => bar.energy < a.peakLevel * 0.3) : null
 		});
-		from.scheduleCurves(curves.A, curves.tail);
+		// (its moves back at rest only once it's quiet: its filters jumping back, or its level
+		// coming up again while the player lets out its last samples, would thump)
+		from.scheduleCurves(curves.A, Math.max(curves.tail, stopA + 0.3));
 		const restB = Math.max(tStart, ...Object.values(curves.B).map((list) => list?.at(-1)?.t ?? 0));
 		to.scheduleCurves(curves.B, restB + 0.01);
 		if (curves.echo) from.mixEcho(curves.echo, Math.max(t0, tStart - 0.01), curves.tail);

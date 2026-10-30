@@ -14,11 +14,15 @@
 //   cymbals) under the old song, its mids and bass on the swap. Tempos too far apart: the old
 //   song builds up (thinning out into reverb and echo) and the new one drops in on the one.
 // - Auto DJ leaves a longer song after one of its peaks, in the part before the next one: the
-//   new song's drop comes where the old one's next drop would have.
+//   new song's drop comes where the old one's next drop would have, or where the old one
+//   would go quiet.
+// - The floor keeps going: every mix is weighed by what's heard bar by bar (see sag), so the
+//   music doesn't sag into a hole without bass (a quiet intro under a breakdown).
 
 import { bpmOf, sectionAt, type Grid } from './grid';
 import {
 	barCeil,
+	barIndex,
 	barsBetween,
 	barsLater,
 	busyness,
@@ -143,6 +147,166 @@ function chance(seed: string) {
 /** The longest musical length (bars) that fits */
 const musical = (bars: number) => [32, 16, 8, 4, 2].find((n) => n <= bars + 1e-6) ?? 0;
 
+type Bands = { low: number; mid: number; high: number };
+const SILENT: Bands = { low: 0, mid: 0, high: 0 };
+
+/** A moment of a song as power in the EQ's three bands, against its peaks (1: as loud) */
+function bandPower(s: SongAnalysis, time: number): Bands {
+	const bar = s.bars[barIndex(s, time)];
+	if (!bar || time >= s.lastBar) return SILENT;
+	const total = (bar.energy / (s.peakLevel || 1)) ** 2;
+	const l = s.bandsLoudest;
+	const low = (bar.bass * l.bass) ** 2;
+	const mid = (bar.mid * l.mid) ** 2;
+	const high = (bar.high * l.high) ** 2;
+	const sum = low + mid + high || 1;
+	return { low: (total * low) / sum, mid: (total * mid) / sum, high: (total * high) / sum };
+}
+
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const all = (v: number): Bands => ({ low: v, mid: v, high: v });
+
+/**
+ * What a mix lets through of each song's bands at a moment (the old song's time), like its
+ * moves on the mixer (automation.ts), roughly: [old song, new song]
+ */
+function gainsAt(p: MixPlan, a: SongAnalysis, t: number): [Bands, Bands] {
+	const pre = p.swapA - p.startA;
+	const u = pre > 0 ? clamp01((t - p.startA) / pre) : 1;
+	const x = p.endA > p.swapA ? clamp01((t - p.swapA) / (p.endA - p.swapA)) : 1;
+	if (t < p.startA) return [all(1), all(0)];
+	const blendLike = p.style === 'blend' || p.style === 'filter' || p.style === 'crossfade';
+	if (!blendLike) {
+		// On the one: the old song until then (a segue's tail fading), the new one after
+		if (t < p.swapA) return [all(1), all(0)];
+		const tail = p.style === 'segue' && t < p.endA ? 0.01 ** x : 0;
+		return [all(tail), all(1)];
+	}
+	if (p.style === 'crossfade') {
+		const k = clamp01((t - p.startA) / Math.max(1e-3, p.endA - p.startA));
+		const before = t < p.swapA;
+		return [
+			{
+				low: before ? Math.cos((k * Math.PI) / 2) : 0,
+				mid: Math.cos((k * Math.PI) / 2),
+				high: Math.cos((k * Math.PI) / 2)
+			},
+			{
+				low: before ? 0 : Math.sin((k * Math.PI) / 2),
+				mid: Math.sin((k * Math.PI) / 2),
+				high: Math.sin((k * Math.PI) / 2)
+			}
+		];
+	}
+	if (t >= p.swapA) {
+		const fade = t < p.endA ? (p.style === 'filter' ? 1 : 0.7) * 0.01 ** x : 0;
+		return [{ low: 0, mid: fade, high: fade }, all(1)];
+	}
+	// Before the swap: the new song rising (its bass held back), the old one making room
+	const bars = pre / a.bar;
+	const vol = 0.01 ** (1 - clamp01(u / Math.min(0.25, 4 / Math.max(1, bars))));
+	if (p.style === 'filter') {
+		return [
+			{ low: 1, mid: u < 0.5 ? 1 : 1 - 0.5 * (u - 0.5) * 2, high: 1 },
+			{ low: 0, mid: vol * clamp01((u - 0.35) / 0.4), high: vol * clamp01((u - 0.65) / 0.3) }
+		];
+	}
+	const room = p.drums
+		? u > 1 - 1 / Math.max(1, bars)
+			? 0.85
+			: 1
+		: u < 0.5
+			? 1
+			: 1 - 0.3 * (u - 0.5) * 2;
+	return [
+		{ low: 1, mid: room, high: room },
+		{
+			low: 0,
+			mid: p.drums ? 0 : u < 0.5 ? 0 : vol * 0.7 * (u - 0.5) * 2,
+			high: vol * (0.25 + 0.75 * clamp01(u * 2))
+		}
+	];
+}
+
+/** Where the new song is at a moment of the old one's (its intro loop too) */
+function timeOfB(p: MixPlan, a: SongAnalysis, b: SongAnalysis, t: number) {
+	const from = p.beatmatch ? p.startA : p.swapA;
+	const played = ((t - from) / (p.rateA || 1)) * (p.rateB || 1);
+	if (played < 0) return -Infinity;
+	const loop = p.loopB;
+	if (!loop) return p.startB + played;
+	const bars = played / b.bar;
+	const looped = loop.bars * loop.times;
+	const into = bars < looped ? bars % loop.bars : loop.bars + bars - looped;
+	return loop.start + into * b.bar;
+}
+
+const powerOf = (s: Bands, g: Bands) =>
+	s.low * g.low * g.low + s.mid * g.mid * g.mid + s.high * g.high * g.high;
+const totalOf = (s: Bands) => s.low + s.mid + s.high;
+const median = (list: number[]) => [...list].sort((x, y) => x - y)[list.length >> 1] ?? 0;
+/** A song's main part against its peaks (power: -3 dB) */
+const MAIN_LEVEL = 0.5;
+
+/**
+ * How much a mix lets the music sag (dB × bars): bar by bar from where the old song could
+ * have been left (`from`) to a while after the swap, what's heard (both songs through the
+ * mix's moves, roughly) against a song's main part, its bass on its own. A DJ keeps the
+ * floor going: the new song's intro without its bass under the old one's breakdown, or the
+ * old song played on into its quiet part before the mix, is a hole; a mix over the old
+ * song's last full bars into the new one's main part isn't.
+ */
+export function sag(p: MixPlan, a: SongAnalysis, b: SongAnalysis, from: number) {
+	const begin = Math.min(p.startA, Math.max(a.firstBar, from));
+	const startBar = barIndex(a, begin);
+	const before: Bands[] = [];
+	for (let i = Math.max(0, startBar - 8); i < startBar; i++)
+		before.push(bandPower(a, a.bars[i].start + 0.01));
+	// The level to keep: a song's main part (a few dB under its peaks), or what played if
+	// that was quieter already; and its bass (the kick and the bassline: without them the
+	// floor stops, however loud the rest)
+	const target = Math.min(
+		MAIN_LEVEL,
+		before.length ? Math.max(median(before.map(totalOf)), 0.25) : 1
+	);
+	const lowA = mainLow(a);
+	const lowB = mainLow(b);
+	const targetLow = Math.min(
+		MAIN_LEVEL,
+		before.length ? Math.max(median(before.map((x) => x.low / lowA)), 0.1) : 1
+	);
+	const end = barsLater(a, Math.max(p.endA, p.swapA), 8);
+	let loss = 0;
+	for (let t = barCeil(a, begin) + a.bar / 2; t < end; t = barsLater(a, t, 1)) {
+		const [ga, gb] = gainsAt(p, a, t);
+		const sa = bandPower(a, t);
+		const sb = bandPower(b, timeOfB(p, a, b, t));
+		const heard = powerOf(sa, ga) + powerOf(sb, gb);
+		const low = (sa.low * ga.low ** 2) / lowA + (sb.low * gb.low ** 2) / lowB;
+		// (a few dB less is a breath; more is a hole)
+		const db = 10 * Math.log10(target / Math.max(heard, 1e-4));
+		const lowDb = 10 * Math.log10(targetLow / Math.max(low, 1e-4));
+		loss += Math.min(20, Math.max(0, db - 3)) + 0.5 * Math.min(20, Math.max(0, lowDb - 6));
+		if (t >= a.lastBar) break;
+	}
+	return loss;
+}
+
+const mainLows = new WeakMap<SongAnalysis, number>();
+/** How much bass a song's peaks have (power, like bandPower's) */
+function mainLow(s: SongAnalysis) {
+	let low = mainLows.get(s);
+	if (low == null) {
+		const peaks = s.bars.filter((bar) =>
+			s.drops.some((d) => bar.start >= d.start - 0.01 && bar.start < d.end - 0.01)
+		);
+		const list = (peaks.length ? peaks : s.bars).map((bar) => bandPower(s, bar.start + 0.01).low);
+		low = Math.max(1e-4, median(list.filter((x) => x > 0)) || 1e-4);
+		mainLows.set(s, low);
+	}
+	return low;
+}
+
 /**
  * Where Auto DJ may leave a song: in a longer song after one of its peaks (once it played a
  * good while), in the part before its next peak; else its outro (or fade), its last hit, its end
@@ -169,7 +333,10 @@ function exitRegions(a: SongAnalysis, now: number) {
 	return regions;
 }
 
-type Candidate = { plan: MixPlan; score: number };
+type Candidate = { plan: MixPlan; score: number; loss: number };
+
+/** What a dB × bar of sag costs a mix's score */
+const SAG_COST = 0.02;
 
 /** The mix from the playing song (A) to the next one (B) */
 export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
@@ -416,7 +583,12 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 
 	// --- Smart ---------------------------------------------------------------------------
 	const options: Candidate[] = [];
-	const add = (plan: MixPlan | null, score: number) => plan && options.push({ plan, score });
+	// (every option also by how well it keeps the energy up: see sag)
+	const add = (plan: MixPlan | null, score: number, from = now) => {
+		if (!plan) return;
+		const loss = sag(plan, a, b, from);
+		options.push({ plan, score: score - SAG_COST * loss, loss });
+	};
 	const blendScore = (p: MixPlan) => {
 		let s = 1;
 		const busyA = busyness(a, p.startA, p.swapA);
@@ -462,7 +634,7 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 				// The new song gets going on the old one's last hit
 				for (const target of [16, 32]) {
 					const p = blend('blend', hit, phraseFloor(a, hit - a.bar * 16), target, 2);
-					if (p) add(p, blendScore(p) + 0.1);
+					if (p) add(p, blendScore(p) + 0.1, region.from);
 				}
 				// Or the old song builds up into its last hit, where the new one drops in
 				add(
@@ -473,7 +645,8 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 						dropIn,
 						buildBars
 					),
-					buildScore
+					buildScore,
+					region.from
 				);
 				// Or the new one starts as the old one's last hit rings (on the bar after it), or
 				// right where it stops
@@ -486,16 +659,16 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 						: 'Segue: the song stops, the next one starts right on the beat',
 					B.placed ? startB : Math.max(b.firstBar, barsLater(b, b.introEnd, -16))
 				);
-				add(segue, 0.5 + (beatmatchable ? 0 : 0.2) + (keys === 0 ? 0.1 : 0));
+				add(segue, 0.5 + (beatmatchable ? 0 : 0.2) + (keys === 0 ? 0.1 : 0), region.from);
 				continue;
 			}
 			// Swaps on the phrases of the region (the new song's intro under the outro or the
-			// part before the old song's next peak); into the old song's last phrases only if
-			// the keys go together
+			// part before the old song's next peak, or under the old song's last full phrases,
+			// its main part taking over where the old one would go quiet)
 			const points = a.phrases.filter((p) => p >= region.from - 0.01 && p <= region.until + 0.01);
 			if (!points.length) points.push(region.until);
 			for (const swap of points) {
-				const earliest = keys === 0 ? region.from : phraseFloor(a, region.from - a.bar * 16);
+				const earliest = phraseFloor(a, region.from - a.bar * 16);
 				// (into the old song's next peak: the new one's takes its place, the old one stops)
 				const intoPeak = region.kind === 'break' && Math.abs(swap - region.until) < a.bar * 0.5;
 				for (const target of [16, 32]) {
@@ -507,7 +680,7 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 						// drop comes where the old one's would have
 						if (Math.abs(swap - region.until) < a.bar * 0.5) s += 0.1;
 						if (style === 'filter' && busyness(b, p.startB, p.swapB) > 0.6) s += 0.1;
-						add(p, s);
+						add(p, s, region.from);
 					}
 				}
 			}
@@ -522,8 +695,35 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 					dropIn,
 					buildBars
 				),
-				buildScore + bonus
+				buildScore + bonus,
+				region.from
 			);
+			// Or on the old song's last full bar, before it goes quiet: a build-up over its last
+			// full bars, or an echo, and the new song comes in where it gets going (the floor
+			// keeps going, above all when the tempos are too far apart to blend)
+			if (region.kind === 'break' || region.kind === 'outro') {
+				add(
+					onOne(
+						'build',
+						region.from,
+						"Build-up over the old song's last full bars, the new one drops in where the old one would go quiet",
+						dropIn,
+						buildBars
+					),
+					buildScore + bonus,
+					region.from
+				);
+				add(
+					onOne(
+						'echo',
+						region.from,
+						"Echo out on the old song's last full bar, the new one comes in where it gets going",
+						dropIn
+					),
+					0.45 + (beatmatchable ? 0 : 0.2) + (keys === 0 ? 0.1 : 0) + bonus,
+					region.from
+				);
+			}
 			// Echo out where a short outro ends, half way through a long one (a fade is quiet by
 			// its end), or where the breakdown starts
 			const echoAt =
@@ -549,7 +749,8 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 						: 'Echo out: the tempos are too far apart to blend, the new one comes in on the one',
 					intoStart
 				),
-				0.45 + (beatmatchable ? 0 : 0.2) + (keys === 0 ? 0.1 : 0) + bonus
+				0.45 + (beatmatchable ? 0 : 0.2) + (keys === 0 ? 0.1 : 0) + bonus,
+				region.from
 			);
 			add(
 				onOne(
@@ -558,7 +759,8 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 					'Wash out: the old song washes away in reverb, the new one comes in on the one',
 					intoStart
 				),
-				0.4 + (beatmatchable ? 0 : 0.2) + bonus
+				0.4 + (beatmatchable ? 0 : 0.2) + bonus,
+				region.from
 			);
 		}
 	} else {
@@ -622,7 +824,7 @@ export function planMix(A: DeckView, B: DeckView, o: PlanOptions): MixPlan {
 			.slice(0, 6)
 			.map(
 				(x) =>
-					`${x.plan.style}@${x.plan.swapA.toFixed(1)}/${x.plan.pre}+${x.plan.post}${x.plan.loopB ? 'L' : ''} ${x.score.toFixed(2)}`
+					`${x.plan.style}@${x.plan.swapA.toFixed(1)}/${x.plan.pre}+${x.plan.post}${x.plan.loopB ? 'L' : ''} ${x.score.toFixed(2)} sag ${Math.round(x.loss)}`
 			)
 			.join(', ');
 		return best;
