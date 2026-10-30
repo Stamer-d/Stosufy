@@ -877,9 +877,10 @@
 		/>
 	{/if}
 
-	<!-- Top: place, search and the categories (names and title where there's room) -->
+	<!-- Top: place, search and the categories (names and title where there's room); above the
+	     panels, so the search's results don't open under the layers -->
 	<div
-		class="@container absolute top-3 left-3 flex items-center gap-2 {rightOpen
+		class="@container absolute z-10 top-3 left-3 flex items-center gap-2 {rightOpen
 			? 'right-[26.5rem]'
 			: 'right-3'}"
 	>
