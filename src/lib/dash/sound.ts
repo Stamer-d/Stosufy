@@ -1,4 +1,8 @@
-// The Dash mode's sounds, made on the spot: crashing, a checkpoint, the level done.
+// The Dash mode's sounds, made on the spot: crashing, a checkpoint, the level done, a click.
+// How loud and which ones: the sound settings (sounds.ts).
+
+import { get } from 'svelte/store';
+import { dashSounds } from './sounds';
 
 let context: AudioContext | null = null;
 
@@ -20,7 +24,10 @@ function noiseBuffer(ctx: AudioContext, seconds: number) {
 	return buffer;
 }
 
-export function playDashSound(name: 'death' | 'checkpoint' | 'complete', volume = 0.5) {
+export function playDashSound(name: 'death' | 'checkpoint' | 'complete' | 'click', base = 0.5) {
+	const settings = get(dashSounds);
+	if (!settings[name] || settings.volume <= 0) return;
+	const volume = base * settings.volume * 1.4;
 	const ctx = audio();
 	if (!ctx) return;
 	const now = ctx.currentTime;
@@ -47,6 +54,17 @@ export function playDashSound(name: 'death' | 'checkpoint' | 'complete', volume 
 		thump.connect(gain).connect(out);
 		thump.start(now);
 		thump.stop(now + 0.4);
+	} else if (name === 'click') {
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.type = 'triangle';
+		osc.frequency.setValueAtTime(1400, now);
+		osc.frequency.exponentialRampToValueAtTime(700, now + 0.04);
+		gain.gain.setValueAtTime(0.25, now);
+		gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+		osc.connect(gain).connect(out);
+		osc.start(now);
+		osc.stop(now + 0.06);
 	} else {
 		const notes = name === 'checkpoint' ? [880, 1320] : [523, 659, 784, 1047, 1319];
 		notes.forEach((frequency, i) => {

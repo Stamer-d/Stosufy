@@ -36,12 +36,26 @@ function flyShip(ctx: Context, from: PlayerState, until: number, target: (x: num
 		const next = s.time + STEP;
 		const speed = world.sectionAt(s.time).speed;
 		const ahead = target(s.x + speed * 0.18);
-		const wanted = clamp((ahead - s.y) * 6, -7, 7);
-		const hold = s.vy < wanted;
-		if (hold !== s.held && next - lastChange > 30) {
-			press(s, hold);
-			events.push({ time: next, down: hold });
-			lastChange = next;
+		if (s.mode === 'swing') {
+			// Flips the gravity toward where it should be (a tap), not too often
+			const off = ahead - (s.y + s.vy * 0.22);
+			const want = off > 0.25 ? -1 : off < -0.25 ? 1 : s.gravity;
+			if (s.held && next - lastChange > 60) {
+				press(s, false);
+				events.push({ time: next, down: false });
+			} else if (!s.held && want !== s.gravity && next - lastChange > 130) {
+				press(s, true);
+				events.push({ time: next, down: true });
+				lastChange = next;
+			}
+		} else {
+			const wanted = clamp((ahead - s.y) * 6, -7, 7);
+			const hold = s.vy < wanted;
+			if (hold !== s.held && next - lastChange > 30) {
+				press(s, hold);
+				events.push({ time: next, down: hold });
+				lastChange = next;
+			}
 		}
 		step(world, s, next);
 	}
@@ -68,7 +82,9 @@ export function buildFlight(
 
 	// --- The way through ---------------------------------------------------------------
 	let events: InputEvent[] = [];
-	if (mode === 'ship') {
+	let follow: (x: number) => number = () => top / 2;
+	const steered = mode === 'ship' || mode === 'swing';
+	if (steered) {
 		// Along the notes' heights, no steeper than a ship climbs
 		const keys: { x: number; y: number }[] = [{ x: section.x0, y: clamp(entry.y, 2, top - 2) }];
 		const margin = preset.ship + 0.4;
@@ -77,8 +93,10 @@ export function buildFlight(
 			if (x < startX + 2 || x > endX) continue;
 			const last = keys[keys.length - 1];
 			if (x - last.x < 2.5) continue;
-			const y = margin + note.height * (top - 2 * margin);
-			const steepest = 0.45 * (x - last.x);
+			// (the swing in a narrower band: it swings around its way)
+			const band = mode === 'swing' ? 0.4 : 1;
+			const y = top / 2 + (note.height - 0.5) * (top - 2 * margin) * band;
+			const steepest = (mode === 'swing' ? 0.3 : 0.45) * (x - last.x);
 			keys.push({ x, y: clamp(y, last.y - steepest, last.y + steepest) });
 		}
 		keys.push({ x: section.x1 + 2, y: keys[keys.length - 1].y });
@@ -92,6 +110,7 @@ export function buildFlight(
 				}
 			return keys[keys.length - 1].y;
 		};
+		follow = path;
 		events = flyShip(ctx, entry, section.end, path).events;
 	} else {
 		// The clicks; the ball and the spider only switch on a surface, else a blue orb does it
@@ -105,7 +124,7 @@ export function buildFlight(
 				const id = world.id();
 				world.orbs.add({ id, kind: 'blue', x: at.x, y: at.y, x0: at.x - 0.6, x1: at.x + 0.6 });
 			}
-			events.push(...tap(time, mode === 'swing' || mode === 'ufo' ? 70 : 90));
+			events.push(...tap(time, mode === 'ufo' ? 70 : 90));
 			s = at;
 		}
 	}
@@ -113,7 +132,7 @@ export function buildFlight(
 	// The ways it may go: on time, and early and late (not for the ship, a person steers it)
 	const runs: { x: number; y: number }[][] = [];
 	const variants: InputEvent[][] = [events];
-	if (mode !== 'ship') {
+	if (!steered) {
 		for (const [shift, length] of [
 			[-tolerance, 60],
 			[tolerance, 160],
@@ -135,14 +154,17 @@ export function buildFlight(
 	}
 
 	// --- The blocks around it -------------------------------------------------------------
+	// How far from the way the blocks stay: the swing and UFO drift (a person steers them back)
 	const margin =
-		mode === 'ship'
-			? preset.ship - 0.45
-			: mode === 'ball' || mode === 'spider'
-				? 0.18
-				: mode === 'ufo'
-					? 0.55
-					: 0.5;
+		mode === 'swing'
+			? 0.6
+			: steered
+				? preset.ship - 0.45
+				: mode === 'ball' || mode === 'spider'
+					? 0.18
+					: mode === 'ufo'
+						? 0.85
+						: 1.3;
 	const cap =
 		mode === 'spider' ? 0 : mode === 'ball' ? Math.floor((top - floor) / 2) - 1 : top - floor;
 	const group = rng() < 0.5 ? 2 : 1;
@@ -183,8 +205,7 @@ export function buildFlight(
 				else if (side === -1 && highRoom > 1.05) c.spike = -1;
 				continue;
 			}
-			if (rng() > (mode === 'ship' ? 0.14 : mode === 'spider' || mode === 'swing' ? 0.45 : 0.25))
-				continue;
+			if (rng() > (steered ? 0.14 : mode === 'spider' ? 0.45 : 0.25)) continue;
 			const choices = shuffleByWeight(rng, [
 				{ item: 1 as const, weight: lowRoom > 1.05 ? 1 : 0 },
 				{ item: -1 as const, weight: highRoom > 1.05 ? 1 : 0 }
@@ -257,20 +278,21 @@ export function buildFlight(
 			for (const c of columns) c.spike = 0;
 			build();
 		}
-		for (const inputs of mode === 'ship' ? [] : variants) {
+		for (const inputs of steered ? [] : variants) {
 			const run = simulate(world, entry, section.end, inputs);
 			if (run.dead) {
 				failed = run;
 				break;
 			}
 		}
-		if (mode === 'ship') {
+		if (steered) {
+			// The way it was built around first; where that crashes, the middle of the room
 			const flown = flyShip(ctx, entry, section.end, (x) => {
 				const c = columns.find((col) => col.x === Math.floor(x));
-				if (!c) return clamp(entry.y, 2, top - 2);
+				if (!c || attempt === 0) return follow(x);
 				const low = c.low + (c.spike === 1 ? 1 : 0);
 				const high = c.high - (c.spike === -1 ? 1 : 0);
-				return (low + high) / 2;
+				return clamp(follow(x), low + 1.2, high - 1.2);
 			});
 			events = flown.events;
 			if (flown.end.dead) failed = flown.end;
@@ -280,7 +302,7 @@ export function buildFlight(
 		if (!near.length) break;
 		for (const c of near) {
 			c.spike = 0;
-			if (attempt > 25) {
+			if (attempt > 30 && !steered) {
 				c.low = floor;
 				c.high = top;
 			} else if (failed.y - c.low < c.high - failed.y) c.low = Math.max(floor, c.low - 1);

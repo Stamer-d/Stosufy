@@ -10,6 +10,7 @@ import {
 	SPEEDS,
 	STEP,
 	World,
+	hitbox,
 	simulate,
 	startState,
 	type InputEvent,
@@ -415,7 +416,10 @@ export function generateLevel(
 					: sec.mode === 'spider'
 						? Math.max(preset.gap, 0.42)
 						: Math.max(preset.gap, 0.3);
-			const theirs = sec.mode === 'ship' ? [] : chooseClicks(chart, inside, gap, preset.cost * 0.9);
+			const theirs =
+				sec.mode === 'ship' || sec.mode === 'swing'
+					? []
+					: chooseClicks(chart, inside, gap, preset.cost * 0.9);
 			state = buildFlight(ctx, sec, inside, theirs, state);
 		}
 		plan.sort((a, b) => a.time - b.time);
@@ -446,6 +450,8 @@ export function generateLevel(
 		removeNear(world, run.x, world.sectionAt(run.time).mode);
 	}
 
+	fillEmpty(world, plan, start, end, chart);
+
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {
 		const point = chart.timing[i];
@@ -464,12 +470,63 @@ export function generateLevel(
 		beats,
 		kiai: chart.kiai,
 		difficulty: options.difficulty,
-		clicks: plan.filter((e) => e.down && world.sectionAt(e.time).mode !== 'ship').length,
+		clicks: plan.filter((e) => e.down && !['ship', 'swing'].includes(world.sectionAt(e.time).mode))
+			.length,
 		title: chart.title,
 		artist: chart.artist,
 		creator: chart.creator,
 		version: chart.version
 	};
+}
+
+/**
+ * Never long without anything (but in the beatmap's breaks): where nothing is for a while,
+ * spikes on the floor and ceiling of the part, far enough from the way through
+ */
+function fillEmpty(world: World, plan: InputEvent[], start: number, end: number, chart: DashChart) {
+	const trace: { x: number; y: number; time: number }[] = [];
+	simulate(world, startState(world, start), end, plan, { trace });
+	const busy = (a: number, b: number) =>
+		world.hazards.near(a, b).length +
+		world.orbs.near(a, b).length +
+		world.pads.near(a, b).length +
+		world.walls.near(a, b).length +
+		world.solids.near(a, b).filter((s) => s.x0 > a - 1 || s.style !== 0).length;
+	const entries = new Map<number, ReturnType<typeof startState>>();
+	const entryOf = (index: number) => {
+		if (!entries.has(index))
+			entries.set(
+				index,
+				simulate(world, startState(world, start), world.sections[index].start + STEP, plan)
+			);
+		return entries.get(index)!;
+	};
+	for (let t = start + 1500; t < end - 1500; t += 500) {
+		if (chart.breaks.some((b) => t > b.start - 500 && t < b.end + 500)) continue;
+		const sec = world.sectionAt(t);
+		if (sec.ceil === null || t < sec.start + 800 || t > sec.end - 800) continue;
+		const a = world.xAt(t);
+		const b = world.xAt(t + 1500);
+		if (busy(a, b)) continue;
+		const box = hitbox(sec.mode, sec.mini);
+		for (let x = Math.ceil(a); x + 1 <= b; x++) {
+			let low = Infinity;
+			let high = -Infinity;
+			for (const p of trace) {
+				if (Math.abs(p.x - (x + 0.5)) > box.w + 1) continue;
+				low = Math.min(low, p.y - box.h);
+				high = Math.max(high, p.y + box.h);
+			}
+			if (!isFinite(low)) continue;
+			const added = [];
+			if (low - sec.floor > 1.8) added.push(world.spike(x + 0.5, sec.floor, 1));
+			if (sec.ceil - high > 1.8) added.push(world.spike(x + 0.5, sec.ceil, -1));
+			if (!added.length) continue;
+			const run = simulate(world, entryOf(sec.index), Math.min(sec.end, world.timeAt(x + 3)), plan);
+			if (run.dead || !legalAround(world, x - 1, x + 2))
+				for (const h of added) world.hazards.remove(h);
+		}
+	}
 }
 
 /** Takes out what's in the way at a place: spikes first, then the blocks of flying parts */

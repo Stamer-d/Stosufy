@@ -18,6 +18,7 @@
 		chooseDifficulty
 	} from '#lib/gameplay/play.ts';
 	import DashSongs from './DashSongs.svelte';
+	import DashSoundMenu from './DashSoundMenu.svelte';
 	import { dashOpen } from '#lib/dash/store.ts';
 	import { makeLevel } from '#lib/dash/level.ts';
 	import { DIFFICULTIES } from '#lib/dash/generate.ts';
@@ -260,7 +261,10 @@
 		if (down) held.add(source);
 		else held.delete(source);
 		const after = held.size > 0;
-		if (before !== after) game.input(after, songTime());
+		if (before !== after) {
+			game.input(after, songTime());
+			if (after && !game.auto) playDashSound('click', 0.3);
+		}
 	}
 	function release() {
 		if (held.size && game) game.input(false, songTime());
@@ -540,17 +544,20 @@
 								></button>
 							{/each}
 						</div>
-						<button
-							class="flex items-center gap-2 h-8 px-3 rounded-full text-xs font-bold cursor-pointer transition {practice
-								? 'bg-emerald-400 text-emerald-950'
-								: 'bg-white/10 text-white/70 hover:text-white'}"
-							role="switch"
-							aria-checked={practice}
-							onclick={togglePractice}
-						>
-							<span class="icon-[mingcute--flag-2-line] size-4"></span>
-							Practice
-						</button>
+						<div class="flex items-center gap-2">
+							<button
+								class="flex items-center gap-2 h-8 px-3 rounded-full text-xs font-bold cursor-pointer transition {practice
+									? 'bg-emerald-400 text-emerald-950'
+									: 'bg-white/10 text-white/70 hover:text-white'}"
+								role="switch"
+								aria-checked={practice}
+								onclick={togglePractice}
+							>
+								<span class="icon-[mingcute--flag-2-line] size-4"></span>
+								Practice
+							</button>
+							<DashSoundMenu />
+						</div>
 					</div>
 
 					<div class="grid grid-cols-2 gap-2 text-center">
@@ -631,6 +638,7 @@
 					>
 						<span class="icon-[mingcute--close-line] size-6"></span>
 					</button>
+					<DashSoundMenu up />
 				</div>
 			</div>
 		</div>

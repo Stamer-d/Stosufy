@@ -2,7 +2,7 @@
 // of how far it got. Everything is drawn here (no images): blocks with bright edges,
 // spikes, orbs, pads and portals that glow, colours that change with every part.
 
-import { wallAt, hitbox, type Mode, type PlayerState, type Section } from './physics';
+import { wallAt, hitbox, type Mode, type PlayerState, type Section, type Solid } from './physics';
 import type { Level } from './generate';
 
 /** How many blocks high the view is */
@@ -396,37 +396,23 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const w = right - left;
 		const h = bottom - top;
 		if (w <= 0 || h <= 0) return;
-		const gradient = ctx.createLinearGradient(0, top, 0, bottom);
-		gradient.addColorStop(0, 'rgba(10,8,24,0.94)');
-		gradient.addColorStop(1, 'rgba(0,0,0,0.9)');
-		ctx.fillStyle = gradient;
+		ctx.fillStyle = 'rgba(7,6,18,0.93)';
 		ctx.fillRect(left, top, w, h);
 		// The blocks inside
-		ctx.strokeStyle = rgba(p.accent, 0.13);
+		ctx.strokeStyle = rgba(p.accent, 0.12);
 		ctx.lineWidth = Math.max(1, scale * 0.035);
 		ctx.beginPath();
-		for (let y = Math.ceil(y0) + 1; y < y1; y++) {
+		for (let y = Math.ceil(y0 + 0.001); y < y1; y++) {
 			ctx.moveTo(left, sy(y));
 			ctx.lineTo(right, sy(y));
 		}
-		for (let x = Math.ceil(x0 + 0.5); x < x1 - 0.5; x++) {
+		for (let x = Math.ceil(x0 + 0.001); x < x1; x++) {
 			ctx.moveTo(sx(x), top);
 			ctx.lineTo(sx(x), bottom);
 		}
 		ctx.stroke();
-		// A glow on the side the player meets
-		const shine = ctx.createLinearGradient(0, top, 0, top + Math.min(h, scale * 0.9));
-		shine.addColorStop(0, rgba(p.accent, 0.35 + pulse * 0.2));
-		shine.addColorStop(1, rgba(p.accent, 0));
-		ctx.fillStyle = shine;
-		ctx.fillRect(left, top, w, Math.min(h, scale * 0.9));
-		if (style === 2) {
-			const under = ctx.createLinearGradient(0, bottom, 0, bottom - Math.min(h, scale * 0.9));
-			under.addColorStop(0, rgba(p.accent, 0.3 + pulse * 0.2));
-			under.addColorStop(1, rgba(p.accent, 0));
-			ctx.fillStyle = under;
-			ctx.fillRect(left, bottom - Math.min(h, scale * 0.9), w, Math.min(h, scale * 0.9));
-		}
+		void style;
+		void pulse;
 		// Lights in some of the blocks
 		for (let y = Math.floor(y0); y < y1; y++) {
 			for (let x = Math.floor(x0); x < x1; x++) {
@@ -440,9 +426,72 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 			}
 		}
+	}
+
+	/** The outline of touching blocks as one shape: only the edges nothing else covers */
+	function outlines(list: Solid[], section: Section, p: Palette, pulse: number) {
+		const EPS = 1e-6;
+		const shines: { x0: number; x1: number; y: number; down: boolean }[] = [];
+		const minus = (from: number, to: number, cuts: [number, number][]) => {
+			let parts: [number, number][] = [[from, to]];
+			for (const [a, b] of cuts)
+				parts = parts.flatMap(([p0, p1]) => {
+					if (b <= p0 + EPS || a >= p1 - EPS) return [[p0, p1]] as [number, number][];
+					const out: [number, number][] = [];
+					if (a > p0 + EPS) out.push([p0, a]);
+					if (b < p1 - EPS) out.push([b, p1]);
+					return out;
+				});
+			return parts;
+		};
 		ctx.strokeStyle = '#ffffff';
 		ctx.lineWidth = Math.max(1.5, scale * 0.07);
-		ctx.strokeRect(left, top, w, h);
+		ctx.lineCap = 'square';
+		ctx.beginPath();
+		for (const a of list) {
+			const touching = list.filter((b) => b !== a);
+			// Top and bottom
+			for (const [y, other] of [
+				[a.y1, 'y0'],
+				[a.y0, 'y1']
+			] as const) {
+				if (Math.abs(y - section.floor) < EPS) continue;
+				if (section.ceil !== null && Math.abs(y - section.ceil) < EPS) continue;
+				if (y <= 0 + EPS && section.ceil === null) continue;
+				const cuts = touching
+					.filter((b) => Math.abs(b[other] - y) < EPS)
+					.map((b) => [b.x0, b.x1] as [number, number]);
+				for (const [p0, p1] of minus(a.x0, a.x1, cuts)) {
+					ctx.moveTo(sx(p0), sy(y));
+					ctx.lineTo(sx(p1), sy(y));
+					shines.push({ x0: p0, x1: p1, y, down: other === 'y0' });
+				}
+			}
+			// Left and right
+			for (const [x, other] of [
+				[a.x0, 'x1'],
+				[a.x1, 'x0']
+			] as const) {
+				const cuts = touching
+					.filter((b) => Math.abs(b[other] - x) < EPS)
+					.map((b) => [b.y0, b.y1] as [number, number]);
+				for (const [p0, p1] of minus(a.y0, a.y1, cuts)) {
+					ctx.moveTo(sx(x), sy(p0));
+					ctx.lineTo(sx(x), sy(p1));
+				}
+			}
+		}
+		// A glow inside along the open tops (and bottoms), under the outline
+		const depth = scale * 0.85;
+		for (const sh of shines) {
+			const y = sy(sh.y);
+			const g = ctx.createLinearGradient(0, y, 0, sh.down ? y + depth : y - depth);
+			g.addColorStop(0, rgba(p.accent, 0.32 + pulse * 0.25));
+			g.addColorStop(1, rgba(p.accent, 0));
+			ctx.fillStyle = g;
+			ctx.fillRect(sx(sh.x0), sh.down ? y : y - depth, sx(sh.x1) - sx(sh.x0), depth);
+		}
+		ctx.stroke();
 	}
 
 	function spike(x: number, y: number, dir: 1 | -1, small: boolean, p: Palette, pulse: number) {
@@ -476,7 +525,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const colors: Record<string, [string, string]> = {
 			yellow: ['#ffe14d', '#fff8c2'],
 			pink: ['#ff5ec4', '#ffd0ef'],
-			blue: ['#3ad7ff', '#d2f6ff']
+			blue: ['#3ad7ff', '#d2f6ff'],
+			red: ['#ff3b3b', '#ffc2c2'],
+			green: ['#4dff6a', '#d4ffd9'],
+			black: ['#1b1b24', '#8a8aa0']
 		};
 		const [main, light] = colors[kind] ?? colors.yellow;
 		const r = (0.42 + pulse * 0.05) * scale;
@@ -512,7 +564,14 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	}
 
 	function pad(x: number, y: number, dir: 1 | -1, kind: string, used: boolean, pulse: number) {
-		const main = kind === 'pink' ? '#ff5ec4' : '#ffe14d';
+		const main =
+			kind === 'pink'
+				? '#ff5ec4'
+				: kind === 'red'
+					? '#ff3b3b'
+					: kind === 'blue'
+						? '#3ad7ff'
+						: '#ffe14d';
 		const cx = sx(x);
 		const base = sy(y);
 		const w = 0.48 * scale;
@@ -702,6 +761,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		glow.addColorStop(1, rgba(icon.primary, 0));
 		ctx.fillStyle = glow;
 		ctx.fillRect(-scale * 1.3, -scale * 1.3, scale * 2.6, scale * 2.6);
+		if (state.mini) ctx.scale(0.6, 0.6);
 		if (state.mode === 'cube') {
 			ctx.rotate(state.rotation);
 			cubeShape(1, icon);
@@ -739,6 +799,95 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.fill();
 			ctx.lineWidth = s * 0.05;
 			ctx.stroke();
+		} else if (state.mode === 'ufo') {
+			if (state.gravity < 0) ctx.scale(1, -1);
+			const s = scale;
+			ctx.save();
+			ctx.translate(0, -s * 0.18);
+			cubeShape(0.5, icon);
+			ctx.restore();
+			// The glass dome and the saucer
+			ctx.beginPath();
+			ctx.arc(0, -s * 0.05, s * 0.36, Math.PI, 0);
+			ctx.fillStyle = 'rgba(190,240,255,0.35)';
+			ctx.fill();
+			ctx.lineWidth = s * 0.06;
+			ctx.strokeStyle = '#000000';
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.ellipse(0, s * 0.12, s * 0.62, s * 0.2, 0, 0, Math.PI * 2);
+			ctx.fillStyle = icon.primary;
+			ctx.fill();
+			ctx.lineWidth = s * 0.08;
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.ellipse(0, s * 0.16, s * 0.4, s * 0.08, 0, 0, Math.PI * 2);
+			ctx.fillStyle = icon.secondary;
+			ctx.fill();
+		} else if (state.mode === 'swing') {
+			const target = -Math.atan2(state.vy, 12) * 0.6;
+			shipAngle += (target - shipAngle) * Math.min(1, dt * 14);
+			ctx.rotate(shipAngle);
+			const s = scale;
+			// Round body with fins that point the way it falls
+			const fin = state.gravity > 0 ? 1 : -1;
+			for (const side of [-1, 1]) {
+				ctx.beginPath();
+				ctx.moveTo(-s * 0.2, side * s * 0.3);
+				ctx.lineTo(-s * 0.62, side * s * (0.3 + (side === fin ? 0.32 : 0.12)));
+				ctx.lineTo(-s * 0.42, side * s * 0.12);
+				ctx.closePath();
+				ctx.fillStyle = icon.secondary;
+				ctx.fill();
+				ctx.lineWidth = s * 0.06;
+				ctx.strokeStyle = '#000000';
+				ctx.stroke();
+			}
+			ctx.beginPath();
+			ctx.arc(0, 0, s * 0.42, 0, Math.PI * 2);
+			ctx.fillStyle = icon.primary;
+			ctx.fill();
+			ctx.lineWidth = s * 0.08;
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.arc(s * 0.08, 0, s * 0.18, 0, Math.PI * 2);
+			ctx.fillStyle = icon.secondary;
+			ctx.fill();
+			ctx.lineWidth = s * 0.05;
+			ctx.stroke();
+		} else if (state.mode === 'spider') {
+			if (state.gravity < 0) ctx.scale(1, -1);
+			const s = scale;
+			// Legs that step as it runs
+			const stepping = Math.sin(time / 45) * s * 0.08;
+			ctx.lineWidth = s * 0.09;
+			ctx.lineCap = 'round';
+			for (const [x0, x1, phase] of [
+				[-0.22, -0.5, 1],
+				[-0.05, -0.2, -1],
+				[0.1, 0.25, 1],
+				[0.22, 0.52, -1]
+			]) {
+				ctx.beginPath();
+				ctx.moveTo(x0 * s, s * 0.05);
+				ctx.lineTo(((x0 + x1) / 2) * s + phase * stepping, s * 0.28);
+				ctx.lineTo(x1 * s + phase * stepping, s * 0.5);
+				ctx.strokeStyle = '#000000';
+				ctx.lineWidth = s * 0.14;
+				ctx.stroke();
+				ctx.strokeStyle = icon.secondary;
+				ctx.lineWidth = s * 0.07;
+				ctx.stroke();
+			}
+			ctx.beginPath();
+			ctx.ellipse(0, -s * 0.05, s * 0.44, s * 0.3, 0, 0, Math.PI * 2);
+			ctx.fillStyle = icon.primary;
+			ctx.fill();
+			ctx.lineWidth = s * 0.08;
+			ctx.strokeStyle = '#000000';
+			ctx.stroke();
+			ctx.fillStyle = icon.secondary;
+			ctx.fillRect(s * 0.1, -s * 0.15, s * 0.14, s * 0.1);
 		} else if (state.mode === 'ball') {
 			ctx.rotate(state.rotation);
 			const r = hitbox('ball', state.mini).h * scale * 1.05;
@@ -981,8 +1130,9 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 
 		// Blocks
-		for (const s of world.solids.near(left, right))
-			solid(s.x0, s.x1, s.y0, s.y1, p, pulse, s.style);
+		const solids = world.solids.near(left, right);
+		for (const s of solids) solid(s.x0, s.x1, s.y0, s.y1, p, pulse, s.style);
+		outlines(solids, section, p, pulse);
 
 		// Spikes and saws
 		for (const h of world.hazards.near(left, right)) {
@@ -1001,6 +1151,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				const sec = world.sectionAt(world.timeAt(portalItem.x + 0.01));
 				const y = sec.ceil !== null ? sec.floor + sec.ceil / 2 : Math.max(1.6, portalItem.y);
 				portal(portalItem.x, y, PORTAL_COLORS[portalItem.mode], time, '');
+				if (portalItem.mini) portal(portalItem.x + 1.3, y, '#ff6ad5', time + 300, '');
 			} else speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);
 		}
 

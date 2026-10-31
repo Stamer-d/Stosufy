@@ -123,7 +123,11 @@ export class DashGame {
 			if (
 				this.practice &&
 				s.time - this.lastCheckpoint > 2200 &&
-				(s.grounded || s.mode === 'ship' || s.mode === 'wave') &&
+				(s.grounded ||
+					s.mode === 'ship' ||
+					s.mode === 'wave' ||
+					s.mode === 'swing' ||
+					s.mode === 'ufo') &&
 				s.time - s.boostedAt > 300
 			) {
 				this.lastCheckpoint = s.time;
