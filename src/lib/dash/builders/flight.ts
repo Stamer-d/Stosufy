@@ -94,7 +94,7 @@ export function buildFlight(
 			const last = keys[keys.length - 1];
 			if (x - last.x < 2.5) continue;
 			// (the swing in a narrower band: it swings around its way)
-			const band = mode === 'swing' ? 0.4 : 1;
+			const band = mode === 'swing' ? 0.28 : 1;
 			const y = top / 2 + (note.height - 0.5) * (top - 2 * margin) * band;
 			const steepest = (mode === 'swing' ? 0.3 : 0.45) * (x - last.x);
 			keys.push({ x, y: clamp(y, last.y - steepest, last.y + steepest) });
@@ -157,7 +157,7 @@ export function buildFlight(
 	// How far from the way the blocks stay: the swing and UFO drift (a person steers them back)
 	const margin =
 		mode === 'swing'
-			? 0.6
+			? 0.45
 			: steered
 				? preset.ship - 0.45
 				: mode === 'ball' || mode === 'spider'
@@ -205,7 +205,8 @@ export function buildFlight(
 				else if (side === -1 && highRoom > 1.05) c.spike = -1;
 				continue;
 			}
-			if (rng() > (steered ? 0.14 : mode === 'spider' ? 0.45 : 0.25)) continue;
+			if (rng() > (mode === 'swing' ? 0.3 : steered ? 0.14 : mode === 'spider' ? 0.45 : 0.25))
+				continue;
 			const choices = shuffleByWeight(rng, [
 				{ item: 1 as const, weight: lowRoom > 1.05 ? 1 : 0 },
 				{ item: -1 as const, weight: highRoom > 1.05 ? 1 : 0 }

@@ -121,6 +121,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	let shipAngle = 0;
 	let emit = 0;
 	let lastMode: Mode | null = null;
+	let lastKiai = false;
+	let zoom = 0;
 
 	function resize() {
 		const ratio = Math.min(2, window.devicePixelRatio || 1);
@@ -272,29 +274,21 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.fillStyle = `rgba(255,255,255,${pulse * 0.06})`;
 			ctx.fillRect(0, 0, width, height);
 		}
-		// Two layers of big squares, far away
-		const layers = [
-			{ speed: 0.08, size: 6, alpha: 0.07, rows: 3 },
-			{ speed: 0.2, size: 3.2, alpha: 0.09, rows: 5 }
-		];
-		ctx.lineWidth = Math.max(1, scale * 0.05);
-		for (const layer of layers) {
-			const size = layer.size * scale;
-			const offset = (camX * layer.speed * scale) % (size * 2);
-			ctx.strokeStyle = `rgba(255,255,255,${layer.alpha})`;
-			ctx.fillStyle = `rgba(0,0,0,${layer.alpha * 0.9})`;
-			const startColumn = Math.floor((camX * layer.speed * scale) / (size * 2));
-			for (let c = -1; c < width / (size * 2) + 2; c++) {
-				const column = startColumn + c;
-				for (let r = 0; r < layer.rows; r++) {
-					const n = noise(column * 13 + r * 7 + layer.size);
-					if (n < 0.45) continue;
-					const x = c * size * 2 - offset + (n - 0.45) * size;
-					const y = height - (r + 1) * size * 1.3 - noise(column + r) * size * 0.6 - scale * 2;
-					const s = size * (0.6 + n * 0.5);
-					ctx.fillRect(x, y, s, s);
-					ctx.strokeRect(x, y, s, s);
-				}
+		// A big tiled wall far away, like the genre's backgrounds
+		const size = scale * 4;
+		const offset = (((camX * 0.1 * scale) % size) + size) % size;
+		const offsetY = (((camY * 0.1 * scale) % size) + size) % size;
+		const column0 = Math.floor((camX * 0.1 * scale) / size);
+		for (let c = -1; c < width / size + 2; c++) {
+			for (let r = -1; r < height / size + 2; r++) {
+				const x = c * size - offset;
+				const y = r * size + offsetY - size;
+				const n = noise((column0 + c) * 3.7 + r * 11.3);
+				ctx.fillStyle = `rgba(0,0,0,${0.05 + n * 0.08})`;
+				ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
+				ctx.strokeStyle = `rgba(255,255,255,${0.05 + (n > 0.85 ? pulse * 0.12 : 0)})`;
+				ctx.lineWidth = Math.max(1, scale * 0.05);
+				ctx.strokeRect(x + size * 0.18, y + size * 0.18, size * 0.64, size * 0.64);
 			}
 		}
 		// Light from below, on the beat
@@ -303,6 +297,64 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		glow.addColorStop(1, `rgba(255,255,255,${0.05 + pulse * (kiai ? 0.1 : 0.04)})`);
 		ctx.fillStyle = glow;
 		ctx.fillRect(0, height * 0.35, width, height * 0.65);
+	}
+
+	/** Gears turning far behind, little squares floating up, rings on the beat in the kiai */
+	function decorations(p: Palette, time: number, pulse: number, kiai: boolean) {
+		// Gears (dark, slow, behind everything)
+		const spacing = 9;
+		const speed = 0.35;
+		const offset = camX * speed;
+		const first = Math.floor(offset / spacing) - 1;
+		for (let k = first; k < first + width / scale / spacing + 3; k++) {
+			const n = noise(k * 5.1 + 2);
+			if (n < 0.45) continue;
+			const cx = (k * spacing - offset + n * 3) * scale;
+			const cy = height * (0.25 + noise(k * 9.7) * 0.4);
+			const r = scale * (1.2 + n * 1.6);
+			const teeth = 8 + Math.floor(n * 6);
+			ctx.save();
+			ctx.translate(cx, cy);
+			ctx.rotate(((time / 1000) * (k % 2 ? 0.4 : -0.4) * (1 + pulse * 0.6)) % (Math.PI * 2));
+			ctx.beginPath();
+			for (let t = 0; t < teeth * 2; t++) {
+				const a = (t / (teeth * 2)) * Math.PI * 2;
+				const rr = t % 2 ? r * 0.82 : r;
+				ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+			}
+			ctx.closePath();
+			ctx.moveTo(r * 0.35, 0);
+			ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2, true);
+			ctx.fillStyle = rgba(mix(p.bottom, '#000000', 0.3), 0.25);
+			ctx.fill('evenodd');
+			ctx.strokeStyle = rgba(p.accent, 0.08 + pulse * 0.08);
+			ctx.lineWidth = Math.max(1, scale * 0.05);
+			ctx.stroke();
+			ctx.restore();
+		}
+		// Little squares floating up
+		for (let k = 0; k < 26; k++) {
+			const n = noise(k * 3.3 + 1);
+			const life = ((time / 1000) * (0.08 + n * 0.08) + n) % 1;
+			const x = (((noise(k * 7.1) * width * 1.3 - camX * scale * 0.15) % width) + width) % width;
+			const y = height * (1 - life);
+			const sz = scale * (0.08 + n * 0.14);
+			ctx.fillStyle = rgba('#ffffff', 0.12 * Math.sin(life * Math.PI) + (kiai ? pulse * 0.1 : 0));
+			ctx.save();
+			ctx.translate(x, y);
+			ctx.rotate(life * 6 + k);
+			ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+			ctx.restore();
+		}
+		// In the kiai, a ring from the middle on every strong beat
+		if (kiai && pulse > 0.05) {
+			const r = (1 - pulse) * Math.max(width, height) * 0.6;
+			ctx.beginPath();
+			ctx.arc(width / 2, height / 2, r, 0, Math.PI * 2);
+			ctx.strokeStyle = rgba('#ffffff', pulse * 0.12);
+			ctx.lineWidth = scale * 0.5 * pulse;
+			ctx.stroke();
+		}
 	}
 
 	/** Hills far away behind the level, and in the kiai beams of light on the beat */
@@ -378,6 +430,62 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillRect(0, line - thick / 2, width, thick);
 		ctx.fillStyle = `rgba(255,255,255,${0.12 + pulse * 0.12})`;
 		ctx.fillRect(0, side === 1 ? line : line - scale * 0.35, width, scale * 0.35);
+		const halo = ctx.createLinearGradient(0, line, 0, line - side * scale * 1.2);
+		halo.addColorStop(0, rgba(p.accent, 0.22 + pulse * 0.2));
+		halo.addColorStop(1, rgba(p.accent, 0));
+		ctx.fillStyle = halo;
+		ctx.fillRect(0, side === 1 ? line - scale * 1.2 : line, width, scale * 1.2);
+	}
+
+	/** One block, drawn once per size and colour and then stamped: a bevelled tile */
+	let tileCache: { key: string; canvas: HTMLCanvasElement } | null = null;
+	function tile(p: Palette) {
+		const size = Math.max(4, Math.round(scale));
+		const key = `${size}:${p.accent}`;
+		if (tileCache?.key === key) return tileCache.canvas;
+		const c = document.createElement('canvas');
+		c.width = size;
+		c.height = size;
+		const t = c.getContext('2d')!;
+		const g = t.createLinearGradient(0, 0, 0, size);
+		g.addColorStop(0, '#1b1636');
+		g.addColorStop(1, '#07060f');
+		t.fillStyle = g;
+		t.fillRect(0, 0, size, size);
+		// The bevel: light on top and left, dark on the other sides
+		const b = size * 0.1;
+		t.fillStyle = 'rgba(255,255,255,0.07)';
+		t.beginPath();
+		t.moveTo(0, 0);
+		t.lineTo(size, 0);
+		t.lineTo(size - b, b);
+		t.lineTo(b, b);
+		t.lineTo(b, size - b);
+		t.lineTo(0, size);
+		t.closePath();
+		t.fill();
+		t.fillStyle = 'rgba(0,0,0,0.35)';
+		t.beginPath();
+		t.moveTo(size, size);
+		t.lineTo(0, size);
+		t.lineTo(b, size - b);
+		t.lineTo(size - b, size - b);
+		t.lineTo(size - b, b);
+		t.lineTo(size, 0);
+		t.closePath();
+		t.fill();
+		// The inner square
+		t.strokeStyle = rgba(p.accent, 0.28);
+		t.lineWidth = Math.max(1, size * 0.04);
+		t.strokeRect(size * 0.24, size * 0.24, size * 0.52, size * 0.52);
+		t.fillStyle = rgba(p.accent, 0.08);
+		t.fillRect(size * 0.24, size * 0.24, size * 0.52, size * 0.52);
+		// The edge between tiles
+		t.strokeStyle = 'rgba(0,0,0,0.5)';
+		t.lineWidth = Math.max(1, size * 0.03);
+		t.strokeRect(0, 0, size, size);
+		tileCache = { key, canvas: c };
+		return c;
 	}
 
 	function solid(
@@ -393,43 +501,48 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const right = sx(x1);
 		const top = sy(y1);
 		const bottom = sy(y0);
-		const w = right - left;
-		const h = bottom - top;
-		if (w <= 0 || h <= 0) return;
-		ctx.fillStyle = 'rgba(7,6,18,0.93)';
-		ctx.fillRect(left, top, w, h);
-		// The blocks inside
-		ctx.strokeStyle = rgba(p.accent, 0.12);
-		ctx.lineWidth = Math.max(1, scale * 0.035);
+		if (right - left <= 0 || bottom - top <= 0) return;
+		const image = tile(p);
+		ctx.save();
 		ctx.beginPath();
-		for (let y = Math.ceil(y0 + 0.001); y < y1; y++) {
-			ctx.moveTo(left, sy(y));
-			ctx.lineTo(right, sy(y));
-		}
-		for (let x = Math.ceil(x0 + 0.001); x < x1; x++) {
-			ctx.moveTo(sx(x), top);
-			ctx.lineTo(sx(x), bottom);
-		}
-		ctx.stroke();
-		void style;
-		void pulse;
-		// Lights in some of the blocks
+		ctx.rect(left, top, right - left, bottom - top);
+		ctx.clip();
+		const fromX = Math.max(Math.floor(x0), Math.floor(camX) - 1);
+		const toX = Math.min(Math.ceil(x1), Math.ceil(camX + width / scale) + 1);
 		for (let y = Math.floor(y0); y < y1; y++) {
-			for (let x = Math.floor(x0); x < x1; x++) {
-				if (x < x0 - 0.01 || x + 1 > x1 + 0.01) continue;
+			const ty = sy(y + 1);
+			if (ty > height || ty + scale < 0) continue;
+			for (let x = fromX; x < toX; x++) {
+				const tx = sx(x);
+				ctx.drawImage(image, tx, ty, scale + 0.6, scale + 0.6);
+				// Some blocks light up on the beat
 				const n = noise(x * 7.3 + y * 13.1);
-				if (n > 0.22) continue;
-				const cx = sx(x + 0.5);
-				const cy = sy(y + 0.5);
-				const r = scale * (n < 0.08 ? 0.16 : 0.1);
-				ctx.fillStyle = rgba(p.accent, 0.35 + pulse * 0.4);
-				ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+				if (n < 0.1) {
+					ctx.fillStyle = rgba(p.accent, 0.15 + pulse * 0.45);
+					ctx.fillRect(tx + scale * 0.3, ty + scale * 0.3, scale * 0.4, scale * 0.4);
+				}
+			}
+		}
+		ctx.restore();
+		// Floating platforms: chains holding them up
+		if (style === 1) {
+			ctx.strokeStyle = rgba('#ffffff', 0.25);
+			ctx.lineWidth = Math.max(1, scale * 0.05);
+			for (let x = Math.ceil(x0) + 0.5; x < x1; x += 3) {
+				if (x < camX - 1 || x > camX + width / scale + 1) continue;
+				for (let k = 0; k < 9; k++) {
+					const cy = sy(y1) - scale * (0.3 + k * 0.4);
+					ctx.beginPath();
+					if (k % 2) ctx.ellipse(sx(x), cy, scale * 0.04, scale * 0.17, 0, 0, Math.PI * 2);
+					else ctx.ellipse(sx(x), cy, scale * 0.1, scale * 0.17, 0, 0, Math.PI * 2);
+					ctx.stroke();
+				}
 			}
 		}
 	}
 
 	/** The outline of touching blocks as one shape: only the edges nothing else covers */
-	function outlines(list: Solid[], section: Section, p: Palette, pulse: number) {
+	function outlines(list: Solid[], section: Section, p: Palette, pulse: number, glow: boolean) {
 		const EPS = 1e-6;
 		const shines: { x0: number; x1: number; y: number; down: boolean }[] = [];
 		const minus = (from: number, to: number, cuts: [number, number][]) => {
@@ -481,16 +594,29 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				}
 			}
 		}
-		// A glow inside along the open tops (and bottoms), under the outline
-		const depth = scale * 0.85;
+		const base = Math.max(1.5, scale * 0.07);
+		if (glow) {
+			// The outline's glow, behind the blocks (more on the beat)
+			ctx.strokeStyle = rgba(p.accent, 0.14 + pulse * 0.12);
+			ctx.lineWidth = base * 7;
+			ctx.stroke();
+			ctx.strokeStyle = rgba(p.accent, 0.3 + pulse * 0.2);
+			ctx.lineWidth = base * 3.5;
+			ctx.stroke();
+			return;
+		}
+		// A light inside along the open tops (and bottoms), then the white line
+		const depth = scale * 0.6;
 		for (const sh of shines) {
 			const y = sy(sh.y);
 			const g = ctx.createLinearGradient(0, y, 0, sh.down ? y + depth : y - depth);
-			g.addColorStop(0, rgba(p.accent, 0.32 + pulse * 0.25));
+			g.addColorStop(0, rgba(p.accent, 0.14 + pulse * 0.16));
 			g.addColorStop(1, rgba(p.accent, 0));
 			ctx.fillStyle = g;
 			ctx.fillRect(sx(sh.x0), sh.down ? y : y - depth, sx(sh.x1) - sx(sh.x0), depth);
 		}
+		ctx.strokeStyle = '#ffffff';
+		ctx.lineWidth = base;
 		ctx.stroke();
 	}
 
@@ -687,11 +813,13 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			}
 			ctx.lineTo(sx(to), sy(edge));
 			ctx.closePath();
-			const fill = ctx.createLinearGradient(0, sy(top), 0, sy(section.floor));
-			fill.addColorStop(0, mix(p.bottom, '#000000', 0.55));
-			fill.addColorStop(0.5, mix(p.bottom, '#000000', 0.8));
-			fill.addColorStop(1, mix(p.bottom, '#000000', 0.55));
-			ctx.fillStyle = fill;
+			const image = tile(p);
+			const pattern = ctx.createPattern(image, 'repeat');
+			if (pattern) {
+				const k = scale / image.width;
+				pattern.setTransform(new DOMMatrix([k, 0, 0, k, sx(0), sy(0)]));
+				ctx.fillStyle = pattern;
+			} else ctx.fillStyle = '#0b0918';
 			ctx.fill();
 			ctx.save();
 			ctx.clip();
@@ -1101,6 +1229,16 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const world = level.world;
 		const section = world.sectionAt(state.time);
 		if (lastMode !== state.mode) lastMode = state.mode;
+		// The drop: a flash and a kick of the camera
+		if (section.kiai && !lastKiai && !frame.waiting && time > level.start + 500) {
+			flash = 1;
+			flashColor = '#ffffff';
+			zoom = 1;
+			shake = Math.max(shake, 0.6);
+		}
+		lastKiai = section.kiai;
+		zoom = Math.max(0, zoom - dt * 2.5);
+		scale *= 1 + zoom * 0.05 + beatPulse(level, time) * (section.kiai ? 0.012 : 0);
 
 		// The camera
 		const x = frame.dead ? state.x : world.xAt(Math.max(time, level.start));
@@ -1118,7 +1256,17 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.save();
 		if (shaking) ctx.translate((Math.random() - 0.5) * shaking, (Math.random() - 0.5) * shaking);
 		background(p, pulse, section.kiai);
+		decorations(p, time, pulse, section.kiai);
 		scenery(p, section.floor, pulse, section.kiai);
+		// The floor and the ceiling (it comes in from above at the start of a part)
+		const ceilingF = ease((state.time - section.start) / 450);
+		if (section.ceil !== null) ground(p, section.ceil + (1 - ceilingF) * 8, -1, pulse, camX);
+		else {
+			const before = world.sections[section.index - 1];
+			if (before?.ceil != null && ceilingF < 1)
+				ground(p, before.ceil + ceilingF * 8, -1, pulse, camX);
+		}
+		ground(p, section.floor, 1, pulse, camX);
 
 		const left = camX - 1;
 		const right = camX + width / scale + 1;
@@ -1131,12 +1279,28 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 
 		// Blocks
 		const solids = world.solids.near(left, right);
+		outlines(solids, section, p, pulse, true);
 		for (const s of solids) solid(s.x0, s.x1, s.y0, s.y1, p, pulse, s.style);
-		outlines(solids, section, p, pulse);
+		outlines(solids, section, p, pulse, false);
 
-		// Spikes and saws
-		for (const h of world.hazards.near(left, right)) {
-			if (h.kind === 'saw') continue;
+		// Spikes and saws (their outlines glow together)
+		const spikes = world.hazards.near(left, right).filter((h) => h.kind !== 'saw');
+		ctx.beginPath();
+		for (const h of spikes) {
+			const sh = (h.kind === 'small' ? 0.5 : 1) * h.dir;
+			const sw = h.kind === 'small' ? 0.42 : 0.5;
+			ctx.moveTo(sx(h.x - sw), sy(h.y));
+			ctx.lineTo(sx(h.x), sy(h.y + sh * 0.98));
+			ctx.lineTo(sx(h.x + sw), sy(h.y));
+		}
+		ctx.lineJoin = 'round';
+		ctx.strokeStyle = rgba(p.accent, 0.14 + pulse * 0.12);
+		ctx.lineWidth = Math.max(4, scale * 0.4);
+		ctx.stroke();
+		ctx.strokeStyle = rgba(p.accent, 0.35 + pulse * 0.2);
+		ctx.lineWidth = Math.max(2, scale * 0.18);
+		ctx.stroke();
+		for (const h of spikes) {
 			spike(h.x, h.y, h.dir, h.kind === 'small', p, pulse);
 		}
 
@@ -1166,16 +1330,6 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.fillStyle = '#ffffff';
 			ctx.fillRect(sx(ex + 4), 0, width, height);
 		}
-
-		// The floor and the ceiling (it comes in from above at the start of a part)
-		const ceilingF = ease((state.time - section.start) / 450);
-		if (section.ceil !== null) ground(p, section.ceil + (1 - ceilingF) * 8, -1, pulse, camX);
-		else {
-			const before = world.sections[section.index - 1];
-			if (before?.ceil != null && ceilingF < 1)
-				ground(p, before.ceil + ceilingF * 8, -1, pulse, camX);
-		}
-		ground(p, section.floor, 1, pulse, camX);
 
 		// Checkpoints
 		for (const c of frame.checkpoints) {

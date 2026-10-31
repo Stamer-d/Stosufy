@@ -82,7 +82,10 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		const room = (next - time) / 1000;
 		// Checked until the next click, and at least until it has landed again
 		const until = Math.max(next - 2, time + air * 1000 + 150);
-		const target = Math.min(preset.height, Math.round(busy(time) * 0.6 + (section.kiai ? 1 : 0)));
+		const target = Math.min(
+			preset.height,
+			Math.max(preset.level >= 1 ? 1 : 0, Math.round(busy(time) * 0.6 + (section.kiai ? 1 : 0)))
+		);
 		const patterns: Pattern[] = [];
 		const add = (p: Pattern) => patterns.push({ ...p, weight: p.weight * freshness(ctx, p.id) });
 		const land = x + speed * air;
@@ -103,6 +106,25 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 								a.spike(center + shift + k - (count - 1) / 2, level, 1, small ? 'small' : 'spike');
 							return true;
 						}
+					});
+				}
+			}
+			// Leaps over spike pits from structure to structure (the heart of a cube part)
+			if (room > air * 0.85 && preset.level >= 1) {
+				const options = platform
+					? [
+							[0, 1.6],
+							[1, level < target ? 1.7 : 1.0],
+							[-1, level > target ? 1.5 : 0.9],
+							[-2, level > target + 1 ? 0.8 : 0.3]
+						]
+					: [[1, 2.2]];
+				for (const [dh, w] of options) {
+					const slab = rng() < 0.45;
+					add({
+						id: `leap${dh}${slab ? 's' : ''}`,
+						weight: w,
+						build: (a) => leap(a, x, dh, slab)
 					});
 				}
 			}
@@ -296,6 +318,50 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				() => (platform = before)
 			);
 			a.spikes(Math.ceil(edge), Math.floor(resume - speed * 0.12), 0, 1);
+		}
+		return true;
+	}
+
+	/**
+	 * A leap over a spike pit onto the next structure, `dh` higher (or lower); a pillar from
+	 * the ground, or (high up) a floating platform
+	 */
+	function leap(a: Attempt, x: number, dh: number, slab: boolean) {
+		const target = level + dh;
+		if (target < 0 || target > preset.height) return false;
+		const disc = cube.jump ** 2 - 2 * cube.gravity * dh;
+		if (disc <= 0) return false;
+		const fall = (cube.jump + Math.sqrt(disc)) / cube.gravity;
+		const edge = platform ? half(x + speed * (tolerance / 1000) - 0.2) : null;
+		const resume = half(x + speed * (fall - tolerance / 1000) + 0.15);
+		const pitFrom = edge ?? Math.ceil(x + speed * (0.06 + tolerance / 1000) + 0.6);
+		if (resume - pitFrom < 1.5) return false;
+		const old = platform;
+		if (old) {
+			const oldEnd = old.x1;
+			a.change(
+				() => (old.x1 = edge!),
+				() => (old.x1 = oldEnd)
+			);
+		}
+		const before = platform;
+		if (target > 0) {
+			const solid = a.solid(
+				slab && target >= 2
+					? { x0: resume, x1: resume + 60, y0: target - 1, y1: target, style: 1 }
+					: { x0: resume, x1: resume + 60, y0: 0, y1: target, style: 0 }
+			);
+			a.change(
+				() => (platform = solid),
+				() => (platform = before)
+			);
+			a.spikes(Math.ceil(pitFrom), Math.floor(resume), 0, 1, old ? 'small' : 'spike');
+		} else {
+			a.change(
+				() => (platform = null),
+				() => (platform = before)
+			);
+			a.spikes(Math.ceil(pitFrom), Math.floor(resume - speed * 0.12), 0, 1);
 		}
 		return true;
 	}
