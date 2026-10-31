@@ -7,14 +7,14 @@ import * as path from '@tauri-apps/api/path';
 import { fetch } from '@tauri-apps/plugin-http';
 import { freshToken } from '../stores/auth';
 import { userSettings, updateUserSettings } from '../stores/user';
-import { mapDataStore } from '../stores/data';
+import { fetchBeatmapset, mapDataStore } from '../stores/data';
 import { currentSong, setPlaybackMod, skipForward, withoutPlaybackLock } from '../stores/audio';
 import { currentMod } from '../stores/mods';
 import { MOD } from './beatmap';
 import type { PlaybackMod } from '../types';
 import { parseReplay, type Replay } from './replay';
 import type { Judge } from './judge';
-import type { MapSet, StoredMapSet } from '../types';
+import type { Beatmap, MapSet, StoredMapSet } from '../types';
 
 // --- Difficulties -----------------------------------------------------------------------
 
@@ -73,11 +73,27 @@ export function playKey(song: MapSet | null | undefined) {
 const header = (content: string, key: string) =>
 	content.match(new RegExp(`^${key}\\s*:\\s*(.*?)\\s*$`, 'm'))?.[1];
 
+/** The difficulties osu! has of a set (asked once a session per set; none while offline) */
+const fromOsu = new Map<string, Promise<Beatmap[]>>();
+function osuDifficulties(setId: string) {
+	if (!fromOsu.has(setId))
+		fromOsu.set(
+			setId,
+			fetchBeatmapset(setId)
+				.then((set) => set.beatmaps ?? [])
+				.catch(() => {
+					fromOsu.delete(setId);
+					return [];
+				})
+		);
+	return fromOsu.get(setId)!;
+}
+
 /** The osu!standard difficulties of a song (with the same audio, so they line up) */
 export async function difficulties(song: MapSet): Promise<Difficulty[]> {
 	const stored = get(mapDataStore)[song.id] as StoredMapSet | undefined;
 	const found = new Map<string, Difficulty & { audio?: string | null }>();
-	for (const map of song.beatmaps ?? []) {
+	const add = (map: Beatmap) =>
 		found.set(String(map.id), {
 			id: String(map.id),
 			version: map.version ?? '',
@@ -85,7 +101,12 @@ export async function difficulties(song: MapSet): Promise<Difficulty[]> {
 			mode: map.mode ?? 'osu',
 			audio: map.audioFile ?? null
 		});
-	}
+	for (const map of song.beatmaps ?? []) add(map);
+	// Streamed, not downloaded: the song often knows only the difficulty it plays, osu! the rest
+	// (each of them can be played: its .osu file comes from osu! too)
+	if (!stored && found.size <= 1 && /^\d+$/.test(String(song.id)))
+		for (const map of await osuDifficulties(String(song.id)))
+			if (!found.has(String(map.id))) add(map);
 	for (const [id, map] of Object.entries(stored?.beatmaps ?? {})) {
 		const known = found.get(id);
 		let version = map.version ?? known?.version ?? '';
