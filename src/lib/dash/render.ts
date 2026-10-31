@@ -2,7 +2,7 @@
 // of how far it got. Everything is drawn here (no images): blocks with bright edges,
 // spikes, orbs, pads and portals that glow, colours that change with every part.
 
-import { wallAt, HITBOX, type Mode, type PlayerState, type Section } from './physics';
+import { wallAt, hitbox, type Mode, type PlayerState, type Section } from './physics';
 import type { Level } from './generate';
 
 /** How many blocks high the view is */
@@ -537,7 +537,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		cube: '#5dff5a',
 		ship: '#ff4fd8',
 		ball: '#ff9a1f',
-		wave: '#3ad7ff'
+		wave: '#3ad7ff',
+		ufo: '#ffd93d',
+		swing: '#ffe14d',
+		spider: '#b14dff'
 	};
 
 	function portal(x: number, y: number, color: string, time: number, label: string) {
@@ -738,7 +741,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.stroke();
 		} else if (state.mode === 'ball') {
 			ctx.rotate(state.rotation);
-			const r = HITBOX.ball.h * scale * 1.05;
+			const r = hitbox('ball', state.mini).h * scale * 1.05;
 			ctx.beginPath();
 			ctx.arc(0, 0, r, 0, Math.PI * 2);
 			ctx.fillStyle = icon.primary;

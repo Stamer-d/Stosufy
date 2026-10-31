@@ -11,7 +11,13 @@
 	import { userSettings } from '#lib/stores/user.ts';
 	import { isPreviewing } from '#lib/stores/stream.ts';
 	import { beatmapContent } from '#lib/hitsounds/player.ts';
-	import { chosenMapId, standardPicks } from '#lib/gameplay/play.ts';
+	import {
+		chosenMapId,
+		standardPicks,
+		difficulties,
+		chooseDifficulty
+	} from '#lib/gameplay/play.ts';
+	import DashSongs from './DashSongs.svelte';
 	import { dashOpen } from '#lib/dash/store.ts';
 	import { makeLevel } from '#lib/dash/level.ts';
 	import { DIFFICULTIES } from '#lib/dash/generate.ts';
@@ -65,6 +71,16 @@
 		song && ($userSettings.settings?.gameplayDifficulty, $standardPicks, chosenMapId(song))
 	);
 	let levelKey = $derived(song ? `${song.id}:${mapId}` : null);
+	/** The beatmap's difficulties, to make the level from another one */
+	let beatmapDiffs = $state([]);
+	$effect(() => {
+		const current = song;
+		beatmapDiffs = [];
+		if (!current) return;
+		difficulties(current)
+			.then((list) => current === song && (beatmapDiffs = list))
+			.catch(() => {});
+	});
 
 	// --- Making the level -------------------------------------------------------------------
 
@@ -433,117 +449,143 @@
 		{/if}
 	{/if}
 
-	{#if screen === 'loading'}
-		<div class="absolute inset-0 grid place-items-center" transition:fade={{ duration: 150 }}>
-			<p class="flex items-center gap-3 text-lg font-semibold text-white/80">
-				<span class="icon-[mingcute--loading-line] size-6 animate-spin"></span>
-				Building the level…
-			</p>
-		</div>
-	{:else if screen === 'error'}
-		<div class="absolute inset-0 grid place-items-center p-6">
-			<div class="flex flex-col items-center gap-4 text-center">
-				<p class="text-white/80">{message}</p>
-				<button
-					class="h-10 px-5 rounded-full bg-white text-black font-semibold cursor-pointer hover:scale-[1.03] transition"
-					onclick={exit}>Back</button
-				>
-			</div>
-		</div>
-	{:else if screen === 'ready' && game}
+	{#if screen === 'loading' || screen === 'error' || (screen === 'ready' && game)}
 		<div
-			class="absolute inset-0 grid place-items-center p-6 bg-black/35"
+			class="absolute inset-0 flex flex-wrap items-center justify-center content-center gap-4 p-6 pt-16 bg-black/35 overflow-y-auto"
 			transition:fade={{ duration: 150 }}
 		>
-			<div
-				class="w-[min(30rem,100%)] flex flex-col gap-5 p-6 rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15 shadow-2xl"
-				in:zoom={{ start: 0.96, duration: 200 }}
-			>
-				<div class="text-center">
-					<p class="text-xs font-black tracking-[0.2em] text-white/50">DASH</p>
-					<h2 class="mt-1 text-2xl font-black leading-tight line-clamp-2">{game.level.title}</h2>
-					<p class="text-sm text-white/60 truncate">
-						{game.level.artist} · {game.level.version} by {game.level.creator}
+			<DashSongs {difficulty} />
+			{#if screen === 'loading'}
+				<div
+					class="w-[min(30rem,100%)] h-[min(34rem,70vh)] grid place-items-center rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15"
+				>
+					<p class="flex items-center gap-3 text-lg font-semibold text-white/80">
+						<span class="icon-[mingcute--loading-line] size-6 animate-spin"></span>
+						Building the level…
 					</p>
 				</div>
-
-				<div class="grid grid-cols-5 gap-1.5">
-					{#each DIFFICULTIES as d (d)}
-						<button
-							class="flex flex-col items-center gap-1 py-2 rounded-xl ring-1 cursor-pointer transition {difficulty ===
-							d
-								? 'ring-white/50 bg-white/10'
-								: 'ring-white/5 bg-white/[0.03] hover:bg-white/[0.08]'}"
-							aria-pressed={difficulty === d}
-							onclick={() => (difficulty = d)}
-						>
-							<span
-								class="px-1.5 rounded text-[11px] font-black {difficulty === d
-									? DIFFICULTY_INFO[d].color
-									: 'bg-white/10 text-white/60'}">{DIFFICULTY_INFO[d].label}</span
-							>
-						</button>
-					{/each}
+			{:else if screen === 'error'}
+				<div
+					class="w-[min(30rem,100%)] h-[min(34rem,70vh)] flex flex-col items-center justify-center gap-4 p-6 text-center rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15"
+				>
+					<span class="icon-[mingcute--music-2-line] size-10 text-white/40"></span>
+					<p class="text-white/80">{message}</p>
+					<p class="text-sm text-white/45">Choose a song on the left.</p>
+					<button
+						class="h-10 px-5 rounded-full bg-white/15 font-semibold cursor-pointer hover:bg-white/25 transition"
+						onclick={exit}>Leave</button
+					>
 				</div>
+			{:else if game}
+				<div
+					class="w-[min(30rem,100%)] flex flex-col gap-5 p-6 rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15 shadow-2xl"
+					in:zoom={{ start: 0.96, duration: 200 }}
+				>
+					<div class="text-center">
+						<p class="text-xs font-black tracking-[0.2em] text-white/50">DASH</p>
+						<h2 class="mt-1 text-2xl font-black leading-tight line-clamp-2">{game.level.title}</h2>
+						<p class="text-sm text-white/60 truncate">
+							{game.level.artist} · {game.level.version} by {game.level.creator}
+						</p>
+					</div>
 
-				<div class="flex items-center justify-between gap-3">
-					<div class="flex gap-1.5">
-						{#each ICONS as icon, i (i)}
+					{#if beatmapDiffs.length > 1}
+						<div class="flex flex-wrap justify-center gap-1.5 max-h-20 overflow-y-auto">
+							{#each beatmapDiffs as diff (diff.id)}
+								<button
+									class="flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-semibold cursor-pointer transition {diff.id ===
+									mapId
+										? 'bg-white text-black'
+										: 'bg-white/5 text-white/65 hover:bg-white/10 hover:text-white'}"
+									title="Make the level from this difficulty of the beatmap"
+									onclick={() => chooseDifficulty(song, diff.id)}
+								>
+									<span class="max-w-28 truncate">{diff.version}</span>
+									{#if diff.stars != null}<span class="opacity-60">{diff.stars.toFixed(1)}★</span
+										>{/if}
+								</button>
+							{/each}
+						</div>
+					{/if}
+
+					<div class="grid grid-cols-5 gap-1.5">
+						{#each DIFFICULTIES as d (d)}
 							<button
-								class="size-8 rounded-lg ring-2 cursor-pointer transition {iconIndex === i
-									? 'ring-white scale-110'
-									: 'ring-transparent opacity-70 hover:opacity-100'}"
-								style="background: linear-gradient(135deg, {icon.primary} 50%, {icon.secondary} 50%)"
-								aria-label="Icon colours {i + 1}"
-								onclick={() => (iconIndex = i)}
-							></button>
+								class="flex flex-col items-center gap-1 py-2 rounded-xl ring-1 cursor-pointer transition {difficulty ===
+								d
+									? 'ring-white/50 bg-white/10'
+									: 'ring-white/5 bg-white/[0.03] hover:bg-white/[0.08]'}"
+								aria-pressed={difficulty === d}
+								onclick={() => (difficulty = d)}
+							>
+								<span
+									class="px-1.5 rounded text-[11px] font-black {difficulty === d
+										? DIFFICULTY_INFO[d].color
+										: 'bg-white/10 text-white/60'}">{DIFFICULTY_INFO[d].label}</span
+								>
+							</button>
 						{/each}
 					</div>
-					<button
-						class="flex items-center gap-2 h-8 px-3 rounded-full text-xs font-bold cursor-pointer transition {practice
-							? 'bg-emerald-400 text-emerald-950'
-							: 'bg-white/10 text-white/70 hover:text-white'}"
-						role="switch"
-						aria-checked={practice}
-						onclick={togglePractice}
-					>
-						<span class="icon-[mingcute--flag-2-line] size-4"></span>
-						Practice
-					</button>
-				</div>
 
-				<div class="grid grid-cols-2 gap-2 text-center">
-					<div class="py-2 rounded-xl bg-white/5">
-						<p class="text-[11px] font-bold text-white/45">NORMAL</p>
-						<p class="text-lg font-black">{pct(best.normal)}</p>
+					<div class="flex items-center justify-between gap-3">
+						<div class="flex gap-1.5">
+							{#each ICONS as icon, i (i)}
+								<button
+									class="size-8 rounded-lg ring-2 cursor-pointer transition {iconIndex === i
+										? 'ring-white scale-110'
+										: 'ring-transparent opacity-70 hover:opacity-100'}"
+									style="background: linear-gradient(135deg, {icon.primary} 50%, {icon.secondary} 50%)"
+									aria-label="Icon colours {i + 1}"
+									onclick={() => (iconIndex = i)}
+								></button>
+							{/each}
+						</div>
+						<button
+							class="flex items-center gap-2 h-8 px-3 rounded-full text-xs font-bold cursor-pointer transition {practice
+								? 'bg-emerald-400 text-emerald-950'
+								: 'bg-white/10 text-white/70 hover:text-white'}"
+							role="switch"
+							aria-checked={practice}
+							onclick={togglePractice}
+						>
+							<span class="icon-[mingcute--flag-2-line] size-4"></span>
+							Practice
+						</button>
 					</div>
-					<div class="py-2 rounded-xl bg-white/5">
-						<p class="text-[11px] font-bold text-white/45">PRACTICE</p>
-						<p class="text-lg font-black text-emerald-300">{pct(best.practice)}</p>
-					</div>
-				</div>
 
-				<div class="flex gap-2">
-					<button
-						class="flex-1 h-12 rounded-full bg-white text-black text-lg font-black flex items-center justify-center gap-2 cursor-pointer hover:scale-[1.02] transition"
-						onclick={() => start(false)}
-					>
-						<span class="icon-[mingcute--play-fill] size-6"></span>
-						Play
-					</button>
-					<button
-						class="h-12 px-5 rounded-full bg-white/10 text-white/80 font-semibold flex items-center gap-2 cursor-pointer hover:bg-white/15 hover:text-white transition"
-						title="Watch it played perfectly"
-						onclick={() => start(true)}
-					>
-						<span class="icon-[mingcute--eye-line] size-5"></span>
-						Auto
-					</button>
+					<div class="grid grid-cols-2 gap-2 text-center">
+						<div class="py-2 rounded-xl bg-white/5">
+							<p class="text-[11px] font-bold text-white/45">NORMAL</p>
+							<p class="text-lg font-black">{pct(best.normal)}</p>
+						</div>
+						<div class="py-2 rounded-xl bg-white/5">
+							<p class="text-[11px] font-bold text-white/45">PRACTICE</p>
+							<p class="text-lg font-black text-emerald-300">{pct(best.practice)}</p>
+						</div>
+					</div>
+
+					<div class="flex gap-2">
+						<button
+							class="flex-1 h-12 rounded-full bg-white text-black text-lg font-black flex items-center justify-center gap-2 cursor-pointer hover:scale-[1.02] transition"
+							onclick={() => start(false)}
+						>
+							<span class="icon-[mingcute--play-fill] size-6"></span>
+							Play
+						</button>
+						<button
+							class="h-12 px-5 rounded-full bg-white/10 text-white/80 font-semibold flex items-center gap-2 cursor-pointer hover:bg-white/15 hover:text-white transition"
+							title="Watch it played perfectly"
+							onclick={() => start(true)}
+						>
+							<span class="icon-[mingcute--eye-line] size-5"></span>
+							Auto
+						</button>
+					</div>
+					<p class="-mt-2 text-center text-xs text-white/40">
+						The song starts over · {game.level.clicks} clicks · made from the beatmap
+					</p>
 				</div>
-				<p class="-mt-2 text-center text-xs text-white/40">
-					The song starts over · {game.level.clicks} clicks · made from the beatmap
-				</p>
-			</div>
+			{/if}
 		</div>
 	{:else if screen === 'paused' && game}
 		<div

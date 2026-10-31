@@ -2,44 +2,79 @@
 // through it. The level generator runs the same physics to check that every level it
 // makes can be played (see generate.ts), so what it checks is what you play.
 //
-// Units: blocks (1 block = one grid square) and seconds; song times in ms. y goes up.
+// The numbers are the genre's own, as two open-source re-implementations have them
+// (OpenGD and camila314's pathfinder simulator, which agree): 30 units a block, 240 steps a
+// second, the speeds, gravities, jumps, orbs, pads and hitboxes below. Converted here to
+// blocks and seconds; song times in ms. y goes up.
 
-export type Mode = 'cube' | 'ship' | 'ball' | 'wave';
+export type Mode = 'cube' | 'ship' | 'ball' | 'ufo' | 'wave' | 'swing' | 'spider';
 
-/** Horizontal speeds (blocks per second): slow, normal, fast, faster, fastest */
+/** Horizontal speeds (blocks per second): 0.5×, 1×, 2×, 3×, 4× */
 export const SPEEDS = [8.372, 10.386, 12.914, 15.6, 19.2];
 
+const U = 1 / 30;
+
+/** The cube's gravity and jump, by speed (blocks/s², blocks/s) */
+const CUBE = [
+	{ gravity: 2747.52 * U, jump: 573.48 * U },
+	{ gravity: 2794.11 * U, jump: 603.72 * U },
+	{ gravity: 2786.4 * U, jump: 616.68 * U },
+	{ gravity: 2799.36 * U, jump: 606.42 * U },
+	{ gravity: 2799.36 * U, jump: 606.42 * U }
+];
+
 export const PHYSICS = {
-	/** Cube: gravity, jump (~2.2 blocks high, ~0.39 s in the air) and fastest fall */
-	gravity: 115,
-	jump: 22.36,
-	maxFall: 30,
-	/** Orbs and pads (times the jump) */
-	yellowOrb: 1.0,
-	pinkOrb: 0.72,
-	yellowPad: 1.38,
-	pinkPad: 0.92,
-	/** Ship: up while holding, down otherwise, and the fastest it goes either way */
-	shipUp: 50,
-	shipDown: 42,
-	shipMaxUp: 9,
-	shipMaxDown: 11,
-	/** Ball: gravity, fastest fall and the push when it switches */
-	ballGravity: 82,
-	ballMaxFall: 24,
-	ballPush: 2.5
+	maxFall: 810 * U,
+	/** Ship and UFO: the speed where their acceleration changes */
+	threshold: 103.5 * U,
+	shipHoldSlow: 1397.05 * U,
+	shipHoldFast: 1117.64 * U,
+	shipFallFast: 1341.17 * U,
+	shipFallSlow: 894.11 * U,
+	shipMaxUp: 432 * U,
+	shipMaxDown: 345.6 * U,
+	ballGravity: 1676.47 * U,
+	ballSwitch: 181.1 * U,
+	ufoJump: 371.03 * U,
+	ufoFallSlow: 1114.56 * U,
+	ufoFallFast: 1671.84 * U,
+	/** Orbs (times the jump) and pads (blocks/s) */
+	orb: {
+		yellow: 1,
+		pink: 0.72,
+		red: 1.36,
+		green: 0.98,
+		blue: 0.4,
+		black: (-810 * U) / (603.72 * U)
+	},
+	pad: { yellow: 864 * U, pink: 561.6 * U, red: 1080 * U, blue: 345.6 * U },
+	/** How much an orb or pad gives in the other modes (times the cube's) */
+	modeFactor: {
+		cube: 1,
+		ship: 0.75,
+		ball: 0.7,
+		ufo: 0.75,
+		wave: 0,
+		swing: 0.6,
+		spider: 0.7
+	} as Record<Mode, number>
 };
 
-/** The player's hitboxes (half sizes): outer (spikes, landing) and inner (crashing) */
-export const HITBOX: Record<Mode, { w: number; h: number; inner: number }> = {
-	cube: { w: 0.5, h: 0.5, inner: 0.18 },
-	ship: { w: 0.45, h: 0.32, inner: 0.14 },
-	ball: { w: 0.46, h: 0.46, inner: 0.17 },
-	wave: { w: 0.17, h: 0.17, inner: 0.17 }
-};
+/** The cube's gravity and jump at a speed */
+export function cubeAt(speedIndex: number) {
+	return CUBE[Math.max(0, Math.min(4, speedIndex))];
+}
+
+/** The player's half sizes: outer (spikes, landing, orbs) and inner (crashing into blocks) */
+export function hitbox(mode: Mode, mini = false) {
+	if (mode === 'wave')
+		return { w: mini ? 0.1 : 1 / 6, h: mini ? 0.1 : 1 / 6, inner: mini ? 0.1 : 1 / 6 };
+	const f = mini ? 0.6 : 1;
+	return { w: 0.5 * f, h: 0.5 * f, inner: 0.15 * f };
+}
 
 /** How deep the player may sink into the top of a block and still land on it */
-const SNAP = (mode: Mode) => HITBOX[mode].h - HITBOX[mode].inner + 0.02;
+const SNAP = (mode: Mode) => (mode === 'ship' || mode === 'ufo' || mode === 'swing' ? 7 : 10) * U;
 
 export interface Rect {
 	x0: number;
@@ -49,7 +84,7 @@ export interface Rect {
 }
 
 export interface Solid extends Rect {
-	/** How it's drawn: 0 a pillar from the ground, 1 a block structure, 2 a tunnel wall */
+	/** How it's drawn: 0 a structure, 1 a slab (floating platform), 2 a tunnel wall */
 	style: number;
 }
 
@@ -69,7 +104,7 @@ export interface Hazard {
 	x1: number;
 }
 
-export type OrbKind = 'yellow' | 'pink' | 'blue';
+export type OrbKind = 'yellow' | 'pink' | 'red' | 'blue' | 'green' | 'black';
 export interface Orb {
 	id: number;
 	kind: OrbKind;
@@ -79,13 +114,24 @@ export interface Orb {
 	x1: number;
 }
 
+export type PadKind = 'yellow' | 'pink' | 'red' | 'blue';
 export interface Pad {
 	id: number;
-	kind: 'yellow' | 'pink';
+	kind: PadKind;
 	x: number;
 	/** The surface it sits on */
 	y: number;
+	/** 1 on a floor, -1 under a ceiling */
 	dir: 1 | -1;
+	x0: number;
+	x1: number;
+}
+
+/** A gravity portal: up (falls up) or back down */
+export interface GravityPortal {
+	x: number;
+	y: number;
+	gravity: 1 | -1;
 	x0: number;
 	x1: number;
 }
@@ -102,6 +148,7 @@ export interface Walls {
 export interface Section {
 	index: number;
 	mode: Mode;
+	mini: boolean;
 	/** Song times (ms) and where (blocks) */
 	start: number;
 	end: number;
@@ -130,22 +177,11 @@ export interface InputEvent {
 	down: boolean;
 }
 
-export interface Decoration {
-	kind: string;
-	x: number;
-	y: number;
-	size: number;
-	/** -1 hangs from above */
-	dir: 1 | -1;
-	x0: number;
-	x1: number;
-	seed: number;
-}
-
 export interface Portal {
-	kind: 'mode' | 'speed';
+	kind: 'mode' | 'speed' | 'size';
 	mode?: Mode;
 	speedIndex?: number;
+	mini?: boolean;
 	x: number;
 	y: number;
 	x0: number;
@@ -189,7 +225,7 @@ export class Lane<T extends { x0: number; x1: number }> {
 	}
 
 	/** The objects that reach into [from, to] */
-	*near(from: number, to: number): Generator<T> {
+	near(from: number, to: number): T[] {
 		this.tidy();
 		const items = this.items;
 		let low = 0;
@@ -200,10 +236,15 @@ export class Lane<T extends { x0: number; x1: number }> {
 			if (items[mid].x0 < start) low = mid + 1;
 			else high = mid;
 		}
+		const found: T[] = [];
 		for (let i = low; i < items.length && items[i].x0 <= to; i++)
-			if (items[i].x1 >= from) yield items[i];
+			if (items[i].x1 >= from) found.push(items[i]);
+		return found;
 	}
 }
+
+const overlaps = (a: Rect, b: Rect) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+const EPS = 1e-6;
 
 export class World {
 	solids = new Lane<Solid>();
@@ -211,6 +252,7 @@ export class World {
 	orbs = new Lane<Orb>();
 	pads = new Lane<Pad>();
 	walls = new Lane<Walls>();
+	gravityPortals = new Lane<GravityPortal>();
 	sections: Section[] = [];
 	segments: SpeedSegment[] = [];
 	private nextId = 1;
@@ -256,19 +298,22 @@ export class World {
 		return sections[low];
 	}
 
+	/** A spike's hitbox: only its middle hurts (6×12 units; small ones 6×5.6) */
+	static spikeHit(x: number, y: number, dir: 1 | -1, kind: 'spike' | 'small'): Rect {
+		const w = 0.1;
+		const [from, to] = kind === 'small' ? [0.06, 0.25] : [0.3, 0.7];
+		return dir === 1
+			? { x0: x - w, x1: x + w, y0: y + from, y1: y + to }
+			: { x0: x - w, x1: x + w, y0: y - to, y1: y - from };
+	}
+
 	spike(x: number, y: number, dir: 1 | -1 = 1, kind: 'spike' | 'small' = 'spike') {
-		// Like the spikes of the genre: only the middle of a spike hurts
-		const width = kind === 'small' ? 0.22 : 0.3;
-		const height = kind === 'small' ? 0.3 : 0.55;
-		const hit =
-			dir === 1
-				? { x0: x - width / 2, x1: x + width / 2, y0: y, y1: y + height }
-				: { x0: x - width / 2, x1: x + width / 2, y0: y - height, y1: y };
+		const hit = World.spikeHit(x, y, dir, kind);
 		return this.hazards.add({ kind, x, y, dir, size: 1, hit, x0: x - 0.5, x1: x + 0.5 });
 	}
 
 	saw(x: number, y: number, radius: number) {
-		const r = radius * 0.78;
+		const r = radius * 0.72;
 		return this.hazards.add({
 			kind: 'saw',
 			x,
@@ -279,6 +324,31 @@ export class World {
 			x0: x - radius,
 			x1: x + radius
 		});
+	}
+
+	/** Whether a place is inside a block (or below the floor, above the ceiling) */
+	solidAt(x0: number, x1: number, y0: number, y1: number) {
+		const box = { x0: x0 + EPS, x1: x1 - EPS, y0: y0 + EPS, y1: y1 - EPS };
+		return this.solids.near(x0, x1).some((s) => overlaps(box, s));
+	}
+
+	/** Whether a whole stretch is a surface to stand on at a height (dir 1) or hang under (-1) */
+	surfaceAt(x0: number, x1: number, y: number, dir: 1 | -1) {
+		const section = this.sectionAt(this.timeAt((x0 + x1) / 2));
+		if (dir === 1 && Math.abs(y - section.floor) < EPS) return true;
+		if (dir === -1 && section.ceil !== null && Math.abs(y - section.ceil) < EPS) return true;
+		// Covered by the tops (or bottoms) of blocks, with no gap
+		const tops = this.solids
+			.near(x0, x1)
+			.filter((s) => Math.abs((dir === 1 ? s.y1 : s.y0) - y) < EPS)
+			.sort((a, b) => a.x0 - b.x0);
+		let reached = x0;
+		for (const s of tops) {
+			if (s.x0 > reached + EPS) return false;
+			reached = Math.max(reached, s.x1);
+			if (reached >= x1 - EPS) return true;
+		}
+		return false;
 	}
 }
 
@@ -293,12 +363,13 @@ export interface PlayerState {
 	gravity: 1 | -1;
 	grounded: boolean;
 	mode: Mode;
+	mini: boolean;
 	section: number;
 	held: boolean;
-	/** A press not used yet (for orbs, the ball), kept while the button is held */
+	/** A press not used yet (for orbs, the UFO, the swing), while the button is held */
 	buffered: boolean;
-	/** When the button was last pressed (ms) */
-	pressedAt: number;
+	/** The ball and the spider switch once per press */
+	switched: boolean;
 	/** Orbs and pads used in this attempt */
 	used: number[];
 	dead: boolean;
@@ -307,36 +378,39 @@ export interface PlayerState {
 	jumpedAt: number;
 	boostedAt: number;
 	landedAt: number;
+	/** The spider's last jump: from where to where (for its trail) */
+	teleport: { x: number; from: number; to: number; time: number } | null;
 }
 
-export function startState(world: World, time: number, y = 0.5): PlayerState {
+export function startState(world: World, time: number, y?: number): PlayerState {
 	const section = world.sectionAt(time);
+	const box = hitbox(section.mode, section.mini);
 	return {
 		time,
 		x: world.xAt(time),
-		y: Math.max(section.floor + HITBOX[section.mode].h, y),
+		y: Math.max(section.floor + box.h, y ?? section.floor + box.h),
 		vy: 0,
 		gravity: 1,
 		grounded: true,
 		mode: section.mode,
+		mini: section.mini,
 		section: section.index,
 		held: false,
 		buffered: false,
-		pressedAt: -1e9,
+		switched: false,
 		used: [],
 		dead: false,
 		rotation: 0,
 		jumpedAt: -1e9,
 		boostedAt: -1e9,
-		landedAt: -1e9
+		landedAt: -1e9,
+		teleport: null
 	};
 }
 
 export function copyState(state: PlayerState): PlayerState {
 	return { ...state, used: [...state.used] };
 }
-
-const overlaps = (a: Rect, b: Rect) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
 
 /** The wave walls' height at a place */
 export function wallAt(walls: Walls, x: number) {
@@ -361,6 +435,31 @@ export function wallAt(walls: Walls, x: number) {
 /** The fixed step of the physics (ms): 240 steps a second */
 export const STEP = 1000 / 240;
 
+/** Entering a part of another kind: what happens to the speed up or down (as in the genre) */
+function enterMode(s: PlayerState, from: Mode, to: Mode) {
+	if (from === 'wave') s.vy *= 0.9;
+	if (to === 'cube' || to === 'spider') s.vy /= from === 'ball' ? 1 : from === 'wave' ? 4 : 2;
+	else if (to === 'ship' || to === 'swing') s.vy /= from === 'ufo' || from === 'wave' ? 4 : 2;
+	else if (to === 'ball') s.vy /= from === 'ship' || from === 'ufo' ? 2 : 1;
+	else if (to === 'ufo') s.vy /= from === 'ship' ? 4 : 2;
+}
+
+/** Where the spider lands when it jumps: the first surface the other way */
+function spiderTarget(
+	world: World,
+	s: PlayerState,
+	section: Section,
+	box: { w: number; h: number }
+) {
+	const up = s.gravity > 0;
+	let target = up ? (section.ceil ?? s.y + 30) : section.floor;
+	for (const solid of world.solids.near(s.x - box.w + 0.05, s.x + box.w - 0.05)) {
+		if (up && solid.y0 >= s.y + box.h - 0.01 && solid.y0 < target) target = solid.y0;
+		if (!up && solid.y1 <= s.y - box.h + 0.01 && solid.y1 > target) target = solid.y1;
+	}
+	return up ? target - box.h : target + box.h;
+}
+
 /**
  * One step of the physics, to `time` (at most a STEP after the state's). Changes the state;
  * returns what happened (for sounds and effects).
@@ -373,120 +472,83 @@ export function step(world: World, s: PlayerState, time: number) {
 	if (section.index !== s.section) {
 		const before = s.mode;
 		s.section = section.index;
-		s.mode = section.mode;
-		s.gravity = 1;
-		s.buffered = false;
-		if (section.mode !== before) {
+		if (section.mode !== before || section.mini !== s.mini) {
 			events.push('portal');
-			if (section.mode === 'ship') s.vy *= 0.4;
-			if (section.mode === 'ball' || section.mode === 'cube')
-				s.vy = Math.min(s.vy, PHYSICS.jump * 0.6);
+			enterMode(s, before, section.mode);
 		}
+		s.mode = section.mode;
+		s.mini = section.mini;
+		if (s.gravity < 0) s.vy = -s.vy / 2;
+		s.gravity = 1;
+		s.buffered = s.held && s.mode !== 'ship';
 		s.grounded = false;
 	}
+	const prevX = s.x;
 	s.time = time;
 	s.x = world.xAt(time);
-	if (s.buffered && !s.held && time - s.pressedAt > BUFFER) s.buffered = false;
 	const speed = section.speed;
-	const box = HITBOX[s.mode];
-	const g = s.gravity;
+	const box = hitbox(s.mode, s.mini);
+	const factor = PHYSICS.modeFactor[s.mode] * (s.mini ? 0.8 : 1);
+	const cube = cubeAt(section.speedIndex);
+
+	// Moving (with the speed of the last step, then the new speed: as the genre does it)
+	const wasGrounded = s.grounded;
+	if (s.mode === 'wave') s.vy = (s.held ? 1 : -1) * s.gravity * speed * (s.mini ? 2 : 1);
+	s.y += s.vy * dt;
+	s.grounded = false;
+
+	// Gravity portals
+	for (const portal of world.gravityPortals.near(prevX, s.x)) {
+		if (portal.x > prevX && portal.x <= s.x && portal.gravity !== s.gravity) {
+			s.gravity = portal.gravity;
+			s.vy = s.vy / 2;
+			events.push('gravity');
+		}
+	}
 
 	// Orbs and pads
 	const player = { x0: s.x - box.w, x1: s.x + box.w, y0: s.y - box.h, y1: s.y + box.h };
 	if (s.mode !== 'wave') {
-		for (const orb of world.orbs.near(player.x0, player.x1)) {
-			if (!s.buffered || s.used.includes(orb.id)) continue;
-			const dx = Math.max(0, Math.abs(orb.x - s.x) - box.w);
-			const dy = Math.max(0, Math.abs(orb.y - s.y) - box.h);
-			if (dx * dx + dy * dy > 0.42 * 0.42) continue;
+		for (const orb of world.orbs.near(player.x0 - 0.6, player.x1 + 0.6)) {
+			if (!s.buffered || !s.held || s.used.includes(orb.id)) continue;
+			if (Math.abs(orb.x - s.x) > box.w + 0.6 || Math.abs(orb.y - s.y) > box.h + 0.6) continue;
 			s.used.push(orb.id);
 			s.buffered = false;
+			s.switched = true;
 			s.grounded = false;
 			s.boostedAt = time;
 			events.push('orb');
-			const jump = s.mode === 'ball' ? PHYSICS.jump * 0.75 : PHYSICS.jump;
+			const jump = cube.jump * factor;
 			if (orb.kind === 'blue') {
 				s.gravity = (s.gravity * -1) as 1 | -1;
-				s.vy = -s.gravity * jump * 0.35;
-			} else s.vy = g * jump * (orb.kind === 'pink' ? PHYSICS.pinkOrb : PHYSICS.yellowOrb);
-			if (s.mode === 'ship') s.vy *= 0.45;
+				s.vy = -s.gravity * cube.jump * 0.4 * factor;
+			} else if (orb.kind === 'green') {
+				s.gravity = (s.gravity * -1) as 1 | -1;
+				s.vy = s.gravity * jump * PHYSICS.orb.green;
+			} else if (orb.kind === 'black') s.vy = -s.gravity * PHYSICS.maxFall;
+			else s.vy = s.gravity * jump * PHYSICS.orb[orb.kind];
 			break;
 		}
 		for (const pad of world.pads.near(player.x0, player.x1)) {
 			if (s.used.includes(pad.id)) continue;
-			const top = pad.dir === 1 ? pad.y + 0.35 : pad.y;
-			const bottom = pad.dir === 1 ? pad.y : pad.y - 0.35;
-			if (player.y0 > top || player.y1 < bottom || Math.abs(pad.x - s.x) > box.w + 0.4) continue;
+			const near = pad.dir === 1 ? player.y0 <= pad.y + 0.2 : player.y1 >= pad.y - 0.2;
+			const touching = pad.dir === 1 ? player.y1 > pad.y : player.y0 < pad.y;
+			if (!near || !touching || Math.abs(pad.x - s.x) > box.w + 0.42) continue;
 			s.used.push(pad.id);
 			s.grounded = false;
 			s.boostedAt = time;
 			events.push('pad');
-			s.vy = pad.dir * PHYSICS.jump * (pad.kind === 'pink' ? PHYSICS.pinkPad : PHYSICS.yellowPad);
-			if (s.mode === 'ship') s.vy *= 0.5;
-		}
-	}
-
-	// Moving
-	switch (s.mode) {
-		case 'cube': {
-			if (s.grounded && (s.held || s.buffered)) {
-				s.vy = g * PHYSICS.jump;
-				s.grounded = false;
-				s.buffered = false;
-				s.jumpedAt = time;
-				events.push('jump');
-			}
-			s.vy -= g * PHYSICS.gravity * dt;
-			s.vy = g > 0 ? Math.max(s.vy, -PHYSICS.maxFall) : Math.min(s.vy, PHYSICS.maxFall);
-			break;
-		}
-		case 'ball': {
-			if (s.grounded && s.buffered) {
+			const f = PHYSICS.modeFactor[s.mode] * (s.mini ? 0.8 : 1);
+			if (pad.kind === 'blue') {
 				s.gravity = (s.gravity * -1) as 1 | -1;
-				s.vy = -s.gravity * PHYSICS.ballPush;
-				s.grounded = false;
-				s.buffered = false;
-				s.jumpedAt = time;
-				events.push('jump');
-			}
-			const gb = s.gravity;
-			s.vy -= gb * PHYSICS.ballGravity * dt;
-			s.vy = Math.max(-PHYSICS.ballMaxFall, Math.min(PHYSICS.ballMaxFall, s.vy));
-			break;
+				s.vy = -s.gravity * PHYSICS.pad.blue * f;
+			} else s.vy = pad.dir * PHYSICS.pad[pad.kind] * f;
 		}
-		case 'ship': {
-			s.vy += (s.held ? PHYSICS.shipUp : -PHYSICS.shipDown) * g * dt;
-			const up = g > 0 ? PHYSICS.shipMaxUp : PHYSICS.shipMaxDown;
-			const down = g > 0 ? PHYSICS.shipMaxDown : PHYSICS.shipMaxUp;
-			s.vy = Math.max(-down, Math.min(up, s.vy));
-			s.buffered = false;
-			break;
-		}
-		case 'wave': {
-			s.vy = (s.held ? 1 : -1) * g * speed;
-			s.buffered = false;
-			break;
-		}
-	}
-	const wasGrounded = s.grounded;
-	s.y += s.vy * dt;
-	s.grounded = false;
-
-	// The floor and ceiling of the part
-	const floor = section.floor;
-	if (s.y - box.h < floor) {
-		s.y = floor + box.h;
-		if (s.vy < 0) s.vy = 0;
-		if (s.gravity > 0 || s.mode === 'ship' || s.mode === 'wave') s.grounded = true;
-	}
-	if (section.ceil !== null && s.y + box.h > section.ceil) {
-		s.y = section.ceil - box.h;
-		if (s.vy > 0) s.vy = 0;
-		if (s.gravity < 0 || s.mode === 'ship' || s.mode === 'wave') s.grounded = true;
 	}
 
 	// Blocks: land on them, slide along them, or crash into them
 	const snap = SNAP(s.mode);
+	const g = s.gravity;
 	for (const solid of world.solids.near(s.x - box.w, s.x + box.w)) {
 		const outer = { x0: s.x - box.w, x1: s.x + box.w, y0: s.y - box.h, y1: s.y + box.h };
 		if (!overlaps(outer, solid)) continue;
@@ -503,52 +565,189 @@ export function step(world: World, s: PlayerState, time: number) {
 		}
 		const fromTop = solid.y1 - outer.y0;
 		const fromBottom = outer.y1 - solid.y0;
-		if (fromTop <= fromBottom && fromTop <= snap && (s.vy <= 0.01 || s.mode === 'ship')) {
+		const flying = s.mode === 'ship' || s.mode === 'ufo' || s.mode === 'swing';
+		// Landing on a top (falling down) or under a bottom (falling up), and flying modes and
+		// the ball bump along the other side
+		const downward = g > 0 ? s.vy <= 0 : s.vy < 0;
+		const upward = g < 0 ? s.vy >= 0 : s.vy > 0;
+		if (
+			fromTop <= fromBottom &&
+			fromTop <= snap &&
+			(g > 0 ? downward : flying || s.mode === 'ball' ? s.vy <= 0 : false)
+		) {
 			s.y = solid.y1 + box.h;
 			if (s.vy < 0) s.vy = 0;
-			if (s.gravity > 0 || s.mode === 'ship') s.grounded = true;
-		} else if (fromBottom < fromTop && fromBottom <= snap && (s.vy >= -0.01 || s.mode === 'ship')) {
+			if (g > 0 || flying) s.grounded = true;
+		} else if (
+			fromBottom < fromTop &&
+			fromBottom <= (g < 0 ? snap : 0.2) &&
+			(g < 0 ? upward : flying || s.mode === 'ball' ? s.vy >= 0 : false)
+		) {
 			s.y = solid.y0 - box.h;
 			if (s.vy > 0) s.vy = 0;
-			if (s.gravity < 0 || s.mode === 'ship') s.grounded = true;
+			if (g < 0 || flying) s.grounded = true;
 		}
-	}
-	if (s.grounded && !wasGrounded && s.mode !== 'wave') {
-		s.landedAt = time;
-		events.push('land');
 	}
 
 	// What kills
-	const hurt = {
-		x0: s.x - box.w + 0.04,
-		x1: s.x + box.w - 0.04,
-		y0: s.y - box.h + 0.04,
-		y1: s.y + box.h - 0.04
-	};
-	for (const hazard of world.hazards.near(hurt.x0, hurt.x1)) {
+	for (const hazard of world.hazards.near(player.x0 - 1, player.x1 + 1)) {
+		const p = { x0: s.x - box.w, x1: s.x + box.w, y0: s.y - box.h, y1: s.y + box.h };
 		if (hazard.kind === 'saw') {
-			const dx = Math.max(0, Math.abs(hazard.x - s.x) - (box.w - 0.04));
-			const dy = Math.max(0, Math.abs(hazard.y - s.y) - (box.h - 0.04));
-			if (dx * dx + dy * dy < (hazard.size * 0.78) ** 2) {
-				s.dead = true;
-				break;
-			}
-		} else if (overlaps(hurt, hazard.hit)) {
-			s.dead = true;
-			break;
-		}
+			const dx = Math.max(0, Math.abs(hazard.x - s.x) - box.w);
+			const dy = Math.max(0, Math.abs(hazard.y - s.y) - box.h);
+			if (dx * dx + dy * dy < (hazard.size * 0.72) ** 2) s.dead = true;
+		} else if (overlaps(p, hazard.hit)) s.dead = true;
+		if (s.dead) break;
 	}
 	if (!s.dead && s.mode === 'wave') {
 		for (const walls of world.walls.near(s.x, s.x)) {
 			const at = wallAt(walls, s.x);
 			// Along a slope the wave touches it a bit before its middle gets there
-			if (s.y - box.h * 1.2 < at.lo || s.y + box.h * 1.2 > at.hi) s.dead = true;
+			if (s.y - box.h * 1.35 < at.lo || s.y + box.h * 1.35 > at.hi) s.dead = true;
 		}
 	}
-	if (s.y < floor - 4) s.dead = true;
 	if (s.dead) {
 		events.push('death');
 		return events;
+	}
+
+	// The floor and ceiling of the part
+	const floor = section.floor;
+	if (s.y - box.h <= floor) {
+		s.y = floor + box.h;
+		if (s.vy < 0) s.vy = 0;
+		if (
+			s.gravity > 0 ||
+			s.mode === 'ship' ||
+			s.mode === 'ufo' ||
+			s.mode === 'wave' ||
+			s.mode === 'swing'
+		)
+			s.grounded = true;
+	}
+	if (section.ceil !== null && s.y + box.h >= section.ceil) {
+		s.y = section.ceil - box.h;
+		if (s.vy > 0) s.vy = 0;
+		if (
+			s.gravity < 0 ||
+			s.mode === 'ship' ||
+			s.mode === 'ufo' ||
+			s.mode === 'wave' ||
+			s.mode === 'swing'
+		)
+			s.grounded = true;
+	}
+	if (s.y < floor - 6 || (section.ceil === null && s.y > 60)) {
+		s.dead = true;
+		events.push('death');
+		return events;
+	}
+	const landed = s.grounded && !wasGrounded;
+	if (landed && s.mode !== 'wave') {
+		s.landedAt = time;
+		events.push('land');
+		// Landing clears a press made in the air (but holding still jumps)
+		if (s.mode !== 'ufo' && s.mode !== 'swing') s.buffered = false;
+	}
+
+	// The new speed up or down
+	const gg = s.gravity;
+	switch (s.mode) {
+		case 'cube': {
+			if (s.grounded && s.held) {
+				s.vy = gg * cube.jump * (s.mini ? 0.8 : 1);
+				s.grounded = false;
+				s.buffered = false;
+				s.jumpedAt = time;
+				events.push('jump');
+			} else s.vy -= gg * cube.gravity * dt;
+			s.vy = Math.max(-PHYSICS.maxFall, Math.min(PHYSICS.maxFall, s.vy));
+			break;
+		}
+		case 'ball': {
+			if (s.grounded && s.held && !s.switched) {
+				s.gravity = (s.gravity * -1) as 1 | -1;
+				s.vy = -s.gravity * PHYSICS.ballSwitch * (s.mini ? 0.8 : 1);
+				s.grounded = false;
+				s.buffered = false;
+				s.switched = true;
+				s.jumpedAt = time;
+				events.push('jump');
+			} else s.vy -= gg * PHYSICS.ballGravity * dt;
+			s.vy = Math.max(-PHYSICS.maxFall, Math.min(PHYSICS.maxFall, s.vy));
+			break;
+		}
+		case 'spider': {
+			if (s.grounded && s.held && !s.switched) {
+				const from = s.y;
+				s.y = spiderTarget(world, s, section, box);
+				s.teleport = { x: s.x, from, to: s.y, time };
+				s.gravity = (s.gravity * -1) as 1 | -1;
+				s.vy = 0;
+				s.switched = true;
+				s.buffered = false;
+				s.grounded = true;
+				s.jumpedAt = time;
+				events.push('jump');
+			} else if (!s.grounded) s.vy -= gg * PHYSICS.ballGravity * dt;
+			s.vy = Math.max(-PHYSICS.maxFall, Math.min(PHYSICS.maxFall, s.vy));
+			break;
+		}
+		case 'ship': {
+			const rel = s.vy * gg;
+			const a = s.held
+				? rel <= PHYSICS.threshold
+					? PHYSICS.shipHoldSlow
+					: PHYSICS.shipHoldFast
+				: rel >= PHYSICS.threshold
+					? -PHYSICS.shipFallFast
+					: -PHYSICS.shipFallSlow;
+			s.vy += a * gg * (s.mini ? 1.177 : 1) * dt;
+			const up = PHYSICS.shipMaxUp * (s.mini ? 1.177 : 1);
+			const down = PHYSICS.shipMaxDown * (s.mini ? 1.177 : 1);
+			s.vy = gg > 0 ? Math.max(-down, Math.min(up, s.vy)) : Math.max(-up, Math.min(down, s.vy));
+			if (s.grounded && ((gg > 0 && s.vy < 0) || (gg < 0 && s.vy > 0))) s.vy = 0;
+			s.buffered = false;
+			break;
+		}
+		case 'swing': {
+			// Each press turns the gravity around; it swings between the floor and ceiling
+			if (s.buffered && s.held) {
+				s.gravity = (s.gravity * -1) as 1 | -1;
+				s.buffered = false;
+				s.jumpedAt = time;
+				events.push('jump');
+			}
+			const g2 = s.gravity;
+			const rel = -s.vy * g2;
+			const a = rel >= PHYSICS.threshold ? PHYSICS.shipFallFast : PHYSICS.shipFallSlow;
+			s.vy -= a * g2 * 0.85 * dt;
+			s.vy = Math.max(-PHYSICS.shipMaxUp, Math.min(PHYSICS.shipMaxUp, s.vy));
+			break;
+		}
+		case 'ufo': {
+			if (s.buffered && s.held) {
+				s.vy = gg * Math.max(s.vy * gg, PHYSICS.ufoJump * (s.mini ? 0.968 : 1));
+				s.buffered = false;
+				s.grounded = false;
+				s.jumpedAt = time;
+				events.push('jump');
+			} else {
+				const rel = s.vy * gg;
+				s.vy -=
+					gg *
+					(rel <= PHYSICS.threshold ? PHYSICS.ufoFallSlow : PHYSICS.ufoFallFast) *
+					(s.mini ? 1.175 : 1) *
+					dt;
+			}
+			const up = PHYSICS.shipMaxUp;
+			const down = PHYSICS.shipMaxDown;
+			s.vy = gg > 0 ? Math.max(-down, Math.min(up, s.vy)) : Math.max(-up, Math.min(down, s.vy));
+			break;
+		}
+		case 'wave':
+			s.buffered = false;
+			break;
 	}
 
 	// The look
@@ -556,21 +755,22 @@ export function step(world: World, s: PlayerState, time: number) {
 		if (s.grounded) {
 			const quarter = Math.PI / 2;
 			const target = Math.round(s.rotation / quarter) * quarter;
-			s.rotation += (target - s.rotation) * Math.min(1, dt * 30);
-		} else s.rotation += g * dt * ((Math.PI / 0.39) * 1.0);
-	} else if (s.mode === 'ball') s.rotation += (s.gravity * speed * dt) / 0.5;
-	else s.rotation = 0;
+			s.rotation += (target - s.rotation) * Math.min(1, (dt / 0.075) * 2);
+		} else s.rotation += gg * dt * (Math.PI / (s.mini ? 0.328 : 0.41));
+	} else if (s.mode === 'ball') s.rotation += (s.gravity * dt * Math.PI * 2) / 0.5;
+	else if (s.mode === 'spider') s.rotation = 0;
 	return events;
 }
 
-/** Sets the button (with what a press buffers) */
-/** How long a press counts after it was let go (ms): a tap a bit before landing still jumps */
-export const BUFFER = 100;
-
+/** Sets the button */
 export function press(s: PlayerState, down: boolean) {
 	if (down && !s.held) {
 		s.buffered = true;
-		s.pressedAt = s.time;
+		s.switched = false;
+	}
+	if (!down) {
+		s.buffered = false;
+		s.switched = false;
 	}
 	s.held = down;
 }
@@ -589,8 +789,9 @@ export function simulate(
 	const s = copyState(start);
 	let index = options.from ?? 0;
 	while (index < inputs.length && inputs[index].time < s.time) index++;
-	while (s.time < until && !s.dead) {
-		const next = Math.min(until, s.time + STEP);
+	// Whole steps only, on the grid from the level's start: the same steps the game takes
+	while (s.time + STEP <= until + 1e-6 && !s.dead) {
+		const next = s.time + STEP;
 		while (index < inputs.length && inputs[index].time <= next) {
 			press(s, inputs[index].down);
 			index++;
