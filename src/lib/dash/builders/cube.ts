@@ -4,6 +4,7 @@
 // Everything stands on the grid; every pick is played early and late before it stays, and a
 // click whose obstacle could be passed without it is no click.
 
+import { beatAt } from '../chart';
 import { cubeAt, simulate, STEP, type PlayerState, type Section, type Solid } from '../physics';
 import {
 	legalAround,
@@ -49,6 +50,23 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 	// How high the level wants to be: higher where the music is busier
 	const busy = (t: number) => noteTimes.filter((n) => n > t - 2000 && n < t + 2000).length / 4;
 
+	// The rhythm of each measure: its clicks on a grid of sixteenths. A rhythm heard before
+	// gets what was built for it then (where it still fits), click for click.
+	const measures = new Map<string, number[]>();
+	const measureOf = (t: number) => {
+		const { point } = beatAt(ctx.chart.timing, t);
+		const length = point.beatLength * point.meter;
+		const index = Math.floor((t - point.time) / length + 1e-6);
+		const slot = Math.round((t - point.time - index * length) / (point.beatLength / 4));
+		return { key: `${point.time}:${index}`, slot };
+	};
+	for (const t of times) {
+		const { key, slot } = measureOf(t);
+		measures.set(key, [...(measures.get(key) ?? []), slot]);
+	}
+	/** The measure being remembered now (the first time its rhythm comes) */
+	let remembering = '';
+
 	const extend = (until: number) => {
 		if (platform) {
 			platform.x1 = Math.max(platform.x1, world.xAt(until) + 30);
@@ -86,8 +104,23 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 			preset.height,
 			Math.max(preset.level >= 1 ? 1 : 0, Math.round(busy(time) * 0.6 + (section.kiai ? 1 : 0)))
 		);
+		const { key: measure, slot } = measureOf(time);
+		const slots = measures.get(measure)!;
+		const rhythm = slots.length >= 2 ? slots.join(',') : '';
+		let motif = rhythm ? ctx.motifs.get(rhythm) : undefined;
+		if (rhythm && !motif) {
+			motif = [];
+			ctx.motifs.set(rhythm, motif);
+			remembering = measure;
+		}
+		const position = slots.indexOf(slot);
+		const wanted = remembering === measure ? undefined : motif?.[position];
 		const patterns: Pattern[] = [];
-		const add = (p: Pattern) => patterns.push({ ...p, weight: p.weight * freshness(ctx, p.id) });
+		const add = (p: Pattern) =>
+			patterns.push({
+				...p,
+				weight: p.id === wanted ? p.weight * 6 : p.weight * freshness(ctx, p.id)
+			});
 		const land = x + speed * air;
 		const middle = x + (speed * air) / 2;
 
@@ -99,7 +132,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				for (const shift of [0, count === 1 ? 1 : -1, count === 1 ? -1 : 1]) {
 					add({
 						id: `spikes${count}`,
-						weight: [0, 1, 1.1, 0.7][count] * (shift ? 0.3 : 1),
+						weight: [0, 0.7, 1, 0.7][count] * (shift ? 0.15 : 1),
 						build: (a) => {
 							const small = count === 1 && rng() < 0.25;
 							for (let k = 0; k < count; k++)
@@ -133,7 +166,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				for (const nudge of [0, 0.5]) {
 					add({
 						id: 'stairs',
-						weight: (level < target ? 1.6 : 0.6) * (nudge ? 0.4 : 1),
+						weight: (level < target ? 1.2 : 0.45) * (nudge ? 0.4 : 1),
 						build: (a) => stepUp(a, half(x + speed * (0.05 + tolerance / 1000) + 0.3) + nudge, 60)
 					});
 				}
@@ -151,6 +184,37 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 						return stepUp(a, edge, end - edge, true);
 					}
 				});
+			}
+			// A step up with a small spike in front of it: up and over in one jump
+			if (level < preset.height && room > 0.4 && preset.level >= 1) {
+				add({
+					id: 'spikeStep',
+					weight: level < target ? 1.1 : 0.4,
+					build: (a) => {
+						const edge = half(x + speed * (0.05 + tolerance / 1000) + 0.3) + 1;
+						stepUp(a, edge, 60);
+						a.spike(edge - 0.5, level, 1, 'small');
+						return true;
+					}
+				});
+			}
+			// A saw half sunk into the surface, under the jump
+			if (room > 0.34) {
+				for (const big of [false, true]) {
+					add({
+						id: big ? 'sawBig' : 'saw',
+						weight: big ? 0.45 : 0.75,
+						build: (a) => {
+							const radius = big ? 1 : 0.8;
+							const c = half(middle);
+							if (!world.surfaceAt(c - radius, c + radius, level, 1)) return false;
+							if (world.solidAt(c - radius, c + radius, level, level + radius)) return false;
+							if (world.hazards.near(c - radius - 0.6, c + radius + 0.6).length) return false;
+							a.saw(c, level, radius);
+							return true;
+						}
+					});
+				}
 			}
 			// A gap over a spike pit (to the same height, or down)
 			if (platform && level >= 1 && room > air * 0.9) {
@@ -176,7 +240,8 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				if (gapS > 0.16 && gapS < air - 0.05) {
 					add({
 						id: 'orbPit',
-						weight: 1.7,
+						// A note in the middle of the jump: that's what the orb is for
+						weight: 5,
 						pair: true,
 						build: (a) => orbPit(a, x, time, second, times[i + 2] ?? section.end)
 					});
@@ -233,6 +298,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				}
 				recent = checks;
 				used(ctx, pattern.id);
+				if (remembering === measure && motif) motif[position] = pattern.id;
 				done = pattern;
 				break;
 			}

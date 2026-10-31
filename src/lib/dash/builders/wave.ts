@@ -23,8 +23,9 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	const floor = section.floor;
 	const slope = section.mini ? 2 : 1;
 	const box = hitbox('wave', section.mini);
-	const width = preset.wave * (section.mini ? 0.75 : 1);
-	const gap = preset.waveGap * (section.mini ? 1.2 : 1);
+	// The small wave is steeper already: hardly narrower, and fewer turns
+	const width = preset.wave * (section.mini ? 0.9 : 1);
+	const gap = preset.waveGap * (section.mini ? 1.35 : 1);
 
 	// The turns: notes far enough apart, put on the grid
 	const turns: number[] = [];
@@ -143,14 +144,15 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	world.walls.add(walls);
 
 	// Checked: on time, and played like a person, who turns a bit early or late at every
-	// corner but sees where the corridor goes (so the errors don't add up); where it
-	// crashes, wider
+	// corner (by up to half a block) but sees where the corridor goes (so the errors don't add
+	// up); where it crashes, wider
+	const SLOPPY = 0.5;
 	const person = (seed: number) => {
 		let r = seed * 7919 + 17;
 		const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647) * 2 - 1;
 		const s = { ...entry, used: [...entry.used] };
 		let k = 1;
-		let error = rnd() * 0.3;
+		let error = rnd() * SLOPPY;
 		while (s.time + STEP <= section.end + 1e-6 && !s.dead) {
 			const next = s.time + STEP;
 			while (k < points.length - 1) {
@@ -165,7 +167,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 							: s.x >= b.x + error / slope;
 				if (reached || s.x > b.x + 1.2) {
 					k++;
-					error = rnd() * 0.3;
+					error = rnd() * SLOPPY;
 				} else break;
 			}
 			const a = points[k - 1];
@@ -181,7 +183,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		let failed: PlayerState | null = null;
 		const exact = simulate(world, entry, section.end, events);
 		if (exact.dead) failed = exact;
-		for (let seed = 1; seed <= 3 && !failed; seed++) {
+		for (let seed = 1; seed <= 6 && !failed; seed++) {
 			const run = person(seed);
 			if (run.dead) failed = run;
 		}

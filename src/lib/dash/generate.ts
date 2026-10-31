@@ -10,12 +10,14 @@ import {
 	SPEEDS,
 	STEP,
 	World,
+	cubeAt,
 	hitbox,
 	simulate,
 	startState,
 	type InputEvent,
 	type Mode,
-	type Portal
+	type Portal,
+	type Section
 } from './physics';
 import {
 	DIFFICULTIES,
@@ -154,6 +156,62 @@ export function chooseClicks(chart: DashChart, notes: DashNote[], gap: number, c
 		while (k < chosen.length && chosen[k] - last < gap * 1000) k++;
 	}
 	return filled;
+}
+
+/**
+ * The cube's clicks: the strongest notes a whole jump apart, so every jump lands on a note
+ * that counts instead of on whichever comes when the cube happens to be down again. Where the
+ * song has a strong note in the middle of a jump (and the next jump is far enough), that one
+ * too: an orb takes it, and on the harder levels another one in that orb's jump, as many in a
+ * row as the difficulty allows. The harder, the less strong such a note needs to be.
+ */
+function cubeClicks(chart: DashChart, notes: DashNote[], sec: Section, preset: Preset) {
+	const cube = cubeAt(sec.speedIndex);
+	const air = ((2 * cube.jump) / cube.gravity) * 1000;
+	const jumps = chooseClicks(chart, notes, Math.max(preset.gap, air / 1000 + 0.04), preset.cost);
+	if (preset.chain < 1) return jumps;
+	const strong = [1.45, 1.35, 1.12, 1.0, 0.9][preset.level];
+	const weightAt = new Map(notes.map((n) => [n.time, weight(chart, n)]));
+	const clicks: number[] = [];
+	let orbsBefore = 0;
+	for (let k = 0; k < jumps.length; k++) {
+		const time = jumps[k];
+		clicks.push(time);
+		let from = time;
+		let orbs = 0;
+		// On the easier levels not on two jumps in a row
+		while (orbs < preset.chain && !(preset.level <= 1 && orbsBefore)) {
+			const next = jumps[k + 1] ?? Infinity;
+			const after = jumps[k + 2] ?? Infinity;
+			let best: DashNote | null = null;
+			let takesNext = false;
+			for (const note of notes) {
+				if (note.time <= from + 160 || note.time >= from + air - 50) continue;
+				const w = weightAt.get(note.time) ?? 0;
+				if (w < strong) continue;
+				// After the orb it flies a whole jump again: the next jump only once it's down.
+				// On the harder levels the orb may take the next jump's place instead (when its
+				// note is as strong and the one after that is far enough).
+				let instead = false;
+				if (next - note.time < air + 60) {
+					if (preset.level < 2 || after - note.time < air + 60) continue;
+					if (w < (weightAt.get(next) ?? Infinity)) continue;
+					instead = true;
+				}
+				if (!best || w > (weightAt.get(best.time) ?? 0)) {
+					best = note;
+					takesNext = instead;
+				}
+			}
+			if (!best) break;
+			if (takesNext) jumps.splice(k + 1, 1);
+			clicks.push(best.time);
+			from = best.time;
+			orbs++;
+		}
+		orbsBefore = orbs;
+	}
+	return clicks;
 }
 
 /** Notes at least `gap` (s) apart, the stronger one of two close ones */
@@ -377,8 +435,7 @@ export function generateLevel(
 	world.segments.push({ time: end, x, speed: world.sections[world.sections.length - 1].speed });
 
 	const plan: InputEvent[] = [];
-	const ctx: Context = { world, plan, rng, preset, chart, history: [] };
-	const clicks = chooseClicks(chart, notes, preset.gap, preset.cost);
+	const ctx: Context = { world, plan, rng, preset, chart, history: [], motifs: new Map() };
 	let state = startState(world, start);
 	const portals: Portal[] = [];
 	for (const sec of world.sections) {
@@ -404,9 +461,8 @@ export function generateLevel(
 				x1: sec.x0 - 0.5
 			});
 		const inside = notes.filter((n) => n.time >= sec.start && n.time < sec.end);
-		const own = clicks.filter((t) => t >= sec.start && t < sec.end);
 		const entry = state;
-		if (sec.mode === 'cube') state = buildCube(ctx, sec, own, state);
+		if (sec.mode === 'cube') state = buildCube(ctx, sec, cubeClicks(chart, inside, sec, preset), state);
 		else if (sec.mode === 'wave') state = buildWave(ctx, sec, inside, state);
 		else {
 			// The UFO and swing click often, the ball and spider like the cube

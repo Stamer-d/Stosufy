@@ -23,7 +23,8 @@
 	import { makeLevel } from '#lib/dash/level.ts';
 	import { DIFFICULTIES } from '#lib/dash/generate.ts';
 	import { DashGame, RESPAWN, bestKey, bestOf, saveBest } from '#lib/dash/game.ts';
-	import { createDashRenderer, ICONS } from '#lib/dash/render.ts';
+	import { createDashRenderer, ICONS, spritesUrl } from '#lib/dash/render.ts';
+	import { ATLAS, SPRITES } from '#lib/dash/sprites.ts';
 	import { playDashSound } from '#lib/dash/sound.ts';
 
 	const DIFFICULTY_INFO = {
@@ -147,19 +148,34 @@
 
 	// --- The song's time, smooth between the audio element's updates --------------------
 
+	// The audio element's time comes in steps (and its latency wobbles): the clock runs on its
+	// own and only drifts towards it, never backwards, unless the song really jumped
 	let lastRaw = -1;
 	let lastPerf = 0;
+	let shown = 0;
+	let shownAt = 0;
 	function songTime() {
 		const audio = $songQueue.audio;
 		if (!audio) return 0;
 		const raw = heardTime(audio);
 		const now = performance.now();
-		if (audio.paused || raw !== lastRaw) {
+		const rate = audio.playbackRate || 1;
+		if (audio.paused || lastRaw < 0) {
+			lastRaw = raw;
+			lastPerf = shownAt = now;
+			return (shown = raw);
+		}
+		if (raw !== lastRaw) {
 			lastRaw = raw;
 			lastPerf = now;
-			return raw;
 		}
-		return raw + Math.min(120, (now - lastPerf) * (audio.playbackRate || 1));
+		const heard = raw + Math.min(120, (now - lastPerf) * rate);
+		const ahead = shown + (now - shownAt) * rate;
+		const off = heard - ahead;
+		const pull = 1 - Math.exp(-(now - shownAt) / 250);
+		shown = Math.abs(off) > 60 ? heard : Math.max(shown, ahead + off * pull);
+		shownAt = now;
+		return shown;
 	}
 
 	function seekAndPlay(ms) {
@@ -373,7 +389,7 @@
 			try {
 				renderer.draw({
 					level: g.level,
-					state: g.state,
+					state: g.view(time),
 					time: g.status === 'dead' ? g.state.time : time,
 					attempt: g.attempt,
 					progress: g.progress,
@@ -399,6 +415,13 @@
 	});
 
 	const pct = (value) => `${Math.floor(value)}%`;
+
+	/** An icon's picture out of the sprites, as a 32 px button's background */
+	function iconLook(icon) {
+		const [x, y, w, h] = SPRITES[icon.sprite];
+		const k = 32 / Math.max(w, h);
+		return `background: url(${spritesUrl}) ${-x * k}px ${-y * k}px / ${ATLAS[0] * k}px ${ATLAS[1] * k}px no-repeat`;
+	}
 </script>
 
 <svelte:window onkeydown={onKey} onkeyup={onKey} onpointerup={onPointer} onblur={release} />
@@ -538,8 +561,8 @@
 									class="size-8 rounded-lg ring-2 cursor-pointer transition {iconIndex === i
 										? 'ring-white scale-110'
 										: 'ring-transparent opacity-70 hover:opacity-100'}"
-									style="background: linear-gradient(135deg, {icon.primary} 50%, {icon.secondary} 50%)"
-									aria-label="Icon colours {i + 1}"
+									style={iconLook(icon)}
+									aria-label="Icon {i + 1}"
 									onclick={() => (iconIndex = i)}
 								></button>
 							{/each}

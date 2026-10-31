@@ -40,9 +40,34 @@ export class DashGame {
 	private lastCheckpoint = 0;
 	/** When this attempt started (song ms) */
 	attemptStart = 0;
+	/** The state one step before (for drawing between the steps) */
+	private before = { time: 0, y: 0, rotation: 0, mode: '' };
 
 	constructor(public level: Level) {
 		this.state = startState(level.world, level.start);
+		this.remember();
+	}
+
+	private remember() {
+		const s = this.state;
+		this.before = { time: s.time, y: s.y, rotation: s.rotation, mode: s.mode };
+	}
+
+	/**
+	 * The player as it should be drawn at a song time: between the last two steps, so it moves
+	 * as smoothly as the screen does (the steps are 240 a second, the frames aren't)
+	 */
+	view(time: number): PlayerState {
+		const s = this.state;
+		const b = this.before;
+		if (this.status !== 'playing' || s.time <= b.time || b.mode !== s.mode) return s;
+		const f = Math.max(0, Math.min(1, (time - s.time) / STEP));
+		const at = b.time + (s.time - b.time) * f;
+		// A teleport (the spider) or a snap: no sliding across
+		const y = Math.abs(s.y - b.y) > 1.5 ? s.y : b.y + (s.y - b.y) * f;
+		const turn = s.rotation - b.rotation;
+		const rotation = Math.abs(turn) > Math.PI / 2 ? s.rotation : b.rotation + turn * f;
+		return { ...s, time: at, x: this.level.world.xAt(at), y, rotation };
 	}
 
 	get progress() {
@@ -69,6 +94,7 @@ export class DashGame {
 		)
 			this.planIndex++;
 		if (!checkpoint) this.checkpoints = [];
+		this.remember();
 		return checkpoint ? Math.max(0, this.state.time - CHECKPOINT_LEAD) : this.level.start;
 	}
 
@@ -106,6 +132,7 @@ export class DashGame {
 				s.x = this.level.world.xAt(next);
 				continue;
 			}
+			this.remember();
 			for (const e of step(this.level.world, s, next)) happened.push(e);
 			if (s.dead) {
 				this.status = 'dead';

@@ -1,9 +1,25 @@
 // Draws the Dash mode: the level around the player, the player, its effects and the bar
-// of how far it got. Everything is drawn here (no images): blocks with bright edges,
-// spikes, orbs, pads and portals that glow, colours that change with every part.
+// of how far it got. The player, its vehicles, spikes, saws, orbs, pads, portals and
+// checkpoints are sprites (sprites.webp, cut from the sprite sheet by
+// scripts/dash-sprites.py); blocks, the ground and the scenery are drawn here, in colours
+// that change with every part. Until the sprites have loaded, everything is drawn.
 
 import { wallAt, hitbox, type Mode, type PlayerState, type Section, type Solid } from './physics';
 import type { Level } from './generate';
+import spritesUrl from './sprites.webp';
+import { SPRITES, type SpriteName } from './sprites';
+
+export { spritesUrl };
+
+let atlas: HTMLImageElement | null = null;
+/** The sprites, once they've loaded */
+function sprites() {
+	if (!atlas && typeof Image !== 'undefined') {
+		atlas = new Image();
+		atlas.src = spritesUrl;
+	}
+	return atlas?.complete && atlas.naturalWidth ? atlas : null;
+}
 
 /** How many blocks high the view is */
 const VIEW = 11;
@@ -27,17 +43,21 @@ export const PALETTES: Palette[] = [
 ];
 
 export interface Icon {
+	/** Its look; the colours are for the trail, the dust and the drawn vehicles */
+	sprite: SpriteName;
 	primary: string;
 	secondary: string;
 }
 
 export const ICONS: Icon[] = [
-	{ primary: '#7dff3a', secondary: '#21e0ff' },
-	{ primary: '#ffd93d', secondary: '#ff5ec4' },
-	{ primary: '#a78bfa', secondary: '#ffffff' },
-	{ primary: '#ff7a1a', secondary: '#ffe14d' },
-	{ primary: '#36f5c8', secondary: '#1b62ff' },
-	{ primary: '#ff4d6d', secondary: '#ffffff' }
+	{ sprite: 'icon0', primary: '#7d6cff', secondary: '#7dff3a' },
+	{ sprite: 'icon1', primary: '#9d7bff', secondary: '#21e0ff' },
+	{ sprite: 'icon2', primary: '#a3abd0', secondary: '#21e0ff' },
+	{ sprite: 'icon3', primary: '#7dff3a', secondary: '#21e0ff' },
+	{ sprite: 'icon4', primary: '#ffd93d', secondary: '#ffe14d' },
+	{ sprite: 'icon5', primary: '#21e0ff', secondary: '#1b62ff' },
+	{ sprite: 'icon6', primary: '#ffe14d', secondary: '#ff5ec4' },
+	{ sprite: 'icon7', primary: '#ff5ec4', secondary: '#ff4fd8' }
 ];
 
 export interface Frame {
@@ -106,6 +126,8 @@ const noise = (n: number) => {
 
 export function createDashRenderer(canvas: HTMLCanvasElement) {
 	const ctx = canvas.getContext('2d')!;
+	// (loading from now on, so they're there when the level starts)
+	sprites();
 	let width = 0;
 	let height = 0;
 	let scale = 1;
@@ -140,6 +162,19 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 
 	const sx = (x: number) => (x - camX) * scale;
 	const sy = (y: number) => height - (y - camY) * scale;
+
+	/**
+	 * Draws a sprite centred on a point (pixels), `w` wide and `h` high (as high as its shape
+	 * makes it without); false while the sprites are still loading
+	 */
+	function sprite(name: SpriteName, x: number, y: number, w: number, h?: number) {
+		const image = sprites();
+		if (!image) return false;
+		const [fx, fy, fw, fh] = SPRITES[name];
+		const high = h ?? (w * fh) / fw;
+		ctx.drawImage(image, fx, fy, fw, fh, x - w / 2, y - high / 2, w, high);
+		return true;
+	}
 
 	function spawn(p: Partial<Particle> & { x: number; y: number }) {
 		particles.push({
@@ -437,24 +472,35 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillRect(0, side === 1 ? line - scale * 1.2 : line, width, scale * 1.2);
 	}
 
-	/** One block, drawn once per size and colour and then stamped: a bevelled tile */
-	let tileCache: { key: string; canvas: HTMLCanvasElement } | null = null;
+	/**
+	 * One block, drawn once per size and colour and then stamped: a bevelled tile. The size goes
+	 * in powers of two and the colour in coarse steps, so the beat's zoom and a palette fading
+	 * into the next don't make a new one every frame.
+	 */
+	const tileCache = new Map<string, HTMLCanvasElement>();
 	function tile(p: Palette) {
-		const size = Math.max(4, Math.round(scale));
-		const key = `${size}:${p.accent}`;
-		if (tileCache?.key === key) return tileCache.canvas;
+		const size = Math.max(16, 2 ** Math.ceil(Math.log2(scale)));
+		const accent = `#${hex(p.accent)
+			.map((v) => Math.min(255, Math.round(v / 24) * 24).toString(16).padStart(2, '0'))
+			.join('')}`;
+		const key = `${size}:${accent}`;
+		const cached = tileCache.get(key);
+		if (cached) return cached;
+		if (tileCache.size > 24) tileCache.clear();
+		p = { ...p, accent };
 		const c = document.createElement('canvas');
 		c.width = size;
 		c.height = size;
 		const t = c.getContext('2d')!;
+		// Indigo with a lighter square in it and a cool light on the top left (as the sprites)
 		const g = t.createLinearGradient(0, 0, 0, size);
-		g.addColorStop(0, '#1b1636');
-		g.addColorStop(1, '#07060f');
+		g.addColorStop(0, '#24245f');
+		g.addColorStop(1, '#16163c');
 		t.fillStyle = g;
 		t.fillRect(0, 0, size, size);
 		// The bevel: light on top and left, dark on the other sides
 		const b = size * 0.1;
-		t.fillStyle = 'rgba(255,255,255,0.07)';
+		t.fillStyle = 'rgba(154,224,241,0.2)';
 		t.beginPath();
 		t.moveTo(0, 0);
 		t.lineTo(size, 0);
@@ -475,16 +521,16 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		t.closePath();
 		t.fill();
 		// The inner square
-		t.strokeStyle = rgba(p.accent, 0.28);
-		t.lineWidth = Math.max(1, size * 0.04);
-		t.strokeRect(size * 0.24, size * 0.24, size * 0.52, size * 0.52);
-		t.fillStyle = rgba(p.accent, 0.08);
-		t.fillRect(size * 0.24, size * 0.24, size * 0.52, size * 0.52);
+		t.fillStyle = rgba(mix('#46448b', p.accent, 0.3), 0.9);
+		t.fillRect(size * 0.26, size * 0.26, size * 0.48, size * 0.48);
+		t.strokeStyle = rgba(p.accent, 0.3);
+		t.lineWidth = Math.max(1, size * 0.03);
+		t.strokeRect(size * 0.26, size * 0.26, size * 0.48, size * 0.48);
 		// The edge between tiles
-		t.strokeStyle = 'rgba(0,0,0,0.5)';
+		t.strokeStyle = 'rgba(0,0,0,0.6)';
 		t.lineWidth = Math.max(1, size * 0.03);
 		t.strokeRect(0, 0, size, size);
-		tileCache = { key, canvas: c };
+		tileCache.set(key, c);
 		return c;
 	}
 
@@ -623,6 +669,24 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	function spike(x: number, y: number, dir: 1 | -1, small: boolean, p: Palette, pulse: number) {
 		const h = (small ? 0.5 : 1) * dir;
 		const w = small ? 0.42 : 0.5;
+		ctx.save();
+		ctx.translate(sx(x), sy(y));
+		ctx.scale(1, dir);
+		const drawn = small
+			? sprite('spikeSmall', 0, -scale * 0.28, scale * 0.9, scale * 0.58)
+			: sprite('spike', 0, -scale * 0.51, scale * 1.04, scale * 1.04);
+		ctx.restore();
+		if (drawn) {
+			// It lights up on the beat
+			ctx.beginPath();
+			ctx.moveTo(sx(x - w * 0.4), sy(y + h * 0.14));
+			ctx.lineTo(sx(x), sy(y + h * 0.58));
+			ctx.lineTo(sx(x + w * 0.4), sy(y + h * 0.14));
+			ctx.closePath();
+			ctx.fillStyle = rgba(p.accent, pulse * 0.3);
+			ctx.fill();
+			return;
+		}
 		ctx.beginPath();
 		ctx.moveTo(sx(x - w), sy(y));
 		ctx.lineTo(sx(x), sy(y + h * 0.98));
@@ -647,6 +711,57 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fill();
 	}
 
+	/** A saw: a toothed disc turning in the surface (only what's above it shows) */
+	function saw(x: number, y: number, radius: number, p: Palette, pulse: number, time: number) {
+		const r = radius * scale;
+		ctx.save();
+		ctx.translate(sx(x), sy(y));
+		ctx.beginPath();
+		ctx.rect(-r * 2, -r * 2, r * 4, r * 2);
+		ctx.clip();
+		const halo = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.6);
+		halo.addColorStop(0, rgba(p.accent, 0.22 + pulse * 0.25));
+		halo.addColorStop(1, rgba(p.accent, 0));
+		ctx.fillStyle = halo;
+		ctx.fillRect(-r * 1.6, -r * 1.6, r * 3.2, r * 1.6);
+		ctx.rotate((time / 1000) * 5);
+		if (sprite(radius >= 1 ? 'sawBig' : 'saw', 0, 0, r * 2.15, r * 2.15)) {
+			ctx.restore();
+			return;
+		}
+		const teeth = 14;
+		ctx.beginPath();
+		for (let k = 0; k < teeth * 2; k++) {
+			const a = (k / (teeth * 2)) * Math.PI * 2;
+			const reach = k % 2 ? r * 0.8 : r;
+			if (k) ctx.lineTo(Math.cos(a) * reach, Math.sin(a) * reach);
+			else ctx.moveTo(reach, 0);
+		}
+		ctx.closePath();
+		ctx.fillStyle = '#120f1f';
+		ctx.fill();
+		ctx.strokeStyle = '#ffffff';
+		ctx.lineWidth = Math.max(1.5, scale * 0.06);
+		ctx.lineJoin = 'round';
+		ctx.stroke();
+		ctx.beginPath();
+		ctx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
+		ctx.strokeStyle = rgba(p.accent, 0.55 + pulse * 0.35);
+		ctx.stroke();
+		for (let k = 0; k < 3; k++) {
+			const a = (k / 3) * Math.PI * 2;
+			ctx.beginPath();
+			ctx.moveTo(Math.cos(a) * r * 0.16, Math.sin(a) * r * 0.16);
+			ctx.lineTo(Math.cos(a) * r * 0.46, Math.sin(a) * r * 0.46);
+			ctx.stroke();
+		}
+		ctx.beginPath();
+		ctx.arc(0, 0, r * 0.14, 0, Math.PI * 2);
+		ctx.fillStyle = rgba(p.accent, 0.9);
+		ctx.fill();
+		ctx.restore();
+	}
+
 	function orb(x: number, y: number, kind: string, used: boolean, time: number, pulse: number) {
 		const colors: Record<string, [string, string]> = {
 			yellow: ['#ffe14d', '#fff8c2'],
@@ -665,6 +780,13 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		halo.addColorStop(1, rgba(main, 0));
 		ctx.fillStyle = halo;
 		ctx.fillRect(cx - r * 2.4, cy - r * 2.4, r * 4.8, r * 4.8);
+		const look = ORB_SPRITES[kind];
+		if (look) {
+			ctx.globalAlpha = used ? 0.35 : 1;
+			const drawn = sprite(look, cx, cy, r * 2.9);
+			ctx.globalAlpha = 1;
+			if (drawn) return;
+		}
 		ctx.beginPath();
 		ctx.arc(cx, cy, r, 0, Math.PI * 2);
 		const fill = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
@@ -702,6 +824,21 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const base = sy(y);
 		const w = 0.48 * scale;
 		const h = (0.24 + pulse * 0.04) * scale * dir;
+		const look = PAD_SPRITES[kind];
+		if (look && sprites()) {
+			const glow = ctx.createLinearGradient(0, base, 0, base - dir * scale * 1.6);
+			glow.addColorStop(0, rgba(main, used ? 0.1 : 0.4 + pulse * 0.2));
+			glow.addColorStop(1, rgba(main, 0));
+			ctx.fillStyle = glow;
+			ctx.fillRect(cx - w, Math.min(base, base - dir * scale * 1.6), w * 2, scale * 1.6);
+			ctx.save();
+			ctx.translate(cx, base);
+			ctx.scale(1, dir);
+			ctx.globalAlpha = used ? 0.45 : 1;
+			sprite(look, 0, -scale * 0.24, scale * 0.98, scale * 0.5);
+			ctx.restore();
+			return;
+		}
 		ctx.beginPath();
 		ctx.moveTo(cx - w, base);
 		ctx.quadraticCurveTo(cx, base - h * 2, cx + w, base);
@@ -718,6 +855,26 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillRect(cx - w, Math.min(base, base - dir * scale * 1.6), w * 2, scale * 1.6);
 	}
 
+	const ORB_SPRITES: Record<string, SpriteName> = {
+		yellow: 'orbYellow',
+		pink: 'orbPink',
+		red: 'orbRed',
+		blue: 'orbBlue',
+		green: 'orbGreen',
+		black: 'orbBlack'
+	};
+	/** (The sheet has no red and blue pads: those are drawn) */
+	const PAD_SPRITES: Record<string, SpriteName> = { yellow: 'padYellow', pink: 'padPink' };
+	const PORTAL_SPRITES: Record<Mode, SpriteName> = {
+		cube: 'portalCube',
+		ship: 'portalShip',
+		ball: 'portalBall',
+		wave: 'portalWave',
+		ufo: 'portalUfo',
+		swing: 'portalSwing',
+		spider: 'portalSpider'
+	};
+
 	const PORTAL_COLORS: Record<Mode, string> = {
 		cube: '#5dff5a',
 		ship: '#ff4fd8',
@@ -728,7 +885,14 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		spider: '#b14dff'
 	};
 
-	function portal(x: number, y: number, color: string, time: number, label: string) {
+	function portal(
+		x: number,
+		y: number,
+		color: string,
+		time: number,
+		label: string,
+		look?: SpriteName
+	) {
 		const cx = sx(x);
 		const cy = sy(y);
 		const rx = 0.45 * scale;
@@ -738,17 +902,19 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		halo.addColorStop(1, rgba(color, 0));
 		ctx.fillStyle = halo;
 		ctx.fillRect(cx - ry * 1.4, cy - ry * 1.4, ry * 2.8, ry * 2.8);
-		for (const [w, c, lw] of [
-			[1, '#000000', 0.32],
-			[1, color, 0.2],
-			[0.62, rgba('#ffffff', 0.85), 0.07]
-		] as const) {
-			ctx.beginPath();
-			ctx.ellipse(cx, cy, rx * w, ry * w, 0, 0, Math.PI * 2);
-			ctx.strokeStyle = c;
-			ctx.lineWidth = scale * lw;
-			ctx.stroke();
-		}
+		const [, , fw, fh] = look ? SPRITES[look] : [0, 0, 1, 1];
+		if (!look || !sprite(look, cx, cy, (ry * 2.2 * fw) / fh, ry * 2.2))
+			for (const [w, c, lw] of [
+				[1, '#000000', 0.32],
+				[1, color, 0.2],
+				[0.62, rgba('#ffffff', 0.85), 0.07]
+			] as const) {
+				ctx.beginPath();
+				ctx.ellipse(cx, cy, rx * w, ry * w, 0, 0, Math.PI * 2);
+				ctx.strokeStyle = c;
+				ctx.lineWidth = scale * lw;
+				ctx.stroke();
+			}
 		// Sparks drawn in
 		for (let k = 0; k < 6; k++) {
 			const f = (((time / 700 + k / 6) % 1) + 1) % 1;
@@ -890,6 +1056,36 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillStyle = glow;
 		ctx.fillRect(-scale * 1.3, -scale * 1.3, scale * 2.6, scale * 2.6);
 		if (state.mini) ctx.scale(0.6, 0.6);
+		// The sprites (the vehicles carry their own little cube); drawn by hand below while
+		// they load
+		if (sprites()) {
+			const s = scale;
+			if (state.mode === 'cube') {
+				ctx.rotate(state.rotation);
+				sprite(icon.sprite, 0, 0, s * 1.02, s * 1.02);
+			} else if (state.mode === 'ship' || state.mode === 'swing') {
+				const ship = state.mode === 'ship';
+				const target = -Math.atan2(state.vy, ship ? 10 : 12) * (ship ? 0.85 : 0.6);
+				shipAngle += (target - shipAngle) * Math.min(1, dt * (ship ? 18 : 14));
+				ctx.rotate(shipAngle);
+				if (state.gravity < 0) ctx.scale(1, -1);
+				if (ship) sprite('ship', -s * 0.04, -s * 0.12, s * 1.55);
+				else sprite('swing', 0, -s * 0.08, s * 1.4);
+			} else if (state.mode === 'ufo' || state.mode === 'spider') {
+				if (state.gravity < 0) ctx.scale(1, -1);
+				if (state.mode === 'ufo') sprite('ufo', 0, -s * 0.08, s * 1.4);
+				else sprite('spider', 0, -s * 0.02, s * 1.32);
+			} else if (state.mode === 'ball') {
+				ctx.rotate(state.rotation);
+				sprite('ball', 0, 0, s * 1.1);
+			} else {
+				const up = state.held ? 1 : -1;
+				ctx.rotate((-up * state.gravity * Math.PI) / 4);
+				sprite('wave', -s * 0.1, 0, s * 1.05);
+			}
+			ctx.restore();
+			return;
+		}
 		if (state.mode === 'cube') {
 			ctx.rotate(state.rotation);
 			cubeShape(1, icon);
@@ -1303,6 +1499,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		for (const h of spikes) {
 			spike(h.x, h.y, h.dir, h.kind === 'small', p, pulse);
 		}
+		for (const h of world.hazards.near(left, right))
+			if (h.kind === 'saw') saw(h.x, h.y, h.size, p, pulse, time);
 
 		// Pads, orbs, portals
 		for (const pd of world.pads.near(left, right))
@@ -1314,7 +1512,14 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			if (portalItem.kind === 'mode' && portalItem.mode) {
 				const sec = world.sectionAt(world.timeAt(portalItem.x + 0.01));
 				const y = sec.ceil !== null ? sec.floor + sec.ceil / 2 : Math.max(1.6, portalItem.y);
-				portal(portalItem.x, y, PORTAL_COLORS[portalItem.mode], time, '');
+				portal(
+					portalItem.x,
+					y,
+					PORTAL_COLORS[portalItem.mode],
+					time,
+					'',
+					PORTAL_SPRITES[portalItem.mode]
+				);
 				if (portalItem.mini) portal(portalItem.x + 1.3, y, '#ff6ad5', time + 300, '');
 			} else speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);
 		}
@@ -1336,6 +1541,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			if (c.x < left || c.x > right) continue;
 			const cx = sx(c.x);
 			const cy = sy(c.y);
+			if (sprite('checkpoint', cx, cy, scale * 0.6)) continue;
 			ctx.beginPath();
 			ctx.moveTo(cx, cy - scale * 0.38);
 			ctx.lineTo(cx + scale * 0.26, cy);

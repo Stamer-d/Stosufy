@@ -68,8 +68,8 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		spikes: 2,
 		height: 3,
 		ship: 2.2,
-		wave: 1.75,
-		waveGap: 0.22,
+		wave: 2.4,
+		waveGap: 0.3,
 		speeds: [1, 2],
 		chain: 1,
 		mini: 0,
@@ -83,8 +83,8 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		spikes: 3,
 		height: 4,
 		ship: 1.9,
-		wave: 1.5,
-		waveGap: 0.15,
+		wave: 2.05,
+		waveGap: 0.22,
 		speeds: [1, 2],
 		chain: 2,
 		mini: 0.15,
@@ -98,8 +98,8 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		spikes: 3,
 		height: 4,
 		ship: 1.65,
-		wave: 1.25,
-		waveGap: 0.11,
+		wave: 1.75,
+		waveGap: 0.16,
 		speeds: [2, 3],
 		chain: 2,
 		mini: 0.22,
@@ -113,8 +113,8 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		spikes: 3,
 		height: 5,
 		ship: 1.45,
-		wave: 1.0,
-		waveGap: 0.075,
+		wave: 1.45,
+		waveGap: 0.12,
 		speeds: [2, 3],
 		chain: 3,
 		mini: 0.3,
@@ -179,6 +179,12 @@ export interface Context {
 	chart: DashChart;
 	/** The kinds of things used lately (to not use them again and again) */
 	history: string[];
+	/**
+	 * What the cube parts built for a rhythm (the clicks of a measure, on its grid): the same
+	 * rhythm later in the song gets the same things again, so the level repeats where the
+	 * music does
+	 */
+	motifs: Map<string, string[]>;
 }
 
 /** A stretch of the level played from a state with some presses */
