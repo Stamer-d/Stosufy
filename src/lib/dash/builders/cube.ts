@@ -5,6 +5,7 @@
 // click whose obstacle could be passed without it is no click.
 
 import { beatAt } from '../chart';
+import { loudness } from '../audio';
 import { cubeAt, simulate, STEP, type PlayerState, type Section, type Solid } from '../physics';
 import {
 	legalAround,
@@ -47,8 +48,12 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 	let chain = 0;
 	const limit = section.x1 - 2;
 	const times = clicks.filter((t) => t > section.start + 350 && t < section.end - 400);
-	// How high the level wants to be: higher where the music is busier
-	const busy = (t: number) => noteTimes.filter((n) => n > t - 2000 && n < t + 2000).length / 4;
+	// How high the level wants to be: higher where the music is busier and (where it can be
+	// heard) louder
+	const sound = ctx.chart.sound;
+	const busy = (t: number) =>
+		noteTimes.filter((n) => n > t - 2000 && n < t + 2000).length / 4 +
+		(sound ? (loudness(sound, t - 1500, t + 1500) - 0.55) * 4 : 0);
 
 	// The rhythm of each measure: its clicks on a grid of sixteenths. A rhythm heard before
 	// gets what was built for it then (where it still fits), click for click.

@@ -481,6 +481,13 @@ export function step(world: World, s: PlayerState, time: number) {
 		if (s.gravity < 0) s.vy = -s.vy / 2;
 		s.gravity = 1;
 		s.buffered = s.held && s.mode !== 'ship';
+		// A press held from before a portal doesn't turn the swing, ball or spider around at
+		// once (only a new one does)
+		const flips = s.mode === 'swing' || s.mode === 'ball' || s.mode === 'spider';
+		if (flips && s.mode !== before && s.held) {
+			s.buffered = false;
+			s.switched = true;
+		}
 		s.grounded = false;
 	}
 	const prevX = s.x;
@@ -496,6 +503,8 @@ export function step(world: World, s: PlayerState, time: number) {
 	if (s.mode === 'wave') s.vy = (s.held ? 1 : -1) * s.gravity * speed * (s.mini ? 2 : 1);
 	s.y += s.vy * dt;
 	s.grounded = false;
+	/** Resting on what it falls onto (not only touching: flying modes touch both sides) */
+	let supported = false;
 
 	// Gravity portals
 	for (const portal of world.gravityPortals.near(prevX, s.x)) {
@@ -578,6 +587,7 @@ export function step(world: World, s: PlayerState, time: number) {
 			s.y = solid.y1 + box.h;
 			if (s.vy < 0) s.vy = 0;
 			if (g > 0 || flying) s.grounded = true;
+			if (g > 0) supported = true;
 		} else if (
 			fromBottom < fromTop &&
 			fromBottom <= (g < 0 ? snap : 0.2) &&
@@ -586,7 +596,42 @@ export function step(world: World, s: PlayerState, time: number) {
 			s.y = solid.y0 - box.h;
 			if (s.vy > 0) s.vy = 0;
 			if (g < 0 || flying) s.grounded = true;
+			if (g < 0) supported = true;
 		}
+	}
+
+	// The floor and ceiling of the part (before what kills: sliding along the floor, it's on it)
+	const floor = section.floor;
+	if (s.y - box.h <= floor) {
+		s.y = floor + box.h;
+		if (s.vy < 0) s.vy = 0;
+		if (s.gravity > 0) supported = true;
+		if (
+			s.gravity > 0 ||
+			s.mode === 'ship' ||
+			s.mode === 'ufo' ||
+			s.mode === 'wave' ||
+			s.mode === 'swing'
+		)
+			s.grounded = true;
+	}
+	if (section.ceil !== null && s.y + box.h >= section.ceil) {
+		s.y = section.ceil - box.h;
+		if (s.vy > 0) s.vy = 0;
+		if (s.gravity < 0) supported = true;
+		if (
+			s.gravity < 0 ||
+			s.mode === 'ship' ||
+			s.mode === 'ufo' ||
+			s.mode === 'wave' ||
+			s.mode === 'swing'
+		)
+			s.grounded = true;
+	}
+	if (s.y < floor - 6 || (section.ceil === null && s.y > 60)) {
+		s.dead = true;
+		events.push('death');
+		return events;
 	}
 
 	// What kills
@@ -611,37 +656,6 @@ export function step(world: World, s: PlayerState, time: number) {
 		return events;
 	}
 
-	// The floor and ceiling of the part
-	const floor = section.floor;
-	if (s.y - box.h <= floor) {
-		s.y = floor + box.h;
-		if (s.vy < 0) s.vy = 0;
-		if (
-			s.gravity > 0 ||
-			s.mode === 'ship' ||
-			s.mode === 'ufo' ||
-			s.mode === 'wave' ||
-			s.mode === 'swing'
-		)
-			s.grounded = true;
-	}
-	if (section.ceil !== null && s.y + box.h >= section.ceil) {
-		s.y = section.ceil - box.h;
-		if (s.vy > 0) s.vy = 0;
-		if (
-			s.gravity < 0 ||
-			s.mode === 'ship' ||
-			s.mode === 'ufo' ||
-			s.mode === 'wave' ||
-			s.mode === 'swing'
-		)
-			s.grounded = true;
-	}
-	if (s.y < floor - 6 || (section.ceil === null && s.y > 60)) {
-		s.dead = true;
-		events.push('death');
-		return events;
-	}
 	const landed = s.grounded && !wasGrounded;
 	if (landed && s.mode !== 'wave') {
 		s.landedAt = time;
@@ -706,7 +720,8 @@ export function step(world: World, s: PlayerState, time: number) {
 			const up = PHYSICS.shipMaxUp * (s.mini ? 1.177 : 1);
 			const down = PHYSICS.shipMaxDown * (s.mini ? 1.177 : 1);
 			s.vy = gg > 0 ? Math.max(-down, Math.min(up, s.vy)) : Math.max(-up, Math.min(down, s.vy));
-			if (s.grounded && ((gg > 0 && s.vy < 0) || (gg < 0 && s.vy > 0))) s.vy = 0;
+			// (resting on the floor it stays there; under the ceiling it falls when let go)
+			if (supported && ((gg > 0 && s.vy < 0) || (gg < 0 && s.vy > 0))) s.vy = 0;
 			s.buffered = false;
 			break;
 		}

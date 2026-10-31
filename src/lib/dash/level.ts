@@ -4,6 +4,7 @@
 import { parseChart } from './chart';
 import { generateLevel, type Difficulty, type Level } from './generate';
 import { World } from './physics';
+import type { SongSound } from './audio';
 
 export type LevelData = Omit<Level, 'world'> & {
 	world: Pick<World, 'sections' | 'segments'> & {
@@ -80,12 +81,15 @@ function getWorker() {
 
 const cache = new Map<string, Promise<Level>>();
 
-/** The level of a beatmap (the same one again for the same beatmap and difficulty) */
+/**
+ * The level of a beatmap (the same one again for the same beatmap and difficulty), with what's
+ * heard in its song where that could be read
+ */
 export function makeLevel(
 	content: string,
-	options: { difficulty: Difficulty; seed: string; duration: number }
+	options: { difficulty: Difficulty; seed: string; duration: number; sound?: SongSound | null }
 ): Promise<Level> {
-	const key = `${options.seed}:${options.difficulty}:${Math.round(options.duration / 1000)}:${content.length}`;
+	const key = `${options.seed}:${options.difficulty}:${Math.round(options.duration / 1000)}:${content.length}:${options.sound ? 'heard' : ''}`;
 	if (!cache.has(key)) {
 		const made = new Promise<Level>((resolve, reject) => {
 			const w = getWorker();
@@ -93,6 +97,7 @@ export function makeLevel(
 				try {
 					const chart = parseChart(content);
 					if (!chart) throw new Error('This beatmap has no notes');
+					chart.sound = options.sound;
 					resolve(generateLevel(chart, options));
 				} catch (error) {
 					reject(error);

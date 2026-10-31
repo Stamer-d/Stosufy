@@ -1,7 +1,8 @@
 // The parts between a floor and a ceiling: ship, UFO, swing, ball and spider. The way
 // through is played first (the clicks on the notes; the ship flies along the notes'
-// heights), on time, early and late; then blocks are built around that way, a bit away from
-// it, column by column on the grid, and spikes go on their surfaces where there's room. So
+// heights, the swing turns around on the notes and beats), on time, early and late; then
+// blocks are built around that way, a bit away from it, column by column on the grid, and
+// spikes go on their surfaces where there's room, in rows that start on the strong notes. So
 // the structures follow the music, and the way they leave always works.
 
 import {
@@ -17,7 +18,8 @@ import {
 	type Solid
 } from '../physics';
 import { clamp, legalAround, shuffleByWeight, tap, used, type Context } from '../build';
-import type { DashNote } from '../chart';
+import { beatStrength, type DashNote } from '../chart';
+import { heardAt } from '../audio';
 
 interface Column {
 	x: number;
@@ -26,27 +28,62 @@ interface Column {
 	spike: 0 | 1 | -1;
 }
 
-/** The ship's way: holds while below where it should be (as a person flies, roughly) */
-function flyShip(ctx: Context, from: PlayerState, until: number, target: (x: number) => number) {
+/** The times the swing turns around on: its part's notes and the beats' halves */
+function onTheMusic(ctx: Context, section: Section, notes: DashNote[]) {
+	const times = notes.map((n) => n.time);
+	const timing = ctx.chart.timing;
+	for (let i = 0; i < timing.length; i++) {
+		const point = timing[i];
+		const until = Math.min(timing[i + 1]?.time ?? Infinity, section.end);
+		const half = point.beatLength / 2;
+		const first = Math.max(0, Math.ceil((section.start - point.time) / half));
+		for (let k = first; point.time + k * half < until; k++) times.push(point.time + k * half);
+	}
+	return times.sort((a, b) => a - b);
+}
+
+/**
+ * The ship's way: holds while below where it should be (as a person flies, roughly). The
+ * swing turns toward it, on the music (`music`: the times it may turn on) unless it must;
+ * with a `delay` (ms) it turns that much after it sees it should, as a person reacts.
+ */
+function flyShip(
+	ctx: Context,
+	from: PlayerState,
+	until: number,
+	target: (x: number) => number,
+	music: number[] = [],
+	delay = 0
+) {
 	const { world } = ctx;
 	const s = copyState(from);
 	const events: InputEvent[] = [];
 	let lastChange = -1e9;
+	let beat = 0;
+	/** A turn it decided on, when it comes (-1: none) */
+	let pending = -1;
 	while (s.time + STEP <= until + 1e-6 && !s.dead) {
 		const next = s.time + STEP;
 		const speed = world.sectionAt(s.time).speed;
 		const ahead = target(s.x + speed * 0.18);
 		if (s.mode === 'swing') {
-			// Flips the gravity toward where it should be (a tap), not too often
+			// Flips the gravity toward where it should be (a tap), on a note or beat when it can
+			while (beat < music.length && music[beat] <= s.time) beat++;
+			const onBeat = beat < music.length && music[beat] <= next;
 			const off = ahead - (s.y + s.vy * 0.22);
 			const want = off > 0.25 ? -1 : off < -0.25 ? 1 : s.gravity;
+			const must = Math.abs(off) > 1.5;
 			if (s.held && next - lastChange > 60) {
 				press(s, false);
 				events.push({ time: next, down: false });
-			} else if (!s.held && want !== s.gravity && next - lastChange > 130) {
+			} else if (pending < 0 && !s.held && want !== s.gravity && next - lastChange > 130) {
+				if (onBeat || must || !music.length) pending = next + delay;
+			}
+			if (pending >= 0 && next >= pending && !s.held) {
 				press(s, true);
 				events.push({ time: next, down: true });
 				lastChange = next;
+				pending = -1;
 			}
 		} else {
 			const wanted = clamp((ahead - s.y) * 6, -7, 7);
@@ -84,6 +121,7 @@ export function buildFlight(
 	let events: InputEvent[] = [];
 	let follow: (x: number) => number = () => top / 2;
 	const steered = mode === 'ship' || mode === 'swing';
+	const music = mode === 'swing' ? onTheMusic(ctx, section, notes) : [];
 	if (steered) {
 		// Along the notes' heights, no steeper than a ship climbs
 		const keys: { x: number; y: number }[] = [{ x: section.x0, y: clamp(entry.y, 2, top - 2) }];
@@ -111,7 +149,7 @@ export function buildFlight(
 			return keys[keys.length - 1].y;
 		};
 		follow = path;
-		events = flyShip(ctx, entry, section.end, path).events;
+		events = flyShip(ctx, entry, section.end, path, music).events;
 	} else {
 		// The clicks; the ball and the spider only switch on a surface, else a blue orb does it
 		const times = clicks.filter((t) => t > section.start + 400 && t < section.end - 400);
@@ -157,7 +195,7 @@ export function buildFlight(
 	// How far from the way the blocks stay: the swing and UFO drift (a person steers them back)
 	const margin =
 		mode === 'swing'
-			? 0.45
+			? 1.1
 			: steered
 				? preset.ship - 0.45
 				: mode === 'ball' || mode === 'spider'
@@ -190,8 +228,30 @@ export function buildFlight(
 	};
 	for (const c of columns)
 		if (open(c.x) && mode !== 'ball' && mode !== 'spider') ((c.low = floor), (c.high = top));
+	// A person turns the swing a moment after seeing a step in the walls: they step back around
+	// each one (every column as open as the two on each side), so there's time to
+	if (mode === 'swing') {
+		const lows = columns.map((c) => c.low);
+		const highs = columns.map((c) => c.high);
+		columns.forEach((c, i) => {
+			for (let k = Math.max(0, i - 2); k <= Math.min(columns.length - 1, i + 2); k++) {
+				if (Math.abs(columns[k].x - c.x) > 2) continue;
+				c.low = Math.min(c.low, lows[k]);
+				c.high = Math.max(c.high, highs[k]);
+			}
+		});
+	}
 
-	// Spikes on the surfaces where there's room, in little rows
+	// Spikes on the surfaces where there's room, in little rows that start on the strong notes
+	// (the beats in between now and then)
+	const strong = new Set<number>();
+	for (const note of notes) {
+		const heard = ctx.chart.sound ? heardAt(ctx.chart.sound, note.time) : 0.5;
+		const accent = beatStrength(ctx.chart.timing, note.time) + heard + (note.sound & 4 ? 0.5 : 0);
+		if (accent >= 1.1) strong.add(Math.floor(world.xAt(note.time)));
+	}
+	// (the swing's spikes only where there's a lot of room: a person turns it a bit late)
+	const spikeRoom = mode === 'swing' ? 1.6 : 1.05;
 	const pickSpikes = () => {
 		for (const c of columns) c.spike = 0;
 		let run = 0;
@@ -201,15 +261,15 @@ export function buildFlight(
 			if (run > 0) {
 				run--;
 				const side = columns[columns.indexOf(c) - 1]?.spike ?? 0;
-				if (side === 1 && lowRoom > 1.05) c.spike = 1;
-				else if (side === -1 && highRoom > 1.05) c.spike = -1;
+				if (side === 1 && lowRoom > spikeRoom) c.spike = 1;
+				else if (side === -1 && highRoom > spikeRoom) c.spike = -1;
 				continue;
 			}
-			if (rng() > (mode === 'swing' ? 0.3 : steered ? 0.14 : mode === 'spider' ? 0.45 : 0.25))
-				continue;
+			const chance = mode === 'swing' ? 0.2 : steered ? 0.14 : mode === 'spider' ? 0.45 : 0.25;
+			if (rng() > (strong.has(c.x) ? Math.min(0.9, chance * 3) : chance * 0.3)) continue;
 			const choices = shuffleByWeight(rng, [
-				{ item: 1 as const, weight: lowRoom > 1.05 ? 1 : 0 },
-				{ item: -1 as const, weight: highRoom > 1.05 ? 1 : 0 }
+				{ item: 1 as const, weight: lowRoom > spikeRoom ? 1 : 0 },
+				{ item: -1 as const, weight: highRoom > spikeRoom ? 1 : 0 }
 			]);
 			if (!choices.length) continue;
 			c.spike = choices[0];
@@ -288,15 +348,38 @@ export function buildFlight(
 		}
 		if (steered) {
 			// The way it was built around first; where that crashes, the middle of the room
-			const flown = flyShip(ctx, entry, section.end, (x) => {
-				const c = columns.find((col) => col.x === Math.floor(x));
-				if (!c || attempt === 0) return follow(x);
-				const low = c.low + (c.spike === 1 ? 1 : 0);
-				const high = c.high - (c.spike === -1 ? 1 : 0);
-				return clamp(follow(x), low + 1.2, high - 1.2);
-			});
+			const flown = flyShip(
+				ctx,
+				entry,
+				section.end,
+				(x) => {
+					const c = columns.find((col) => col.x === Math.floor(x));
+					if (!c || attempt === 0) return follow(x);
+					const low = c.low + (c.spike === 1 ? 1 : 0);
+					const high = c.high - (c.spike === -1 ? 1 : 0);
+					return clamp(follow(x), low + 1.2, high - 1.2);
+				},
+				music
+			);
 			events = flown.events;
 			if (flown.end.dead) failed = flown.end;
+			// The swing as a person flies it: turning a moment after seeing it should, wherever
+			// the room is (where that crashes, more room too)
+			if (!failed && mode === 'swing') {
+				const person = flyShip(
+					ctx,
+					entry,
+					section.end,
+					(x) => {
+						const c = columns.find((col) => col.x === Math.floor(x));
+						if (!c) return follow(x);
+						return (c.low + (c.spike === 1 ? 1 : 0) + c.high - (c.spike === -1 ? 1 : 0)) / 2;
+					},
+					[],
+					60
+				);
+				if (person.end.dead) failed = person.end;
+			}
 		}
 		if (!failed) break;
 		const near = columns.filter((c) => Math.abs(c.x + 0.5 - failed!.x) < 3);

@@ -118,6 +118,20 @@ const rgba = (color: string, alpha: number) => {
 };
 const ease = (f: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, f)), 3);
 
+/** The swing's colour (its portal's): its fins, arrow and trail */
+const SWING_COLOR = '#ffe14d';
+
+/** What each kind of part is called and how it's played: over its portal */
+const MODE_NAMES: Record<Mode, [string, string]> = {
+	cube: ['CUBE', 'tap to jump'],
+	ship: ['SHIP', 'hold to fly up'],
+	ball: ['BALL', 'tap to flip'],
+	ufo: ['UFO', 'tap to hop'],
+	wave: ['WAVE', 'hold: up · let go: down'],
+	swing: ['SWING', 'tap to flip the pull'],
+	spider: ['SPIDER', 'tap to teleport']
+};
+
 /** A number from a place, always the same */
 const noise = (n: number) => {
 	const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
@@ -216,6 +230,22 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			spawn({ x, y, kind: 'glow', max: 0.35, size: 2.2, color: icon.primary });
 		} else if (name === 'orb' || name === 'pad') {
 			spawn({ x, y, kind: 'ring', max: 0.35, size: 1.6, color: '#fff3a0' });
+		} else if (name === 'jump' && state.mode === 'swing') {
+			spawn({ x, y, kind: 'ring', max: 0.3, size: 1.4, color: SWING_COLOR });
+		} else if (name === 'jump' && state.mode === 'spider' && state.teleport) {
+			// Sparks along the way it jumped, a ring where it lands
+			const { from, to } = state.teleport;
+			for (let i = 0; i < 12; i++)
+				spawn({
+					x: x + (Math.random() - 0.5) * 0.5,
+					y: from + (to - from) * Math.random(),
+					vx: -2 - Math.random() * 3,
+					vy: (Math.random() - 0.5) * 2,
+					max: 0.3 + Math.random() * 0.2,
+					size: 0.07 + Math.random() * 0.08,
+					color: i % 2 ? icon.primary : '#ffffff'
+				});
+			spawn({ x, y, kind: 'ring', max: 0.3, size: 1.5, color: icon.primary });
 		} else if (name === 'portal') {
 			flash = 1;
 			flashColor = '#ffffff';
@@ -481,7 +511,11 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	function tile(p: Palette) {
 		const size = Math.max(16, 2 ** Math.ceil(Math.log2(scale)));
 		const accent = `#${hex(p.accent)
-			.map((v) => Math.min(255, Math.round(v / 24) * 24).toString(16).padStart(2, '0'))
+			.map((v) =>
+				Math.min(255, Math.round(v / 24) * 24)
+					.toString(16)
+					.padStart(2, '0')
+			)
 			.join('')}`;
 		const key = `${size}:${accent}`;
 		const cached = tileCache.get(key);
@@ -891,7 +925,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		color: string,
 		time: number,
 		label: string,
-		look?: SpriteName
+		look?: SpriteName,
+		hint = ''
 	) {
 		const cx = sx(x);
 		const cy = sy(y);
@@ -925,11 +960,20 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			const py = cy + Math.sin(a) * d * scale * 1.1;
 			ctx.fillRect(px - scale * 0.06, py - scale * 0.06, scale * 0.12, scale * 0.12);
 		}
-		if (label) {
-			ctx.fillStyle = '#ffffff';
-			ctx.font = `800 ${Math.round(scale * 0.32)}px Figtree Variable, sans-serif`;
-			ctx.textAlign = 'center';
-			ctx.fillText(label, cx, cy - ry - scale * 0.25);
+		// Its name (in its colour), and how it's played the first time it comes
+		ctx.textAlign = 'center';
+		ctx.lineJoin = 'round';
+		for (const [text, size, at, fill] of [
+			[label, 0.5, hint ? 0.75 : 0.3, color],
+			[hint, 0.3, 0.25, '#ffffff']
+		] as const) {
+			if (!text) continue;
+			ctx.font = `900 ${Math.round(scale * size)}px Figtree Variable, sans-serif`;
+			ctx.lineWidth = scale * size * 0.22;
+			ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+			ctx.strokeText(text, cx, cy - ry - scale * at);
+			ctx.fillStyle = fill;
+			ctx.fillText(text, cx, cy - ry - scale * at);
 		}
 	}
 
@@ -1045,6 +1089,165 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillRect(-s * 0.4, -s * 0.4, s * 0.18, s * 0.07);
 	}
 
+	/** The player's own cube, small, riding a vehicle (centred on a point, in pixels) */
+	function rider(icon: Icon, x: number, y: number, size: number) {
+		if (sprite(icon.sprite, x, y, size * scale, size * scale)) return;
+		ctx.save();
+		ctx.translate(x, y);
+		cubeShape(size, icon);
+		ctx.restore();
+	}
+
+	/**
+	 * The spider: a body on four legs that walk as fast as it runs (each foot stays on the
+	 * ground while it's down), and stretched along its jump for a moment after one
+	 */
+	function spiderShape(state: PlayerState, icon: Icon, time: number) {
+		const s = scale;
+		if (state.gravity < 0) ctx.scale(1, -1);
+		const since = state.teleport ? time - state.teleport.time : Infinity;
+		const jump = since >= 0 && since < 180 ? 1 - since / 180 : 0;
+		ctx.scale(1 - jump * 0.2, 1 + jump * 0.35);
+		const walk = state.x * 2.6;
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		// Hip, knee (high and out, above the body) and foot of each leg; two each side
+		for (const [hip, knee, reach, phase] of [
+			[-0.26, -0.56, -0.66, 0],
+			[-0.1, -0.34, -0.3, Math.PI],
+			[0.1, 0.36, 0.32, 0],
+			[0.26, 0.58, 0.68, Math.PI]
+		]) {
+			// Back along the ground while down, lifted on the way forward; hanging in the air
+			const p = walk + phase;
+			const down = state.grounded && jump === 0;
+			const stride = down ? -Math.sin(p) * 0.14 : -0.1 * Math.sign(reach);
+			const lift = down ? Math.max(0, Math.cos(p)) * 0.16 : 0.12;
+			const hx = hip * s;
+			const hy = s * 0.02;
+			const fx = (reach + stride) * s;
+			const fy = s * (0.5 - lift);
+			const kx = (knee + stride * 0.5) * s;
+			const ky = -s * (0.28 + lift * 0.4);
+			ctx.beginPath();
+			ctx.moveTo(hx, hy);
+			ctx.lineTo(kx, ky);
+			ctx.lineTo(fx, fy);
+			ctx.strokeStyle = '#000000';
+			ctx.lineWidth = s * 0.12;
+			ctx.stroke();
+			ctx.strokeStyle = '#b9b4e6';
+			ctx.lineWidth = s * 0.055;
+			ctx.stroke();
+		}
+		rider(icon, -s * 0.02, -s * 0.3, 0.48);
+		const body = ctx.createLinearGradient(0, -s * 0.28, 0, s * 0.22);
+		body.addColorStop(0, '#3d4290');
+		body.addColorStop(1, '#191b46');
+		ctx.beginPath();
+		ctx.ellipse(0, s * 0.02, s * 0.42, s * 0.24, 0, 0, Math.PI * 2);
+		ctx.fillStyle = body;
+		ctx.fill();
+		ctx.lineWidth = s * 0.08;
+		ctx.strokeStyle = '#000000';
+		ctx.stroke();
+		// Its glowing middle
+		const core = ctx.createRadialGradient(s * 0.06, s * 0.02, 0, s * 0.06, s * 0.02, s * 0.2);
+		core.addColorStop(0, '#ffffff');
+		core.addColorStop(0.4, icon.secondary);
+		core.addColorStop(1, rgba(icon.secondary, 0));
+		ctx.fillStyle = core;
+		ctx.fillRect(-s * 0.14, -s * 0.18, s * 0.4, s * 0.4);
+	}
+
+	/** The spider's jump: a streak of light from where it was to where it is, fading */
+	function teleportBeam(state: PlayerState, icon: Icon, time: number) {
+		const t = state.teleport;
+		if (!t || state.mode !== 'spider') return;
+		const f = (time - t.time) / 260;
+		if (f < 0 || f >= 1) return;
+		const x = sx(t.x);
+		const from = sy(t.from);
+		const to = sy(t.to);
+		const top = Math.min(from, to);
+		const tall = Math.abs(to - from);
+		for (const [w, alpha, color] of [
+			[0.95, 0.55, icon.primary],
+			[0.3, 0.9, '#ffffff']
+		] as const) {
+			const g = ctx.createLinearGradient(0, from, 0, to);
+			g.addColorStop(0, rgba(color, 0));
+			g.addColorStop(1, rgba(color, alpha * (1 - f)));
+			ctx.fillStyle = g;
+			const wide = scale * w * (1 - f * 0.7);
+			ctx.fillRect(x - wide / 2, top, wide, tall);
+		}
+	}
+
+	/**
+	 * The swing: a round pod with fins, and an arrow on the side it's pulled to (the lit fin
+	 * there too), so it's clear at a glance which way it goes and that a tap turns it around
+	 */
+	function swingShape(state: PlayerState, icon: Icon, dt: number, time: number) {
+		const s = scale;
+		const target = -Math.atan2(state.vy, 12) * 0.5;
+		shipAngle += (target - shipAngle) * Math.min(1, dt * 14);
+		ctx.rotate(shipAngle);
+		// 1: pulled down (down on the screen)
+		const pull = state.gravity;
+		const since = time - state.jumpedAt;
+		const flipped = since >= 0 && since < 220 ? 1 - since / 220 : 0;
+		ctx.lineJoin = 'round';
+		for (const side of [-1, 1]) {
+			const lit = side === pull;
+			ctx.beginPath();
+			ctx.moveTo(-s * 0.08, side * s * 0.26);
+			ctx.quadraticCurveTo(-s * 0.32, side * s * 0.6, -s * 0.68, side * s * (lit ? 0.6 : 0.4));
+			ctx.lineTo(-s * 0.36, side * s * 0.08);
+			ctx.closePath();
+			ctx.fillStyle = lit ? SWING_COLOR : '#4a4f8f';
+			ctx.fill();
+			ctx.lineWidth = s * 0.06;
+			ctx.strokeStyle = '#000000';
+			ctx.stroke();
+		}
+		const body = ctx.createLinearGradient(0, -s * 0.38, 0, s * 0.38);
+		body.addColorStop(0, '#3d4290');
+		body.addColorStop(1, '#191b46');
+		ctx.beginPath();
+		ctx.arc(0, 0, s * 0.38, 0, Math.PI * 2);
+		ctx.fillStyle = body;
+		ctx.fill();
+		ctx.lineWidth = s * 0.08;
+		ctx.strokeStyle = '#000000';
+		ctx.stroke();
+		ctx.beginPath();
+		ctx.arc(0, 0, s * 0.29, 0, Math.PI * 2);
+		ctx.lineWidth = s * 0.05;
+		ctx.strokeStyle = rgba(SWING_COLOR, 0.75 + flipped * 0.25);
+		ctx.stroke();
+		rider(icon, 0, 0, 0.36);
+		// The arrow: where it's pulled, glowing (bigger right after a turn)
+		const reach = s * (0.42 + Math.sin(time / 90) * 0.02);
+		const size = s * (0.22 + flipped * 0.1);
+		const tip = pull * (reach + size * 1.15);
+		const glow = ctx.createRadialGradient(0, tip * 0.85, 0, 0, tip * 0.85, size * 2.2);
+		glow.addColorStop(0, rgba(SWING_COLOR, 0.55));
+		glow.addColorStop(1, rgba(SWING_COLOR, 0));
+		ctx.fillStyle = glow;
+		ctx.fillRect(-size * 2.2, tip * 0.85 - size * 2.2, size * 4.4, size * 4.4);
+		ctx.beginPath();
+		ctx.moveTo(-size, pull * reach);
+		ctx.lineTo(size, pull * reach);
+		ctx.lineTo(0, tip);
+		ctx.closePath();
+		ctx.fillStyle = SWING_COLOR;
+		ctx.fill();
+		ctx.lineWidth = s * 0.05;
+		ctx.strokeStyle = '#000000';
+		ctx.stroke();
+	}
+
 	function drawPlayer(state: PlayerState, icon: Icon, dt: number, time: number) {
 		const cx = sx(state.x);
 		const cy = sy(state.y);
@@ -1056,6 +1259,14 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillStyle = glow;
 		ctx.fillRect(-scale * 1.3, -scale * 1.3, scale * 2.6, scale * 2.6);
 		if (state.mini) ctx.scale(0.6, 0.6);
+		// The spider and the swing are drawn here (they move: legs, fins, the way they're
+		// pulled), carrying the player's own cube
+		if (state.mode === 'spider' || state.mode === 'swing') {
+			if (state.mode === 'spider') spiderShape(state, icon, time);
+			else swingShape(state, icon, dt, time);
+			ctx.restore();
+			return;
+		}
 		// The sprites (the vehicles carry their own little cube); drawn by hand below while
 		// they load
 		if (sprites()) {
@@ -1063,18 +1274,15 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			if (state.mode === 'cube') {
 				ctx.rotate(state.rotation);
 				sprite(icon.sprite, 0, 0, s * 1.02, s * 1.02);
-			} else if (state.mode === 'ship' || state.mode === 'swing') {
-				const ship = state.mode === 'ship';
-				const target = -Math.atan2(state.vy, ship ? 10 : 12) * (ship ? 0.85 : 0.6);
-				shipAngle += (target - shipAngle) * Math.min(1, dt * (ship ? 18 : 14));
+			} else if (state.mode === 'ship') {
+				const target = -Math.atan2(state.vy, 10) * 0.85;
+				shipAngle += (target - shipAngle) * Math.min(1, dt * 18);
 				ctx.rotate(shipAngle);
 				if (state.gravity < 0) ctx.scale(1, -1);
-				if (ship) sprite('ship', -s * 0.04, -s * 0.12, s * 1.55);
-				else sprite('swing', 0, -s * 0.08, s * 1.4);
-			} else if (state.mode === 'ufo' || state.mode === 'spider') {
+				sprite('ship', -s * 0.04, -s * 0.12, s * 1.55);
+			} else if (state.mode === 'ufo') {
 				if (state.gravity < 0) ctx.scale(1, -1);
-				if (state.mode === 'ufo') sprite('ufo', 0, -s * 0.08, s * 1.4);
-				else sprite('spider', 0, -s * 0.02, s * 1.32);
+				sprite('ufo', 0, -s * 0.08, s * 1.4);
 			} else if (state.mode === 'ball') {
 				ctx.rotate(state.rotation);
 				sprite('ball', 0, 0, s * 1.1);
@@ -1148,70 +1356,6 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.ellipse(0, s * 0.16, s * 0.4, s * 0.08, 0, 0, Math.PI * 2);
 			ctx.fillStyle = icon.secondary;
 			ctx.fill();
-		} else if (state.mode === 'swing') {
-			const target = -Math.atan2(state.vy, 12) * 0.6;
-			shipAngle += (target - shipAngle) * Math.min(1, dt * 14);
-			ctx.rotate(shipAngle);
-			const s = scale;
-			// Round body with fins that point the way it falls
-			const fin = state.gravity > 0 ? 1 : -1;
-			for (const side of [-1, 1]) {
-				ctx.beginPath();
-				ctx.moveTo(-s * 0.2, side * s * 0.3);
-				ctx.lineTo(-s * 0.62, side * s * (0.3 + (side === fin ? 0.32 : 0.12)));
-				ctx.lineTo(-s * 0.42, side * s * 0.12);
-				ctx.closePath();
-				ctx.fillStyle = icon.secondary;
-				ctx.fill();
-				ctx.lineWidth = s * 0.06;
-				ctx.strokeStyle = '#000000';
-				ctx.stroke();
-			}
-			ctx.beginPath();
-			ctx.arc(0, 0, s * 0.42, 0, Math.PI * 2);
-			ctx.fillStyle = icon.primary;
-			ctx.fill();
-			ctx.lineWidth = s * 0.08;
-			ctx.stroke();
-			ctx.beginPath();
-			ctx.arc(s * 0.08, 0, s * 0.18, 0, Math.PI * 2);
-			ctx.fillStyle = icon.secondary;
-			ctx.fill();
-			ctx.lineWidth = s * 0.05;
-			ctx.stroke();
-		} else if (state.mode === 'spider') {
-			if (state.gravity < 0) ctx.scale(1, -1);
-			const s = scale;
-			// Legs that step as it runs
-			const stepping = Math.sin(time / 45) * s * 0.08;
-			ctx.lineWidth = s * 0.09;
-			ctx.lineCap = 'round';
-			for (const [x0, x1, phase] of [
-				[-0.22, -0.5, 1],
-				[-0.05, -0.2, -1],
-				[0.1, 0.25, 1],
-				[0.22, 0.52, -1]
-			]) {
-				ctx.beginPath();
-				ctx.moveTo(x0 * s, s * 0.05);
-				ctx.lineTo(((x0 + x1) / 2) * s + phase * stepping, s * 0.28);
-				ctx.lineTo(x1 * s + phase * stepping, s * 0.5);
-				ctx.strokeStyle = '#000000';
-				ctx.lineWidth = s * 0.14;
-				ctx.stroke();
-				ctx.strokeStyle = icon.secondary;
-				ctx.lineWidth = s * 0.07;
-				ctx.stroke();
-			}
-			ctx.beginPath();
-			ctx.ellipse(0, -s * 0.05, s * 0.44, s * 0.3, 0, 0, Math.PI * 2);
-			ctx.fillStyle = icon.primary;
-			ctx.fill();
-			ctx.lineWidth = s * 0.08;
-			ctx.strokeStyle = '#000000';
-			ctx.stroke();
-			ctx.fillStyle = icon.secondary;
-			ctx.fillRect(s * 0.1, -s * 0.15, s * 0.14, s * 0.1);
 		} else if (state.mode === 'ball') {
 			ctx.rotate(state.rotation);
 			const r = hitbox('ball', state.mini).h * scale * 1.05;
@@ -1271,13 +1415,14 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		trail.push({ x: state.x, y: state.y, time });
 		const keep = wave ? 900 : 260;
 		while (trail.length && time - trail[0].time > keep) trail.shift();
-		if (trail.length < 2 || (!wave && !boosted && state.mode !== 'ship')) return;
+		const swing = state.mode === 'swing';
+		if (trail.length < 2 || (!wave && !boosted && state.mode !== 'ship' && !swing)) return;
 		ctx.lineCap = 'round';
 		ctx.lineJoin = 'round';
 		const width = wave ? 0.3 : 0.5;
 		for (const [w, color] of [
-			[width * 1.9, rgba(icon.primary, 0.25)],
-			[width, wave ? icon.primary : rgba(icon.secondary, 0.6)]
+			[width * 1.9, rgba(swing ? SWING_COLOR : icon.primary, 0.25)],
+			[width, wave ? icon.primary : swing ? rgba(SWING_COLOR, 0.7) : rgba(icon.secondary, 0.6)]
 		] as const) {
 			ctx.beginPath();
 			trail.forEach((p, k) => {
@@ -1309,7 +1454,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 						color: Math.random() < 0.5 ? '#ffb347' : icon.secondary,
 						kind: 'glow'
 					});
-				} else if (state.grounded && (state.mode === 'cube' || state.mode === 'ball')) {
+				} else if (
+					state.grounded &&
+					(state.mode === 'cube' || state.mode === 'ball' || state.mode === 'spider')
+				) {
 					spawn({
 						x: state.x - 0.45,
 						y: state.y - state.gravity * 0.45,
@@ -1436,10 +1584,14 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		zoom = Math.max(0, zoom - dt * 2.5);
 		scale *= 1 + zoom * 0.05 + beatPulse(level, time) * (section.kiai ? 0.012 : 0);
 
-		// The camera
+		// The camera; at the end it comes to a stop with the light ahead, and the player runs on
+		// into it
 		const x = frame.dead ? state.x : world.xAt(Math.max(time, level.start));
 		const playerX = frame.waiting || frame.dead ? state.x : x;
-		camX = playerX - (width * 0.3) / scale;
+		const free = playerX - (width * 0.3) / scale;
+		const stop = level.xEnd - (width * 0.62) / scale;
+		const over = free - (stop - 3);
+		camX = over <= 0 ? free : stop - 3 * Math.exp(-over / 3);
 		let targetY: number;
 		if (section.ceil !== null) targetY = section.floor + section.ceil / 2 - VIEW / 2;
 		else targetY = Math.max(-2.2, state.y - 7.2);
@@ -1507,18 +1659,23 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			pad(pd.x, pd.y, pd.dir, pd.kind, state.used.includes(pd.id), pulse);
 		for (const o of world.orbs.near(left, right))
 			orb(o.x, o.y, o.kind, state.used.includes(o.id), time, pulse);
+		const seen = new Set<Mode>([world.sections[0]?.mode]);
 		for (const portalItem of level.portals) {
+			const first = portalItem.mode && !seen.has(portalItem.mode);
+			if (portalItem.mode) seen.add(portalItem.mode);
 			if (portalItem.x1 < left || portalItem.x0 > right) continue;
 			if (portalItem.kind === 'mode' && portalItem.mode) {
 				const sec = world.sectionAt(world.timeAt(portalItem.x + 0.01));
 				const y = sec.ceil !== null ? sec.floor + sec.ceil / 2 : Math.max(1.6, portalItem.y);
+				const [name, how] = MODE_NAMES[portalItem.mode];
 				portal(
 					portalItem.x,
 					y,
 					PORTAL_COLORS[portalItem.mode],
 					time,
-					'',
-					PORTAL_SPRITES[portalItem.mode]
+					name,
+					PORTAL_SPRITES[portalItem.mode],
+					first ? how : ''
 				);
 				if (portalItem.mini) portal(portalItem.x + 1.3, y, '#ff6ad5', time + 300, '');
 			} else speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);
@@ -1532,8 +1689,9 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			g.addColorStop(1, 'rgba(255,255,255,0.85)');
 			ctx.fillStyle = g;
 			ctx.fillRect(sx(ex), 0, scale * 4, height);
+			const wall = Math.max(0, sx(ex + 4));
 			ctx.fillStyle = '#ffffff';
-			ctx.fillRect(sx(ex + 4), 0, width, height);
+			ctx.fillRect(wall, 0, Math.max(0, width - wall), height);
 		}
 
 		// Checkpoints
@@ -1562,7 +1720,9 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 
 		updateParticles(dt, state, icon, frame);
-		if (!frame.dead) {
+		// (gone into the light at the end)
+		if (!frame.dead && state.x < level.xEnd + 2.5) {
+			teleportBeam(state, icon, time);
 			drawTrail(state, icon, time);
 			if (!(frame.waiting && Math.floor(now / 120) % 2)) drawPlayer(state, icon, dt, time);
 		}

@@ -21,6 +21,7 @@
 	import DashSoundMenu from './DashSoundMenu.svelte';
 	import { dashOpen } from '#lib/dash/store.ts';
 	import { makeLevel } from '#lib/dash/level.ts';
+	import { hearAudio } from '#lib/dash/audio.ts';
 	import { DIFFICULTIES } from '#lib/dash/generate.ts';
 	import { DashGame, RESPAWN, bestKey, bestOf, saveBest } from '#lib/dash/game.ts';
 	import { createDashRenderer, ICONS, spritesUrl } from '#lib/dash/render.ts';
@@ -125,11 +126,15 @@
 			const audio = get(songQueue).audio;
 			let duration = (audio?.duration ?? 0) * 1000;
 			if (!isFinite(duration)) duration = 0;
+			// What's heard in the song (its hits, its loud parts) goes into the level too
+			const sound = await hearAudio(`${current.id}:${id}`, audio);
+			if (cancelled) return;
 			try {
 				const level = await makeLevel(content, {
 					difficulty: chosen,
 					seed: `${current.id}:${id}`,
-					duration
+					duration,
+					sound
 				});
 				if (cancelled) return;
 				const made = new DashGame(level);

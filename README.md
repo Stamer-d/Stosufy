@@ -22,8 +22,9 @@ Every song from osu!'s beatmaps, with playlists, lyrics, gameplay, a DJ mode and
 - 🎤 **Synced lyrics**, with romaji for Japanese songs, and a full-screen focus mode.
 - 🎯 **Gameplay.** Watch the map play along with the song, watch top replays or play it yourself.
 - 🎛️ **DJ mode.** Two decks, and smart mixes that blend songs on their phrases.
-- 🟩 **Dash.** Play the song as a one-button rhythm level made from its beatmap: cube, ship, ball,
-  UFO, wave, swing and spider parts on the beat, with practice mode and five difficulties.
+- 🟩 **Dash.** Play the song as a one-button rhythm level made from its beatmap and what's heard in
+  the song: cube, ship, ball, UFO, wave, swing and spider parts on the beat, with practice mode and
+  five difficulties.
 - 🧩 **Puzzles.** Put a song's background back together, with leaderboards and a daily puzzle.
 - 👥 **Friends.** See what your friends are listening to and listen together.
 

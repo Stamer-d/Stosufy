@@ -1,5 +1,8 @@
 // What the Dash mode reads from a beatmap: its notes (any mode: osu!, taiko, catch, mania),
-// the beat (BPM and measures), the kiai parts and the breaks.
+// how the mapper made each one stand out (a jump across the playfield, a louder hitsound, faster
+// sliders), the beat (BPM and measures), the kiai parts and the breaks.
+
+import type { SongSound } from './audio';
 
 export interface DashNote {
 	time: number;
@@ -12,6 +15,12 @@ export interface DashNote {
 	sound: number;
 	/** Starts a new combo */
 	combo: boolean;
+	/** How far it is from the note before on the playfield (0–1, a big jump there is 1) */
+	jump: number;
+	/** The hitsound volume there (0–1) */
+	volume: number;
+	/** The slider velocity there (1 normal, more where the mapper speeds up) */
+	sv: number;
 }
 
 export interface TimingPoint {
@@ -30,6 +39,8 @@ export interface DashChart {
 	artist: string;
 	creator: string;
 	version: string;
+	/** What's heard in the song itself, where it could be read */
+	sound?: SongSound | null;
 }
 
 function sections(content: string) {
@@ -68,6 +79,7 @@ export function parseChart(content: string): DashChart | null {
 				beatLength,
 				meter: Number(p[2]) || 4,
 				uninherited: p[6] === undefined ? beatLength > 0 : p[6] === '1',
+				volume: Number(p[5]),
 				kiai: (Number(p[7]) || 0) & 1
 			};
 		})
@@ -98,6 +110,9 @@ export function parseChart(content: string): DashChart | null {
 	};
 
 	const notes: DashNote[] = [];
+	// Where the last note ended on the playfield (for how far the next one jumps)
+	let lastX: number | null = null;
+	let lastY = 0;
 	for (const line of parsed.HitObjects) {
 		const p = line.split(',');
 		const x = Number(p[0]);
@@ -117,23 +132,38 @@ export function parseChart(content: string): DashChart | null {
 							: 0.3
 						: 1 - y / 384;
 		height = Math.max(0, Math.min(1, isFinite(height) ? height : 0.5));
+		const point = at(points, time);
+		const velocity =
+			point && !point.uninherited && point.beatLength < 0
+				? Math.max(0.1, Math.min(10, -100 / point.beatLength))
+				: 1;
+		// The jump: across the playfield (osu!, catch), from column to column (mania)
+		let jump = 0;
+		if (mode !== 1 && isFinite(x) && lastX !== null) {
+			const dx = x - lastX;
+			const dy = mode === 0 ? y - lastY : 0;
+			jump = Math.min(1, Math.hypot(dx, dy) / (mode === 3 ? 512 : 320));
+		}
+		if (isFinite(x)) {
+			lastX = x;
+			lastY = isFinite(y) ? y : 0;
+		}
+		const volume = point && isFinite(point.volume) ? point.volume / 100 : 0.7;
 		const note: DashNote = {
 			time,
 			end: time,
 			kind: 'circle',
 			height,
 			sound,
-			combo: !!(type & 4)
+			combo: !!(type & 4),
+			jump,
+			volume: Math.max(0, Math.min(1, volume)),
+			sv: velocity
 		};
 		if (type & 2) {
 			const slides = Math.max(1, Number(p[6]) || 1);
 			const length = Number(p[7]) || 0;
 			const beat = at(timing, time)?.beatLength ?? 500;
-			const point = at(points, time);
-			const velocity =
-				point && !point.uninherited && point.beatLength < 0
-					? Math.max(0.1, Math.min(10, -100 / point.beatLength))
-					: 1;
 			note.kind = 'slider';
 			note.end = time + (length / (multiplier * 100 * velocity)) * beat * slides;
 		} else if (type & 8) {
