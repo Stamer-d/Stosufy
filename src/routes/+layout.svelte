@@ -31,6 +31,8 @@
 	import PlayOverlay from '#lib/components/PlayOverlay.svelte';
 	import DjView from '#lib/components/dj/DjView.svelte';
 	import { djOpen } from '#lib/dj/engine.ts';
+	import DashView from '#lib/components/dash/DashView.svelte';
+	import { dashOpen } from '#lib/dash/store.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
@@ -47,6 +49,7 @@
 		if (to?.url && from?.url?.pathname !== to.url.pathname) {
 			focusMode.set(false);
 			djOpen.set(false);
+			dashOpen.set(false);
 		}
 		if (from?.url && scroller)
 			scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
@@ -63,7 +66,7 @@
 
 	// While a full-screen view (playing, focus, DJ) covers the page, the page keeps where it
 	// was scrolled to: nothing behind it may move it, and it's put back when the view closes
-	let covered = $derived($playingLive || $focusMode || $djOpen);
+	let covered = $derived($playingLive || $focusMode || $djOpen || $dashOpen);
 	let keptScroll = null;
 	$effect(() => {
 		const el = scroller;
@@ -226,6 +229,9 @@
 	{/if}
 	{#if $djOpen}
 		<DjView />
+	{/if}
+	{#if $dashOpen}
+		<DashView />
 	{/if}
 	<!-- Over the full-screen views (DJ, focus, playing) the friends panel floats on top -->
 	{#if $friendsPanelOpen && ($djOpen || $focusMode || $playingLive)}

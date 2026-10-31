@@ -36,6 +36,7 @@
 	import Gameplay from './Gameplay.svelte';
 	import GameplayControls from './GameplayControls.svelte';
 	import { playingLive } from '#lib/gameplay/play.ts';
+	import { dashOpen } from '#lib/dash/store.ts';
 	import Triangles from './Triangles.svelte';
 	import PlayButton from './PlayButton.svelte';
 	import { openSettings } from '#lib/stores/settings.ts';
@@ -701,7 +702,7 @@
 				<!-- The song's gameplay, like osu!'s autoplay, over a dimmed background -->
 				<div class="absolute inset-0 bg-black/45"></div>
 				<!-- (playing it yourself, it fills the window instead: PlayOverlay) -->
-				{#if !$playingLive && !$focusMode}
+				{#if !$playingLive && !$focusMode && !$dashOpen}
 					<!-- (its label would be under the widgets) -->
 					<Gameplay class="absolute inset-0" hideLabel={widgetsShown} />
 				{/if}

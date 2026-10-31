@@ -19,6 +19,9 @@
 		PLAY_MODS
 	} from '#lib/gameplay/play.ts';
 
+	import { dashOpen } from '#lib/dash/store.ts';
+	import { focusMode } from '#lib/stores/audio.ts';
+
 	/** @type {{ up?: boolean }} up: the panel opens above the button (at the bottom of a view) */
 	let { up = false } = $props();
 
@@ -103,7 +106,8 @@
 	const TABS = [
 		{ id: 'watch', label: 'Watch', icon: 'icon-[mingcute--magic-2-line]' },
 		{ id: 'play', label: 'Play', icon: 'icon-[mingcute--cursor-3-line]' },
-		{ id: 'replays', label: 'Replays', icon: 'icon-[mingcute--trophy-line]' }
+		{ id: 'replays', label: 'Replays', icon: 'icon-[mingcute--trophy-line]' },
+		{ id: 'dash', label: 'Dash', icon: 'icon-[mingcute--box-3-line]' }
 	];
 
 	const MOD_NAMES = {
@@ -216,7 +220,7 @@
 						{/each}
 					</div>
 				{/if}
-				<div class="grid grid-cols-3 gap-1 p-1 rounded-xl bg-black/25">
+				<div class="grid grid-cols-4 gap-1 p-1 rounded-xl bg-black/25">
 					{#each TABS as t (t.id)}
 						<button
 							class="flex items-center justify-center gap-1.5 h-8 rounded-lg text-sm font-semibold cursor-pointer transition {tab ===
@@ -309,6 +313,29 @@
 						Play it yourself
 					</button>
 					<p class="mt-1.5 text-center text-xs text-white/40">The song starts over</p>
+				{:else if tab === 'dash'}
+					<div class="flex flex-col items-center text-center gap-3 py-3">
+						<span class="grid place-items-center size-14 rounded-2xl bg-lime-400/20 text-lime-200">
+							<span class="icon-[mingcute--box-3-line] size-7"></span>
+						</span>
+						<div>
+							<p class="font-semibold">Dash</p>
+							<p class="text-sm text-white/55">
+								The song as a one-button rhythm level, made from this difficulty: jump, fly and flip
+								on the beat.
+							</p>
+						</div>
+						<button
+							class="h-9 px-5 rounded-full text-sm font-semibold bg-white text-black hover:scale-[1.03] cursor-pointer transition"
+							onclick={() => {
+								open = false;
+								focusMode.set(false);
+								dashOpen.set(true);
+							}}
+						>
+							Open Dash
+						</button>
+					</div>
 				{:else}
 					{#if replayError}
 						<p class="mb-2 px-2 py-1.5 rounded-lg bg-red-500/10 text-xs text-red-300">

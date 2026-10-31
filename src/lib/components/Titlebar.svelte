@@ -13,6 +13,7 @@
 	import { relaunch } from '@tauri-apps/plugin-process';
 	import { focusMode } from '#lib/stores/audio.ts';
 	import { djOpen } from '#lib/dj/engine.ts';
+	import { dashOpen } from '#lib/dash/store.ts';
 	import { page } from '$app/state';
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 	import { logout } from '#lib/stores/account.ts';
@@ -26,15 +27,23 @@
 	function go(path) {
 		focusMode.set(false);
 		djOpen.set(false);
+		dashOpen.set(false);
 		goto(path);
 	}
 	// The focus and DJ modes are one at a time
 	const toggleDj = () => {
 		focusMode.set(false);
+		dashOpen.set(false);
 		djOpen.update((on) => !on);
+	};
+	const toggleDash = () => {
+		focusMode.set(false);
+		djOpen.set(false);
+		dashOpen.update((on) => !on);
 	};
 	const toggleFocus = () => {
 		djOpen.set(false);
+		dashOpen.set(false);
 		focusMode.update((on) => !on);
 	};
 	let updating = $state(false);
@@ -154,6 +163,17 @@
 				onclick={toggleDj}
 			>
 				<span class="icon-[mingcute--disc-line] size-[18px]"></span>
+			</button>
+			<button
+				title={$dashOpen ? 'Leave Dash' : 'Dash: play the song as a level'}
+				aria-label={$dashOpen ? 'Leave Dash' : 'Dash'}
+				aria-pressed={$dashOpen}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {$dashOpen
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={toggleDash}
+			>
+				<span class="icon-[mingcute--box-3-line] size-[18px]"></span>
 			</button>
 			<button
 				title="World center"
