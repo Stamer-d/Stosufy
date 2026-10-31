@@ -237,7 +237,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				kind: 'ring',
 				max: 0.4,
 				size: 2,
-				color: state.gravity < 0 ? '#3ad7ff' : '#ffe14d'
+				color: state.gravity < 0 ? '#ffe14d' : '#3ad7ff'
 			});
 		} else if (name === 'jump' && state.mode === 'swing') {
 			spawn({ x, y, kind: 'ring', max: 0.3, size: 1.4, color: SWING_COLOR });
@@ -1042,9 +1042,9 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 	}
 
-	/** A gravity portal: blue turns it upside down, yellow back; arrows the way it then falls */
+	/** A gravity portal: yellow turns it upside down, blue back; arrows the way it then falls */
 	function gravityPortal(x: number, y: number, gravity: 1 | -1, time: number) {
-		const color = gravity < 0 ? '#3ad7ff' : '#ffe14d';
+		const color = gravity < 0 ? '#ffe14d' : '#3ad7ff';
 		portal(x, y, color, time, '');
 		const cx = sx(x);
 		ctx.lineJoin = 'round';
@@ -1762,7 +1762,11 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			if (portalItem.x1 < left || portalItem.x0 > right) continue;
 			if (portalItem.kind === 'mode' && portalItem.mode) {
 				const sec = world.sectionAt(world.timeAt(portalItem.x + 0.01));
-				const y = sec.ceil !== null ? sec.floor + sec.ceil / 2 : Math.max(1.6, portalItem.y);
+				// (where the player goes through: in a part with a ceiling, not in its walls)
+				const y =
+					sec.ceil !== null
+						? Math.max(sec.floor + 1.6, Math.min(sec.ceil - 1.6, portalItem.y))
+						: Math.max(1.6, portalItem.y);
 				const [name, how] = MODE_NAMES[portalItem.mode];
 				portal(
 					portalItem.x,

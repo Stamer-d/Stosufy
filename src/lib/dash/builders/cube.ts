@@ -53,7 +53,10 @@ const FAMILIES = [
 	'padOver',
 	'orbPit',
 	'padOrb',
-	'dash'
+	'dash',
+	'pillar',
+	'window',
+	'pinkPad'
 ];
 
 export function buildCube(ctx: Context, section: Section, clicks: number[], entry: PlayerState) {
@@ -189,7 +192,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		const add = (p: Pattern) =>
 			patterns.push({
 				...p,
-				weight: p.id === wanted ? p.weight * 6 : p.weight * freshness(ctx, p.id) * taste(p.id)
+				weight: (p.id === wanted ? 2.5 : freshness(ctx, p.id)) * p.weight * taste(p.id)
 			});
 		const land = x + speed * air;
 		const middle = x + (speed * air) / 2;
@@ -295,6 +298,52 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 						build: (a) => gap(a, x, down)
 					});
 				}
+			}
+			// A pillar with a small spike on it, under the jump
+			if (room > air * 0.8 && level + 1 <= preset.height) {
+				add({
+					id: 'pillar',
+					weight: 0.9,
+					build: (a) => {
+						const c = Math.floor(middle);
+						if (!world.surfaceAt(c, c + 1, level, 1)) return false;
+						a.solid({ x0: c, x1: c + 1, y0: level, y1: level + 1, style: 0 });
+						a.spike(c + 0.5, level + 1, 1, 'small');
+						return true;
+					}
+				});
+			}
+			// A window: a spike under the jump, spikes hanging from a slab over it
+			if (room > air * 0.8 && preset.level >= 1) {
+				add({
+					id: 'window',
+					weight: 0.8,
+					build: (a) => {
+						const c = Math.floor(middle);
+						const high = level + 4;
+						if (world.solidAt(c - 2, c + 3, high, high + 1)) return false;
+						a.spike(c + 0.5, level, 1);
+						a.solid({ x0: c - 1, x1: c + 2, y0: high, y1: high + 1, style: 1 });
+						a.spike(c - 0.5, high, -1);
+						a.spike(c + 1.5, high, -1);
+						return true;
+					}
+				});
+			}
+			// A pink pad: a small hop over a spike, no press
+			if (room > 0.45) {
+				add({
+					id: 'pinkPad',
+					weight: 0.7,
+					noPress: true,
+					build: (a) => {
+						const padX = Math.floor(x + 0.85) + 0.5;
+						a.pad('pink', padX, level);
+						const top = padX + speed * (PINK_PAD / cube.gravity);
+						a.spike(Math.round(top) + 0.5, level, 1);
+						return true;
+					}
+				});
 			}
 			// A held note (a slider, a hold): a dash orb, up and on over a spike pit while held
 			const held = Math.min(700, (ends.get(time) ?? time) - time);
@@ -813,8 +862,9 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 	}
 }
 
-/** A yellow pad's push (blocks/s) */
+/** A yellow pad's push, and a pink one's (blocks/s) */
 const PHYSICS_PAD = 864 / 30;
+const PINK_PAD = 561.6 / 30;
 
 /** How often a click on the ground turns into an upside-down stretch, by difficulty */
 const UPSIDE = [0, 0.12, 0.2, 0.26, 0.32];

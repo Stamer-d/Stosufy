@@ -25,8 +25,8 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	const box = hitbox('wave', section.mini);
 	// The small wave is steeper already (twice as far up or down for a moment late): a bit
 	// wider, and fewer turns
-	const width = preset.wave * (section.mini ? 1.1 : 1);
-	const gap = preset.waveGap * (section.mini ? 1.6 : 1);
+	const width = preset.wave * (section.mini ? 1.3 : 1);
+	const gap = preset.waveGap * (section.mini ? 1.8 : 1);
 
 	// The turns: notes far enough apart, put on the grid
 	const turns: number[] = [];
@@ -147,7 +147,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	// Checked: on time, and played like a person, who turns a bit early or late at every
 	// corner (by up to half a block of the way: twice as high for the steeper small wave) but
 	// sees where the corridor goes (so the errors don't add up); where it crashes, wider
-	const SLOPPY = 0.5 * slope;
+	const SLOPPY = 0.6 * slope;
 	const person = (seed: number) => {
 		let r = seed * 7919 + 17;
 		const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647) * 2 - 1;

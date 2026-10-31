@@ -14,8 +14,10 @@ import {
 	simulate,
 	step,
 	STEP,
+	type GravityPortal,
 	type Hazard,
 	type InputEvent,
+	type Orb,
 	type OrbKind,
 	type PlayerState,
 	type Section,
@@ -126,6 +128,7 @@ export function buildFlight(
 	const spiky = [0.7, 0.85, 1, 1.3, 1.6][preset.level];
 
 	// --- Gravity portals: on strong downbeats, upside down and back -------------------------
+	const flips: GravityPortal[] = [];
 	// (not near a click: pressed a moment before or after the portal would go another way)
 	if (mode !== 'swing' && preset.level >= 1 && rng() < [0, 0.5, 0.75, 0.85, 0.95][preset.level]) {
 		let gravity: 1 | -1 = -1;
@@ -137,7 +140,9 @@ export function buildFlight(
 			if (x < startX + 4 || x > endX - 6 || note.time - last < 2400) continue;
 			if (beatStrength(ctx.chart.timing, note.time) < 1 && !(note.sound & 4)) continue;
 			if (clicks.some((c) => Math.abs(c - note.time) < 280) || rng() < 0.35) continue;
-			world.gravityPortals.add({ x, y: (floor + top) / 2, gravity, x0: x - 0.6, x1: x + 0.6 });
+			flips.push(
+				world.gravityPortals.add({ x, y: (floor + top) / 2, gravity, x0: x - 0.6, x1: x + 0.6 })
+			);
 			gravity = gravity > 0 ? -1 : 1;
 			last = note.time;
 			count++;
@@ -147,6 +152,7 @@ export function buildFlight(
 
 	// --- The way through ---------------------------------------------------------------
 	let events: InputEvent[] = [];
+	const orbs: Orb[] = [];
 	let follow: (x: number) => number = () => top / 2;
 	const steered = mode === 'ship' || mode === 'swing';
 	const music = mode === 'swing' ? onTheMusic(ctx, section, notes) : [];
@@ -194,7 +200,9 @@ export function buildFlight(
 			const note = noteAt.get(time) ?? null;
 			const add = (kind: OrbKind, dir?: number) => {
 				const id = world.id();
-				world.orbs.add({ id, kind, x: at.x, y: at.y, dir, x0: at.x - 0.6, x1: at.x + 0.6 });
+				orbs.push(
+					world.orbs.add({ id, kind, x: at.x, y: at.y, dir, x0: at.x - 0.6, x1: at.x + 0.6 })
+				);
 				used(ctx, `orb-${kind}`);
 			};
 			let hold = mode === 'ufo' ? 70 : 90;
@@ -252,6 +260,14 @@ export function buildFlight(
 		const trace: { x: number; y: number; time: number }[] = [];
 		simulate(world, entry, section.end, inputs, { trace });
 		runs.push(trace);
+	}
+	// The gravity portals where the player goes through them (not in the walls)
+	for (const portal of flips) {
+		const near = runs[0].reduce(
+			(best, p) => (Math.abs(p.x - portal.x) < Math.abs(best.x - portal.x) ? p : best),
+			runs[0][0] ?? { x: portal.x, y: portal.y }
+		);
+		portal.y = clamp(near.y, floor + 1.6, top - 1.6);
 	}
 
 	/** A strong moment: the bar's first beat, or a finish */
@@ -547,6 +563,12 @@ export function buildFlight(
 			else c.high = Math.min(top, c.high + 1);
 		}
 		build();
+	}
+	// Every orb needed: one it gets through without (the press there a plain hop or switch)
+	// goes, so none is just in the air
+	for (const orb of orbs) {
+		world.orbs.remove(orb);
+		if (simulate(world, entry, section.end, events).dead) world.orbs.add(orb);
 	}
 	plan.push(...events);
 	used(ctx, mode);
