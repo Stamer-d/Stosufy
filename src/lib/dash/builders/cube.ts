@@ -1,7 +1,8 @@
 // The cube parts: a library of the genre's building blocks (spikes, stairs, blocks to hop
-// onto, gaps over spike pits, pads up, an orb over a pit, low ceilings, stretches upside down
-// under a slab, in and out by blue orbs, pads or gravity portals), picked for each click
-// by what fits the time to the next one, how high the level is and what was used lately.
+// onto, gaps over spike pits, pads up, an orb over a pit, low ceilings, a dash over a pit on a
+// held note, stretches upside down under a slab, in and out by blue or spider orbs, pads or
+// gravity portals), picked for each click by what fits the time to the next one, how high the
+// level is, what was used lately and what this level and part like most (each its own).
 // Everything stands on the grid; every pick is played early and late before it stays, and a
 // click whose obstacle could be passed without it is no click.
 
@@ -32,7 +33,28 @@ interface Pattern {
 	pair?: boolean;
 	/** No press (a pad does it) */
 	noPress?: boolean;
+	/** Held this long (ms), not tapped (a dash) */
+	hold?: number;
+	/** With `pair`: a pad (no press) on this click, the press only on the next */
+	padFirst?: boolean;
 }
+
+/** The kinds of patterns, for what a level and a part like most */
+const FAMILIES = [
+	'spikes',
+	'leap',
+	'stairs',
+	'hop',
+	'spikeStep',
+	'saw',
+	'sawBig',
+	'gap',
+	'padUp',
+	'padOver',
+	'orbPit',
+	'padOrb',
+	'dash'
+];
 
 export function buildCube(ctx: Context, section: Section, clicks: number[], entry: PlayerState) {
 	const { world, plan, rng, preset } = ctx;
@@ -41,12 +63,38 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 	const cube = cubeAt(section.speedIndex);
 	const air = (2 * cube.jump) / cube.gravity;
 	const noteTimes = ctx.chart.notes.map((n) => n.time);
+	const ends = new Map(ctx.chart.notes.map((n) => [n.time, n.end]));
+	const heights = new Map(ctx.chart.notes.map((n) => [n.time, n.height]));
+	/** The orb for a note, by where the melody goes: up a lot red, down pink, else yellow */
+	const orbFor = (from: number, to: number) => {
+		const leap = (heights.get(to) ?? 0.5) - (heights.get(from) ?? 0.5);
+		return leap > 0.25 && preset.level >= 2 ? 'red' : leap < -0.25 ? 'pink' : 'yellow';
+	};
 	let state = entry;
+	// Each level has its taste in patterns, each part its own on top of it and two favourites,
+	// so levels and their parts don't all look alike
+	const familyOf = (id: string) => id.replace(/[\d-]+s?$/, '');
+	const levelTaste = (ctx.taste ??= new Map());
+	const partTaste = new Map<string, number>();
+	const favourites = new Set(
+		shuffleByWeight(
+			rng,
+			FAMILIES.map((item) => ({ item, weight: 1 }))
+		).slice(0, 2)
+	);
+	const taste = (id: string) => {
+		const family = familyOf(id);
+		if (!levelTaste.has(family)) levelTaste.set(family, Math.exp((rng() - 0.5) * 1.8));
+		if (!partTaste.has(family))
+			partTaste.set(family, Math.exp((rng() - 0.5) * 1.1) * (favourites.has(family) ? 2.4 : 1));
+		return levelTaste.get(family)! * partTaste.get(family)!;
+	};
 	/** The structure the cube runs on (none: the ground) */
 	let platform: Solid | null = null;
 	let level = 0;
 	let recent: Check[] = [];
 	let chain = 0;
+	let upsides = 0;
 	const limit = section.x1 - 2;
 	const times = clicks.filter((t) => t > section.start + 350 && t < section.end - 400);
 	// How high the level wants to be: higher where the music is busier and (where it can be
@@ -103,10 +151,18 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		if (grounded) level = Math.round(at.y - 0.5);
 		chain = grounded ? 0 : chain + 1;
 		if (!grounded && chain > preset.chain) continue;
-		// Now and then upside down for a few clicks
-		if (grounded && rng() < UPSIDE[preset.level] * freshness(ctx, 'upside')) {
+		// Now and then upside down for a few clicks (in the genre's levels gravity turns around
+		// about 20 times a minute in cube parts): every part tries from a quarter in until one
+		// fits, more of them the harder
+		const due = upsides === 0 && time > section.start + (section.end - section.start) / 4;
+		if (
+			grounded &&
+			preset.level >= 1 &&
+			(due || rng() < UPSIDE[preset.level] * freshness(ctx, 'upside'))
+		) {
 			const last = upside(i, x);
 			if (last !== null) {
+				upsides++;
 				i = last;
 				continue;
 			}
@@ -133,7 +189,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		const add = (p: Pattern) =>
 			patterns.push({
 				...p,
-				weight: p.id === wanted ? p.weight * 6 : p.weight * freshness(ctx, p.id)
+				weight: p.id === wanted ? p.weight * 6 : p.weight * freshness(ctx, p.id) * taste(p.id)
 			});
 		const land = x + speed * air;
 		const middle = x + (speed * air) / 2;
@@ -146,7 +202,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				for (const shift of [0, count === 1 ? 1 : -1, count === 1 ? -1 : 1]) {
 					add({
 						id: `spikes${count}`,
-						weight: [0, 0.7, 1, 0.7][count] * (shift ? 0.15 : 1),
+						weight: [0, 1.2, 0.9, 0.55][count] * (shift ? 0.15 : 1),
 						build: (a) => {
 							const small = count === 1 && rng() < 0.25;
 							for (let k = 0; k < count; k++)
@@ -240,12 +296,17 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 					});
 				}
 			}
+			// A held note (a slider, a hold): a dash orb, up and on over a spike pit while held
+			const held = Math.min(700, (ends.get(time) ?? time) - time);
+			if (preset.level >= 1 && held >= 220 && next - time > held + 300) {
+				add({ id: 'dash', weight: 2.4, hold: held, build: (a) => dashPit(a, x, time, held) });
+			}
 			// A pad up onto a higher structure, or over a long pit
 			if (room > 0.65 && level + 2 <= preset.height && preset.level >= 1) {
-				add({ id: 'padUp', weight: 0.55, noPress: true, build: (a) => padUp(a, x) });
+				add({ id: 'padUp', weight: 1.1, noPress: true, build: (a) => padUp(a, x) });
 			}
 			if (room > 0.7) {
-				add({ id: 'padOver', weight: 0.4, noPress: true, build: (a) => padOver(a, x) });
+				add({ id: 'padOver', weight: 0.8, noPress: true, build: (a) => padOver(a, x) });
 			}
 			// Jump, then an orb on the next note over a pit
 			const second = times[i + 1];
@@ -258,6 +319,16 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 						weight: 5,
 						pair: true,
 						build: (a) => orbPit(a, x, time, second, times[i + 2] ?? section.end)
+					});
+				}
+				// A pad up, and an orb on the next note in the air: over a pit
+				if (gapS > 0.18 && gapS < 0.55 && preset.level >= 1) {
+					add({
+						id: 'padOrb',
+						weight: 2.2,
+						pair: true,
+						padFirst: true,
+						build: (a) => orbPit(a, x, time, second, times[i + 2] ?? section.end, true)
 					});
 				}
 			}
@@ -286,6 +357,23 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 			if (pattern.noPress) {
 				const from = simulate(world, state, time - tolerance - STEP * 2, []);
 				checks = [{ from, inputs: [], until }];
+			} else if (pattern.hold) {
+				// Pressed and let go on time, early and late
+				const from = simulate(world, state, time - tolerance - STEP * 2, []);
+				const hold = pattern.hold;
+				checks = [0, -tolerance, tolerance].flatMap((p) =>
+					[0, -tolerance, tolerance].map((r) => ({
+						from,
+						inputs: [
+							{ time: time + p, down: true },
+							{ time: time + hold + r, down: false }
+						],
+						until: Math.max(until, time + hold + 700)
+					}))
+				);
+			} else if (pattern.pair && pattern.padFirst && second !== undefined) {
+				const third = times[i + 2] ?? section.end - 250;
+				checks = clickChecks(world, state, second, third - 2, tolerance);
 			} else if (pattern.pair && second !== undefined) {
 				const third = times[i + 2] ?? section.end - 250;
 				checks = [
@@ -302,10 +390,13 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 			if (!pattern.noPress) {
 				const end = Math.max(pattern.pair ? (times[i + 2] ?? section.end) - 2 : until, time + 900);
 				needed = !survivesWithout(world, checks[0].from, end);
-				if (needed && pattern.pair) needed = simulate(world, checks[0].from, end, tap(time)).dead;
+				if (needed && pattern.pair && !pattern.padFirst)
+					needed = simulate(world, checks[0].from, end, tap(time)).dead;
 			}
 			if (ok && needed) {
-				if (!pattern.noPress) plan.push(...tap(time));
+				if (pattern.hold)
+					plan.push({ time, down: true }, { time: time + pattern.hold, down: false });
+				else if (!pattern.noPress && !pattern.padFirst) plan.push(...tap(time));
 				if (pattern.pair && second !== undefined) {
 					plan.push(...tap(second));
 					i++;
@@ -480,21 +571,34 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		return true;
 	}
 
-	function orbPit(a: Attempt, x: number, first: number, second: number, third: number) {
-		const flight = simulate(world, state, second, tap(first));
+	/**
+	 * A jump (or a yellow pad: `pad`), then an orb on the next note in the air, over a pit; the
+	 * orb's colour by where the melody goes
+	 */
+	function orbPit(
+		a: Attempt,
+		x: number,
+		first: number,
+		second: number,
+		third: number,
+		pad = false
+	) {
+		const padX = Math.floor(x + 0.85) + 0.5;
+		if (pad) a.pad('yellow', padX, level);
+		const before = pad ? [] : tap(first);
+		const flight = simulate(world, state, second, before);
 		if (flight.dead || flight.grounded) return false;
-		const kind = rng() < 0.25 && preset.level >= 2 ? 'red' : 'yellow';
 		const orbX = flight.x + speed * 0.01;
-		a.orb(kind, half(orbX), Math.round(flight.y * 2) / 2);
+		a.orb(orbFor(first, second), half(orbX), Math.round(flight.y * 2) / 2);
 		// Where it lands with the orb
 		const landing = simulate(
 			world,
 			state,
 			third - 1,
-			[...tap(first), ...tap(second)].sort((p, q) => p.time - q.time)
+			[...before, ...tap(second)].sort((p, q) => p.time - q.time)
 		);
 		const end = landing.grounded ? landing.x - speed * 0.12 : flight.x + 3;
-		const from = Math.ceil(x + 1);
+		const from = Math.ceil((pad ? padX : x) + 1);
 		const to = Math.floor(end);
 		if (to - from < 2) return false;
 		if (platform && level >= 1) {
@@ -525,7 +629,8 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 	 */
 	function upside(i: number, x: number): number | null {
 		const start = times[i];
-		const longest = [0, 3000, 3800, 4600, 5400][preset.level];
+		// (and it ends in this part, the fall down to the ground included)
+		const longest = Math.min([0, 3000, 3800, 4600, 5400][preset.level], section.end - 900 - start);
 		let j = i;
 		while (j + 1 < times.length && times[j + 1] - start <= longest) j++;
 		if (j < i + 2) return null;
@@ -550,11 +655,12 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		// In
 		const way = shuffleByWeight(rng, [
 			{ item: 'orb', weight: 1.4 },
+			{ item: 'spider', weight: preset.level >= 2 ? 1 : 0 },
 			{ item: 'pad', weight: preset.level >= 2 ? 0.8 : 0 },
 			{ item: 'portal', weight: 0.8 }
 		])[0];
-		if (way === 'orb') {
-			a.orb('blue', half(x), level + 1);
+		if (way === 'orb' || way === 'spider') {
+			a.orb(way === 'orb' ? 'blue' : 'spider', half(x), level + 1);
 			presses.push(start);
 		} else if (way === 'pad') a.pad('blue', Math.floor(x) + 0.5, level);
 		else gravityPortal(x, -1);
@@ -563,7 +669,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		// Out
 		const outByOrb = rng() < (preset.level >= 2 ? 0.6 : 0.75);
 		if (outByOrb) {
-			a.orb('blue', half(endX), high - 1);
+			a.orb(preset.level >= 2 && rng() < 0.4 ? 'spider' : 'blue', half(endX), high - 1);
 			presses.push(end);
 		} else gravityPortal(endX, 1);
 		// Who doesn't turn around runs into these
@@ -611,7 +717,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		].sort((p, q) => p - q);
 		const ok =
 			jumps > 0 &&
-			marks.every((t, k) => k === 0 || t - marks[k - 1] <= 1450) &&
+			marks.every((t, k) => k === 0 || t - marks[k - 1] <= 1600) &&
 			a.legal() &&
 			variants.every((inputs) => !simulate(world, state, until, inputs).dead) &&
 			recent.every((c) => passes(world, c));
@@ -619,7 +725,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		const needed =
 			ok &&
 			simulate(world, state, until + 1000, plan).dead &&
-			(way !== 'orb' ||
+			((way !== 'orb' && way !== 'spider') ||
 				simulate(world, state, until + 1000, withPlan(presses.slice(1).flatMap((t) => tap(t))))
 					.dead);
 		if (!ok || !needed) {
@@ -630,6 +736,24 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		recent = [];
 		used(ctx, 'upside');
 		return last;
+	}
+
+	/** A dash orb on a held note: up at an angle while held, over spikes to where it lands */
+	function dashPit(a: Attempt, x: number, time: number, held: number) {
+		a.orb('dash', half(x), level + 1, 1);
+		const path: { x: number; y: number; time: number }[] = [];
+		const inputs = [
+			{ time, down: true },
+			{ time: time + held, down: false }
+		];
+		simulate(world, state, time + held + 900, inputs, { trace: path });
+		const landed = path.find((p) => p.time > time + held && Math.abs(p.y - (level + 0.5)) < 0.02);
+		if (!landed) return false;
+		const from = Math.ceil(x + 1.5);
+		const to = Math.floor(landed.x - speed * 0.1);
+		if (to - from < 2) return false;
+		a.spikes(from, to, level, 1);
+		return true;
 	}
 
 	function airOrb(a: Attempt, at: PlayerState) {
@@ -693,4 +817,4 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 const PHYSICS_PAD = 864 / 30;
 
 /** How often a click on the ground turns into an upside-down stretch, by difficulty */
-const UPSIDE = [0, 0.05, 0.1, 0.15, 0.2];
+const UPSIDE = [0, 0.12, 0.2, 0.26, 0.32];

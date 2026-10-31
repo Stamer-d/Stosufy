@@ -367,7 +367,10 @@ function planParts(
 	preset: Preset,
 	rng: Random
 ): Part[] {
-	// Phrases: every few measures (about 10–20 s), and where the kiai starts and stops
+	// Phrases: every few measures (about 10–20 s, shorter the harder: more changes), and where
+	// the kiai starts and stops
+	const longest = [21000, 14000, 9000, 8000, 7000][preset.level];
+	const shortest = [9000, 6000, 4500, 3800, 3200][preset.level];
 	const cuts = new Set<number>();
 	const timing = chart.timing;
 	for (let i = 0; i < timing.length; i++) {
@@ -375,8 +378,8 @@ function planParts(
 		const until = timing[i + 1]?.time ?? end;
 		const measure = point.beatLength * point.meter;
 		let measures = 8;
-		while (measures * measure > 21000 && measures > 2) measures /= 2;
-		while (measures * measure < 9000) measures *= 2;
+		while (measures * measure > longest && measures > 2) measures /= 2;
+		while (measures * measure < shortest) measures *= 2;
 		const first =
 			point.time + Math.ceil((start - point.time) / (measure * measures)) * measure * measures;
 		for (let t = Math.max(point.time, first); t < until; t += measure * measures)
@@ -400,10 +403,10 @@ function planParts(
 	const kept: number[] = [];
 	for (const cut of sorted) {
 		const last = kept[kept.length - 1] ?? start;
-		if (cut - last >= 7000) kept.push(cut);
+		if (cut - last >= shortest - 1500) kept.push(cut);
 		else if (kiaiCuts.has(cut) && !kiaiCuts.has(last) && kept.length) kept[kept.length - 1] = cut;
 	}
-	if (kept.length && end - kept[kept.length - 1] < 6000) kept.pop();
+	if (kept.length && end - kept[kept.length - 1] < Math.min(6000, shortest)) kept.pop();
 	const bounds = [start, ...kept, end];
 	const meanDensity = chart.notes.length / Math.max(1, (end - start) / 1000);
 	const sound = chart.sound;
@@ -444,7 +447,11 @@ function planParts(
 			spider: 0.3 + (streamy < 0.25 ? 0.15 : 0)
 		};
 		let mode: Mode = 'cube';
-		if (i > 0) {
+		// Now and then the same kind again, small (or big) now: a size portal
+		const before = parts[parts.length - 1];
+		const resize = !!before && !drop && before.mode !== 'ball' && rng() < preset.mini * 0.8;
+		if (resize) mode = before.mode;
+		else if (i > 0) {
 			const options = (preset.modes as Mode[]).map((m) => {
 				let w = fits[m];
 				// Not the same kind again and again, and at a drop something new
@@ -469,7 +476,7 @@ function planParts(
 			}
 		}
 		history.push(mode);
-		const mini = i > 0 && mode !== 'ball' && rng() < preset.mini;
+		const mini = resize ? !before.mini : i > 0 && mode !== 'ball' && rng() < preset.mini;
 		parts.push({ start: from, end: to, mode, mini, kiai, energy, drive });
 	}
 	// The end comes on the cube
@@ -941,11 +948,16 @@ function fairness(
 	let clean = 0;
 	for (let k = 0; k < 120 && clean < 12; k++) {
 		const inputs: InputEvent[] = [];
-		for (const e of own) {
-			if (!e.down) continue;
+		own.forEach((e, k) => {
+			if (!e.down) return;
 			const at = e.time + (rnd() * 2 - 1) * preset.tolerance * 0.75;
-			inputs.push({ time: at, down: true }, { time: at + 60 + rnd() * 110, down: false });
-		}
+			// (a tap held a bit shorter or longer, a dash let go a bit early or late)
+			const up = own.slice(k + 1).find((u) => !u.down);
+			const length = (up?.time ?? e.time + 90) - e.time;
+			const held =
+				length > 150 ? length + (rnd() * 2 - 1) * preset.tolerance * 0.75 : 60 + rnd() * 110;
+			inputs.push({ time: at, down: true }, { time: at + held, down: false });
+		});
 		inputs.sort((a, b) => a.time - b.time);
 		const run = simulate(world, entry, sec.end, inputs);
 		if (!run.dead) {

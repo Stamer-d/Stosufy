@@ -14,13 +14,14 @@ import {
 	simulate,
 	step,
 	STEP,
+	type Hazard,
 	type InputEvent,
 	type OrbKind,
 	type PlayerState,
 	type Section,
 	type Solid
 } from '../physics';
-import { clamp, legalAround, shuffleByWeight, tap, used, type Context } from '../build';
+import { clamp, freshness, legalAround, shuffleByWeight, tap, used, type Context } from '../build';
 import { beatStrength, type DashNote } from '../chart';
 
 interface Column {
@@ -126,14 +127,14 @@ export function buildFlight(
 
 	// --- Gravity portals: on strong downbeats, upside down and back -------------------------
 	// (not near a click: pressed a moment before or after the portal would go another way)
-	if (mode !== 'swing' && preset.level >= 1 && rng() < [0, 0.35, 0.6, 0.75, 0.9][preset.level]) {
+	if (mode !== 'swing' && preset.level >= 1 && rng() < [0, 0.5, 0.75, 0.85, 0.95][preset.level]) {
 		let gravity: 1 | -1 = -1;
 		let last = -Infinity;
 		let count = 0;
 		for (const note of notes) {
 			if (count >= preset.level) break;
 			const x = world.xAt(note.time);
-			if (x < startX + 4 || x > endX - 6 || note.time - last < 3200) continue;
+			if (x < startX + 4 || x > endX - 6 || note.time - last < 2400) continue;
 			if (beatStrength(ctx.chart.timing, note.time) < 1 && !(note.sound & 4)) continue;
 			if (clicks.some((c) => Math.abs(c - note.time) < 280) || rng() < 0.35) continue;
 			world.gravityPortals.add({ x, y: (floor + top) / 2, gravity, x0: x - 0.6, x1: x + 0.6 });
@@ -179,32 +180,39 @@ export function buildFlight(
 		events = flyShip(ctx, entry, section.end, path, music).events;
 	} else {
 		// The clicks; the ball and the spider only switch on a surface, else a blue orb does it.
-		// Some clicks (more the harder) take an orb where it is: blue and green turn gravity
-		// around, yellow, pink and red jump (in the UFO: further, or less, than a hop)
+		// Some clicks take an orb, for what the music does there (see musicalOrb)
 		const times = clicks.filter((t) => t > section.start + 400 && t < section.end - 400);
-		const orbs: OrbKind[] =
-			mode === 'ufo'
-				? ['blue', 'green', 'pink', 'red', 'yellow']
-				: mode === 'ball'
-					? ['green', 'blue', 'yellow', 'pink']
-					: ['blue', 'green'];
-		const orbChance = [0, 0.06, 0.11, 0.16, 0.22][preset.level];
+		const noteAt = new Map(notes.map((n) => [n.time, n]));
+		const most = [0, 2, 4, 6, 8][preset.level];
+		let placed = 0;
+		let lastOrb = -Infinity;
+		let previous: DashNote | null = null;
 		let s = entry;
 		for (const time of times) {
 			const at = simulate(world, s, time, events);
 			if (at.dead) break;
-			const add = (kind: OrbKind) => {
+			const note = noteAt.get(time) ?? null;
+			const add = (kind: OrbKind, dir?: number) => {
 				const id = world.id();
-				world.orbs.add({ id, kind, x: at.x, y: at.y, x0: at.x - 0.6, x1: at.x + 0.6 });
+				world.orbs.add({ id, kind, x: at.x, y: at.y, dir, x0: at.x - 0.6, x1: at.x + 0.6 });
 				used(ctx, `orb-${kind}`);
 			};
+			let hold = mode === 'ufo' ? 70 : 90;
 			if ((mode === 'ball' || mode === 'spider') && !at.grounded) {
-				if (mode === 'spider' && rng() > orbChance * 2) continue;
-				add(mode === 'ball' && rng() < 0.4 ? 'green' : 'blue');
-			} else if (rng() < orbChance && at.y > floor + 1.2 && at.y < top - 1.2) {
-				add(orbs[Math.floor(rng() * orbs.length)]);
+				if (mode === 'spider') continue;
+				// (green on an accent: it flips and jumps)
+				add(note && strongAt(note) ? 'green' : 'blue');
+			} else if (note && preset.level >= 1 && placed < most && time - lastOrb > 1100) {
+				const orb = musicalOrb(note, previous, at.y);
+				if (orb) {
+					add(orb.kind, orb.dir);
+					if (orb.hold) hold = orb.hold;
+					placed++;
+					lastOrb = time;
+				}
 			}
-			events.push(...tap(time, mode === 'ufo' ? 70 : 90));
+			events.push(...tap(time, hold));
+			previous = note ?? previous;
 			s = at;
 		}
 	}
@@ -213,16 +221,29 @@ export function buildFlight(
 	const runs: { x: number; y: number }[][] = [];
 	const variants: InputEvent[][] = [events];
 	if (!steered) {
-		for (const [shift, length] of [
-			[-tolerance, 60],
-			[tolerance, 160],
-			[-tolerance * 0.5, 160],
-			[tolerance * 0.5, 60]
+		// (each press held about as long as planned: a tap shorter or longer, a dash let go a
+		// bit early or late)
+		const presses = events.flatMap((e, k) => {
+			if (!e.down) return [];
+			const up = events.slice(k + 1).find((u) => !u.down);
+			return [{ at: e.time, length: (up?.time ?? e.time + 90) - e.time }];
+		});
+		for (const [shift, longer] of [
+			[-tolerance, -30],
+			[tolerance, 70],
+			[-tolerance * 0.5, 70],
+			[tolerance * 0.5, -30]
 		]) {
 			variants.push(
-				events
-					.filter((e) => e.down)
-					.flatMap((e) => tap(e.time + shift, length))
+				presses
+					.flatMap((p) =>
+						tap(
+							p.at + shift,
+							p.length > 150
+								? p.length + Math.sign(longer) * tolerance
+								: Math.max(50, p.length + longer)
+						)
+					)
 					.sort((a, b) => a.time - b.time)
 			);
 		}
@@ -231,6 +252,43 @@ export function buildFlight(
 		const trace: { x: number; y: number; time: number }[] = [];
 		simulate(world, entry, section.end, inputs, { trace });
 		runs.push(trace);
+	}
+
+	/** A strong moment: the bar's first beat, or a finish */
+	function strongAt(note: DashNote) {
+		return beatStrength(ctx.chart.timing, note.time) >= 1 || !!(note.sound & 4);
+	}
+
+	/**
+	 * The orb a click takes, for what the music does there (or none): a held note a dash orb,
+	 * held as long (up or down with the melody); a finish on a strong beat turns gravity around
+	 * (blue, green; on the harder ones a spider orb jumps to the other side), and so does any
+	 * strong beat; a leap of the melody up a yellow orb (a big one red), down a pink one (a
+	 * very big one black). Not too close to the floor or ceiling.
+	 */
+	function musicalOrb(
+		note: DashNote,
+		previous: DashNote | null,
+		y: number
+	): { kind: OrbKind; dir?: number; hold?: number } | null {
+		if (y < floor + 1.2 || y > top - 1.2) return null;
+		const leap = previous ? note.height - previous.height : 0;
+		const length = note.end - note.time;
+		if (length >= 250 && mode !== 'spider') {
+			// (straight on near the ceiling or floor: there's no room up or down there)
+			const way = leap > 0.15 && y < top - 3 ? 1 : leap < -0.15 && y > floor + 3 ? -1 : 0;
+			return { kind: 'dash', dir: way, hold: Math.min(700, length) };
+		}
+		if (strongAt(note) && note.sound & 4 && preset.level >= 2) {
+			if (preset.level >= 3 && rng() < 0.35) return { kind: 'spider' };
+			return { kind: rng() < 0.5 ? 'blue' : 'green' };
+		}
+		if (mode === 'spider') return null;
+		if (strongAt(note) && preset.level >= 1) return { kind: rng() < 0.6 ? 'blue' : 'green' };
+		if (leap > 0.35) return { kind: preset.level >= 2 ? 'red' : 'yellow' };
+		if (leap > 0.2) return { kind: 'yellow' };
+		if (leap < -0.2) return { kind: leap < -0.45 && preset.level >= 3 ? 'black' : 'pink' };
+		return null;
 	}
 
 	// --- The blocks around it -------------------------------------------------------------
@@ -269,7 +327,7 @@ export function buildFlight(
 		return phase % (preset.level >= 3 ? 12 : 7) === 6;
 	};
 	for (const c of columns)
-		if (open(c.x) && mode !== 'ball' && mode !== 'spider') (c.low = floor), (c.high = top);
+		if (open(c.x) && mode !== 'ball' && mode !== 'spider') ((c.low = floor), (c.high = top));
 	// A person turns the swing a moment after seeing a step in the walls: they step back around
 	// each one (every column as open as the two on each side), so there's time to
 	if (mode === 'swing') {
@@ -283,6 +341,27 @@ export function buildFlight(
 			}
 		});
 	}
+
+	// How the part is built, each its own: a tunnel around the way, pillars (the tunnel with
+	// gaps), or open (nothing but spikes on the floor and ceiling, and saws in the air on the
+	// strong notes, away from the way)
+	const style =
+		mode === 'ball' || mode === 'spider' || mode === 'swing'
+			? 'tunnel'
+			: shuffleByWeight(rng, [
+					{ item: 'tunnel', weight: 1.2 * freshness(ctx, `${mode}-tunnel`) },
+					{ item: 'pillars', weight: freshness(ctx, `${mode}-pillars`) },
+					{
+						item: 'open',
+						weight: (preset.level >= 2 ? 0.8 : 0.35) * freshness(ctx, `${mode}-open`)
+					}
+				])[0];
+	used(ctx, `${mode}-${style}`);
+	for (const c of columns)
+		if (style === 'open' || (style === 'pillars' && Math.floor((c.x - startX) / 3) % 2 === 1)) {
+			c.low = floor;
+			c.high = top;
+		}
 
 	// Spikes on the surfaces where there's room, in little rows that start on the strong notes
 	// (the beats in between now and then)
@@ -372,6 +451,35 @@ export function buildFlight(
 		}
 	};
 	build();
+	const saws: Hazard[] = [];
+	if (style === 'open')
+		for (const note of notes) {
+			const x = world.xAt(note.time);
+			if (!strongAt(note) || x < startX + 2 || x > endX - 2) continue;
+			if (saws.some((saw) => Math.abs(saw.x - x) < 4)) continue;
+			// In the larger room above or below the way there (off the floor's and ceiling's spikes)
+			let low = Infinity;
+			let high = -Infinity;
+			for (const trace of runs)
+				for (const p of trace)
+					if (Math.abs(p.x - x) < box.w + 1.2) {
+						low = Math.min(low, p.y - box.h);
+						high = Math.max(high, p.y + box.h);
+					}
+			if (!isFinite(low)) continue;
+			const radius = 0.7;
+			const reach = radius * 0.72 + 0.6 * tight;
+			const below = low - reach - (floor + 1.2);
+			const above = top - 1.2 - (high + reach);
+			const y =
+				above >= below && above > 0
+					? high + reach + above / 2
+					: below > 0
+						? floor + 1.2 + below / 2
+						: null;
+			if (y !== null) saws.push(world.saw(x, y, radius));
+		}
+	if (saws.length) used(ctx, 'saws');
 
 	// --- Checked: on time, early and late; where it crashes, more room -------------------------
 	for (let attempt = 0; attempt < 40; attempt++) {
@@ -424,6 +532,10 @@ export function buildFlight(
 			}
 		}
 		if (!failed) break;
+		for (const saw of saws.filter((s) => Math.abs(s.x - failed!.x) < 3)) {
+			world.hazards.remove(saw);
+			saws.splice(saws.indexOf(saw), 1);
+		}
 		const near = columns.filter((c) => Math.abs(c.x + 0.5 - failed!.x) < 3);
 		if (!near.length) break;
 		for (const c of near) {

@@ -755,18 +755,29 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	}
 
 	/** A saw: a toothed disc turning in the surface (only what's above it shows) */
-	function saw(x: number, y: number, radius: number, p: Palette, pulse: number, time: number) {
+	function saw(
+		x: number,
+		y: number,
+		radius: number,
+		p: Palette,
+		pulse: number,
+		time: number,
+		floating = false
+	) {
 		const r = radius * scale;
 		ctx.save();
 		ctx.translate(sx(x), sy(y));
-		ctx.beginPath();
-		ctx.rect(-r * 2, -r * 2, r * 4, r * 2);
-		ctx.clip();
+		// (sunk into a surface only the half above it shows; one in the air is whole)
+		if (!floating) {
+			ctx.beginPath();
+			ctx.rect(-r * 2, -r * 2, r * 4, r * 2);
+			ctx.clip();
+		}
 		const halo = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.6);
 		halo.addColorStop(0, rgba(p.accent, 0.22 + pulse * 0.25));
 		halo.addColorStop(1, rgba(p.accent, 0));
 		ctx.fillStyle = halo;
-		ctx.fillRect(-r * 1.6, -r * 1.6, r * 3.2, r * 1.6);
+		ctx.fillRect(-r * 1.6, -r * 1.6, r * 3.2, floating ? r * 3.2 : r * 1.6);
 		ctx.rotate((time / 1000) * 5);
 		if (sprite(radius >= 1 ? 'sawBig' : 'saw', 0, 0, r * 2.15, r * 2.15)) {
 			ctx.restore();
@@ -805,14 +816,24 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.restore();
 	}
 
-	function orb(x: number, y: number, kind: string, used: boolean, time: number, pulse: number) {
+	function orb(
+		x: number,
+		y: number,
+		kind: string,
+		used: boolean,
+		time: number,
+		pulse: number,
+		dir = 0
+	) {
 		const colors: Record<string, [string, string]> = {
 			yellow: ['#ffe14d', '#fff8c2'],
 			pink: ['#ff5ec4', '#ffd0ef'],
 			blue: ['#3ad7ff', '#d2f6ff'],
 			red: ['#ff3b3b', '#ffc2c2'],
 			green: ['#4dff6a', '#d4ffd9'],
-			black: ['#1b1b24', '#8a8aa0']
+			black: ['#1b1b24', '#8a8aa0'],
+			dash: ['#ff4fd8', '#ffd0ef'],
+			spider: ['#b14dff', '#ecd6ff']
 		};
 		const [main, light] = colors[kind] ?? colors.yellow;
 		const r = (0.42 + pulse * 0.05) * scale;
@@ -850,6 +871,41 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.beginPath();
 			ctx.arc(0, 0, r * 1.45, (k * Math.PI) / 2, (k * Math.PI) / 2 + 0.9);
 			ctx.stroke();
+		}
+		ctx.restore();
+		// What it does: a dash's way (arrows that run along it), the spider's both ways
+		ctx.save();
+		ctx.translate(cx, cy);
+		ctx.lineJoin = 'round';
+		ctx.lineCap = 'round';
+		const mark = (draw: () => void) => {
+			ctx.beginPath();
+			draw();
+			ctx.strokeStyle = '#000000';
+			ctx.lineWidth = scale * 0.16;
+			ctx.stroke();
+			ctx.strokeStyle = used ? rgba('#ffffff', 0.4) : '#ffffff';
+			ctx.lineWidth = scale * 0.08;
+			ctx.stroke();
+		};
+		if (kind === 'dash') {
+			ctx.rotate(-Math.atan(dir * 0.45));
+			const run = ((time / 500) % 1) * r * 0.5;
+			for (const k of [-1, 0]) {
+				const ox = k * r * 0.5 + run - r * 0.1;
+				mark(() => {
+					ctx.moveTo(ox - r * 0.25, -r * 0.4);
+					ctx.lineTo(ox + r * 0.15, 0);
+					ctx.lineTo(ox - r * 0.25, r * 0.4);
+				});
+			}
+		} else if (kind === 'spider') {
+			for (const side of [-1, 1])
+				mark(() => {
+					ctx.moveTo(-r * 0.35, side * r * 0.2);
+					ctx.lineTo(0, side * r * 0.6);
+					ctx.lineTo(r * 0.35, side * r * 0.2);
+				});
 		}
 		ctx.restore();
 	}
@@ -1194,10 +1250,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillRect(-s * 0.14, -s * 0.18, s * 0.4, s * 0.4);
 	}
 
-	/** The spider's jump: a streak of light from where it was to where it is, fading */
+	/** The spider's jump (or a spider orb's): a streak of light from where it was, fading */
 	function teleportBeam(state: PlayerState, icon: Icon, time: number) {
 		const t = state.teleport;
-		if (!t || state.mode !== 'spider') return;
+		if (!t) return;
 		const f = (time - t.time) / 260;
 		if (f < 0 || f >= 1) return;
 		const x = sx(t.x);
@@ -1445,7 +1501,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 
 	function drawTrail(state: PlayerState, icon: Icon, time: number) {
 		const wave = state.mode === 'wave';
-		const boosted = time - state.boostedAt < 450;
+		const boosted = time - state.boostedAt < 450 || state.dash !== null;
 		trail.push({ x: state.x, y: state.y, time });
 		const keep = wave ? 900 : 260;
 		while (trail.length && time - trail[0].time > keep) trail.shift();
@@ -1685,14 +1741,20 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		for (const h of spikes) {
 			spike(h.x, h.y, h.dir, h.kind === 'small', p, pulse);
 		}
-		for (const h of world.hazards.near(left, right))
-			if (h.kind === 'saw') saw(h.x, h.y, h.size, p, pulse, time);
+		for (const h of world.hazards.near(left, right)) {
+			if (h.kind !== 'saw') continue;
+			const sec = world.sectionAt(world.timeAt(h.x));
+			const onSurface =
+				Math.abs(h.y - sec.floor) < 0.01 ||
+				world.solids.near(h.x, h.x).some((s) => Math.abs(s.y1 - h.y) < 0.01);
+			saw(h.x, h.y, h.size, p, pulse, time, !onSurface);
+		}
 
 		// Pads, orbs, portals
 		for (const pd of world.pads.near(left, right))
 			pad(pd.x, pd.y, pd.dir, pd.kind, state.used.includes(pd.id), pulse);
 		for (const o of world.orbs.near(left, right))
-			orb(o.x, o.y, o.kind, state.used.includes(o.id), time, pulse);
+			orb(o.x, o.y, o.kind, state.used.includes(o.id), time, pulse, o.dir);
 		const seen = new Set<Mode>([world.sections[0]?.mode]);
 		for (const portalItem of level.portals) {
 			const first = portalItem.mode && !seen.has(portalItem.mode);

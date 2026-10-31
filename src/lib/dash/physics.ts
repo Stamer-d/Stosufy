@@ -104,12 +104,19 @@ export interface Hazard {
 	x1: number;
 }
 
-export type OrbKind = 'yellow' | 'pink' | 'red' | 'blue' | 'green' | 'black';
+/**
+ * Orbs, used with a press while touching them: jumps (yellow, pink, red), down at once
+ * (black), gravity turned around (blue, green), a dash straight on while held (dash), and a
+ * jump to the surface on the other side at once (spider)
+ */
+export type OrbKind = 'yellow' | 'pink' | 'red' | 'blue' | 'green' | 'black' | 'dash' | 'spider';
 export interface Orb {
 	id: number;
 	kind: OrbKind;
 	x: number;
 	y: number;
+	/** A dash orb's way: 1 up at 24°, 0 straight on, -1 down */
+	dir?: number;
 	x0: number;
 	x1: number;
 }
@@ -380,6 +387,8 @@ export interface PlayerState {
 	landedAt: number;
 	/** The spider's last jump: from where to where (for its trail) */
 	teleport: { x: number; from: number; to: number; time: number } | null;
+	/** Dashing (from a dash orb, while held): its speed up or down (blocks/s) */
+	dash: number | null;
 }
 
 export function startState(world: World, time: number, y?: number): PlayerState {
@@ -404,7 +413,8 @@ export function startState(world: World, time: number, y?: number): PlayerState 
 		jumpedAt: -1e9,
 		boostedAt: -1e9,
 		landedAt: -1e9,
-		teleport: null
+		teleport: null,
+		dash: null
 	};
 }
 
@@ -481,6 +491,7 @@ export function step(world: World, s: PlayerState, time: number) {
 		if (s.gravity < 0) s.vy = -s.vy / 2;
 		s.gravity = 1;
 		s.buffered = s.held && s.mode !== 'ship';
+		s.dash = null;
 		// A press held from before a portal doesn't turn the swing, ball or spider around at
 		// once (only a new one does)
 		const flips = s.mode === 'swing' || s.mode === 'ball' || s.mode === 'spider';
@@ -535,7 +546,15 @@ export function step(world: World, s: PlayerState, time: number) {
 				s.gravity = (s.gravity * -1) as 1 | -1;
 				s.vy = s.gravity * jump * PHYSICS.orb.green;
 			} else if (orb.kind === 'black') s.vy = -s.gravity * PHYSICS.maxFall;
-			else s.vy = s.gravity * jump * PHYSICS.orb[orb.kind];
+			else if (orb.kind === 'dash') s.vy = s.dash = (orb.dir ?? 0) * speed * 0.45;
+			else if (orb.kind === 'spider') {
+				const from = s.y;
+				s.y = spiderTarget(world, s, section, box);
+				s.teleport = { x: s.x, from, to: s.y, time };
+				s.gravity = (s.gravity * -1) as 1 | -1;
+				s.vy = 0;
+				s.grounded = true;
+			} else s.vy = s.gravity * jump * PHYSICS.orb[orb.kind];
 			break;
 		}
 		for (const pad of world.pads.near(player.x0, player.x1)) {
@@ -665,9 +684,15 @@ export function step(world: World, s: PlayerState, time: number) {
 		if (s.mode !== 'ufo' && s.mode !== 'swing') s.buffered = false;
 	}
 
-	// The new speed up or down
+	// The new speed up or down. Dashing: straight on while held (then as before)
 	const gg = s.gravity;
-	switch (s.mode) {
+	if (s.dash !== null && !s.held) s.dash = null;
+	const mode = s.dash !== null ? 'dash' : s.mode;
+	if (s.dash !== null) {
+		s.vy = s.dash;
+		s.grounded = false;
+	}
+	switch (mode) {
 		case 'cube': {
 			if (s.grounded && s.held) {
 				s.vy = gg * cube.jump * (s.mini ? 0.8 : 1);

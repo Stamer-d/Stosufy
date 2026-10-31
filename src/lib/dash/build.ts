@@ -66,13 +66,13 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		gap: 0.36,
 		tolerance: 65,
 		spikes: 2,
-		height: 3,
+		height: 4,
 		ship: 2.2,
 		wave: 2.4,
 		waveGap: 0.3,
 		speeds: [1, 2],
-		chain: 1,
-		mini: 0,
+		chain: 2,
+		mini: 0.1,
 		modes: ['cube', 'ship', 'ball', 'ufo', 'wave']
 	},
 	hard: {
@@ -81,13 +81,13 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		gap: 0.24,
 		tolerance: 48,
 		spikes: 3,
-		height: 4,
+		height: 5,
 		ship: 1.6,
 		wave: 1.85,
 		waveGap: 0.2,
 		speeds: [1, 2],
-		chain: 2,
-		mini: 0.18,
+		chain: 3,
+		mini: 0.24,
 		modes: ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
 	},
 	insane: {
@@ -96,13 +96,13 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		gap: 0.17,
 		tolerance: 38,
 		spikes: 3,
-		height: 5,
+		height: 6,
 		ship: 1.35,
 		wave: 1.5,
 		waveGap: 0.14,
 		speeds: [2, 3],
-		chain: 3,
-		mini: 0.25,
+		chain: 4,
+		mini: 0.3,
 		modes: ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
 	},
 	// (about a medium demon: fast, tight, and every kind of part and trick)
@@ -112,13 +112,13 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		gap: 0.13,
 		tolerance: 30,
 		spikes: 3,
-		height: 6,
+		height: 7,
 		ship: 1.15,
 		wave: 1.25,
 		waveGap: 0.1,
 		speeds: [3, 4],
-		chain: 4,
-		mini: 0.32,
+		chain: 5,
+		mini: 0.36,
 		modes: ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
 	}
 };
@@ -186,6 +186,8 @@ export interface Context {
 	 * music does
 	 */
 	motifs: Map<string, string[]>;
+	/** How much this level likes each kind of thing (set as they come up): no two alike */
+	taste?: Map<string, number>;
 }
 
 /** A stretch of the level played from a state with some presses */
@@ -274,9 +276,9 @@ export class Attempt {
 		return solid;
 	}
 
-	orb(kind: OrbKind, x: number, y: number) {
+	orb(kind: OrbKind, x: number, y: number, dir?: number) {
 		this.mark(x - 0.6, x + 0.6);
-		const orb = { id: this.world.id(), kind, x, y, x0: x - 0.6, x1: x + 0.6 };
+		const orb = { id: this.world.id(), kind, x, y, dir, x0: x - 0.6, x1: x + 0.6 };
 		this.world.orbs.add(orb);
 		this.undo.push(() => this.world.orbs.remove(orb));
 		return orb;
