@@ -1,7 +1,8 @@
 <script>
 	// The Dash mode: the song that plays as a one-button rhythm level, made from its beatmap.
-	// Space, ↑, W, the gameplay keys or the mouse to jump; Esc pauses.
-	import { onMount, untrack } from 'svelte';
+	// Space, ↑, W, the gameplay keys or the mouse to jump; Esc pauses (and from the pause or the
+	// results back to the menu, from the menu out of Dash). F shows the frames per second.
+	import { onMount, tick, untrack } from 'svelte';
 	import { fade, fly, scale as zoom } from 'svelte/transition';
 	import { get } from 'svelte/store';
 	import Titlebar from '../Titlebar.svelte';
@@ -11,19 +12,14 @@
 	import { userSettings } from '#lib/stores/user.ts';
 	import { isPreviewing } from '#lib/stores/stream.ts';
 	import { beatmapContent } from '#lib/hitsounds/player.ts';
-	import {
-		chosenMapId,
-		standardPicks,
-		difficulties,
-		chooseDifficulty
-	} from '#lib/gameplay/play.ts';
+	import { chosenMapId, difficulties } from '#lib/gameplay/play.ts';
 	import DashSongs from './DashSongs.svelte';
 	import DashSoundMenu from './DashSoundMenu.svelte';
 	import { dashOpen } from '#lib/dash/store.ts';
 	import { makeLevel } from '#lib/dash/level.ts';
 	import { hearAudio } from '#lib/dash/audio.ts';
 	import { DIFFICULTIES } from '#lib/dash/generate.ts';
-	import { DashGame, RESPAWN, bestKey, bestOf, saveBest } from '#lib/dash/game.ts';
+	import { DashGame, RESPAWN, bestKey, bestOfSet, saveBest } from '#lib/dash/game.ts';
 	import { createDashRenderer, ICONS, spritesUrl } from '#lib/dash/render.ts';
 	import { ATLAS, SPRITES } from '#lib/dash/sprites.ts';
 	import { playDashSound } from '#lib/dash/sound.ts';
@@ -54,6 +50,8 @@
 	let difficulty = $state(stored('stosufy-dash-difficulty', 'normal'));
 	let iconIndex = $state(Number(stored('stosufy-dash-icon', '0')) || 0);
 	let practice = $state(stored('stosufy-dash-practice', '0') === '1');
+	let showFps = $state(stored('stosufy-dash-fps', '1') === '1');
+	$effect(() => store('stosufy-dash-fps', showFps ? '1' : '0'));
 	$effect(() => store('stosufy-dash-difficulty', difficulty));
 	$effect(() => store('stosufy-dash-icon', iconIndex));
 	$effect(() => store('stosufy-dash-practice', practice ? '1' : '0'));
@@ -68,22 +66,32 @@
 	let best = $state({ normal: 0, practice: 0, attempts: 0 });
 	let results = $state(null);
 	let progressShown = $state(0);
+	/** Frames drawn a second (counted over half a second) */
+	let fps = $state(0);
+	/** The song list (↑ ↓ Enter in the menu) */
+	let songs = $state();
 
 	let song = $derived($currentSong.song);
-	let mapId = $derived(
-		song && ($userSettings.settings?.gameplayDifficulty, $standardPicks, chosenMapId(song))
-	);
-	let levelKey = $derived(song ? `${song.id}:${mapId}` : null);
-	/** The beatmap's difficulties, to make the level from another one */
-	let beatmapDiffs = $state([]);
+	/**
+	 * The beatmap's difficulty the level is made from: always the one with the most stars, of
+	 * all the set has (streamed songs too); none until that's known
+	 */
+	let mapId = $state(null);
 	$effect(() => {
 		const current = song;
-		beatmapDiffs = [];
+		mapId = null;
 		if (!current) return;
+		// (a set without osu!standard difficulties: the one the song plays)
+		const fallback = () => current === song && (mapId = chosenMapId(current));
 		difficulties(current)
-			.then((list) => current === song && (beatmapDiffs = list))
-			.catch(() => {});
+			.then((list) => {
+				if (current !== song) return;
+				if (list.length) mapId = list[list.length - 1].id;
+				else fallback();
+			})
+			.catch(fallback);
 	});
+	let levelKey = $derived(song ? `${song.id}:${mapId}` : null);
 
 	// --- Making the level -------------------------------------------------------------------
 
@@ -114,6 +122,8 @@
 			return;
 		}
 		screen = 'loading';
+		// (the hardest difficulty is still being found)
+		if (id == null) return;
 		let cancelled = false;
 		(async () => {
 			const content = await beatmapContent(current, id).catch(() => null);
@@ -140,7 +150,7 @@
 				const made = new DashGame(level);
 				made.practice = practice;
 				game = made;
-				best = bestOf(bestKey(`${current.id}:${id}`, chosen));
+				best = bestOfSet(current.id, chosen);
 				screen = 'ready';
 			} catch (error) {
 				if (cancelled) return;
@@ -257,6 +267,34 @@
 		dashOpen.set(false);
 	}
 
+	/** Out of the level, back to the menu (the song goes on there) */
+	function toMenu() {
+		clearTimeout(respawnTimer);
+		release();
+		results = null;
+		if (stale) {
+			screen = 'loading';
+			reload++;
+			return;
+		}
+		if (game) {
+			game.begin(false);
+			game.status = 'ready';
+			renderer?.reset(game.state);
+		}
+		screen = game ? 'ready' : 'loading';
+		$songQueue.audio?.play().catch(() => {});
+	}
+
+	/** The next song of the list, its level made (from the results: the list shows first) */
+	async function nextSong() {
+		results = null;
+		stale = false;
+		screen = 'loading';
+		await tick();
+		if (!songs?.next()) toMenu();
+	}
+
 	function finish() {
 		if (!game) return;
 		const key = bestKey(levelKey, difficulty);
@@ -300,11 +338,40 @@
 	];
 
 	function onKey(event) {
+		// Typing in the search: not for the game (Esc there only leaves the search)
+		if (event.target instanceof HTMLInputElement) return;
 		if (event.key === 'Escape' && event.type === 'keydown') {
 			event.preventDefault();
 			if (screen === 'playing') pause();
 			else if (screen === 'paused') resume();
+			else if (screen === 'complete') toMenu();
 			else exit();
+			return;
+		}
+		// (unless F is one of the jump keys)
+		if (
+			event.type === 'keydown' &&
+			event.code === 'KeyF' &&
+			!event.repeat &&
+			!keys().includes('KeyF')
+		) {
+			showFps = !showFps;
+			return;
+		}
+		// The menu: ↑ ↓ through the songs, Enter takes one (or plays the one there)
+		const menu = screen === 'ready' || screen === 'loading' || screen === 'error';
+		if (
+			menu &&
+			event.type === 'keydown' &&
+			(event.code === 'ArrowUp' || event.code === 'ArrowDown')
+		) {
+			event.preventDefault();
+			songs?.move(event.code === 'ArrowUp' ? -1 : 1);
+			return;
+		}
+		if (menu && event.type === 'keydown' && event.code === 'Enter') {
+			event.preventDefault();
+			if (!songs?.choose() && screen === 'ready') start(false);
 			return;
 		}
 		if (!keys().includes(event.code)) {
@@ -322,8 +389,6 @@
 				togglePractice();
 			return;
 		}
-		// Typing somewhere: not a jump
-		if (event.target instanceof HTMLInputElement) return;
 		event.preventDefault();
 		if (event.repeat) return;
 		if (event.type === 'keydown' && screen === 'ready') return start(false);
@@ -354,8 +419,17 @@
 		renderer = createDashRenderer(canvas);
 		let frame;
 		let lastProgress = -1;
+		let frames = 0;
+		let since = performance.now();
 		const loop = () => {
 			frame = requestAnimationFrame(loop);
+			frames++;
+			const now = performance.now();
+			if (now - since >= 500) {
+				fps = Math.round((frames * 1000) / (now - since));
+				frames = 0;
+				since = now;
+			}
 			if (!game || !renderer) {
 				const ctx = canvas?.getContext('2d');
 				if (ctx) {
@@ -441,6 +515,14 @@
 	<div class="relative z-10">
 		<Titlebar />
 	</div>
+	{#if showFps}
+		<p
+			class="absolute top-12 left-3 z-10 px-2 py-0.5 rounded-md bg-black/45 text-xs font-bold tabular-nums text-white/75 pointer-events-none"
+			title="Frames per second (F)"
+		>
+			{fps} FPS
+		</p>
+	{/if}
 
 	{#if screen === 'playing'}
 		<div class="absolute top-14 right-4 z-10 flex gap-2">
@@ -486,7 +568,15 @@
 			class="absolute inset-0 flex flex-wrap items-center justify-center content-center gap-4 p-6 pt-16 bg-black/35 overflow-y-auto"
 			transition:fade={{ duration: 150 }}
 		>
-			<DashSongs {difficulty} />
+			<button
+				class="absolute top-14 right-4 grid place-items-center size-9 rounded-full bg-black/40 ring-1 ring-white/15 text-white/80 hover:text-white cursor-pointer"
+				title="Leave Dash (Esc)"
+				aria-label="Leave Dash"
+				onclick={exit}
+			>
+				<span class="icon-[mingcute--close-line] size-5"></span>
+			</button>
+			<DashSongs bind:this={songs} {difficulty} />
 			{#if screen === 'loading'}
 				<div
 					class="w-[min(30rem,100%)] h-[min(34rem,70vh)] grid place-items-center rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15"
@@ -503,10 +593,6 @@
 					<span class="icon-[mingcute--music-2-line] size-10 text-white/40"></span>
 					<p class="text-white/80">{message}</p>
 					<p class="text-sm text-white/45">Choose a song on the left.</p>
-					<button
-						class="h-10 px-5 rounded-full bg-white/15 font-semibold cursor-pointer hover:bg-white/25 transition"
-						onclick={exit}>Leave</button
-					>
 				</div>
 			{:else if game}
 				<div
@@ -520,25 +606,6 @@
 							{game.level.artist} · {game.level.version} by {game.level.creator}
 						</p>
 					</div>
-
-					{#if beatmapDiffs.length > 1}
-						<div class="flex flex-wrap justify-center gap-1.5 max-h-20 overflow-y-auto">
-							{#each beatmapDiffs as diff (diff.id)}
-								<button
-									class="flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-semibold cursor-pointer transition {diff.id ===
-									mapId
-										? 'bg-white text-black'
-										: 'bg-white/5 text-white/65 hover:bg-white/10 hover:text-white'}"
-									title="Make the level from this difficulty of the beatmap"
-									onclick={() => chooseDifficulty(song, diff.id)}
-								>
-									<span class="max-w-28 truncate">{diff.version}</span>
-									{#if diff.stars != null}<span class="opacity-60">{diff.stars.toFixed(1)}★</span
-										>{/if}
-								</button>
-							{/each}
-						</div>
-					{/if}
 
 					<div class="grid grid-cols-5 gap-1.5">
 						{#each DIFFICULTIES as d (d)}
@@ -660,11 +727,11 @@
 					</button>
 					<button
 						class="grid place-items-center size-12 rounded-full bg-white/15 cursor-pointer hover:bg-white/25 transition"
-						title="Leave"
-						aria-label="Leave"
-						onclick={exit}
+						title="Back to the songs"
+						aria-label="Back to the songs"
+						onclick={toMenu}
 					>
-						<span class="icon-[mingcute--close-line] size-6"></span>
+						<span class="icon-[mingcute--menu-line] size-6"></span>
 					</button>
 					<DashSoundMenu up />
 				</div>
@@ -706,16 +773,19 @@
 						{stale ? 'Next level' : 'Play again'}
 					</button>
 					<button
-						class="h-11 px-6 rounded-full bg-white/15 font-semibold cursor-pointer hover:bg-white/25 transition"
-						onclick={() => (stale ? ((screen = 'loading'), reload++) : (screen = 'ready'))}
+						class="h-11 px-6 rounded-full bg-white/15 font-semibold flex items-center gap-2 cursor-pointer hover:bg-white/25 transition"
+						onclick={nextSong}
 					>
-						Options
+						<span class="icon-[mingcute--skip-forward-line] size-5"></span>
+						Next song
 					</button>
 					<button
-						class="h-11 px-6 rounded-full bg-white/15 font-semibold cursor-pointer hover:bg-white/25 transition"
-						onclick={exit}
+						class="h-11 px-6 rounded-full bg-white/15 font-semibold flex items-center gap-2 cursor-pointer hover:bg-white/25 transition"
+						title="Back to the songs (Esc)"
+						onclick={toMenu}
 					>
-						Leave
+						<span class="icon-[mingcute--menu-line] size-5"></span>
+						Songs
 					</button>
 				</div>
 			</div>

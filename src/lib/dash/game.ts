@@ -187,6 +187,18 @@ export function bestOf(key: string) {
 	return readBest()[key] ?? { normal: 0, practice: 0, attempts: 0 };
 }
 
+/** The best progress on a beatmap set's levels at a difficulty, whichever of its maps made them */
+export function bestOfSet(setId: string | number, difficulty: Difficulty) {
+	const best = { normal: 0, practice: 0, attempts: 0 };
+	for (const [key, entry] of Object.entries(readBest())) {
+		if (!key.startsWith(`${setId}:`) || !key.endsWith(`:${difficulty}`)) continue;
+		best.normal = Math.max(best.normal, entry.normal);
+		best.practice = Math.max(best.practice, entry.practice);
+		best.attempts = Math.max(best.attempts, entry.attempts);
+	}
+	return best;
+}
+
 export function saveBest(key: string, progress: number, practice: boolean, attempts: number) {
 	const all = readBest();
 	const entry = all[key] ?? { normal: 0, practice: 0, attempts: 0 };
