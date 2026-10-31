@@ -1,9 +1,11 @@
-// The parts between a floor and a ceiling: ship, UFO, swing, ball and spider. The way
-// through is played first (the clicks on the notes; the ship flies along the notes'
-// heights, the swing turns around on the notes and beats), on time, early and late; then
-// blocks are built around that way, a bit away from it, column by column on the grid, and
-// spikes go on their surfaces where there's room, in rows that start on the strong notes. So
-// the structures follow the music, and the way they leave always works.
+// The parts between a floor and a ceiling: ship, UFO, swing, ball and spider. Gravity portals
+// on strong downbeats turn some of them upside down for a while, and some clicks take an orb
+// (blue and green turn gravity around, the others jump). The way through is played first
+// (the clicks on the notes; the ship flies along the notes' heights, the swing turns around on
+// the notes and beats), on time, early and late; then blocks are built around that way, a bit
+// away from it (less the harder), column by column on the grid, and spikes go on their
+// surfaces where there's room, in rows that start on the strong notes. So the structures
+// follow the music, and the way they leave always works.
 
 import {
 	copyState,
@@ -13,13 +15,13 @@ import {
 	step,
 	STEP,
 	type InputEvent,
+	type OrbKind,
 	type PlayerState,
 	type Section,
 	type Solid
 } from '../physics';
 import { clamp, legalAround, shuffleByWeight, tap, used, type Context } from '../build';
 import { beatStrength, type DashNote } from '../chart';
-import { heardAt } from '../audio';
 
 interface Column {
 	x: number;
@@ -86,8 +88,9 @@ function flyShip(
 				pending = -1;
 			}
 		} else {
+			// (upside down, holding pulls it down)
 			const wanted = clamp((ahead - s.y) * 6, -7, 7);
-			const hold = s.vy < wanted;
+			const hold = s.gravity > 0 ? s.vy < wanted : s.vy > wanted;
 			if (hold !== s.held && next - lastChange > 30) {
 				press(s, hold);
 				events.push({ time: next, down: hold });
@@ -116,6 +119,30 @@ export function buildFlight(
 	const box = hitbox(mode, section.mini);
 	const startX = world.xAt(section.start + 450);
 	const endX = world.xAt(section.end - 450);
+
+	// How hard: room around the way, spikes, breathers
+	const tight = [1.25, 1.1, 1, 0.82, 0.65][preset.level];
+	const spiky = [0.7, 0.85, 1, 1.3, 1.6][preset.level];
+
+	// --- Gravity portals: on strong downbeats, upside down and back -------------------------
+	// (not near a click: pressed a moment before or after the portal would go another way)
+	if (mode !== 'swing' && preset.level >= 1 && rng() < [0, 0.35, 0.6, 0.75, 0.9][preset.level]) {
+		let gravity: 1 | -1 = -1;
+		let last = -Infinity;
+		let count = 0;
+		for (const note of notes) {
+			if (count >= preset.level) break;
+			const x = world.xAt(note.time);
+			if (x < startX + 4 || x > endX - 6 || note.time - last < 3200) continue;
+			if (beatStrength(ctx.chart.timing, note.time) < 1 && !(note.sound & 4)) continue;
+			if (clicks.some((c) => Math.abs(c - note.time) < 280) || rng() < 0.35) continue;
+			world.gravityPortals.add({ x, y: (floor + top) / 2, gravity, x0: x - 0.6, x1: x + 0.6 });
+			gravity = gravity > 0 ? -1 : 1;
+			last = note.time;
+			count++;
+		}
+		if (count) used(ctx, 'gravity');
+	}
 
 	// --- The way through ---------------------------------------------------------------
 	let events: InputEvent[] = [];
@@ -151,16 +178,31 @@ export function buildFlight(
 		follow = path;
 		events = flyShip(ctx, entry, section.end, path, music).events;
 	} else {
-		// The clicks; the ball and the spider only switch on a surface, else a blue orb does it
+		// The clicks; the ball and the spider only switch on a surface, else a blue orb does it.
+		// Some clicks (more the harder) take an orb where it is: blue and green turn gravity
+		// around, yellow, pink and red jump (in the UFO: further, or less, than a hop)
 		const times = clicks.filter((t) => t > section.start + 400 && t < section.end - 400);
+		const orbs: OrbKind[] =
+			mode === 'ufo'
+				? ['blue', 'green', 'pink', 'red', 'yellow']
+				: mode === 'ball'
+					? ['green', 'blue', 'yellow', 'pink']
+					: ['blue', 'green'];
+		const orbChance = [0, 0.06, 0.11, 0.16, 0.22][preset.level];
 		let s = entry;
 		for (const time of times) {
 			const at = simulate(world, s, time, events);
 			if (at.dead) break;
-			if ((mode === 'ball' || mode === 'spider') && !at.grounded) {
-				if (mode === 'spider') continue;
+			const add = (kind: OrbKind) => {
 				const id = world.id();
-				world.orbs.add({ id, kind: 'blue', x: at.x, y: at.y, x0: at.x - 0.6, x1: at.x + 0.6 });
+				world.orbs.add({ id, kind, x: at.x, y: at.y, x0: at.x - 0.6, x1: at.x + 0.6 });
+				used(ctx, `orb-${kind}`);
+			};
+			if ((mode === 'ball' || mode === 'spider') && !at.grounded) {
+				if (mode === 'spider' && rng() > orbChance * 2) continue;
+				add(mode === 'ball' && rng() < 0.4 ? 'green' : 'blue');
+			} else if (rng() < orbChance && at.y > floor + 1.2 && at.y < top - 1.2) {
+				add(orbs[Math.floor(rng() * orbs.length)]);
 			}
 			events.push(...tap(time, mode === 'ufo' ? 70 : 90));
 			s = at;
@@ -195,14 +237,14 @@ export function buildFlight(
 	// How far from the way the blocks stay: the swing and UFO drift (a person steers them back)
 	const margin =
 		mode === 'swing'
-			? 1.1
+			? 1.1 * Math.max(0.85, tight)
 			: steered
 				? preset.ship - 0.45
 				: mode === 'ball' || mode === 'spider'
 					? 0.18
 					: mode === 'ufo'
-						? 0.85
-						: 1.3;
+						? 0.85 * tight
+						: 1.3 * tight;
 	const cap =
 		mode === 'spider' ? 0 : mode === 'ball' ? Math.floor((top - floor) / 2) - 1 : top - floor;
 	const group = rng() < 0.5 ? 2 : 1;
@@ -224,10 +266,10 @@ export function buildFlight(
 	// Not every column: some stretches stay open (a breath), the rest is built
 	const open = (x: number) => {
 		const phase = Math.floor((x - startX) / 10);
-		return phase % 7 === 6;
+		return phase % (preset.level >= 3 ? 12 : 7) === 6;
 	};
 	for (const c of columns)
-		if (open(c.x) && mode !== 'ball' && mode !== 'spider') ((c.low = floor), (c.high = top));
+		if (open(c.x) && mode !== 'ball' && mode !== 'spider') (c.low = floor), (c.high = top);
 	// A person turns the swing a moment after seeing a step in the walls: they step back around
 	// each one (every column as open as the two on each side), so there's time to
 	if (mode === 'swing') {
@@ -246,9 +288,8 @@ export function buildFlight(
 	// (the beats in between now and then)
 	const strong = new Set<number>();
 	for (const note of notes) {
-		const heard = ctx.chart.sound ? heardAt(ctx.chart.sound, note.time) : 0.5;
-		const accent = beatStrength(ctx.chart.timing, note.time) + heard + (note.sound & 4 ? 0.5 : 0);
-		if (accent >= 1.1) strong.add(Math.floor(world.xAt(note.time)));
+		const accent = beatStrength(ctx.chart.timing, note.time) + (note.sound & 4 ? 0.5 : 0);
+		if (accent >= 0.65) strong.add(Math.floor(world.xAt(note.time)));
 	}
 	// (the swing's spikes only where there's a lot of room: a person turns it a bit late)
 	const spikeRoom = mode === 'swing' ? 1.6 : 1.05;
@@ -266,7 +307,8 @@ export function buildFlight(
 				continue;
 			}
 			const chance = mode === 'swing' ? 0.2 : steered ? 0.14 : mode === 'spider' ? 0.45 : 0.25;
-			if (rng() > (strong.has(c.x) ? Math.min(0.9, chance * 3) : chance * 0.3)) continue;
+			const often = chance * spiky;
+			if (rng() > (strong.has(c.x) ? Math.min(0.9, often * 3) : often * 0.3)) continue;
 			const choices = shuffleByWeight(rng, [
 				{ item: 1 as const, weight: lowRoom > spikeRoom ? 1 : 0 },
 				{ item: -1 as const, weight: highRoom > spikeRoom ? 1 : 0 }

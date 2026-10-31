@@ -628,7 +628,8 @@ export function step(world: World, s: PlayerState, time: number) {
 		)
 			s.grounded = true;
 	}
-	if (s.y < floor - 6 || (section.ceil === null && s.y > 60)) {
+	// (nothing in a cube part is that high: up and away there is gone)
+	if (s.y < floor - 6 || (section.ceil === null && s.y > 30)) {
 		s.dead = true;
 		events.push('death');
 		return events;

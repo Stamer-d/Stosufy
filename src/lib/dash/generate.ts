@@ -1,9 +1,9 @@
 // Makes a Dash level out of a beatmap. The song is cut into parts on its phrases, and each
 // part gets a kind (cube, ship, ball, UFO, wave, swing, spider; some of them small) that
 // fits its music: streams become wave turns, held notes ship flights, the kiai comes faster.
-// The clicks are the notes that stand out most: on the strong beats, with the mapper's
-// accents (a jump across the playfield, a louder hitsound) and on what's heard in the song
-// (its hits, its loud parts: see audio.ts, where it could be heard). The parts are built by
+// The clicks are the notes that stand out most: on the strong beats first, then the mapper's
+// accents (a jump across the playfield, a louder hitsound); how loud the song is (audio.ts,
+// where it could be heard) shapes the parts, its drops and its structures. The parts are built by
 // the builders (builders/*.ts) from the notes, and every obstacle is checked with the
 // physics: the level is played on time, early and late, short and long presses, and what
 // can't be passed is taken out again. So every level can be finished, and nowhere can it be
@@ -40,7 +40,7 @@ import {
 	type Preset,
 	type Random
 } from './build';
-import { heardAt, loudness } from './audio';
+import { loudness } from './audio';
 import { buildCube } from './builders/cube';
 import { buildFlight } from './builders/flight';
 import { buildWave } from './builders/wave';
@@ -87,18 +87,12 @@ export function inKiai(chart: DashChart, time: number) {
 const ACCENT = new WeakMap<DashNote, number>();
 
 /**
- * The accents of the notes: a jump to it on the playfield, a louder hitsound, a hit heard in
- * the song there (most of all the kick). Around 0 on average, so the song's own level of
- * them doesn't change how many clicks there are, only which notes they are.
+ * The mapper's accents on the notes: a jump to it on the playfield, a louder hitsound. Only
+ * between notes about as strong in the beat (the beat comes first: a click off it is felt as
+ * out of time), and around 0 on average, so they change which notes are clicks, not how many.
  */
-function accents(chart: DashChart, notes: DashNote[], own: Set<DashNote>) {
-	const sound = chart.sound;
-	const raw = notes.map(
-		(n) =>
-			n.jump * 0.35 +
-			n.volume * 0.3 +
-			(sound ? heardAt(sound, n.time) * 0.8 + heardAt(sound, n.time, 'bass') * 0.35 : 0)
-	);
+function accents(notes: DashNote[], own: Set<DashNote>) {
+	const raw = notes.map((n) => n.jump * 0.12 + n.volume * 0.12);
 	// (centred on the beatmap's own notes, not the beats added between them)
 	let sum = 0;
 	let count = 0;
@@ -268,8 +262,7 @@ export function spaced(chart: DashChart, notes: DashNote[], gap: number) {
 /**
  * The notes, and in long stretches without any (an intro, a break, a held note) the beats
  * as notes too: those are still jumps on the music (in the beatmap's breaks every other one,
- * a calmer stretch but not an empty one). Where the song can be heard, only the beats with
- * something on them (not silence), and the off-beats where something hits.
+ * a calmer stretch but not an empty one). Where the song can be heard, not in its silences.
  */
 export function withBeats(chart: DashChart): DashNote[] {
 	const notes = chart.notes;
@@ -282,16 +275,13 @@ export function withBeats(chart: DashChart): DashNote[] {
 		const point = chart.timing[i];
 		const until = Math.min(chart.timing[i + 1]?.time ?? to, to);
 		const firstBeat = Math.max(0, Math.ceil((from - point.time) / point.beatLength));
-		for (let b = firstBeat * 2; ; b += 1) {
-			const time = point.time + (b / 2) * point.beatLength;
+		for (let b = firstBeat; ; b += 1) {
+			const time = point.time + b * point.beatLength;
 			if (time >= until) break;
-			const offBeat = b % 2 === 1;
-			if (offBeat && (!sound || heardAt(sound, time) < 0.45)) continue;
-			if (sound && heardAt(sound, time) < 0.08 && loudness(sound, time - 150, time + 150) < 0.06)
-				continue;
+			if (sound && loudness(sound, time - 150, time + 150) < 0.05) continue;
 			const resting = chart.breaks.some((br) => time > br.start - 500 && time < br.end + 300);
-			if (resting && (offBeat || b % 4 !== 0)) continue;
-			const near = point.beatLength * (offBeat ? 0.4 : 0.75);
+			if (resting && b % 2 !== 0) continue;
+			const near = point.beatLength * 0.75;
 			while (k < notes.length && notes[k].time < time - near) k++;
 			if (k < notes.length && notes[k].time <= time + near) continue;
 			// (nor inside a held note's start: its end is free)
@@ -505,7 +495,7 @@ export function generateLevel(
 	const own = new Set(chart.notes);
 	chart = { ...chart, notes: withBeats(chart) };
 	const notes = chart.notes;
-	accents(chart, notes, own);
+	accents(notes, own);
 	const first = notes[0].time;
 	const lastEnd = Math.max(...notes.map((n) => n.end));
 	const start = first > 2600 ? Math.round(first - 2000) : 0;
@@ -608,6 +598,7 @@ export function generateLevel(
 			world.hazards.removeIf(inside);
 			world.walls.removeIf(inside);
 			world.solids.removeIf((o) => inside(o) && o.style !== 0);
+			if (sec.mode === 'cube') upsideGone(world, sec.x0, sec.x1);
 			state = simulate(world, entry, sec.end, plan);
 		}
 		if (state.dead) state = { ...state, dead: false };
@@ -821,19 +812,23 @@ function requireInput(
 			if (!isFinite(way.low)) continue;
 			const bottom = p.y - box.h;
 			const top = p.y + box.h;
-			const options: (() => Hazard | null)[] = [
-				// On the surface it runs along (the planned run well above the spike)
+			// A spike on the surface it runs along (or under the one it slides along), the planned
+			// run well clear of it: a small one where there's less room
+			const spike = (kind: 'spike' | 'small', reach: number, extra: number) => [
 				() =>
 					world.surfaceAt(column + 0.05, column + 0.95, bottom, 1) &&
-					way.low - box.h > bottom + 0.7 + room
-						? world.spike(x, bottom, 1)
+					way.low - box.h > bottom + reach + extra
+						? world.spike(x, bottom, 1, kind)
 						: null,
-				// Under the surface it slides along
 				() =>
 					world.surfaceAt(column + 0.05, column + 0.95, top, -1) &&
-					way.high + box.h < top - 0.7 - room
-						? world.spike(x, top, -1)
-						: null,
+					way.high + box.h < top - reach - extra
+						? world.spike(x, top, -1, kind)
+						: null
+			];
+			const options: (() => Hazard | null)[] = [
+				...spike('spike', 0.7, room),
+				...spike('small', 0.25, room / 2),
 				// Flying: a saw where it drifts
 				() => {
 					if (!flying(sec.mode)) return null;
@@ -890,14 +885,27 @@ function removeNear(world: World, x: number, mode: Mode) {
 			if (middle.y1 - middle.y0 >= 1) world.solids.add(middle);
 		}
 		world.solids.touch();
-	} else if (world.solids.items.some((o) => near(o) && (o.style !== 0 || mode !== 'cube')))
-		world.solids.removeIf((o) => near(o) && (o.style !== 0 || mode !== 'cube'));
-	else if (world.walls.items.some(near)) world.walls.removeIf(near);
+	} else if (world.solids.items.some((o) => near(o) && (o.style !== 0 || mode !== 'cube'))) {
+		const gone = world.solids.items.filter((o) => near(o) && (o.style !== 0 || mode !== 'cube'));
+		world.solids.removeIf((o) => gone.includes(o));
+		// (a cube part's slab goes with what turns gravity around under it)
+		if (mode === 'cube')
+			for (const slab of gone.filter((o) => o.style === 1))
+				upsideGone(world, slab.x0 - 3, slab.x1 + 1);
+	} else if (world.walls.items.some(near)) world.walls.removeIf(near);
 	else world.solids.removeIf(near);
 	// What lost its surface goes too
 	world.hazards.removeIf(
 		(h) => near({ x0: h.x0 - 2, x1: h.x1 + 2 }) && !legalAround(world, h.x0, h.x1)
 	);
+}
+
+/** What turns a cube upside down (onto a slab that's gone now): between two places */
+function upsideGone(world: World, x0: number, x1: number) {
+	const inside = (o: { x0: number; x1: number }) => o.x1 > x0 && o.x0 < x1;
+	world.gravityPortals.removeIf(inside);
+	world.orbs.removeIf((o) => inside(o) && (o.kind === 'blue' || o.kind === 'green'));
+	world.pads.removeIf((p) => inside(p) && p.kind === 'blue');
 }
 
 /** A part that can't be played as planned: what stops it goes */
@@ -931,7 +939,7 @@ function fairness(
 	let s = hash(`${seed}:${sec.index}`) || 1;
 	const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
 	let clean = 0;
-	for (let k = 0; k < 70 && clean < 10; k++) {
+	for (let k = 0; k < 120 && clean < 12; k++) {
 		const inputs: InputEvent[] = [];
 		for (const e of own) {
 			if (!e.down) continue;

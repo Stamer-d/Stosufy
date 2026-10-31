@@ -230,6 +230,15 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			spawn({ x, y, kind: 'glow', max: 0.35, size: 2.2, color: icon.primary });
 		} else if (name === 'orb' || name === 'pad') {
 			spawn({ x, y, kind: 'ring', max: 0.35, size: 1.6, color: '#fff3a0' });
+		} else if (name === 'gravity') {
+			spawn({
+				x,
+				y,
+				kind: 'ring',
+				max: 0.4,
+				size: 2,
+				color: state.gravity < 0 ? '#3ad7ff' : '#ffe14d'
+			});
 		} else if (name === 'jump' && state.mode === 'swing') {
 			spawn({ x, y, kind: 'ring', max: 0.3, size: 1.4, color: SWING_COLOR });
 		} else if (name === 'jump' && state.mode === 'spider' && state.teleport) {
@@ -977,6 +986,31 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 	}
 
+	/** A gravity portal: blue turns it upside down, yellow back; arrows the way it then falls */
+	function gravityPortal(x: number, y: number, gravity: 1 | -1, time: number) {
+		const color = gravity < 0 ? '#3ad7ff' : '#ffe14d';
+		portal(x, y, color, time, '');
+		const cx = sx(x);
+		ctx.lineJoin = 'round';
+		ctx.lineCap = 'round';
+		for (let k = 0; k < 3; k++) {
+			// Drifting the way it falls, fading at the ends
+			const f = (k / 3 + time / 900) % 1;
+			const cy = sy(y) + gravity * (f - 0.5) * scale * 1.8;
+			const w = scale * 0.28;
+			ctx.beginPath();
+			ctx.moveTo(cx - w, cy - gravity * w * 0.7);
+			ctx.lineTo(cx, cy);
+			ctx.lineTo(cx + w, cy - gravity * w * 0.7);
+			ctx.strokeStyle = rgba('#000000', Math.sin(f * Math.PI) * 0.8);
+			ctx.lineWidth = scale * 0.2;
+			ctx.stroke();
+			ctx.strokeStyle = rgba(color, Math.sin(f * Math.PI));
+			ctx.lineWidth = scale * 0.1;
+			ctx.stroke();
+		}
+	}
+
 	function speedPortal(x: number, y: number, index: number) {
 		const colors = ['#ffb347', '#5ad1ff', '#5dff8b', '#ff5ec4', '#ff4040'];
 		const color = colors[index] ?? '#ffffff';
@@ -1680,6 +1714,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				if (portalItem.mini) portal(portalItem.x + 1.3, y, '#ff6ad5', time + 300, '');
 			} else speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);
 		}
+		for (const g of world.gravityPortals.near(left, right))
+			gravityPortal(g.x, g.y, g.gravity, time);
 
 		// The end
 		if (level.xEnd < right) {

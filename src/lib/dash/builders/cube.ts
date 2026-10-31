@@ -1,5 +1,6 @@
 // The cube parts: a library of the genre's building blocks (spikes, stairs, blocks to hop
-// onto, gaps over spike pits, pads up, an orb over a pit, low ceilings), picked for each click
+// onto, gaps over spike pits, pads up, an orb over a pit, low ceilings, stretches upside down
+// under a slab, in and out by blue orbs, pads or gravity portals), picked for each click
 // by what fits the time to the next one, how high the level is and what was used lately.
 // Everything stands on the grid; every pick is played early and late before it stays, and a
 // click whose obstacle could be passed without it is no click.
@@ -102,6 +103,14 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		if (grounded) level = Math.round(at.y - 0.5);
 		chain = grounded ? 0 : chain + 1;
 		if (!grounded && chain > preset.chain) continue;
+		// Now and then upside down for a few clicks
+		if (grounded && rng() < UPSIDE[preset.level] * freshness(ctx, 'upside')) {
+			const last = upside(i, x);
+			if (last !== null) {
+				i = last;
+				continue;
+			}
+		}
 		const room = (next - time) / 1000;
 		// Checked until the next click, and at least until it has landed again
 		const until = Math.max(next - 2, time + air * 1000 + 150);
@@ -506,6 +515,123 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		return true;
 	}
 
+	/**
+	 * Upside down for a few clicks: on click i a blue orb (or a blue pad, or a gravity portal on
+	 * its beat) turns gravity around, up under a floating slab; the clicks after it jump (down)
+	 * over spikes hanging from it, and the last one (a blue orb, or a gravity portal on its
+	 * beat) turns it back down to the ground, where small spikes wait for whoever didn't turn
+	 * around. Played on time, all early and late, short and long, each a bit off; every press
+	 * must be needed. Returns the last click it took (null: it didn't fit).
+	 */
+	function upside(i: number, x: number): number | null {
+		const start = times[i];
+		const longest = [0, 3000, 3800, 4600, 5400][preset.level];
+		let j = i;
+		while (j + 1 < times.length && times[j + 1] - start <= longest) j++;
+		if (j < i + 2) return null;
+		const end = times[j];
+		const endX = world.xAt(end);
+		if (endX + 6 > limit) return null;
+		// After turning back it falls to the ground: the clicks while it falls are left out
+		let last = j;
+		while (last + 1 < times.length && times[last + 1] < end + 650) last++;
+		extend(times[last + 1] ?? section.end);
+		const high = level + 4 + (preset.level >= 3 && rng() < 0.5 ? 1 : 0);
+		const a = new Attempt(world, limit);
+		const presses: number[] = [];
+		const gravityPortal = (px: number, gravity: 1 | -1) => {
+			const portal = { x: px, y: level + 2.5, gravity, x0: px - 0.6, x1: px + 0.6 };
+			a.change(
+				() => world.gravityPortals.add(portal),
+				() => world.gravityPortals.remove(portal),
+				px
+			);
+		};
+		// In
+		const way = shuffleByWeight(rng, [
+			{ item: 'orb', weight: 1.4 },
+			{ item: 'pad', weight: preset.level >= 2 ? 0.8 : 0 },
+			{ item: 'portal', weight: 0.8 }
+		])[0];
+		if (way === 'orb') {
+			a.orb('blue', half(x), level + 1);
+			presses.push(start);
+		} else if (way === 'pad') a.pad('blue', Math.floor(x) + 0.5, level);
+		else gravityPortal(x, -1);
+		// The slab, from above where it turns to past where it turns back
+		a.solid({ x0: Math.floor(x) + 1, x1: Math.ceil(endX) + 2, y0: high, y1: high + 1, style: 1 });
+		// Out
+		const outByOrb = rng() < (preset.level >= 2 ? 0.6 : 0.75);
+		if (outByOrb) {
+			a.orb('blue', half(endX), high - 1);
+			presses.push(end);
+		} else gravityPortal(endX, 1);
+		// Who doesn't turn around runs into these
+		a.spikes(Math.ceil(x + 2), Math.floor(endX - 1), level, 1, 'small');
+		const taps = () => presses.flatMap((t) => tap(t)).sort((p, q) => p.time - q.time);
+		const withPlan = (inputs: { time: number; down: boolean }[]) =>
+			[...plan, ...inputs].sort((p, q) => p.time - q.time);
+		// Upside down: jumps (down) over spikes hanging from the slab, on the clicks between
+		let jumps = 0;
+		for (const c of times.slice(i + 1, j)) {
+			if (c + air * 1000 + 150 > end) break;
+			const s = simulate(world, state, c, withPlan(taps()));
+			if (s.dead || !s.grounded || s.gravity > 0 || Math.abs(s.y - (high - 0.5)) > 0.05) continue;
+			const mid = s.x + (speed * air) / 2;
+			const count = preset.level >= 2 && rng() < 0.45 ? 2 : 1;
+			const center = count % 2 ? Math.floor(mid) + 0.5 : Math.round(mid);
+			for (let k = 0; k < count; k++) a.spike(center + k - (count - 1) / 2, high, -1);
+			presses.push(c);
+			presses.sort((p, q) => p - q);
+			jumps++;
+		}
+		const until = end + 750;
+		const shifted = (shift: (k: number) => number, length: number) =>
+			withPlan(presses.flatMap((t, k) => tap(t + shift(k), length)));
+		const variants = [
+			withPlan(taps()),
+			...[-tolerance, tolerance].flatMap((d) => [60, 170].map((l) => shifted(() => d, l))),
+			...[1, 2, 3, 4, 5].map((seed) =>
+				shifted(
+					(k) => Math.sin(seed * 12.9898 + k * 78.233) * tolerance * 0.75,
+					seed > 3 ? 170 : 90
+				)
+			)
+		];
+		// (never long without pressing in it, from the press before to the click after: a portal
+		// or pad in or out is no press)
+		const before = plan.reduce(
+			(t, e) => (e.down && e.time < start ? Math.max(t, e.time) : t),
+			-1e9
+		);
+		const marks = [
+			Math.max(before, start - 1500),
+			...presses,
+			outByOrb ? end : (times[last + 1] ?? section.end)
+		].sort((p, q) => p - q);
+		const ok =
+			jumps > 0 &&
+			marks.every((t, k) => k === 0 || t - marks[k - 1] <= 1450) &&
+			a.legal() &&
+			variants.every((inputs) => !simulate(world, state, until, inputs).dead) &&
+			recent.every((c) => passes(world, c));
+		// Not without pressing, nor without turning around (the orb in)
+		const needed =
+			ok &&
+			simulate(world, state, until + 1000, plan).dead &&
+			(way !== 'orb' ||
+				simulate(world, state, until + 1000, withPlan(presses.slice(1).flatMap((t) => tap(t))))
+					.dead);
+		if (!ok || !needed) {
+			a.revert();
+			return null;
+		}
+		plan.push(...taps());
+		recent = [];
+		used(ctx, 'upside');
+		return last;
+	}
+
 	function airOrb(a: Attempt, at: PlayerState) {
 		const kind = at.y - 0.5 - level > 2.6 ? 'pink' : 'yellow';
 		a.orb(kind, half(at.x + speed * 0.01), Math.round(at.y * 2) / 2);
@@ -565,3 +691,6 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 
 /** A yellow pad's push (blocks/s) */
 const PHYSICS_PAD = 864 / 30;
+
+/** How often a click on the ground turns into an upside-down stretch, by difficulty */
+const UPSIDE = [0, 0.05, 0.1, 0.15, 0.2];
