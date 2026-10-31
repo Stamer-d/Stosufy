@@ -507,10 +507,18 @@ function clickChecks(
 ): Check[] {
 	const from = simulate(world, state, time - tolerance - STEP * 2, []);
 	if (!withPress) return [{ from, inputs: [], until }];
-	return [0, -tolerance, tolerance].map((shift) => ({
+	// On time; early and late, each with a short and a long press
+	const variants: [number, number][] = [
+		[0, 90],
+		[-tolerance, 50],
+		[-tolerance, 170],
+		[tolerance, 50],
+		[tolerance, 170]
+	];
+	return variants.map(([shift, length]) => ({
 		from,
-		inputs: tap(time + shift),
-		until: Math.max(until, time + shift + 100)
+		inputs: tap(time + shift, length),
+		until: Math.max(until, time + shift + length + 20)
 	}));
 }
 
@@ -1207,6 +1215,33 @@ export function generateLevel(
 			else world.solids.removeIf(near);
 			state = simulate(world, entry, sec.end, plan);
 		}
+		// Played like a person would: a bit early or late, short and long presses. Where
+		// that keeps crashing, the obstacles go.
+		if (sec.mode === 'cube' || sec.mode === 'ball') {
+			const own = plan.filter((e) => e.time >= sec.start && e.time < sec.end);
+			let seed = hash(`${options.seed}:${sec.index}`) || 1;
+			const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+			let clean = 0;
+			for (let k = 0; k < 60 && clean < 10; k++) {
+				const inputs: InputEvent[] = [];
+				for (const e of own) {
+					if (!e.down) continue;
+					const at = e.time + (rnd() * 2 - 1) * preset.tolerance * 0.75;
+					inputs.push({ time: at, down: true }, { time: at + 45 + rnd() * 130, down: false });
+				}
+				inputs.sort((a, b) => a.time - b.time);
+				const run = simulate(world, entry, sec.end, inputs);
+				if (!run.dead) {
+					clean++;
+					continue;
+				}
+				clean = 0;
+				const near = (o: { x0: number; x1: number }) => o.x1 > run.x - 1.6 && o.x0 < run.x + 1.2;
+				if (!world.hazards.items.some(near)) break;
+				world.hazards.removeIf(near);
+			}
+			state = simulate(world, entry, sec.end, plan);
+		}
 	}
 	plan.sort((a, b) => a.time - b.time);
 
@@ -1245,7 +1280,7 @@ export function generateLevel(
 		beats,
 		kiai: chart.kiai,
 		difficulty: options.difficulty,
-		clicks: plan.filter((e) => e.down).length,
+		clicks: plan.filter((e) => e.down && world.sectionAt(e.time).mode !== 'ship').length,
 		title: chart.title,
 		artist: chart.artist,
 		creator: chart.creator,

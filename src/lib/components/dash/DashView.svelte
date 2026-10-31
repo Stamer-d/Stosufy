@@ -171,8 +171,10 @@
 	}
 
 	function pause() {
-		if (screen !== 'playing' || !game || game.status === 'dead') return;
+		if (screen !== 'playing' || !game) return;
 		$songQueue.audio?.pause();
+		// Dead: it starts again when it goes on
+		clearTimeout(respawnTimer);
 		screen = 'paused';
 		release();
 	}
@@ -180,7 +182,8 @@
 	function resume() {
 		if (screen !== 'paused') return;
 		screen = 'playing';
-		$songQueue.audio?.play().catch(() => {});
+		if (game?.status === 'dead') respawn();
+		else $songQueue.audio?.play().catch(() => {});
 	}
 
 	function restart() {

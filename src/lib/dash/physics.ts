@@ -297,6 +297,8 @@ export interface PlayerState {
 	held: boolean;
 	/** A press not used yet (for orbs, the ball), kept while the button is held */
 	buffered: boolean;
+	/** When the button was last pressed (ms) */
+	pressedAt: number;
 	/** Orbs and pads used in this attempt */
 	used: number[];
 	dead: boolean;
@@ -320,6 +322,7 @@ export function startState(world: World, time: number, y = 0.5): PlayerState {
 		section: section.index,
 		held: false,
 		buffered: false,
+		pressedAt: -1e9,
 		used: [],
 		dead: false,
 		rotation: 0,
@@ -383,6 +386,7 @@ export function step(world: World, s: PlayerState, time: number) {
 	}
 	s.time = time;
 	s.x = world.xAt(time);
+	if (s.buffered && !s.held && time - s.pressedAt > BUFFER) s.buffered = false;
 	const speed = section.speed;
 	const box = HITBOX[s.mode];
 	const g = s.gravity;
@@ -425,7 +429,7 @@ export function step(world: World, s: PlayerState, time: number) {
 	// Moving
 	switch (s.mode) {
 		case 'cube': {
-			if (s.grounded && s.held) {
+			if (s.grounded && (s.held || s.buffered)) {
 				s.vy = g * PHYSICS.jump;
 				s.grounded = false;
 				s.buffered = false;
@@ -560,9 +564,14 @@ export function step(world: World, s: PlayerState, time: number) {
 }
 
 /** Sets the button (with what a press buffers) */
+/** How long a press counts after it was let go (ms): a tap a bit before landing still jumps */
+export const BUFFER = 100;
+
 export function press(s: PlayerState, down: boolean) {
-	if (down && !s.held) s.buffered = true;
-	if (!down) s.buffered = false;
+	if (down && !s.held) {
+		s.buffered = true;
+		s.pressedAt = s.time;
+	}
 	s.held = down;
 }
 

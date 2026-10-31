@@ -77,6 +77,11 @@ interface Particle {
 }
 
 const hex = (color: string) => {
+	if (color.startsWith('rgb'))
+		return color
+			.match(/[\d.]+/g)!
+			.slice(0, 3)
+			.map(Number);
 	const n = parseInt(color.slice(1), 16);
 	return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 };
@@ -757,7 +762,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 
 	function updateParticles(dt: number, state: PlayerState, icon: Icon, frame: Frame) {
 		// The dust it kicks up, the ship's fire
-		if (!frame.dead && !frame.waiting) {
+		if (!frame.dead && !frame.waiting && frame.hud) {
 			emit += dt;
 			const every = state.mode === 'ship' ? 1 / 70 : 1 / 30;
 			while (emit > every) {
