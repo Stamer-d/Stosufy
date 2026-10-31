@@ -1,5 +1,7 @@
 // A Dash level being played: the attempts, dying and starting again (from the start, or in
-// practice from the last checkpoint), autoplay, and the best progress per song.
+// practice from the last checkpoint), autoplay, and the best progress per song. Presses count
+// at the song time they were made, also when they come in a moment late (the page was busy
+// drawing): the game goes back to just before them and plays those steps again.
 
 import {
 	STEP,
@@ -24,6 +26,18 @@ export interface Checkpoint {
 export const RESPAWN = 1000;
 /** How long the player waits at a checkpoint before it goes on (ms of the song) */
 const CHECKPOINT_LEAD = 450;
+/** How far back a press that comes in late may still change what happened (ms of the song) */
+export const ROLLBACK = 60;
+/** How many steps are kept for that */
+const KEEP = Math.ceil(ROLLBACK / STEP) + 2;
+
+/** The game before a step: where a late press starts again from */
+interface Kept {
+	state: PlayerState;
+	next: number;
+	lastCheckpoint: number;
+	checkpoints: number;
+}
 
 export class DashGame {
 	state: PlayerState;
@@ -34,8 +48,15 @@ export class DashGame {
 	checkpoints: Checkpoint[] = [];
 	diedAt = 0;
 	jumps = 0;
-	/** Presses not handled yet */
-	private queue: InputEvent[] = [];
+	/** The presses and releases of this attempt, in order of time; from `next` on not used yet */
+	private inputs: InputEvent[] = [];
+	private next = 0;
+	/** The game before each of the last steps */
+	private kept: Kept[] = [];
+	/** What happened in the last steps, and when (played again, it isn't told twice) */
+	private told: { time: number; name: string }[] = [];
+	/** Played again up to here after a late press */
+	private replayed = -Infinity;
 	private planIndex = 0;
 	private lastCheckpoint = 0;
 	/** When this attempt started (song ms) */
@@ -76,7 +97,11 @@ export class DashGame {
 
 	/** Where the song should be for this attempt (ms) */
 	begin(fromCheckpoint = false): number {
-		this.queue = [];
+		this.inputs = [];
+		this.next = 0;
+		this.kept = [];
+		this.told = [];
+		this.replayed = -Infinity;
 		const checkpoint =
 			fromCheckpoint && this.practice ? this.checkpoints[this.checkpoints.length - 1] : null;
 		this.state = checkpoint
@@ -98,10 +123,31 @@ export class DashGame {
 		return checkpoint ? Math.max(0, this.state.time - CHECKPOINT_LEAD) : this.level.start;
 	}
 
-	/** The button, at a song time */
+	/** The button, at the song time it was pressed or let go */
 	input(down: boolean, time: number) {
 		if (this.auto || this.status !== 'playing') return;
-		this.queue.push({ time, down });
+		if (down) this.jumps++;
+		// From before where the game is: back to then, if that's not too long ago
+		if (time < this.state.time && !this.rewind(time)) time = this.state.time;
+		let i = this.inputs.length;
+		while (i > this.next && this.inputs[i - 1].time > time) i--;
+		this.inputs.splice(i, 0, { time, down });
+	}
+
+	/** Back to the game before the step a press at `time` belongs to; false if too long ago */
+	private rewind(time: number) {
+		let k = this.kept.length - 1;
+		while (k >= 0 && this.kept[k].state.time >= time) k--;
+		if (k < 0 || this.state.time - time > ROLLBACK) return false;
+		const kept = this.kept[k];
+		this.replayed = Math.max(this.replayed, this.state.time);
+		this.kept.length = k;
+		this.state = copyState(kept.state);
+		this.next = kept.next;
+		this.lastCheckpoint = kept.lastCheckpoint;
+		this.checkpoints.length = kept.checkpoints;
+		this.remember();
+		return true;
 	}
 
 	/** Until the song time; returns what happened */
@@ -120,11 +166,15 @@ export class DashGame {
 					this.planIndex++;
 				}
 			} else {
-				while (this.queue.length && this.queue[0].time <= next) {
-					const event = this.queue.shift()!;
-					if (event.down && !s.held) this.jumps++;
-					press(s, event.down);
-				}
+				this.kept.push({
+					state: copyState(s),
+					next: this.next,
+					lastCheckpoint: this.lastCheckpoint,
+					checkpoints: this.checkpoints.length
+				});
+				if (this.kept.length > KEEP * 2) this.kept.splice(0, this.kept.length - KEEP);
+				while (this.next < this.inputs.length && this.inputs[this.next].time <= next)
+					press(s, this.inputs[this.next++].down);
 			}
 			if (this.status === 'complete') {
 				// Past the end: on it goes, nothing can stop it
@@ -133,7 +183,7 @@ export class DashGame {
 				continue;
 			}
 			this.remember();
-			for (const e of step(this.level.world, s, next)) happened.push(e);
+			for (const name of step(this.level.world, s, next)) this.tell(happened, name, next);
 			if (s.dead) {
 				this.status = 'dead';
 				this.diedAt = performance.now();
@@ -145,7 +195,7 @@ export class DashGame {
 			}
 			if (s.x >= this.level.xEnd) {
 				this.status = 'complete';
-				happened.push('complete');
+				this.tell(happened, 'complete', next);
 			}
 			if (
 				this.practice &&
@@ -160,10 +210,18 @@ export class DashGame {
 				this.lastCheckpoint = s.time;
 				const copy = copyState(s);
 				this.checkpoints.push({ state: copy, x: s.x, y: s.y });
-				happened.push('checkpoint');
+				this.tell(happened, 'checkpoint', next);
 			}
 		}
 		return happened;
+	}
+
+	/** Something happened at a step (unless it was told already, before a late press) */
+	private tell(happened: string[], name: string, time: number) {
+		if (time <= this.replayed && this.told.some((t) => t.time === time && t.name === name)) return;
+		happened.push(name);
+		this.told.push({ time, name });
+		if (this.told.length > 64) this.told = this.told.filter((t) => t.time > time - ROLLBACK * 2);
 	}
 }
 

@@ -272,6 +272,22 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				});
 		} else if (name === 'checkpoint') {
 			spawn({ x, y, kind: 'ring', max: 0.5, size: 1.8, color: '#5dff8b' });
+		} else if (name === 'spawn') {
+			// (re)started: a ring and a few sparks where it appears
+			spawn({ x, y, kind: 'glow', max: 0.4, size: 1.4, color: icon.primary });
+			spawn({ x, y, kind: 'ring', max: 0.4, size: 1.5, color: icon.secondary });
+			for (let i = 0; i < 10; i++) {
+				const a = (i / 10) * Math.PI * 2;
+				spawn({
+					x,
+					y,
+					vx: Math.cos(a) * 3,
+					vy: Math.sin(a) * 3,
+					max: 0.35,
+					size: 0.08 + (i % 3) * 0.03,
+					color: i % 2 ? icon.primary : '#ffffff'
+				});
+			}
 		} else if (name === 'complete') {
 			flash = 1;
 			flashColor = '#ffffff';
@@ -334,6 +350,23 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const beat = beats[low];
 		const strength = beat.downbeat ? 1 : 0.6;
 		return strength * Math.exp(-(time - beat.time) / 140);
+	}
+
+	/**
+	 * The light on the music: the beat, and where the song could be heard its kicks too (the
+	 * drums as they're played, also off the beat and in breaks where the beat goes on)
+	 */
+	function musicPulse(level: Level, time: number) {
+		const beat = beatPulse(level, time);
+		const kicks = level.kicks;
+		if (!kicks) return beat;
+		const n = Math.floor(time / kicks.hop);
+		let kick = 0;
+		for (let k = 0; k < 16 && n - k >= 0; k++) {
+			const v = kicks.values[n - k];
+			if (v !== undefined) kick = Math.max(kick, v * Math.exp((-k * kicks.hop) / 120));
+		}
+		return Math.max(beat * 0.75, kick);
 	}
 
 	// --- The scene ------------------------------------------------------------------------
@@ -1281,7 +1314,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	function swingShape(state: PlayerState, icon: Icon, dt: number, time: number) {
 		const s = scale;
 		const target = -Math.atan2(state.vy, 12) * 0.5;
-		shipAngle += (target - shipAngle) * Math.min(1, dt * 14);
+		shipAngle += (target - shipAngle) * (1 - Math.exp(-dt * 14));
 		ctx.rotate(shipAngle);
 		// 1: pulled down (down on the screen)
 		const pull = state.gravity;
@@ -1366,7 +1399,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				sprite(icon.sprite, 0, 0, s * 1.02, s * 1.02);
 			} else if (state.mode === 'ship') {
 				const target = -Math.atan2(state.vy, 10) * 0.85;
-				shipAngle += (target - shipAngle) * Math.min(1, dt * 18);
+				shipAngle += (target - shipAngle) * (1 - Math.exp(-dt * 18));
 				ctx.rotate(shipAngle);
 				if (state.gravity < 0) ctx.scale(1, -1);
 				sprite('ship', -s * 0.04, -s * 0.12, s * 1.55);
@@ -1389,7 +1422,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			cubeShape(1, icon);
 		} else if (state.mode === 'ship') {
 			const target = -Math.atan2(state.vy, 10) * 0.85;
-			shipAngle += (target - shipAngle) * Math.min(1, dt * 18);
+			shipAngle += (target - shipAngle) * (1 - Math.exp(-dt * 18));
 			ctx.rotate(shipAngle);
 			if (state.gravity < 0) ctx.scale(1, -1);
 			// The little cube riding it
@@ -1672,7 +1705,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 		lastKiai = section.kiai;
 		zoom = Math.max(0, zoom - dt * 2.5);
-		scale *= 1 + zoom * 0.05 + beatPulse(level, time) * (section.kiai ? 0.012 : 0);
+		const pulse = musicPulse(level, time);
+		scale *= 1 + zoom * 0.05 + pulse * (section.kiai ? 0.012 : 0);
 
 		// The camera; at the end it comes to a stop with the light ahead, and the player runs on
 		// into it
@@ -1685,12 +1719,12 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		let targetY: number;
 		if (section.ceil !== null) targetY = section.floor + section.ceil / 2 - VIEW / 2;
 		else targetY = Math.max(-2.2, state.y - 7.2);
-		camY += (targetY - camY) * Math.min(1, dt * (section.ceil !== null ? 5 : 3.5));
+		// (eased the same however many frames a second)
+		camY += (targetY - camY) * (1 - Math.exp(-dt * (section.ceil !== null ? 5 : 3.5)));
 		const shaking = shake > 0 ? shake * scale * 0.12 : 0;
 		shake = Math.max(0, shake - dt * 3);
 
 		const p = paletteAt(level, state.time);
-		const pulse = beatPulse(level, time);
 		ctx.save();
 		if (shaking) ctx.translate((Math.random() - 0.5) * shaking, (Math.random() - 0.5) * shaking);
 		background(p, pulse, section.kiai);

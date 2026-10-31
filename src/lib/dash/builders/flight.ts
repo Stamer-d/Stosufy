@@ -23,7 +23,16 @@ import {
 	type Section,
 	type Solid
 } from '../physics';
-import { clamp, freshness, legalAround, shuffleByWeight, tap, used, type Context } from '../build';
+import {
+	clamp,
+	freshness,
+	jittered,
+	legalAround,
+	shuffleByWeight,
+	tap,
+	used,
+	type Context
+} from '../build';
 import { beatStrength, type DashNote } from '../chart';
 
 interface Column {
@@ -546,6 +555,16 @@ export function buildFlight(
 				);
 				if (person.end.dead) failed = person.end;
 			}
+			// Clicked on the music like the other parts: each turn a bit early or late (the rest on
+			// time), and all of them early or late (where that crashes, more room too)
+			if (!failed && mode === 'swing')
+				for (const inputs of jittered(events, tolerance * 0.75, section.index)) {
+					const run = simulate(world, entry, section.end, inputs);
+					if (run.dead) {
+						failed = run;
+						break;
+					}
+				}
 		}
 		if (!failed) break;
 		for (const saw of saws.filter((s) => Math.abs(s.x - failed!.x) < 3)) {

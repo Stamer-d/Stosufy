@@ -2,8 +2,9 @@
 // part gets a kind (cube, ship, ball, UFO, wave, swing, spider; some of them small) that
 // fits its music: streams become wave turns, held notes ship flights, the kiai comes faster.
 // The clicks are the notes that stand out most: on the strong beats first, then the mapper's
-// accents (a jump across the playfield, a louder hitsound); how loud the song is (audio.ts,
-// where it could be heard) shapes the parts, its drops and its structures. The parts are built by
+// accents (a jump across the playfield, a louder hitsound) and how hard the song itself hits
+// there; how loud the song is (audio.ts, where it could be heard) shapes the parts, its drops
+// and its structures. The parts are built by
 // the builders (builders/*.ts) from the notes, and every obstacle is checked with the
 // physics: the level is played on time, early and late, short and long presses, and what
 // can't be passed is taken out again. So every level can be finished, and nowhere can it be
@@ -40,7 +41,7 @@ import {
 	type Preset,
 	type Random
 } from './build';
-import { loudness } from './audio';
+import { hitAt, loudness } from './audio';
 import { buildCube } from './builders/cube';
 import { buildFlight } from './builders/flight';
 import { buildWave } from './builders/wave';
@@ -71,6 +72,8 @@ export interface Level {
 	difficulty: Difficulty;
 	/** For the results: how many presses it takes */
 	clicks: number;
+	/** How hard the bass hits, every `hop` ms (where the song could be heard): for the light */
+	kicks: { hop: number; values: Float32Array } | null;
 	title: string;
 	artist: string;
 	creator: string;
@@ -87,12 +90,16 @@ export function inKiai(chart: DashChart, time: number) {
 const ACCENT = new WeakMap<DashNote, number>();
 
 /**
- * The mapper's accents on the notes: a jump to it on the playfield, a louder hitsound. Only
- * between notes about as strong in the beat (the beat comes first: a click off it is felt as
- * out of time), and around 0 on average, so they change which notes are clicks, not how many.
+ * The accents on the notes: the mapper's (a jump to it on the playfield, a louder hitsound) and
+ * the song's own (how hard it hits there, where it could be heard). Only between notes about as
+ * strong in the beat (the beat comes first: a click off it is felt as out of time), and around
+ * 0 on average, so they change which notes are clicks, not how many.
  */
-function accents(notes: DashNote[], own: Set<DashNote>) {
-	const raw = notes.map((n) => n.jump * 0.12 + n.volume * 0.12);
+function accents(chart: DashChart, notes: DashNote[], own: Set<DashNote>) {
+	const sound = chart.sound;
+	const raw = notes.map(
+		(n) => n.jump * 0.12 + n.volume * 0.12 + (sound ? hitAt(sound, n.time) * 0.3 : 0)
+	);
 	// (centred on the beatmap's own notes, not the beats added between them)
 	let sum = 0;
 	let count = 0;
@@ -502,7 +509,7 @@ export function generateLevel(
 	const own = new Set(chart.notes);
 	chart = { ...chart, notes: withBeats(chart) };
 	const notes = chart.notes;
-	accents(notes, own);
+	accents(chart, notes, own);
 	const first = notes[0].time;
 	const lastEnd = Math.max(...notes.map((n) => n.end));
 	const start = first > 2600 ? Math.round(first - 2000) : 0;
@@ -612,15 +619,12 @@ export function generateLevel(
 	}
 	plan.sort((a, b) => a.time - b.time);
 
-	// Played through once more: whatever still stops it goes
-	for (let attempt = 0; attempt < 80; attempt++) {
-		const run = simulate(world, startState(world, start), end, plan);
-		if (!run.dead) break;
-		removeNear(world, run.x, world.sectionAt(run.time).mode);
-	}
-
+	playThrough(world, plan, start, end);
 	fillEmpty(world, plan, start, end, chart);
 	requireInput(world, plan, start, end, preset);
+	// (what those two add is checked where it's added, each on its own: all together once more,
+	// so nothing of it can stop the level)
+	playThrough(world, plan, start, end);
 
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {
@@ -642,6 +646,7 @@ export function generateLevel(
 		difficulty: options.difficulty,
 		clicks: plan.filter((e) => e.down && !['ship', 'swing'].includes(world.sectionAt(e.time).mode))
 			.length,
+		kicks: chart.sound?.kicks ? { hop: chart.sound.hop, values: chart.sound.kicks } : null,
 		title: chart.title,
 		artist: chart.artist,
 		creator: chart.creator,
@@ -869,6 +874,18 @@ function requireInput(
 			world.hazards.remove(h);
 			added.splice(added.indexOf(h), 1);
 		}
+	}
+}
+
+/**
+ * Played through from the start: whatever still stops the plan goes, until it gets to the end
+ * (so every level can be finished, whatever the steps before left in it)
+ */
+function playThrough(world: World, plan: InputEvent[], start: number, end: number) {
+	for (let attempt = 0; attempt < 120; attempt++) {
+		const run = simulate(world, startState(world, start), end, plan);
+		if (!run.dead) return;
+		removeNear(world, run.x, world.sectionAt(run.time).mode);
 	}
 }
 

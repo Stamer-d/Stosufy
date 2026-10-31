@@ -92,6 +92,7 @@ You need [Node.js](https://nodejs.org) 20+, [Rust](https://rustup.rs) and the
 npm install
 npm run tauri dev     # run the app while developing
 npm run check         # type and icon checks
+npm run test:dash     # the Dash mode's tests (physics, levels, timing)
 npm run tauri build   # build an installer
 npm run build:web     # build the web app
 ```

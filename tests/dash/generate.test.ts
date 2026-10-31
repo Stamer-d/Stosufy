@@ -1,0 +1,177 @@
+// The levels made from songs (generate.ts), checked with the physics (validate.ts): the same
+// song makes the same level; every level can be finished, every click has room to be a bit
+// early or late; the clicks are never too close; harder is faster and busier, the kiai faster;
+// the wave keeps turning in the kiai; and levels are made for slow and fast songs, calm and
+// intense ones, with BPM changes, with breaks and without the song's sound.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseChart } from '../../src/lib/dash/chart';
+import {
+	generateLevel,
+	DIFFICULTIES,
+	type Difficulty,
+	type Level
+} from '../../src/lib/dash/generate';
+import { PRESETS } from '../../src/lib/dash/build';
+import { hearSong, type SongSound } from '../../src/lib/dash/audio';
+import { levelData, levelFromData } from '../../src/lib/dash/level';
+import { simulate, startState, STEP } from '../../src/lib/dash/physics';
+import { checkLevel } from '../../src/lib/dash/validate';
+import { makeAudio, makeOsu, makeSound, type SongOptions } from './fixtures';
+
+const SONGS: Record<string, SongOptions> = {
+	slow: { bpm: 90, length: 70, style: 'calm' },
+	mixed: {
+		bpm: 128,
+		length: 80,
+		style: 'mixed',
+		kiai: [[40000, 70000]],
+		breaks: [[20000, 26000]]
+	},
+	fast: { bpm: 174, length: 70, style: 'intense', sliders: 6 },
+	change: {
+		bpm: 110,
+		length: 70,
+		style: 'mixed',
+		change: { at: 30000, bpm: 165 },
+		kiai: [[45000, 65000]]
+	}
+};
+
+const heard = new Map<string, SongSound>();
+async function soundOf(name: string) {
+	if (!heard.has(name)) heard.set(name, await hearSong(makeAudio(SONGS[name]).buffer));
+	return heard.get(name)!;
+}
+
+const made = new Map<string, Level>();
+async function level(name: string, difficulty: Difficulty, seed = 'tests') {
+	const key = `${name}:${difficulty}:${seed}`;
+	if (!made.has(key)) {
+		const song = SONGS[name];
+		const chart = parseChart(makeOsu(song))!;
+		chart.sound = await soundOf(name);
+		made.set(key, generateLevel(chart, { difficulty, seed, duration: song.length * 1000 }));
+	}
+	return made.get(key)!;
+}
+
+test('the same song, settings and seed: the same level; another seed: another', async () => {
+	const song = SONGS.mixed;
+	const make = (seed: string) => {
+		const chart = parseChart(makeOsu(song))!;
+		chart.sound = makeSound(song);
+		return JSON.stringify(
+			levelData(generateLevel(chart, { difficulty: 'hard', seed, duration: 80000 }))
+		);
+	};
+	assert.equal(make('a'), make('a'));
+	assert.notEqual(make('a'), make('b'));
+});
+
+for (const name of Object.keys(SONGS))
+	test(`${name} song: every difficulty can be finished, every click with room`, async () => {
+		for (const difficulty of DIFFICULTIES) {
+			const report = checkLevel(await level(name, difficulty));
+			const preset = PRESETS[difficulty];
+			const what = `${name} ${difficulty}`;
+			assert.ok(report.finishes, `${what}: crashes at ${report.crash}`);
+			assert.ok(report.clicks.length > 20, `${what}: ${report.clicks.length} clicks`);
+			// Every click alone may be off by the difficulty's tolerance in all (early and late)
+			const narrow = report.clicks.filter((c) => c.early + c.late < preset.tolerance);
+			assert.equal(
+				narrow.length,
+				0,
+				`${what}: ${narrow.map((c) => `${c.mode}@${c.time.toFixed(0)} -${c.early}/+${c.late}`).join(', ')}`
+			);
+			// Never too close: an orb comes 160 ms after its jump at the soonest, the swing turns
+			// 130 ms after the last turn; on easy (no orbs, no swing) the jumps' own gap
+			const least = difficulty === 'easy' ? preset.gap * 1000 : 130;
+			assert.ok(report.closest >= least - STEP * 2, `${what}: ${report.closest} ms apart`);
+			// Seen coming for at least half a second
+			assert.ok(report.sight >= 500, `${what}: seen ${report.sight} ms`);
+		}
+	});
+
+test('harder: faster on average, more presses than easy, more kinds of parts', async () => {
+	for (const name of Object.keys(SONGS)) {
+		const levels = await Promise.all(DIFFICULTIES.map((d) => level(name, d)));
+		const speeds = levels.map(
+			(l) =>
+				l.world.sections.reduce((a, s) => a + s.speed * (s.end - s.start), 0) / (l.end - l.start)
+		);
+		for (let i = 1; i < speeds.length; i++)
+			assert.ok(speeds[i] >= speeds[i - 1] - 0.5, `${name}: ${speeds.map((s) => s.toFixed(1))}`);
+		assert.ok(speeds[4] > speeds[0] + 4);
+		// (presses a second, all but the ship's: it's held, not clicked)
+		const presses = levels.map(
+			(l) =>
+				l.plan.filter((e) => e.down && l.world.sectionAt(e.time).mode !== 'ship').length /
+				((l.end - l.start) / 1000)
+		);
+		for (let i = 1; i < presses.length; i++)
+			assert.ok(presses[i] > presses[0], `${name}: ${presses.map((p) => p.toFixed(2))}`);
+		const kinds = levels.map((l) => new Set(l.world.sections.map((s) => s.mode)).size);
+		assert.ok(kinds[4] > kinds[0], `${name}: ${kinds}`);
+	}
+});
+
+test('the kiai is played faster than the calm parts around it', async () => {
+	for (const difficulty of ['normal', 'hard', 'insane', 'extreme'] as const) {
+		const l = await level('mixed', difficulty);
+		const mean = (kiai: boolean) => {
+			const parts = l.world.sections.filter((s) => s.kiai === kiai);
+			return (
+				parts.reduce((a, s) => a + s.speed * (s.end - s.start), 0) /
+				parts.reduce((a, s) => a + s.end - s.start, 0)
+			);
+		};
+		assert.ok(mean(true) > mean(false), `${difficulty}: kiai ${mean(true)} calm ${mean(false)}`);
+	}
+});
+
+test('the wave keeps turning on the notes, also small and fast in the kiai', async () => {
+	let waves = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of DIFFICULTIES) {
+			const l = await level(name, difficulty);
+			for (const s of l.world.sections) {
+				if (s.mode !== 'wave' || s.end - s.start < 3000) continue;
+				waves++;
+				const turns = l.plan.filter((e) => e.time > s.start + 700 && e.time < s.end - 600);
+				const times = [s.start + 700, ...turns.map((e) => e.time), s.end - 600];
+				for (let i = 1; i < times.length; i++)
+					assert.ok(
+						times[i] - times[i - 1] < 1600,
+						`${name} ${difficulty}: the ${s.mini ? 'small ' : ''}wave goes one way for ${(times[i] - times[i - 1]).toFixed(0)} ms`
+					);
+			}
+		}
+	assert.ok(waves >= 3, `only ${waves} wave parts to check`);
+});
+
+test('a song without its sound still makes a level that can be finished', () => {
+	const song = SONGS.fast;
+	const chart = parseChart(makeOsu(song))!;
+	const l = generateLevel(chart, { difficulty: 'insane', seed: 'quiet', duration: 70000 });
+	assert.equal(l.kicks, null);
+	assert.equal(checkLevel(l, { windows: false }).finishes, true);
+});
+
+test('the level after its trip from the worker plays the same', async () => {
+	const l = await level('mixed', 'insane');
+	const copy = levelFromData(structuredClone(levelData(l)));
+	const a = simulate(l.world, startState(l.world, l.start), l.end, l.plan);
+	const b = simulate(copy.world, startState(copy.world, copy.start), copy.end, copy.plan);
+	assert.equal(b.dead, false);
+	assert.deepEqual(b, a);
+});
+
+test('every kind of part comes up', async () => {
+	const kinds = new Set<string>();
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of DIFFICULTIES)
+			for (const s of (await level(name, difficulty)).world.sections) kinds.add(s.mode);
+	assert.deepEqual([...kinds].sort(), ['ball', 'cube', 'ship', 'spider', 'swing', 'ufo', 'wave']);
+});

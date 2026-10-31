@@ -230,6 +230,28 @@ export function clickChecks(
 	}));
 }
 
+/**
+ * Presses played as a person might: all of them `amount` (ms) early, all late, and a few times
+ * each one a bit early or late on its own. A press and its release move together. Always the
+ * same for the same seed.
+ */
+export function jittered(inputs: InputEvent[], amount: number, seed: number, count = 4) {
+	let s = (seed * 7919 + 13) % 2147483647 || 1;
+	const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647) * 2 - 1;
+	const moved = (shift: () => number) => {
+		let by = 0;
+		return inputs
+			.map((e) => {
+				if (e.down) by = shift();
+				return { ...e, time: e.time + by };
+			})
+			.sort((a, b) => a.time - b.time);
+	};
+	const runs = [moved(() => -amount), moved(() => amount)];
+	for (let k = 0; k < count; k++) runs.push(moved(() => rnd() * amount));
+	return runs;
+}
+
 /** Things put into the world for a click, taken out again if they don't work out */
 export class Attempt {
 	private undo: (() => void)[] = [];

@@ -67,10 +67,14 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		const nextX = turns[k + 1] ?? world.xAt(section.end);
 		const dy = (nextX - tx) * slope;
 		const wouldBe = y + (up ? -dy : dy);
+		// Already along the floor or ceiling it heads for: on it would only slide on there (the
+		// small wave, twice as steep, gets there in every longer stretch)
+		const sliding = up ? y >= high - 1e-6 : y <= low + 1e-6;
 		// A turn on every note, unless it runs into the floor or ceiling for long
 		if (
 			(wouldBe >= floor + margin - dy * 0.4 && wouldBe <= top - margin + dy * 0.4) ||
-			rng() < 0.12
+			rng() < 0.12 ||
+			sliding
 		) {
 			up = !up;
 			events.push({ time: world.timeAt(tx), down: up });

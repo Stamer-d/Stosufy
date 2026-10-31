@@ -85,6 +85,24 @@
 				{/each}
 			</div>
 			<div class="pt-2 border-t border-white/10">
+				<div class="flex justify-between text-xs mb-2 text-white/55">
+					<span class="font-bold uppercase tracking-wider">Audio delay</span>
+					<span class="tabular-nums">{$dashSounds.delay ?? 0} ms</span>
+				</div>
+				<Range
+					value={$dashSounds.delay ?? 0}
+					min={-100}
+					max={300}
+					step={5}
+					onchange={(value) => {
+						dashSounds.update((s) => ({ ...s, delay: Math.round(value) }));
+					}}
+				/>
+				<p class="pt-2 text-xs text-white/40">
+					Jumps feel late to the music (Bluetooth headphones)? Raise it until they're on the beat.
+				</p>
+			</div>
+			<div class="pt-2 border-t border-white/10">
 				<button
 					class="w-full flex items-center justify-between h-9 px-1 text-sm cursor-pointer"
 					role="switch"

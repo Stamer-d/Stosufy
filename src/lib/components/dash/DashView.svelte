@@ -23,6 +23,8 @@
 	import { createDashRenderer, ICONS, spritesUrl } from '#lib/dash/render.ts';
 	import { ATLAS, SPRITES } from '#lib/dash/sprites.ts';
 	import { playDashSound } from '#lib/dash/sound.ts';
+	import { dashSounds } from '#lib/dash/sounds.ts';
+	import { SongClock } from '#lib/dash/clock.ts';
 
 	const DIFFICULTY_INFO = {
 		easy: { label: 'Easy', color: 'bg-sky-400 text-sky-950' },
@@ -163,41 +165,30 @@
 
 	// --- The song's time, smooth between the audio element's updates --------------------
 
-	// The audio element's time comes in steps (and its latency wobbles): the clock runs on its
-	// own and only drifts towards it, never backwards, unless the song really jumped
-	let lastRaw = -1;
-	let lastPerf = 0;
-	let shown = 0;
-	let shownAt = 0;
+	const clock = new SongClock();
+	$effect(() => {
+		clock.delay = $dashSounds.delay ?? 0;
+	});
+
 	function songTime() {
 		const audio = $songQueue.audio;
 		if (!audio) return 0;
-		const raw = heardTime(audio);
+		return clock.read(heardTime(audio), performance.now(), audio.paused, audio.playbackRate || 1);
+	}
+
+	/** The song time an input event happened at (not when it's handled) */
+	function eventTime(event) {
+		const audio = $songQueue.audio;
+		if (!audio) return 0;
 		const now = performance.now();
-		const rate = audio.playbackRate || 1;
-		if (audio.paused || lastRaw < 0) {
-			lastRaw = raw;
-			lastPerf = shownAt = now;
-			return (shown = raw);
-		}
-		if (raw !== lastRaw) {
-			lastRaw = raw;
-			lastPerf = now;
-		}
-		const heard = raw + Math.min(120, (now - lastPerf) * rate);
-		const ahead = shown + (now - shownAt) * rate;
-		const off = heard - ahead;
-		const pull = 1 - Math.exp(-(now - shownAt) / 250);
-		shown = Math.abs(off) > 60 ? heard : Math.max(shown, ahead + off * pull);
-		shownAt = now;
-		return shown;
+		return clock.at(event.timeStamp, heardTime(audio), now, audio.paused, audio.playbackRate || 1);
 	}
 
 	function seekAndPlay(ms) {
 		const audio = $songQueue.audio;
 		if (!audio) return;
 		audio.currentTime = Math.max(0, ms / 1000);
-		lastRaw = -1;
+		clock.jumped();
 		audio.play().catch(() => {});
 	}
 
@@ -216,6 +207,7 @@
 		renderer?.reset(game.state);
 		seekAndPlay(game.begin(false));
 		renderer?.reset(game.state);
+		renderer?.event('spawn', game.state, ICONS[iconIndex]);
 		screen = 'playing';
 		held.clear();
 	}
@@ -225,6 +217,7 @@
 		game.attempt++;
 		const from = game.begin(game.practice);
 		renderer?.reset(game.state);
+		renderer?.event('spawn', game.state, ICONS[iconIndex]);
 		seekAndPlay(from);
 	}
 
@@ -252,6 +245,7 @@
 		game.attempt++;
 		seekAndPlay(game.begin(false));
 		renderer?.reset(game.state);
+		renderer?.event('spawn', game.state, ICONS[iconIndex]);
 		screen = 'playing';
 	}
 
@@ -314,14 +308,14 @@
 	// --- Input --------------------------------------------------------------------------------
 
 	const held = new Set();
-	function setHeld(source, down) {
+	function setHeld(source, down, event) {
 		if (!game || screen !== 'playing') return;
 		const before = held.size > 0;
 		if (down) held.add(source);
 		else held.delete(source);
 		const after = held.size > 0;
 		if (before !== after) {
-			game.input(after, songTime());
+			game.input(after, eventTime(event));
 			if (after && !game.auto) playDashSound('click', 0.3);
 		}
 	}
@@ -393,14 +387,14 @@
 		if (event.repeat) return;
 		if (event.type === 'keydown' && screen === 'ready') return start(false);
 		if (event.type === 'keydown' && screen === 'paused') return resume();
-		setHeld(event.code, event.type === 'keydown');
+		setHeld(event.code, event.type === 'keydown', event);
 	}
 
 	function onPointer(event) {
 		if (event.button !== 0 && event.type === 'pointerdown') return;
 		if (screen !== 'playing') return;
 		event.preventDefault();
-		setHeld(`pointer${event.pointerId}`, event.type === 'pointerdown');
+		setHeld(`pointer${event.pointerId}`, event.type === 'pointerdown', event);
 	}
 
 	$effect(() => {

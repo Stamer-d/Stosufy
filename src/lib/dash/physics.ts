@@ -445,6 +445,13 @@ export function wallAt(walls: Walls, x: number) {
 /** The fixed step of the physics (ms): 240 steps a second */
 export const STEP = 1000 / 240;
 
+/**
+ * Falling is held to the most (`maxFall`); going up isn't: a jump, an orb or a pad may launch
+ * it faster (a red pad higher than a yellow one)
+ */
+const capFall = (vy: number, gravity: 1 | -1) =>
+	gravity > 0 ? Math.max(-PHYSICS.maxFall, vy) : Math.min(PHYSICS.maxFall, vy);
+
 /** Entering a part of another kind: what happens to the speed up or down (as in the genre) */
 function enterMode(s: PlayerState, from: Mode, to: Mode) {
 	if (from === 'wave') s.vy *= 0.9;
@@ -701,7 +708,7 @@ export function step(world: World, s: PlayerState, time: number) {
 				s.jumpedAt = time;
 				events.push('jump');
 			} else s.vy -= gg * cube.gravity * dt;
-			s.vy = Math.max(-PHYSICS.maxFall, Math.min(PHYSICS.maxFall, s.vy));
+			s.vy = capFall(s.vy, s.gravity);
 			break;
 		}
 		case 'ball': {
@@ -714,7 +721,7 @@ export function step(world: World, s: PlayerState, time: number) {
 				s.jumpedAt = time;
 				events.push('jump');
 			} else s.vy -= gg * PHYSICS.ballGravity * dt;
-			s.vy = Math.max(-PHYSICS.maxFall, Math.min(PHYSICS.maxFall, s.vy));
+			s.vy = capFall(s.vy, s.gravity);
 			break;
 		}
 		case 'spider': {
@@ -730,7 +737,7 @@ export function step(world: World, s: PlayerState, time: number) {
 				s.jumpedAt = time;
 				events.push('jump');
 			} else if (!s.grounded) s.vy -= gg * PHYSICS.ballGravity * dt;
-			s.vy = Math.max(-PHYSICS.maxFall, Math.min(PHYSICS.maxFall, s.vy));
+			s.vy = capFall(s.vy, s.gravity);
 			break;
 		}
 		case 'ship': {

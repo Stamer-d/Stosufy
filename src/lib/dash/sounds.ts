@@ -1,5 +1,5 @@
-// The Dash mode's sound settings: how loud its own sounds are and which of them play
-// (kept on this device)
+// The Dash mode's sound settings: how loud its own sounds are, which of them play, and how
+// much later the music is heard than played (kept on this device)
 
 import { writable } from 'svelte/store';
 
@@ -11,6 +11,11 @@ export interface DashSoundSettings {
 	complete: boolean;
 	/** A soft tick on every press */
 	click: boolean;
+	/**
+	 * How much later the music reaches the ears than the player says (ms): Bluetooth
+	 * headphones, some drivers. The level runs that much later, so it's on the beat again.
+	 */
+	delay: number;
 }
 
 const KEY = 'stosufy-dash-sounds';
@@ -19,7 +24,8 @@ const DEFAULTS: DashSoundSettings = {
 	death: true,
 	checkpoint: true,
 	complete: true,
-	click: false
+	click: false,
+	delay: 0
 };
 
 function load(): DashSoundSettings {
