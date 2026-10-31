@@ -94,7 +94,9 @@
 	let showUI = $state(false);
 
 	let appearance = $derived({ ...DEFAULT_APPEARANCE, ...$userSettings.settings?.appearance });
-	let backgroundOn = $derived(appearance.background && !!$currentSong.song);
+	// (not under the Dash mode: it covers the whole window, and the song's background video,
+	// blurred and pulsing with the beat, cost frames there for nothing)
+	let backgroundOn = $derived(appearance.background && !!$currentSong.song && !$dashOpen);
 	let panel = $derived(backgroundOn ? 'bg-panel/80' : 'bg-panel');
 
 	$effect(() => {
@@ -168,7 +170,8 @@
 			></div>
 		</div>
 	{/if}
-	<div class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'}">
+	<!-- Under the Dash mode the app isn't drawn at all (it stays laid out, scrolled where it was) -->
+	<div class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'} {$dashOpen ? 'invisible' : ''}">
 		<Titlebar />
 		{#if $offline}
 			<div

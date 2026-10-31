@@ -2,7 +2,9 @@
 // variables on <html>, updated every frame:
 //   --beat  1 on each beat, falling off to 0 until the next one
 //   --kiai  0–1, eases in and out with the kiai sections ("kiai time")
-// The effects themselves are plain CSS (app.css), so nothing re-renders at 60 fps.
+// The effects themselves are plain CSS (app.css), so nothing re-renders at 60 fps. While the
+// Dash mode covers the app (it pulses with the beat on its own) they rest: every change of
+// these variables restyles the whole page behind it.
 
 import { get } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
@@ -12,6 +14,7 @@ import { loadTiming } from './mods';
 import { userSettings } from './user';
 import { heardTime } from './equalizer';
 import { isStreamed } from './stream';
+import { dashOpen } from '../dash/store';
 import { parseKiai, parseTimingPoints, type KiaiSection, type TimingPoint } from '../osuFile';
 
 /** How sharply the pulse falls off after a beat; higher is snappier */
@@ -67,13 +70,16 @@ function currentTiming(): Timing | null {
 	return timing && isStreamed(song) ? { ...timing, offset: 0 } : timing;
 }
 
+/** The timing point a time is in (the last one at or before it; the first before them all) */
 function pointAt(points: TimingPoint[], time: number) {
-	let point = points[0];
-	for (const candidate of points) {
-		if (candidate.time > time) break;
-		point = candidate;
+	let low = 0;
+	let high = points.length - 1;
+	while (low < high) {
+		const mid = (low + high + 1) >> 1;
+		if (points[mid].time <= time) low = mid;
+		else high = mid - 1;
 	}
-	return point;
+	return points[low];
 }
 
 /**
@@ -116,7 +122,9 @@ export function startBeatEffects() {
 
 		const audio = get(songQueue).audio;
 		const enabled =
-			(get(userSettings).settings?.appearance?.beatEffects ?? true) && !reducedMotion.matches;
+			(get(userSettings).settings?.appearance?.beatEffects ?? true) &&
+			!reducedMotion.matches &&
+			!get(dashOpen);
 		let pulse = 0;
 		let inKiai = false;
 		const timing = enabled && audio && !audio.paused ? currentTiming() : null;
