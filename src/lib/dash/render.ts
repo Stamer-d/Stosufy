@@ -305,6 +305,47 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillRect(0, height * 0.35, width, height * 0.65);
 	}
 
+	/** Hills far away behind the level, and in the kiai beams of light on the beat */
+	function scenery(p: Palette, floor: number, pulse: number, kiai: boolean) {
+		const base = sy(floor);
+		const layers = [
+			{ speed: 0.25, cell: 7, high: 4.2, color: mix(p.bottom, p.top, 0.35), alpha: 0.55 },
+			{ speed: 0.5, cell: 4.5, high: 2.6, color: mix(p.bottom, '#000000', 0.25), alpha: 0.7 }
+		];
+		if (kiai) {
+			const spacing = 6;
+			const offset = camX * 0.6;
+			const first = Math.floor(offset / spacing);
+			for (let k = first; k < first + width / scale / spacing + 2; k++) {
+				const bx = (k * spacing - offset) * scale;
+				const beam = ctx.createLinearGradient(0, base, 0, 0);
+				beam.addColorStop(0, rgba(p.accent, 0.08 + pulse * 0.22));
+				beam.addColorStop(1, rgba(p.accent, 0));
+				ctx.fillStyle = beam;
+				ctx.fillRect(bx - scale * 0.35, 0, scale * 0.7, base);
+			}
+		}
+		for (const layer of layers) {
+			const offset = camX * layer.speed;
+			const first = Math.floor(offset / layer.cell) - 1;
+			ctx.beginPath();
+			ctx.moveTo(-10, height);
+			for (let k = first; k < first + width / scale / layer.cell + 3; k++) {
+				const x = (k * layer.cell - offset) * scale;
+				const h = (0.35 + noise(k * 3.1 + layer.cell) * 0.65) * layer.high * scale;
+				const nx = ((k + 1) * layer.cell - offset) * scale;
+				ctx.lineTo(x, base - h * 0.4);
+				ctx.quadraticCurveTo((x + nx) / 2, base - h * 1.6, nx, base - h * 0.4);
+			}
+			ctx.lineTo(width + 10, height);
+			ctx.closePath();
+			ctx.globalAlpha = layer.alpha;
+			ctx.fillStyle = layer.color;
+			ctx.fill();
+			ctx.globalAlpha = 1;
+		}
+	}
+
 	function ground(p: Palette, y: number, side: 1 | -1, pulse: number, scroll: number) {
 		const line = sy(y);
 		const top = side === 1 ? line : 0;
@@ -385,6 +426,19 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			under.addColorStop(1, rgba(p.accent, 0));
 			ctx.fillStyle = under;
 			ctx.fillRect(left, bottom - Math.min(h, scale * 0.9), w, Math.min(h, scale * 0.9));
+		}
+		// Lights in some of the blocks
+		for (let y = Math.floor(y0); y < y1; y++) {
+			for (let x = Math.floor(x0); x < x1; x++) {
+				if (x < x0 - 0.01 || x + 1 > x1 + 0.01) continue;
+				const n = noise(x * 7.3 + y * 13.1);
+				if (n > 0.22) continue;
+				const cx = sx(x + 0.5);
+				const cy = sy(y + 0.5);
+				const r = scale * (n < 0.08 ? 0.16 : 0.1);
+				ctx.fillStyle = rgba(p.accent, 0.35 + pulse * 0.4);
+				ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+			}
 		}
 		ctx.strokeStyle = '#ffffff';
 		ctx.lineWidth = Math.max(1.5, scale * 0.07);
@@ -912,6 +966,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.save();
 		if (shaking) ctx.translate((Math.random() - 0.5) * shaking, (Math.random() - 0.5) * shaking);
 		background(p, pulse, section.kiai);
+		scenery(p, section.floor, pulse, section.kiai);
 
 		const left = camX - 1;
 		const right = camX + width / scale + 1;

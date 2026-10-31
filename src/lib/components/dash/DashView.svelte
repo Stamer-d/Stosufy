@@ -1,7 +1,7 @@
 <script>
 	// The Dash mode: the song that plays as a one-button rhythm level, made from its beatmap.
 	// Space, ↑, W, the gameplay keys or the mouse to jump; Esc pauses.
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { fade, fly, scale as zoom } from 'svelte/transition';
 	import { get } from 'svelte/store';
 	import Titlebar from '../Titlebar.svelte';
@@ -68,10 +68,20 @@
 
 	// --- Making the level -------------------------------------------------------------------
 
+	/** Another song started while the results show: its level is made after them */
+	let stale = $state(false);
+	let reload = $state(0);
+
 	$effect(() => {
 		const current = song;
 		const id = mapId;
 		const chosen = difficulty;
+		void reload;
+		if (untrack(() => screen) === 'complete') {
+			stale = true;
+			return;
+		}
+		stale = false;
 		results = null;
 		game = null;
 		if (!current) {
@@ -612,14 +622,14 @@
 				<div class="flex gap-2">
 					<button
 						class="h-11 px-6 rounded-full bg-white text-black font-bold flex items-center gap-2 cursor-pointer hover:scale-[1.03] transition"
-						onclick={() => start(false)}
+						onclick={() => (stale ? ((screen = 'loading'), reload++) : start(false))}
 					>
 						<span class="icon-[mingcute--refresh-2-line] size-5"></span>
-						Play again
+						{stale ? 'Next level' : 'Play again'}
 					</button>
 					<button
 						class="h-11 px-6 rounded-full bg-white/15 font-semibold cursor-pointer hover:bg-white/25 transition"
-						onclick={() => (screen = 'ready')}
+						onclick={() => (stale ? ((screen = 'loading'), reload++) : (screen = 'ready'))}
 					>
 						Options
 					</button>

@@ -6,7 +6,7 @@
 
 <p align="center">
 The music player for osu! players.<br />
-Every song from osu!'s beatmaps, with playlists, lyrics, gameplay and a DJ mode.
+Every song from osu!'s beatmaps, with playlists, lyrics, gameplay, a DJ mode and Dash levels.
 </p>
 
 <p align="center">
@@ -22,6 +22,8 @@ Every song from osu!'s beatmaps, with playlists, lyrics, gameplay and a DJ mode.
 - 🎤 **Synced lyrics**, with romaji for Japanese songs, and a full-screen focus mode.
 - 🎯 **Gameplay.** Watch the map play along with the song, watch top replays or play it yourself.
 - 🎛️ **DJ mode.** Two decks, and smart mixes that blend songs on their phrases.
+- 🟩 **Dash.** Play the song as a one-button rhythm level made from its beatmap: jump, fly and
+  flip on the beat, with practice mode and five difficulties.
 - 🧩 **Puzzles.** Put a song's background back together, with leaderboards and a daily puzzle.
 - 👥 **Friends.** See what your friends are listening to and listen together.
 
