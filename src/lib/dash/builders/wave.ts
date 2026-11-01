@@ -46,47 +46,122 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		turns.push(x);
 	}
 
-	// The way: 45° (63° small) up or down, along the floor or ceiling at the ends
+	// The way: 45° (63° small) up or down, inside a band that keeps off the floor and ceiling
+	// (they're safe to slide on: a corridor side there would be no wall at all). The band rises
+	// and falls over four bars, so the corridor climbs and dives. A turn on every note; where
+	// the way to the next one is longer than the band is high, it turns on the beat (the
+	// quarter beats) on the way, at the band's edge.
 	const low = floor + box.h;
 	const high = top - box.h;
+	const room = Math.max(0.6, width + 0.45);
+	const bandLow = Math.min(low + room, (floor + top) / 2 - 0.6);
+	const bandHigh = Math.max(high - room, (floor + top) / 2 + 0.6);
+	const sway =
+		Math.max(0, (bandHigh - bandLow - 2.5) / 2) *
+		(section.mini ? 0.3 : preset.level >= 2 ? 0.7 : 0.4);
+	const bar = (x: number) => {
+		const pos = musicalPosition(ctx.chart, world.timeAt(x));
+		return pos.point.beatLength * pos.point.meter;
+	};
+	const swayLength = Math.max(8, (bar(entry.x) / 1000) * 4 * section.speed);
+	const swayPhase = rng() * Math.PI * 2;
+	const band = (px: number) => {
+		const shift = Math.sin(swayPhase + ((px - section.x0) / swayLength) * Math.PI * 2) * sway;
+		// (it moves inside the band's limits, never closer to the floor or ceiling)
+		return { lo: bandLow + sway + shift, hi: bandHigh - sway + shift };
+	};
+	/** The quarter beats between two places (where a turn on the way may go) */
+	const quarters = (from: number, to: number) => {
+		const result: number[] = [];
+		for (const point of ctx.chart.timing) {
+			const span = point.beatLength / 4;
+			const t0 = world.timeAt(from);
+			const t1 = world.timeAt(to);
+			const until = Math.min(
+				t1,
+				ctx.chart.timing.find((q) => q.time > point.time)?.time ?? Infinity
+			);
+			for (let t = point.time + Math.ceil((t0 - point.time) / span) * span; t <= until; t += span)
+				if (t >= point.time) result.push(half(world.xAt(t)));
+		}
+		return result.filter((q) => q > from && q <= to).sort((a, b) => a - b);
+	};
 	const points: { x: number; y: number }[] = [];
 	const events: InputEvent[] = [];
 	let x = entry.x;
 	let y = clamp(entry.y, low, high);
+	// (as it comes in: let go, down; the first turn is on the first note)
 	let up = false;
+	let lastTurn = -Infinity;
+	let inBand = false;
 	points.push({ x, y });
+	/**
+	 * A place on the physics' steps: a turn there is where the wave turns, exactly (between two
+	 * steps it would turn at the next one, and over many turns the way would drift off)
+	 */
+	const onStep = (px: number) => {
+		const t = world.timeAt(px);
+		return world.xAt(entry.time + Math.round((t - entry.time) / STEP) * STEP);
+	};
+	const turn = (at: number) => {
+		up = !up;
+		lastTurn = at;
+		// (just after the step it turns from: the press counts for the step after it)
+		events.push({ time: world.timeAt(at) + 0.001, down: up });
+	};
+	/** Straight on to a place: turning at the band's edge (on a quarter beat) on the way */
 	const advance = (toX: number) => {
-		const dy = (toX - x) * slope * (up ? 1 : -1);
-		const target = y + dy;
-		if (target > high || target < low) {
+		for (let guard = 0; inBand && guard < 64 && x < toX - 1e-6; guard++) {
+			// Where it leaves the band going on like this
+			let out = Infinity;
+			for (let px = x + 0.25; px <= toX + 1e-6; px += 0.25) {
+				const py = y + (px - x) * slope * (up ? 1 : -1);
+				const b = band(px);
+				if ((up && py > b.hi) || (!up && py < b.lo)) {
+					out = px - 0.25;
+					break;
+				}
+			}
+			if (out >= toX) break;
+			// (a turn at the band's edge only needs the plain gap, also for the small wave: else it
+			// would run out of the band before it may turn)
+			const minGap = preset.waveGap * section.speed;
+			const options = quarters(x, out).filter((q) => q - lastTurn >= minGap);
+			const at = onStep(
+				options.length
+					? options[options.length - 1]
+					: Math.max(x + 0.5, Math.min(out, lastTurn + minGap))
+			);
+			if (at >= toX - 0.25) break;
+			const ny = clamp(y + (at - x) * slope * (up ? 1 : -1), low, high);
+			x = at;
+			y = ny;
+			points.push({ x, y });
+			turn(at);
+		}
+		const ny = y + (toX - x) * slope * (up ? 1 : -1);
+		if (ny > high || ny < low) {
+			// (only where the band can't hold it: along the edge to there)
 			const limit = up ? high : low;
 			const reach = x + Math.abs(limit - y) / slope;
 			if (reach > x + 1e-6) points.push({ x: reach, y: limit });
 			y = limit;
-		} else y = target;
+		} else y = ny;
 		x = toX;
 		points.push({ x, y });
 	};
-	const margin = width + 0.4;
 	for (let k = 0; k < turns.length; k++) {
-		const tx = turns[k];
+		const tx = onStep(turns[k]);
+		if (tx - lastTurn < gap * section.speed) continue;
 		advance(tx);
-		const nextX = turns[k + 1] ?? world.xAt(section.end);
-		const dy = (nextX - tx) * slope;
-		const wouldBe = y + (up ? -dy : dy);
-		// Already along the floor or ceiling it heads for: on it would only slide on there (the
-		// small wave, twice as steep, gets there in every longer stretch)
-		const sliding = up ? y >= high - 1e-6 : y <= low + 1e-6;
-		// A turn on every note, unless it runs into the floor or ceiling for long
-		if (
-			(wouldBe >= floor + margin - dy * 0.4 && wouldBe <= top - margin + dy * 0.4) ||
-			rng() < 0.12 ||
-			sliding
-		) {
-			up = !up;
-			events.push({ time: world.timeAt(tx), down: up });
-		}
+		// A turn on every note (now and then one goes by, for a longer stroke)
+		const b = band(tx);
+		const towardEdge = up ? y >= b.hi - 0.3 : y <= b.lo + 0.3;
+		if (!inBand || towardEdge || rng() > 0.08) turn(tx);
+		inBand = true;
 	}
+	// (out to the end: no more turns of its own, none past the end into the next part)
+	inBand = false;
 	advance(world.xAt(section.end) + 1);
 	if (up) events.push({ time: section.end - 1, down: false });
 
@@ -124,7 +199,9 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	const styles = xs.map((x) => {
 		const pos = musicalPosition(ctx.chart, world.timeAt(x));
 		const slot = hash(`${ctx.seed ?? 0}:${pos.point.meter}:${Math.floor(pos.bar / 2) % 2}`) % 4;
-		return ['even', 'even', 'flatTop', 'flatBottom'][slot];
+		return preset.level >= 2 && (section.intensity ?? 0.5) > 0.5
+			? ['even', 'narrow', 'flatTop', 'flatBottom'][slot]
+			: ['even', 'even', 'flatTop', 'flatBottom'][slot];
 	});
 	const build = () => {
 		walls.xs = [];
@@ -133,7 +210,9 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		xs.forEach((px, k) => {
 			const opening =
 				clamp((walls.x0 + 3.5 - px) / 3.5, 0, 1) + clamp((px - (walls.x1 - 3)) / 3, 0, 1);
-			const w = width + (extra.get(k) ?? 0) + opening * 4;
+			// (a chokepoint: narrower for a phrase, as tight as the wave allows)
+			const narrow = styles[k] === 'narrow' ? Math.min(0.35, width - box.h * 1.35 - 0.45) : 0;
+			const w = width - Math.max(0, narrow) + (extra.get(k) ?? 0) + opening * 4;
 			// Straight stretches (long gaps) get a bit more room
 			const gapLeft = k > 0 ? px - xs[k - 1] : 0;
 			const roomy = gapLeft > 4 ? 0.25 : 0;
@@ -141,14 +220,21 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 			let lo = py - w - roomy;
 			let hi = py + w + roomy;
 			// Flat sides: the highest (lowest) of the stretch
-			if (styles[k] !== 'even') {
+			if (styles[k] === 'flatTop' || styles[k] === 'flatBottom') {
 				let a = k;
 				let b = k;
 				while (a > 0 && styles[a - 1] === styles[k]) a--;
 				while (b < xs.length - 1 && styles[b + 1] === styles[k]) b++;
-				const ys = xs.slice(a, b + 1).map(pathAt);
-				if (styles[k] === 'flatTop') hi = Math.min(top + 0.5, Math.max(...ys) + w);
-				else lo = Math.max(floor - 0.5, Math.min(...ys) - w);
+				// (from the first turn on: before it, it's still coming in along the floor)
+				const ys = xs
+					.slice(a, b + 1)
+					.filter((px) => px >= first)
+					.map(pathAt);
+				if (!ys.length) ys.push(pathAt(px));
+				// (flat at the way's highest or lowest there; a place that needed more room keeps it)
+				if (styles[k] === 'flatTop')
+					hi = Math.max(hi, Math.min(top - 0.3, Math.max(...ys) + width));
+				else lo = Math.min(lo, Math.max(floor + 0.3, Math.min(...ys) - width));
 			}
 			if (musicalRest(ctx.chart, world.timeAt(px))) {
 				lo = floor - 0.5;

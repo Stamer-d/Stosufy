@@ -56,7 +56,7 @@ test('REA Robot holding uses the bounded native charge; release permanently ends
 	assert.ok(robotStep(state, c, 1 / 240).vy < state.vy);
 });
 
-test('Robot hold height varies, and holding through landing does not auto-jump', () => {
+test('Robot hold height varies, and held through a landing it jumps again at once', () => {
 	const jump = (hold: number) => {
 		const w = world({ mode: 'robot' }),
 			s = startState(w, 0);
@@ -71,7 +71,36 @@ test('Robot hold height varies, and holding through landing does not auto-jump',
 		return { top, jumps };
 	};
 	assert.ok(jump(300).top > jump(35).top + 1.5);
-	assert.equal(jump(10000).jumps, 1);
+	assert.ok(jump(10000).jumps > 2, 'held: one full jump after another');
+});
+
+test('Robot: a press made a moment before landing jumps on the landing', () => {
+	const w = world({ mode: 'robot' }),
+		s = startState(w, 0);
+	press(s, true);
+	const events: { time: number; name: string }[] = [];
+	let landed = -1;
+	for (let k = 1; k < 480; k++) {
+		const time = k * STEP;
+		// A full jump, let go, and pressed again 40 ms before it comes down
+		if (time > 400 && s.held && landed < 0) press(s, false);
+		for (const name of step(w, s, time)) events.push({ time, name });
+		if (landed < 0 && events.some((e) => e.name === 'land')) landed = time;
+	}
+	const firstLand = events.find((e) => e.name === 'land')!.time;
+	// Again, with the press just before that landing
+	const w2 = world({ mode: 'robot' }),
+		s2 = startState(w2, 0);
+	press(s2, true);
+	const jumps: number[] = [];
+	for (let k = 1; k < 480; k++) {
+		const time = k * STEP;
+		if (time > 400 && time < firstLand - 40 && s2.held) press(s2, false);
+		if (time >= firstLand - 40 && !s2.held && jumps.length === 1) press(s2, true);
+		for (const name of step(w2, s2, time)) if (name === 'jump') jumps.push(time);
+	}
+	assert.ok(jumps.length >= 2, `jumps at ${jumps}`);
+	assert.ok(Math.abs(jumps[1] - firstLand) <= STEP * 2, `${jumps[1]} vs landing ${firstLand}`);
 });
 
 for (const kind of [

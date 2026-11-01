@@ -19,6 +19,7 @@ import { hearSong, type SongSound } from '../../src/lib/dash/audio';
 import { levelData, levelFromData } from '../../src/lib/dash/level';
 import { simulate, startState, STEP } from '../../src/lib/dash/physics';
 import { checkLevel, type LevelReport } from '../../src/lib/dash/validate';
+import { musicalRest } from '../../src/lib/dash/composition';
 import { makeAudio, makeOsu, makeSound, type SongOptions } from './fixtures';
 
 const SONGS: Record<string, SongOptions> = {
@@ -327,4 +328,38 @@ test('the parts know how intense they are, and the intense ones are faster', asy
 			difficulty
 		);
 	}
+});
+
+test('nowhere to rest: doing nothing (or holding on) in a flying part does not get through', async () => {
+	let tried = 0;
+	let rested = 0;
+	const where: string[] = [];
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['normal', 'hard', 'insane', 'extreme'] as const) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			let state = startState(w, l.start);
+			for (const e of l.plan) {
+				if (!e.down) continue;
+				const sec = w.sectionAt(e.time);
+				if (!['ufo', 'swing', 'ship', 'wave'].includes(sec.mode)) continue;
+				const until = Math.min(e.time + 1600, sec.end - 900);
+				if (e.time < sec.start + 300 || until - e.time < 1000) continue;
+				const chart = parseChart(makeOsu(SONGS[name]))!;
+				let rest = false;
+				for (let t = e.time; t < until; t += 50) if (musicalRest(chart, t)) rest = true;
+				if (rest) continue;
+				state = simulate(w, state, e.time, l.plan);
+				for (const held of sec.mode === 'ship' || sec.mode === 'wave' ? [false, true] : [false]) {
+					tried++;
+					const from = { ...state, used: [...state.used], held, buffered: false };
+					if (!simulate(w, from, until, []).dead) {
+						rested++;
+						where.push(`${name} ${difficulty} ${sec.mode}@${Math.round(e.time)}`);
+					}
+				}
+			}
+		}
+	assert.ok(tried > 200, `${tried} tried`);
+	assert.ok(rested / tried < 0.1, `${rested}/${tried}: ${where.slice(0, 8).join(', ')}`);
 });

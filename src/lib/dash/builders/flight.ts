@@ -42,6 +42,8 @@ interface Column {
 	low: number;
 	high: number;
 	spike: 0 | 1 | -1;
+	/** A small spike (in a tight tunnel: only what slides along the surface touches it) */
+	small?: boolean;
 }
 
 /** The times the swing turns around on: its part's notes and the beats' halves */
@@ -188,7 +190,7 @@ export function buildFlight(
 			if (x - last.x < 2.5) continue;
 			// (the swing in a narrower band: it swings around its way; the ship straighter, in a
 			// tight corridor, the harder it is)
-			const band = mode === 'swing' ? 0.28 : 1 - close * 0.55;
+			const band = mode === 'swing' ? 0.28 + close * 0.3 : 1 - close * 0.55;
 			const pos = musicalPosition(ctx.chart, note.time);
 			const phase = clamp((note.time - pos.start) / (pos.end - pos.start), 0, 1);
 			const energy = ctx.chart.sound
@@ -286,6 +288,9 @@ export function buildFlight(
 			);
 		}
 	}
+	// (and each press a bit early or late on its own, as a person plays it)
+	if (!steered)
+		variants.push(...jittered(events, tolerance * 0.75, section.index * 31 + 7, 4).slice(2));
 	for (const inputs of variants) {
 		const trace: { x: number; y: number; time: number }[] = [];
 		simulate(world, entry, section.end, inputs, { trace });
@@ -576,8 +581,10 @@ export function buildFlight(
 			flush(lastX + 1);
 		}
 		for (const c of columns) {
-			if (c.spike === 1 && c.low > floor - 1) made.spikes.push(world.spike(c.x + 0.5, c.low, 1));
-			if (c.spike === -1) made.spikes.push(world.spike(c.x + 0.5, c.high, -1));
+			const kind = c.small ? 'small' : 'spike';
+			if (c.spike === 1 && c.low > floor - 1)
+				made.spikes.push(world.spike(c.x + 0.5, c.low, 1, kind));
+			if (c.spike === -1) made.spikes.push(world.spike(c.x + 0.5, c.high, -1, kind));
 		}
 	};
 	build();
@@ -626,7 +633,8 @@ export function buildFlight(
 	if (saws.length) used(ctx, 'saws');
 
 	// --- Checked: on time, early and late; where it crashes, more room -------------------------
-	for (let attempt = 0; attempt < 40; attempt++) {
+	/** Played the ways it may be played (steered: flown again); where it crashes, if it does */
+	const verify = (attempt: number) => {
 		let failed: PlayerState | null = null;
 		if (!legalAround(world, startX - 1, endX + 1)) {
 			// A spike broke a rule: the spikes go
@@ -685,6 +693,13 @@ export function buildFlight(
 					}
 				}
 		}
+		return failed;
+	};
+	/** The attempt whose way was played through (checked again the same way later) */
+	let settled = 0;
+	for (let attempt = 0; attempt < 40; attempt++) {
+		settled = attempt;
+		const failed = verify(attempt);
 		if (!failed) break;
 		for (const saw of saws.filter((s) => Math.abs(s.x - failed!.x) < 3)) {
 			world.hazards.remove(saw);
@@ -701,6 +716,104 @@ export function buildFlight(
 			else c.high = Math.min(top, c.high + 1);
 		}
 		build();
+	}
+	noResting();
+
+	/**
+	 * Nowhere to rest: from each click on, doing nothing (the ship also: holding on) must not get
+	 * it through by riding along a floor, ceiling or wall for long. Where it would, a spike on that
+	 * surface, where the way itself keeps clear of it (checked again with all the ways it may be
+	 * played; a spike that breaks one goes again).
+	 */
+	function noResting() {
+		if (preset.level < 1 || (mode !== 'ufo' && mode !== 'swing' && mode !== 'ship')) return;
+		const trace: { x: number; y: number; time: number }[] = [];
+		simulate(world, entry, section.end, events, { trace });
+		const ways = [...runs, trace];
+		const room = (c: Column, side: 1 | -1) => {
+			let near = Infinity;
+			for (const way of ways)
+				for (const p of way)
+					if (Math.abs(p.x - (c.x + 0.5)) < box.w + 0.35)
+						near = Math.min(near, side > 0 ? p.y - box.h - c.low : c.high - (p.y + box.h));
+			return near;
+		};
+		const need = mode === 'swing' ? 1.25 : 1.05;
+		// (where it crashed already before: not a reason to take a spike away again)
+		const before = verify(settled);
+		const known = (failed: PlayerState) => !!before && Math.abs(failed.x - before.x) < 1.5;
+		/** What was changed on a column: a spike, or its surface a half block closer (a bump) */
+		const added: { c: Column; spike: boolean; side: 1 | -1 }[] = [];
+		const undo = (a: (typeof added)[number]) => {
+			if (a.spike) {
+				a.c.spike = 0;
+				a.c.small = false;
+			} else if (a.side > 0) a.c.low -= 0.5;
+			else a.c.high += 0.5;
+		};
+		for (let pass = 0; pass < 4; pass++) {
+			let changed = false;
+			let state = entry;
+			for (const e of events) {
+				if (!e.down || e.time < section.start + 300 || e.time > section.end - 1200) continue;
+				state = simulate(world, state, e.time, events);
+				if (state.dead) break;
+				for (const hold of mode === 'ship' ? [false, true] : [false]) {
+					const ride: { x: number; y: number; time: number }[] = [];
+					// (the button as it is then: let go, or held on)
+					const from = { ...state, used: [...state.used], held: hold, buffered: false };
+					const until = Math.min(section.end - 300, e.time + 1600);
+					if (simulate(world, from, until, [], { trace: ride }).dead) continue;
+					// Where it rode along a surface, the way well clear of that surface there
+					for (const p of ride) {
+						if (p.time < e.time + 250 || musicalRest(ctx.chart, p.time)) continue;
+						const c = columns.find((col) => col.x === Math.floor(p.x));
+						if (!c || c.spike || added.some((a) => a.c === c)) continue;
+						const side: 0 | 1 | -1 =
+							p.y - box.h - c.low < 0.05 ? 1 : c.high - (p.y + box.h) < 0.05 ? -1 : 0;
+						if (!side) continue;
+						const clear = room(c, side);
+						if (clear >= need) {
+							c.spike = side;
+							added.push({ c, spike: true, side });
+						} else if (clear >= 0.42) {
+							// (little room: a small spike, only what slides along touches it)
+							c.spike = side;
+							c.small = true;
+							added.push({ c, spike: true, side });
+						} else if (clear >= 0.85 && c.high - c.low >= 2.5) {
+							// (no room for a spike: a step in the surface it slides along)
+							if (side > 0) c.low += 0.5;
+							else c.high -= 0.5;
+							added.push({ c, spike: false, side });
+						} else continue;
+						changed = true;
+						break;
+					}
+				}
+			}
+			if (!changed) break;
+			build();
+			// Still played every way it may be: a spike in the way of one goes again
+			for (let k = 0; k < 16; k++) {
+				const failed = verify(settled);
+				if (!failed || known(failed)) break;
+				const gone = added.filter((a) => Math.abs(a.c.x + 0.5 - failed.x) < 3);
+				if (!gone.length) {
+					for (const a of added) undo(a);
+					added.length = 0;
+					build();
+					verify(settled);
+					return;
+				}
+				for (const a of gone) {
+					undo(a);
+					added.splice(added.indexOf(a), 1);
+				}
+				build();
+			}
+		}
+		if (added.length) used(ctx, `${mode}-unrested`);
 	}
 	// Every orb needed: one it gets through without (the press there a plain hop or switch)
 	// goes, so none is just in the air

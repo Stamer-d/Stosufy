@@ -6,6 +6,8 @@ const SCALE = 54 / 30;
  * Ground jump: half the speed-specific cube impulse. Holding cancels gravity
  * through two setter calls until the native 1.5 charge counter is exhausted.
  * releaseButton 0x1404f64c0 latches release; pressing again in the air cannot renew it.
+ * On the ground it jumps whenever the button is down, like the cube: held through a landing it
+ * jumps again at once, and a press made just before the landing isn't lost.
  */
 export function robotStep(
 	input: {
@@ -26,7 +28,7 @@ export function robotStep(
 		charge = input.charge,
 		active = input.active,
 		released = input.released;
-	const jumped = input.grounded && input.held && input.buffered;
+	const jumped = input.grounded && input.held;
 	if (jumped) {
 		v = q(f(f(input.gravity * f(f(cube.jump / SCALE) * f(0.5))) * (input.mini ? f(0.8) : 1)));
 		charge = 0;

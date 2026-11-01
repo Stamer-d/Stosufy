@@ -676,8 +676,10 @@ export function generateLevel(
 		const constructed = world.hazards.items.filter((h) => !oldHazards.has(h));
 		plan.sort((a, b) => a.time - b.time);
 		state = repair(world, plan, entry, sec);
-		// (the steered parts are checked as a person steers them: see builders/flight.ts)
-		if (sec.mode !== 'ship' && sec.mode !== 'wave' && sec.mode !== 'swing')
+		// (the flying parts are checked as a person plays them, each press a bit early or late on
+		// its own, by their builder: see builders/flight.ts. Taking things out of them here
+		// would open places to rest)
+		if (sec.mode === 'cube' || sec.mode === 'robot')
 			fairness(world, plan, entry, sec, preset, options.seed);
 		state = simulate(world, entry, sec.end, plan);
 		const removed = constructed.filter((h) => !world.hazards.items.includes(h)).length;
@@ -845,7 +847,16 @@ function removeNear(world: World, x: number, mode: Mode) {
 		if (mode === 'cube')
 			for (const slab of gone.filter((o) => o.style === 1))
 				upsideGone(world, slab.x0 - 3, slab.x1 + 1);
-	} else if (world.walls.items.some(near)) world.walls.removeIf(near);
+	} else if (world.walls.items.some(near)) {
+		// A wave corridor: wider just there (not gone: a wave part without walls is empty)
+		for (const walls of world.walls.items.filter(near))
+			walls.xs.forEach((wx, k) => {
+				if (wx < x - 2.5 || wx > x + 2.5) return;
+				walls.lo[k] -= 0.5;
+				walls.hi[k] += 0.5;
+			});
+		world.walls.touch();
+	}
 	else world.solids.removeIf(near);
 	// What lost its surface goes too
 	world.hazards.removeIf(
