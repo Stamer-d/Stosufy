@@ -316,8 +316,9 @@ function readBest(): Record<string, { normal: number; practice: number; attempts
 	}
 }
 
-export function bestKey(song: string, difficulty: Difficulty) {
-	return `${song}:${difficulty}`;
+/** Where a level's best progress is kept: its own for levels with other kinds of parts (`mark`) */
+export function bestKey(song: string, difficulty: Difficulty, mark = '') {
+	return mark ? `${song}~${mark}:${difficulty}` : `${song}:${difficulty}`;
 }
 
 export function bestOf(key: string) {
@@ -325,10 +326,12 @@ export function bestOf(key: string) {
 }
 
 /** The best progress on a beatmap set's levels at a difficulty, whichever of its maps made them */
-export function bestOfSet(setId: string | number, difficulty: Difficulty) {
+export function bestOfSet(setId: string | number, difficulty: Difficulty, mark = '') {
 	const best = { normal: 0, practice: 0, attempts: 0 };
 	for (const [key, entry] of Object.entries(readBest())) {
 		if (!key.startsWith(`${setId}:`) || !key.endsWith(`:${difficulty}`)) continue;
+		// (only those made with the same kinds of parts)
+		if (mark ? !key.includes(`~${mark}:`) : key.includes('~')) continue;
 		best.normal = Math.max(best.normal, entry.normal);
 		best.practice = Math.max(best.practice, entry.practice);
 		best.attempts = Math.max(best.attempts, entry.attempts);

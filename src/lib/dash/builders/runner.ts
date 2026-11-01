@@ -11,7 +11,16 @@
 //
 // The terrain always stands on the floor (no floating upper lanes), the spikes stand on it.
 
-import { Attempt, byIntensity, freshness, half, tap, used, type Context } from '../build';
+import {
+	Attempt,
+	byIntensity,
+	freshness,
+	gravityIn,
+	half,
+	tap,
+	used,
+	type Context
+} from '../build';
 import { composePhrases, musicalRest, phraseAt } from '../composition';
 import { hitAt } from '../audio';
 import {
@@ -149,6 +158,7 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 		if (
 			!ctx.simplify &&
 			preset.level >= 1 &&
+			gravityIn(ctx, sec.mode) &&
 			upsides < (preset.level >= 3 ? 2 : 1) &&
 			upsideTries < 5 &&
 			time > sec.start + 1500 &&

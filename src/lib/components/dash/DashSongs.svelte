@@ -10,8 +10,8 @@
 	import { bestOfSet } from '#lib/dash/game.ts';
 	import SongCover from '../SongCover.svelte';
 
-	/** @type {{ difficulty: import("#lib/dash/generate.ts").Difficulty }} */
-	let { difficulty } = $props();
+	/** @type {{ difficulty: import("#lib/dash/generate.ts").Difficulty, mark?: string }} */
+	let { difficulty, mark = '' } = $props();
 
 	let queue = $derived($songQueue.queue ?? []);
 	let tab = $state(($songQueue.queue?.length ?? 0) > 1 ? 'queue' : 'recent');
@@ -111,7 +111,7 @@
 		search?.focus();
 	}
 
-	const best = (song) => bestOfSet(song.id, difficulty).normal;
+	const best = (song) => bestOfSet(song.id, difficulty, mark).normal;
 </script>
 
 <div

@@ -2,7 +2,7 @@
 // from there as plain data.
 
 import { parseChart } from './chart';
-import { GENERATOR_VERSION, generateLevel, type Difficulty, type Level } from './generate';
+import { GENERATOR_VERSION, generateLevel, type Level, type LevelOptions } from './generate';
 import { World } from './physics';
 import type { SongSound } from './audio';
 
@@ -87,9 +87,10 @@ const cache = new Map<string, Promise<Level>>();
  */
 export function makeLevel(
 	content: string,
-	options: { difficulty: Difficulty; seed: string; duration: number; sound?: SongSound | null }
+	options: LevelOptions & { sound?: SongSound | null }
 ): Promise<Level> {
-	const key = `${GENERATOR_VERSION}:${options.seed}:${options.difficulty}:${Math.round(options.duration / 1000)}:${content.length}:${options.sound ? 'heard' : ''}`;
+	const kinds = `${options.modes?.join(',') ?? 'all'}/${options.gravity?.join(',') ?? 'all'}`;
+	const key = `${GENERATOR_VERSION}:${options.seed}:${options.difficulty}:${Math.round(options.duration / 1000)}:${content.length}:${options.sound ? 'heard' : ''}:${kinds}`;
 	if (!cache.has(key)) {
 		const made = new Promise<Level>((resolve, reject) => {
 			const w = getWorker();

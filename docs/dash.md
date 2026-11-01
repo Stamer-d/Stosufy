@@ -462,3 +462,24 @@ Nach Rückmeldung zum Spielen von 0.6.75. Alle Befunde habe ich an Bildern der g
   die Spikes. Noten, die mitten im Sprung liegen, werden übersprungen.
 - **Tests:** kein kleiner Wave mit 4x Tempo, Wave-Korridore (engste 10 %) mindestens 3 Blöcke, Orbs
   in Ship und Spider kommen vor und werden vom Plan auch benutzt.
+
+## 10. 0.6.79: Modi und Gravity selbst wählen
+
+Im Dash-Menü öffnet ein neuer Knopf (Zahnrad, neben dem Sound-Menü) eine Liste aller Modi mit zwei
+Schaltern (`DashModesMenu.svelte`, gespeichert auf dem Gerät in `modes.ts`):
+
+- **An:** Ob der Modus in den Leveln vorkommt. Der Cube bleibt immer an, jedes Level beginnt und
+  endet mit ihm. Welche Modi eine Stufe überhaupt hat, bleibt ihre Sache (Easy hat z. B. keinen Wave);
+  die Einstellung kann nur weglassen.
+- **Gravity:** Ob in diesem Modus Gravity-Portale vorkommen. Bei Cube und Robot heißt das: keine
+  Kopfüber-Passagen. Gravity-Orbs (blau, grün) in UFO und Ball sind Orbs und bleiben.
+
+Der Generator bekommt die Auswahl als `modes` und `gravity` (`generateLevel`, über den Worker); mit
+allem an ist das Level genau dasselbe wie ohne Einstellung. Levels mit anderen Einstellungen sind
+andere Levels: Ihre Bestleistung wird getrennt gespeichert (`bestKey` mit Kennung), damit z. B. ein
+Level ohne Wave nicht als 100 % des normalen zählt. Ein Punkt am Zahnrad zeigt, dass etwas
+abgeschaltet ist.
+
+Tests (`tests/dash/modes.test.ts`): abgeschaltete Modi kommen nie vor, nur Cube ergibt nur Cube, und
+beides bleibt durchspielbar; ohne Gravity keine Portale und kein Cube kopfüber; Gravity nur im Ship
+heißt Portale nur im Ship; Bestleistungen getrennt.

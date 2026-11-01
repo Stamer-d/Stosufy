@@ -255,7 +255,12 @@ export interface Context {
 	 * music does
 	 */
 	motifs: Map<string, string[]>;
+	/** The kinds of parts gravity may turn around in (all when not given) */
+	gravity?: ReadonlySet<string>;
 }
+
+/** Whether gravity may turn around in a kind of part (a player's setting) */
+export const gravityIn = (ctx: Context, mode: string) => !ctx.gravity || ctx.gravity.has(mode);
 
 /** A stretch of the level played from a state with some presses */
 export interface Check {

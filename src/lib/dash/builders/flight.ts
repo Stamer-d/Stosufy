@@ -26,6 +26,7 @@ import {
 import {
 	byIntensity,
 	clamp,
+	gravityIn,
 	jittered,
 	legalAround,
 	shuffleByWeight,
@@ -169,7 +170,11 @@ export function buildFlight(
 	// --- Gravity portals: on strong downbeats, upside down and back -------------------------
 	const flips: GravityPortal[] = [];
 	// (not right at a click: pressed a moment before or after the portal would go another way)
-	if (preset.level >= 1 && rng() < preset.flips * (mode === 'swing' ? 0.7 : 1)) {
+	if (
+		preset.level >= 1 &&
+		gravityIn(ctx, mode) &&
+		rng() < preset.flips * (mode === 'swing' ? 0.7 : 1)
+	) {
 		let gravity: 1 | -1 = -1;
 		let last = -Infinity;
 		let count = 0;

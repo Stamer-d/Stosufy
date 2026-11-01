@@ -16,6 +16,8 @@
 	import { chosenMapId, difficulties } from '#lib/gameplay/play.ts';
 	import DashSongs from './DashSongs.svelte';
 	import DashSoundMenu from './DashSoundMenu.svelte';
+	import DashModesMenu from './DashModesMenu.svelte';
+	import { allowedModes, dashModes, modesMark } from '#lib/dash/modes.ts';
 	import { dashOpen } from '#lib/dash/store.ts';
 	import { makeLevel } from '#lib/dash/level.ts';
 	import { hearAudio } from '#lib/dash/audio.ts';
@@ -132,6 +134,9 @@
 		const current = song;
 		const id = mapId;
 		const chosen = difficulty;
+		// (the kinds of parts chosen: another level)
+		const kinds = allowedModes($dashModes);
+		const mark = modesMark($dashModes);
 		void reload;
 		if (untrack(() => screen) === 'complete') {
 			stale = true;
@@ -173,14 +178,16 @@
 					difficulty: chosen,
 					seed: `${current.id}:${id}`,
 					duration,
-					sound
+					sound,
+					modes: kinds.modes,
+					gravity: kinds.gravity
 				});
 				if (cancelled) return;
 				const made = new DashGame(level);
 				made.practice = practice;
 				made.autoCheckpoints = autoCheckpoints;
 				game = made;
-				best = bestOfSet(current.id, chosen);
+				best = bestOfSet(current.id, chosen, mark);
 				screen = 'ready';
 			} catch (error) {
 				if (cancelled) return;
@@ -357,7 +364,7 @@
 
 	function finish() {
 		if (!game) return;
-		const key = bestKey(levelKey, difficulty);
+		const key = bestKey(levelKey, difficulty, modesMark($dashModes));
 		if (!game.auto) best = saveBest(key, 100, game.practice, game.attempt);
 		results = {
 			attempts: game.attempt,
@@ -517,7 +524,7 @@
 						playDashSound('death');
 						audio?.pause();
 						release();
-						const key = bestKey(levelKey, difficulty);
+						const key = bestKey(levelKey, difficulty, modesMark($dashModes));
 						if (!g.auto) best = saveBest(key, Math.floor(g.progress), g.practice, g.attempt);
 						clearTimeout(respawnTimer);
 						respawnTimer = setTimeout(respawn, RESPAWN);
@@ -673,7 +680,7 @@
 			>
 				<span class="icon-[mingcute--close-line] size-5"></span>
 			</button>
-			<DashSongs bind:this={songs} {difficulty} />
+			<DashSongs bind:this={songs} {difficulty} mark={modesMark($dashModes)} />
 			{#if screen === 'loading'}
 				<div
 					class="w-[min(30rem,100%)] h-[min(34rem,70vh)] grid place-items-center rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15"
@@ -765,6 +772,7 @@
 									Auto
 								</button>
 							{/if}
+							<DashModesMenu />
 							<DashSoundMenu />
 						</div>
 					</div>

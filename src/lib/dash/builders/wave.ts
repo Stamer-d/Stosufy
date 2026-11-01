@@ -14,7 +14,7 @@ import {
 	type Section,
 	type Walls
 } from '../physics';
-import { clamp, half, used, type Context } from '../build';
+import { clamp, gravityIn, half, used, type Context } from '../build';
 import type { DashNote } from '../chart';
 import { musicalPosition, musicalRest } from '../composition';
 import { hash } from '../build';
@@ -116,7 +116,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	 */
 	let gravity: 1 | -1 = 1;
 	let lastPortal = -Infinity;
-	let portalsLeft = preset.level >= 4 ? 2 : preset.level >= 2 ? 1 : 0;
+	let portalsLeft = !gravityIn(ctx, 'wave') ? 0 : preset.level >= 4 ? 2 : preset.level >= 2 ? 1 : 0;
 	const upsideDown: [number, number][] = [];
 	const turn = (at: number, portal = false) => {
 		up = !up;

@@ -562,11 +562,23 @@ function planParts(
 
 // --- The level ---------------------------------------------------------------------------
 
-export function generateLevel(
-	chart: DashChart,
-	options: { difficulty: Difficulty; seed: string; duration: number }
-): Level {
-	const preset = PRESETS[options.difficulty];
+export interface LevelOptions {
+	difficulty: Difficulty;
+	seed: string;
+	duration: number;
+	/** The kinds of parts it may have (the cube always): all of the difficulty's when not given */
+	modes?: Mode[];
+	/** The kinds of parts gravity portals come in: all when not given */
+	gravity?: Mode[];
+}
+
+export function generateLevel(chart: DashChart, options: LevelOptions): Level {
+	const allowed = options.modes;
+	const base = PRESETS[options.difficulty];
+	// (the player's choice of kinds of parts, of those the difficulty has; the cube always)
+	const preset: Preset = allowed
+		? { ...base, modes: base.modes.filter((m) => m === 'cube' || allowed.includes(m as Mode)) }
+		: base;
 	const rng = random(hash(`${options.seed}:${options.difficulty}`));
 	const own = new Set(chart.notes);
 	chart = { ...chart, notes: withBeats(chart) };
@@ -631,7 +643,8 @@ export function generateLevel(
 		chart,
 		seed: hash(`${options.seed}:${options.difficulty}`),
 		history: [],
-		motifs: new Map()
+		motifs: new Map(),
+		gravity: options.gravity ? new Set(options.gravity) : undefined
 	};
 	let state = startState(world, start);
 	const portals: Portal[] = [];
