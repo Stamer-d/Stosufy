@@ -409,7 +409,7 @@ Nach Rückmeldung zum Spielen von 0.6.75. Alle Befunde habe ich an Bildern der g
     unten über hängende Spikes. Ein Portal oder Orb dreht zurück. Geprüft wird mit allen
     Spielweisen, und jeder Druck muss nötig sein.
   - Gemessen auf drei echten Maps: Auf Extreme kommen Gravity-Wechsel in bis zu sieben Modi pro
-    Level vor (vorher in höchstens zwei).
+    Level vor (etwa 5–9 je Level, dazu Kopfüber-Passagen per blauem Orb).
 - **Zwei Parser-Fixes (`chart.ts`):**
   - Manche Maps nutzen absurde Tempopunkte als Effekt (gefunden in „Acid Rain [Aspire]“: eine
     Beat-Länge von 1e-289 ms). Jede Schleife über Beats lief dann praktisch endlos, und das Level
