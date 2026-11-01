@@ -595,6 +595,9 @@ export function generateLevel(
 				: preset.speeds[0];
 		if (!part.kiai && (part.energy < 0.45 || part.intensity < 0.2) && preset.level >= 1)
 			speedIndex = Math.max(0, speedIndex - 1);
+		// (the small wave, twice as steep, not at the top speeds)
+		if (part.mode === 'wave' && part.mini)
+			speedIndex = Math.min(speedIndex, preset.level >= 4 ? 3 : 2);
 		const speed = SPEEDS[speedIndex];
 		world.segments.push({ time: part.start, x, speed });
 		const x1 = x + ((part.end - part.start) / 1000) * speed;

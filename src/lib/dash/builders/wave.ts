@@ -27,8 +27,10 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	const box = hitbox('wave', section.mini);
 	// The small wave is steeper already (twice as far up or down for a moment late): a bit
 	// wider, and fewer turns
-	const width = preset.wave * (section.mini ? 1.3 : 1);
-	const gap = preset.waveGap * (section.mini ? 1.8 : 1);
+	// (and the faster, the wider: the same mistake is further off there)
+	const fast = 1 + Math.max(0, section.speedIndex - 1) * 0.1;
+	const width = preset.wave * (section.mini ? 1.55 : 1) * fast;
+	const gap = preset.waveGap * (section.mini ? 2.2 : 1) * (section.speedIndex >= 3 ? 1.15 : 1);
 
 	// The turns: notes far enough apart, put on the grid
 	const turns: number[] = [];
@@ -53,7 +55,12 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	// quarter beats) on the way, at the band's edge.
 	const low = floor + box.h;
 	const high = top - box.h;
-	const room = Math.max(0.6, width + 0.45);
+	// (and a band high enough that it needn't turn at its edges all the time: the corridor's
+	// walls may come down to the floor at the lowest corners, not along it)
+	const room = Math.max(
+		0.6,
+		Math.min(width + 0.45, (top - floor - (section.mini ? 5.5 : 4.5)) / 2 - box.h)
+	);
 	const bandLow = Math.min(low + room, (floor + top) / 2 - 0.6);
 	const bandHigh = Math.max(high - room, (floor + top) / 2 + 0.6);
 	const sway =
@@ -103,18 +110,25 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		const t = world.timeAt(px);
 		return world.xAt(entry.time + Math.round((t - entry.time) / STEP) * STEP);
 	};
-	/** Upside down (a gravity portal): holding takes it down then, letting go up */
+	/**
+	 * Upside down (a gravity portal): holding takes it down then, letting go up. Only for a
+	 * bar or two, then a portal back, and the corridor a bit wider meanwhile
+	 */
 	let gravity: 1 | -1 = 1;
 	let lastPortal = -Infinity;
-	let portalsLeft = preset.level >= 2 ? preset.level - 1 : 0;
+	let portalsLeft = preset.level >= 4 ? 2 : preset.level >= 2 ? 1 : 0;
+	const upsideDown: [number, number][] = [];
 	const turn = (at: number, portal = false) => {
 		up = !up;
 		lastTurn = at;
 		if (portal) {
 			// A gravity portal turns it without a press (just before the step it turns from)
 			gravity = gravity > 0 ? -1 : 1;
+			if (gravity < 0) {
+				portalsLeft--;
+				upsideDown.push([at, Infinity]);
+			} else upsideDown[upsideDown.length - 1][1] = at;
 			lastPortal = at;
-			portalsLeft--;
 			world.gravityPortals.add({ x: at - 0.001, y, gravity, x0: at - 0.6, x1: at + 0.6 });
 			used(ctx, 'wave-gravity');
 			return;
@@ -124,9 +138,13 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	};
 	/** A turn on a note that's a strong downbeat may be a gravity portal (now and then) */
 	const portalHere = (at: number) => {
-		if (portalsLeft <= 0 || at - lastPortal < 6 * section.speed * 0.5) return false;
 		const time = world.timeAt(at);
 		const pos = musicalPosition(ctx.chart, time);
+		const barX = ((pos.point.beatLength * pos.point.meter) / 1000) * section.speed;
+		// Upside down: back after a bar, on a downbeat, or after two bars at the latest
+		if (gravity < 0)
+			return at - lastPortal >= barX && (at - lastPortal >= 2 * barX || pos.inBar < 0.1);
+		if (portalsLeft <= 0 || at - lastPortal < 3 * barX) return false;
 		if (pos.bar % 2 !== 0 || pos.inBar > 0.1 || musicalRest(ctx.chart, time)) return false;
 		return rng() < preset.flips * (0.35 + (section.intensity ?? 0.5) * 0.4);
 	};
@@ -222,7 +240,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	const styles = xs.map((x) => {
 		const pos = musicalPosition(ctx.chart, world.timeAt(x));
 		const slot = hash(`${ctx.seed ?? 0}:${pos.point.meter}:${Math.floor(pos.bar / 2) % 2}`) % 4;
-		return preset.level >= 2 && (section.intensity ?? 0.5) > 0.5
+		return preset.level >= 4 && (section.intensity ?? 0.5) > 0.6
 			? ['even', 'narrow', 'flatTop', 'flatBottom'][slot]
 			: ['even', 'even', 'flatTop', 'flatBottom'][slot];
 	});
@@ -234,8 +252,9 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 			const opening =
 				clamp((walls.x0 + 3.5 - px) / 3.5, 0, 1) + clamp((px - (walls.x1 - 3)) / 3, 0, 1);
 			// (a chokepoint: narrower for a phrase, as tight as the wave allows)
-			const narrow = styles[k] === 'narrow' ? Math.min(0.35, width - box.h * 1.35 - 0.45) : 0;
-			const w = width - Math.max(0, narrow) + (extra.get(k) ?? 0) + opening * 4;
+			const narrow = styles[k] === 'narrow' ? Math.min(0.25, width - box.h * 1.35 - 0.6) : 0;
+			const flipped = upsideDown.some(([a, b]) => px >= a - 1.5 && px <= b + 1.5) ? 0.45 : 0;
+			const w = width - Math.max(0, narrow) + flipped + (extra.get(k) ?? 0) + opening * 4;
 			// Straight stretches (long gaps) get a bit more room
 			const gapLeft = k > 0 ? px - xs[k - 1] : 0;
 			const roomy = gapLeft > 4 ? 0.25 : 0;
@@ -275,7 +294,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	// corner (by up to half a block of the way: twice as high for the steeper small wave) but
 	// sees where the corridor goes (so the errors don't add up); where it crashes, wider
 	// (a player of the harder levels is less sloppy: the corridor isn't widened for as much)
-	const SLOPPY = (0.6 - preset.level * 0.05) * slope;
+	const SLOPPY = (0.6 - preset.level * 0.02) * slope;
 	const person = (seed: number) => {
 		let r = seed * 7919 + 17;
 		const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647) * 2 - 1;

@@ -428,3 +428,37 @@ Nach Rückmeldung zum Spielen von 0.6.75. Alle Befunde habe ich an Bildern der g
   Gravity-Wechsel in mindestens vier Modi; Kopfüber-Passagen im Cube durchspielbar und richtig
   abgestützt. Absurde Tempopunkte: Das Level wird trotzdem gebaut.
   Dazu alle bisherigen Prüfungen: durchspielbar, jedes Fenster ≥ Toleranz.
+
+## 9. 0.6.78: leichterer Wave, Orbs in Ship und Spider
+
+- **Wave leichter**, vor allem der kleine bei hohem Tempo:
+  - Breitere Korridore auf Hard, Insane und Extreme (halbe Höhe 1,85 / 1,6 / 1,35 statt 1,6 / 1,3 /
+    1,05). Der kleine Wave bekommt ×1,55 statt ×1,3, und jede Tempostufe über 1x macht 10 % breiter.
+  - Mehr Zeit zwischen zwei Knicken.
+  - Der kleine Wave kommt auf Hard und Insane höchstens mit 2x, auf Extreme mit 3x Tempo.
+  - Das Band, in dem der Pfad zickzackt, ist mindestens 4,5 Blöcke hoch (klein 5,5), damit er nicht
+    ständig am Rand knicken muss.
+  - Engstellen gibt es nur noch auf Extreme.
+  - Gravity-Teile: ein Portal hinein, nach ein bis zwei Takten automatisch eins zurück, und der
+    Korridor ist dazwischen breiter.
+  - Gemessen auf vier echten Maps (vorher → nachher):
+
+    | Stufe   | Wave  | Korridor Median | engste 10 % | Knicke/s  |
+    | ------- | ----- | --------------- | ----------- | --------- |
+    | extreme | groß  | 4,3 → 5,1       | 2,9 → 3,5   | 5,7 → 5,5 |
+    | extreme | klein | 4,9 → 7,1       | 2,0 → 5,0   | 8,8 → 7,5 |
+    | insane  | groß  | 4,5 → 5,8       | 2,7 → 4,3   | 6,2 → 6,3 |
+    | insane  | klein | 5,3 → 7,5       | 2,7 → 5,7   | 8,9 → 6,9 |
+    | hard    | groß  | 5,2 → 5,7       | 3,2 → 4,4   | 6,9 → 7,1 |
+
+- **Orbs im Ship:** Auf starken Noten liegt ein Orb auf dem Weg. Ein gelber schießt das Ship sofort
+  2–2,5 Blöcke hoch (20 Blöcke/s; durch Halten erreicht es nur 14,4 und auch die erst nach einer
+  Weile), ein schwarzer drückt es ebenso schnell runter, und der Tunnel folgt dem Knick. Jeder Orb
+  wird geprüft: Ohne ihn, mit normalem Steuern, darf der Abschnitt nicht zu schaffen sein, sonst
+  fällt er weg. Auch Orbs, die der fertige Weg nicht berührt, werden entfernt.
+- **Orbs im Spider:** Auf manchen Klicks steht ein gelber oder roter Orb auf dem Boden. Der Spider
+  springt dann im Bogen über Spikes auf seiner Seite, statt zu teleportieren. Genau gegenüber dem
+  Absprung liegt ein Spike: Wer stattdessen normal klickt, landet darauf; wer nicht klickt, läuft in
+  die Spikes. Noten, die mitten im Sprung liegen, werden übersprungen.
+- **Tests:** kein kleiner Wave mit 4x Tempo, Wave-Korridore (engste 10 %) mindestens 3 Blöcke, Orbs
+  in Ship und Spider kommen vor und werden vom Plan auch benutzt.

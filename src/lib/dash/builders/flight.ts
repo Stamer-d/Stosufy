@@ -71,7 +71,9 @@ function flyShip(
 	until: number,
 	target: (x: number) => number,
 	music: number[] = [],
-	delay = 0
+	delay = 0,
+	/** The ship's orbs: a fresh press there (and the first time, the orb put where it is then) */
+	orbAt: ShipOrb[] = []
 ) {
 	const { world } = ctx;
 	const s = copyState(from);
@@ -80,6 +82,8 @@ function flyShip(
 	let beat = 0;
 	/** A turn it decided on, when it comes (-1: none) */
 	let pending = -1;
+	let orb = 0;
+	while (orb < orbAt.length && orbAt[orb].time < s.time) orb++;
 	while (s.time + STEP <= until + 1e-6 && !s.dead) {
 		const next = s.time + STEP;
 		const speed = world.sectionAt(s.time).speed;
@@ -103,6 +107,18 @@ function flyShip(
 				lastChange = next;
 				pending = -1;
 			}
+		} else if (orb < orbAt.length && next >= orbAt[orb].time - (s.held ? STEP : 0)) {
+			// An orb: let go a step before if held, then pressed on it
+			if (s.held) {
+				press(s, false);
+				events.push({ time: next, down: false });
+			} else {
+				orbAt[orb].place?.(world.xAt(next), s.y);
+				press(s, true);
+				events.push({ time: next, down: true });
+				lastChange = next;
+				orb++;
+			}
 		} else {
 			// (upside down, holding pulls it down)
 			const wanted = clamp((ahead - s.y) * 6, -7, 7);
@@ -117,6 +133,13 @@ function flyShip(
 	}
 	if (s.held) events.push({ time: until, down: false });
 	return { end: s, events };
+}
+
+/** An orb on the ship's way: when, and (the first flight) how to put it there */
+interface ShipOrb {
+	time: number;
+	place?: (x: number, y: number) => void;
+	orb?: Orb;
 }
 
 export function buildFlight(
@@ -191,6 +214,9 @@ export function buildFlight(
 	// --- The way through ---------------------------------------------------------------
 	let events: InputEvent[] = [];
 	const orbs: Orb[] = [];
+	const shipOrbs: ShipOrb[] = [];
+	/** The spider's jumps on an orb (from the ground) */
+	const jumpOrbs: { time: number; x: number; y: number; gravity: 1 | -1; orb: Orb }[] = [];
 	let follow: (x: number) => number = () => top / 2;
 	const steered = mode === 'ship' || mode === 'swing';
 	const music = mode === 'swing' ? onTheMusic(ctx, section, notes) : [];
@@ -227,8 +253,54 @@ export function buildFlight(
 				}
 			return keys[keys.length - 1].y;
 		};
-		follow = path;
-		events = flyShip(ctx, entry, section.end, path, music).events;
+		// Orbs on the ship's way, on strong notes: a yellow one throws it up at once, a black one
+		// down, and the way goes with it (holding alone isn't that fast: without the orb it's
+		// into the wall)
+		if (mode === 'ship' && preset.level >= 1) {
+			const most = Math.min(4, Math.round(preset.orbs * (0.4 + intensity * 0.5)));
+			let last = -Infinity;
+			let shift = 0;
+			const jumps: { x: number; by: number }[] = [];
+			for (const note of notes) {
+				if (shipOrbs.length >= most) break;
+				const x = world.xAt(note.time);
+				if (x < startX + 4 || x > endX - 6 || note.time - last < 1500) continue;
+				if (!strongAt(note) || musicalRest(ctx.chart, note.time) || rng() < 0.35) continue;
+				const y = path(x) + shift;
+				const size = preset.level >= 2 ? 2.5 : 2;
+				const up = y + size < top - 2 && (y < (floor + top) / 2 || y - size < floor + 2);
+				if (!up && y - size < floor + 2) continue;
+				const kind: OrbKind = up ? 'yellow' : 'black';
+				const by = up ? size : -size;
+				shift += by;
+				jumps.push({ x, by });
+				last = note.time;
+				const so: ShipOrb = { time: note.time };
+				so.place = (ox, oy) => {
+					const id = world.id();
+					so.orb = world.orbs.add({
+						id,
+						kind,
+						x: ox,
+						y: Math.round(oy * 2) / 2,
+						x0: ox - 0.6,
+						x1: ox + 0.6
+					});
+					used(ctx, `ship-orb-${kind}`);
+				};
+				shipOrbs.push(so);
+			}
+			if (jumps.length)
+				follow = (x: number) => {
+					let y = path(x);
+					// (each jump in a moment: a fifth of a block on)
+					for (const j of jumps) y += j.by * clamp((x - j.x) / (speed * 0.12), 0, 1);
+					return clamp(y, floor + 1.6, top - 1.6);
+				};
+			else follow = path;
+		} else follow = path;
+		events = flyShip(ctx, entry, section.end, follow, music, 0, shipOrbs).events;
+		for (const o of shipOrbs) o.place = undefined;
 	} else {
 		// The clicks; the ball and the spider only switch on a surface, else a blue orb does it.
 		// Some clicks take an orb, for what the music does there (see musicalOrb)
@@ -240,6 +312,7 @@ export function buildFlight(
 		let placed = 0;
 		let lastOrb = -Infinity;
 		let previous: DashNote | null = null;
+		let airborneUntil = -Infinity;
 		let s = entry;
 		for (const time of times) {
 			const at = simulate(world, s, time, events);
@@ -253,7 +326,27 @@ export function buildFlight(
 				used(ctx, `orb-${kind}`);
 			};
 			let hold = mode === 'ufo' ? 70 : 90;
-			if ((mode === 'ball' || mode === 'spider') && !at.grounded) {
+			// (the notes while it's in the air after an orb jump go by)
+			if (time < airborneUntil) continue;
+			if (
+				mode === 'spider' &&
+				at.grounded &&
+				preset.level >= 1 &&
+				placed < most &&
+				time - lastOrb > 900 &&
+				section.end - time > 1500 &&
+				rng() < 0.35 + intensity * 0.3
+			) {
+				// An orb on the ground: a jump over spikes on its side, where switching sides
+				// would land it on a spike (the orb must be used)
+				const room = top - floor;
+				const red = !!note && strongAt(note) && room >= 6 && rng() < 0.4;
+				add(red ? 'red' : 'yellow');
+				airborneUntil = time + (red ? 820 : 660);
+				jumpOrbs.push({ time, x: at.x, y: at.y, gravity: at.gravity, orb: orbs[orbs.length - 1] });
+				placed++;
+				lastOrb = time;
+			} else if ((mode === 'ball' || mode === 'spider') && !at.grounded) {
 				if (mode === 'spider') continue;
 				// (green on an accent: it flips and jumps)
 				add(note && strongAt(note) ? 'green' : 'blue');
@@ -521,6 +614,42 @@ export function buildFlight(
 	}
 	pickSpikes();
 	timingSpikes();
+	orbJumpSpikes();
+
+	/**
+	 * The spider's orb jumps: spikes on its side under the jump (without the press it runs into
+	 * them), and one on the other side just past where it is then (a plain switch lands on it)
+	 */
+	function orbJumpSpikes() {
+		for (const j of jumpOrbs) {
+			const trace = runs[0];
+			const k = trace.findIndex((p) => p.time >= j.time + 100);
+			if (k < 0) continue;
+			// Where it's down on its side again
+			let land = -1;
+			for (let n = k; n < trace.length && trace[n].time < j.time + 1500; n++)
+				if (Math.abs(trace[n].y - j.y) < 0.05) {
+					land = n;
+					break;
+				}
+			if (land < 0) continue;
+			const side: 1 | -1 = j.gravity > 0 ? 1 : -1;
+			const from = Math.floor(j.x + 1.3);
+			const to = Math.floor(trace[land].x - 1.5);
+			let put = 0;
+			for (let cx = from; cx <= to && put < 3; cx++) {
+				const c = columns.find((col) => col.x === cx);
+				if (!c || c.spike) continue;
+				// (in the middle of the jump, two or three)
+				if (cx < (from + to) / 2 - 1.5 || cx > (from + to) / 2 + 1.5) continue;
+				c.spike = side;
+				put++;
+			}
+			const other = columns.find((col) => col.x === Math.floor(j.x + 0.8));
+			if (other && !other.spike) other.spike = side > 0 ? -1 : 1;
+		}
+		if (jumpOrbs.length) used(ctx, 'spider-orb-jump');
+	}
 
 	/**
 	 * Stairs for the spider and the ball: while it's on one side, the other side moves up or down
@@ -665,8 +794,15 @@ export function buildFlight(
 	};
 	build();
 	if (stairs()) {
-		// The ways again, over the stairs, and the spikes for them
+		// The ways again, over the stairs, and the spikes for them (the orbs on the ground on the
+		// surface where it is now)
 		build();
+		for (const j of jumpOrbs) {
+			const c = columns.find((col) => col.x === Math.floor(j.x));
+			if (!c) continue;
+			j.y = j.gravity > 0 ? c.low + box.h : c.high - box.h;
+			j.orb.y = j.y;
+		}
 		runs.length = 0;
 		for (const inputs of variants) {
 			const trace: { x: number; y: number; time: number }[] = [];
@@ -675,6 +811,7 @@ export function buildFlight(
 		}
 		pickSpikes();
 		timingSpikes();
+		orbJumpSpikes();
 		build();
 	}
 	const saws: Hazard[] = [];
@@ -750,7 +887,9 @@ export function buildFlight(
 					const high = c.high - (c.spike === -1 ? 1 : 0);
 					return clamp(follow(x), low + 1.2, high - 1.2);
 				},
-				music
+				music,
+				0,
+				shipOrbs
 			);
 			events = flown.events;
 			if (flown.end.dead) failed = flown.end;
@@ -931,6 +1070,27 @@ export function buildFlight(
 			}
 		}
 		if (added.length) used(ctx, `${mode}-unrested`);
+	}
+	// The ship's orbs: each one needed. Flown without it (and without the press for it), it
+	// mustn't get through, else it goes
+	if (shipOrbs.length) {
+		for (const so of [...shipOrbs]) {
+			if (!so.orb) {
+				shipOrbs.splice(shipOrbs.indexOf(so), 1);
+				continue;
+			}
+			world.orbs.remove(so.orb);
+			const others = shipOrbs.filter((o) => o !== so);
+			if (!flyShip(ctx, entry, section.end, follow, music, 0, others).end.dead)
+				shipOrbs.splice(shipOrbs.indexOf(so), 1);
+			else world.orbs.add(so.orb);
+		}
+		const flown = flyShip(ctx, entry, section.end, follow, music, 0, shipOrbs);
+		if (!flown.end.dead) events = flown.events;
+		// (one the way it's flown now doesn't touch goes too)
+		const touched = simulate(world, entry, section.end, events).used;
+		for (const so of shipOrbs)
+			if (so.orb && !touched.includes(so.orb.id)) world.orbs.remove(so.orb);
 	}
 	// Every orb needed: one it gets through without (the press there a plain hop or switch)
 	// goes, so none is just in the air; unless a press a bit early or late needs it

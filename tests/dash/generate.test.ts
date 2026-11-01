@@ -17,7 +17,7 @@ import {
 import { PRESETS } from '../../src/lib/dash/build';
 import { hearSong, type SongSound } from '../../src/lib/dash/audio';
 import { levelData, levelFromData } from '../../src/lib/dash/level';
-import { simulate, startState, STEP } from '../../src/lib/dash/physics';
+import { simulate, startState, STEP, wallAt } from '../../src/lib/dash/physics';
 import { checkLevel, type LevelReport } from '../../src/lib/dash/validate';
 import { musicalRest } from '../../src/lib/dash/composition';
 import { makeAudio, makeOsu, makeSound, type SongOptions } from './fixtures';
@@ -409,4 +409,47 @@ test('gravity portals come up in many kinds of parts on the hard levels', async 
 					modes.add(w.sectionAt(w.timeAt(o.x)).mode);
 		}
 	assert.ok(modes.size >= 4, `gravity turned in ${[...modes]}`);
+});
+
+test('the wave keeps room: no small wave at the top speed, corridors of a few blocks', async () => {
+	const rooms: number[] = [];
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
+			const w = (await level(name, difficulty)).world;
+			for (const s of w.sections.filter((s) => s.mode === 'wave')) {
+				if (s.mini)
+					assert.ok(s.speedIndex <= 3, `${name} ${difficulty}: small wave at ${s.speedIndex}`);
+				for (const walls of w.walls.items.filter((x) => x.x1 > s.x0 && x.x0 < s.x1))
+					for (let x = walls.x0 + 4; x < walls.x1 - 4; x++) {
+						const a = wallAt(walls, x);
+						rooms.push(a.hi - a.lo);
+					}
+			}
+		}
+	rooms.sort((a, b) => a - b);
+	assert.ok(rooms.length > 50, `${rooms.length} places`);
+	assert.ok(
+		rooms[Math.floor(rooms.length * 0.1)] >= 3,
+		`narrowest tenth ${rooms[Math.floor(rooms.length * 0.1)]}`
+	);
+});
+
+test('ship and spider parts have orbs that must be used', async () => {
+	let ship = 0;
+	let spider = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			const used = simulate(w, startState(w, l.start), l.end, l.plan).used;
+			for (const o of w.orbs.items) {
+				const mode = w.sectionAt(w.timeAt(o.x)).mode;
+				if (mode !== 'ship' && mode !== 'spider') continue;
+				// (the plan uses it)
+				assert.ok(used.includes(o.id), `${name} ${difficulty}: an unused ${mode} orb`);
+				if (mode === 'ship') ship++;
+				else spider++;
+			}
+		}
+	assert.ok(ship >= 2 && spider >= 2, `${ship} ship orbs, ${spider} spider orbs`);
 });
