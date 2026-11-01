@@ -85,9 +85,11 @@ export function parseChart(content: string): DashChart | null {
 		})
 		.filter((p) => isFinite(p.time) && isFinite(p.beatLength))
 		.sort((a, b) => a.time - b.time);
+	// (some maps use absurd tempos for effects: a beat of 1e-289 ms, or of years. Those aren't
+	// the song's beat, and counting beats on them would never end: the grid before goes on)
 	const timing = points
-		.filter((p) => p.uninherited && p.beatLength > 0)
-		.map(({ time, beatLength, meter }) => ({ time, beatLength, meter }));
+		.filter((p) => p.uninherited && p.beatLength >= 50 && p.beatLength <= 10000)
+		.map(({ time, beatLength, meter }) => ({ time, beatLength, meter: Math.max(1, meter) }));
 	if (!timing.length) timing.push({ time: 0, beatLength: 500, meter: 4 });
 
 	const kiai: { start: number; end: number }[] = [];
@@ -173,6 +175,8 @@ export function parseChart(content: string): DashChart | null {
 			note.kind = 'hold';
 			note.end = Math.max(time, Number((p[5] ?? '').split(':')[0]) || time);
 		}
+		// (a slider, spinner or hold of minutes is a mapper's effect, not a held note)
+		note.end = Math.min(note.end, time + 30000);
 		notes.push(note);
 	}
 	notes.sort((a, b) => a.time - b.time);

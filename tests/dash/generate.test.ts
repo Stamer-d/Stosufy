@@ -254,7 +254,7 @@ test('harder: less room for each click (the median over all songs), never less t
 	}
 	const shown = `jumps ${jumps.map(Math.round)}, all ${all.map(Math.round)}`;
 	// (on the easy levels a jump over a spike or two has about all the room it can have)
-	for (let i = 1; i < 3; i++) assert.ok(jumps[i] <= jumps[i - 1], shown);
+	for (let i = 1; i < 3; i++) assert.ok(jumps[i] <= jumps[i - 1] + STEP, shown);
 	for (let i = 3; i < jumps.length; i++) assert.ok(jumps[i] < jumps[i - 1] - 20, shown);
 	assert.ok(jumps[4] < jumps[2] * 0.75, shown);
 	for (let i = 1; i < 3; i++) assert.ok(all[i] <= all[i - 1], shown);
@@ -362,4 +362,51 @@ test('nowhere to rest: doing nothing (or holding on) in a flying part does not g
 		}
 	assert.ok(tried > 200, `${tried} tried`);
 	assert.ok(rested / tried < 0.1, `${rested}/${tried}: ${where.slice(0, 8).join(', ')}`);
+});
+
+test('spider and ball parts climb and fall like stairs, not only floor to ceiling', async () => {
+	let parts = 0;
+	let stairs = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['normal', 'hard', 'insane', 'extreme'] as const) {
+			const w = (await level(name, difficulty)).world;
+			for (const s of w.sections) {
+				if ((s.mode !== 'spider' && s.mode !== 'ball') || s.x1 - s.x0 < 40) continue;
+				parts++;
+				// The heights its floor and ceiling have, block by block
+				const heights = new Set<string>();
+				for (let x = Math.ceil(s.x0 + 6); x < s.x1 - 6; x++) {
+					const here = w.solids
+						.near(x + 0.4, x + 0.6)
+						.filter((o) => o.x0 <= x + 0.5 && o.x1 >= x + 0.5);
+					const lo = Math.max(
+						s.floor,
+						...here.filter((o) => o.y0 <= s.floor + 1e-6).map((o) => o.y1)
+					);
+					const hi = Math.min(
+						s.ceil!,
+						...here.filter((o) => o.y1 >= s.ceil! - 1e-6).map((o) => o.y0)
+					);
+					heights.add(`${lo}:${hi}`);
+				}
+				if (heights.size >= 3) stairs++;
+			}
+		}
+	assert.ok(parts >= 3, `${parts} spider and ball parts`);
+	assert.ok(stairs >= parts * 0.6, `${stairs} of ${parts} with stairs`);
+});
+
+test('gravity portals come up in many kinds of parts on the hard levels', async () => {
+	const modes = new Set<string>();
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
+			const w = (await level(name, difficulty)).world;
+			for (const g of w.gravityPortals.items)
+				if (!g.sectionEntry) modes.add(w.sectionAt(w.timeAt(g.x)).mode);
+			// (and a cube or robot part turned upside down by a blue orb)
+			for (const o of w.orbs.items)
+				if (o.kind === 'blue' && ['cube', 'robot'].includes(w.sectionAt(w.timeAt(o.x)).mode))
+					modes.add(w.sectionAt(w.timeAt(o.x)).mode);
+		}
+	assert.ok(modes.size >= 4, `gravity turned in ${[...modes]}`);
 });

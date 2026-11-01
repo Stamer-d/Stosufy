@@ -103,11 +103,32 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		const t = world.timeAt(px);
 		return world.xAt(entry.time + Math.round((t - entry.time) / STEP) * STEP);
 	};
-	const turn = (at: number) => {
+	/** Upside down (a gravity portal): holding takes it down then, letting go up */
+	let gravity: 1 | -1 = 1;
+	let lastPortal = -Infinity;
+	let portalsLeft = preset.level >= 2 ? preset.level - 1 : 0;
+	const turn = (at: number, portal = false) => {
 		up = !up;
 		lastTurn = at;
+		if (portal) {
+			// A gravity portal turns it without a press (just before the step it turns from)
+			gravity = gravity > 0 ? -1 : 1;
+			lastPortal = at;
+			portalsLeft--;
+			world.gravityPortals.add({ x: at - 0.001, y, gravity, x0: at - 0.6, x1: at + 0.6 });
+			used(ctx, 'wave-gravity');
+			return;
+		}
 		// (just after the step it turns from: the press counts for the step after it)
-		events.push({ time: world.timeAt(at) + 0.001, down: up });
+		events.push({ time: world.timeAt(at) + 0.001, down: gravity > 0 ? up : !up });
+	};
+	/** A turn on a note that's a strong downbeat may be a gravity portal (now and then) */
+	const portalHere = (at: number) => {
+		if (portalsLeft <= 0 || at - lastPortal < 6 * section.speed * 0.5) return false;
+		const time = world.timeAt(at);
+		const pos = musicalPosition(ctx.chart, time);
+		if (pos.bar % 2 !== 0 || pos.inBar > 0.1 || musicalRest(ctx.chart, time)) return false;
+		return rng() < preset.flips * (0.35 + (section.intensity ?? 0.5) * 0.4);
 	};
 	/** Straight on to a place: turning at the band's edge (on a quarter beat) on the way */
 	const advance = (toX: number) => {
@@ -157,13 +178,15 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		// A turn on every note (now and then one goes by, for a longer stroke)
 		const b = band(tx);
 		const towardEdge = up ? y >= b.hi - 0.3 : y <= b.lo + 0.3;
-		if (!inBand || towardEdge || rng() > 0.08) turn(tx);
+		if (!inBand || towardEdge || rng() > 0.08) turn(tx, inBand && portalHere(tx));
 		inBand = true;
 	}
 	// (out to the end: no more turns of its own, none past the end into the next part)
+	const lastInBand = lastTurn;
 	inBand = false;
 	advance(world.xAt(section.end) + 1);
-	if (up) events.push({ time: section.end - 1, down: false });
+	// (let go at the end, whichever way that is)
+	if (gravity > 0 ? up : !up) events.push({ time: section.end - 1, down: false });
 
 	if (turns.length < 2) {
 		plan.push(...events);
@@ -228,7 +251,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 				// (from the first turn on: before it, it's still coming in along the floor)
 				const ys = xs
 					.slice(a, b + 1)
-					.filter((px) => px >= first)
+					.filter((px) => px >= first && px <= lastInBand)
 					.map(pathAt);
 				if (!ys.length) ys.push(pathAt(px));
 				// (flat at the way's highest or lowest there; a place that needed more room keeps it)
@@ -279,7 +302,9 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 			const a = points[k - 1];
 			const b = points[k];
 			const dir = Math.sign(b.y - a.y);
-			const hold = dir > 0 ? true : dir < 0 ? false : b.y > (floor + top) / 2;
+			const rise = dir > 0 ? true : dir < 0 ? false : b.y > (floor + top) / 2;
+			// (upside down, holding takes it down)
+			const hold = s.gravity > 0 ? rise : !rise;
 			if (hold !== s.held) press(s, hold);
 			step(world, s, next);
 		}

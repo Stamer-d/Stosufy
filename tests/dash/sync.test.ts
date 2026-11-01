@@ -167,3 +167,17 @@ test("the level's clicks are on the song's notes, its beats on the beatmap's", a
 		}
 	}
 });
+
+test('absurd tempo points (a mapper effect) are not the beat, and a level is still made', () => {
+	const song = { bpm: 150, length: 40, style: 'mixed' as const };
+	const text = makeOsu(song).replace(
+		'[TimingPoints]',
+		'[TimingPoints]\n12000,1e-289,4,2,0,70,1,0\n12100,400,4,2,0,70,1,0\n20000,6e+298,4,2,0,70,1,0\n20050,400,4,2,0,70,1,0'
+	);
+	const chart = parseChart(text)!;
+	assert.ok(chart.timing.every((p) => p.beatLength >= 50 && p.beatLength <= 10000));
+	const started = Date.now();
+	const level = generateLevel(chart, { difficulty: 'hard', seed: 'tempo', duration: 40000 });
+	assert.ok(Date.now() - started < 20000, 'made in time');
+	assert.ok(level.plan.length > 10);
+});

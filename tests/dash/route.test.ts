@@ -49,10 +49,19 @@ for (const mode of ['cube', 'robot'] as const)
 			'planned elevated terrain'
 		);
 		assert.ok(
-			w.solids.items.every((s) => s.style === 0 && s.y0 === 0),
-			'terrain supported from the floor'
+			w.solids.items.every(
+				(s) => (s.style === 0 && s.y0 === 0) || (s.style === 1 && turnedUnder(w, s))
+			),
+			'terrain supported from the floor (or a slab it turns upside down under)'
 		);
-		assert.ok(w.hazards.items.every((h) => h.kind === 'saw' || h.dir === 1));
+		assert.ok(
+			w.hazards.items.every(
+				(h) =>
+					h.kind === 'saw' ||
+					h.dir === 1 ||
+					w.solids.items.some((s) => s.style === 1 && Math.abs(s.y0 - h.y) < 1e-6)
+			)
+		);
 		assert.deepEqual(unsupportedSpikes(w), []);
 		assert.equal(simulate(w, startState(w, 0), 30000, plan).dead, false);
 		assert.equal(
@@ -61,6 +70,15 @@ for (const mode of ['cube', 'robot'] as const)
 			'the route cannot be bypassed by running below it'
 		);
 	});
+
+/** A slab a cube part turns upside down under: a gravity portal or a blue orb takes it up there */
+function turnedUnder(w: ReturnType<typeof world>, slab: { x0: number; x1: number }) {
+	return (
+		w.gravityPortals.items.some(
+			(p) => p.gravity === -1 && p.x >= slab.x0 - 2 && p.x <= slab.x0 + 0.5
+		) || w.orbs.items.some((o) => o.kind === 'blue' && o.x >= slab.x0 - 2 && o.x <= slab.x0 + 0.5)
+	);
+}
 
 test('generated ground-mode sections keep all their spikes supported after final repair', () => {
 	const song = { bpm: 174, length: 70, style: 'intense' as const, sliders: 6 };
@@ -72,10 +90,50 @@ test('generated ground-mode sections keep all their spikes supported after final
 		assert.ok(
 			l.world.hazards.items
 				.filter((h) => ['cube', 'robot'].includes(l.world.sectionAt(l.world.timeAt(h.x)).mode))
-				.every((h) => h.kind === 'saw' || h.dir === 1),
+				.every(
+					(h) =>
+						h.kind === 'saw' ||
+						h.dir === 1 ||
+						// (hanging under a slab it's turned upside down under)
+						l.world.solids.items.some(
+							(s) =>
+								s.style === 1 &&
+								Math.abs(s.y0 - h.y) < 1e-6 &&
+								s.x0 <= h.x &&
+								s.x1 >= h.x &&
+								turnedUnder(l.world as ReturnType<typeof world>, s)
+						)
+				),
 			difficulty
 		);
 	}
+});
+
+test('cube and robot parts turn upside down now and then: a gravity portal in, one out', () => {
+	let upside = 0;
+	for (const [bpm, style] of [
+		[174, 'intense'],
+		[128, 'mixed'],
+		[100, 'calm']
+	] as const) {
+		const song = { bpm, length: 70, style, sliders: 6 };
+		const chart = parseChart(makeOsu(song))!;
+		chart.sound = makeSound(song);
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
+			const l = generateLevel(chart, { difficulty, seed: 'upside', duration: 70000 });
+			for (const slab of l.world.solids.items.filter((s) => s.style === 1)) {
+				const sec = l.world.sectionAt(l.world.timeAt(slab.x0));
+				if (sec.mode !== 'cube' && sec.mode !== 'robot') continue;
+				if (turnedUnder(l.world as ReturnType<typeof world>, slab)) upside++;
+			}
+			assert.equal(
+				simulate(l.world, startState(l.world, l.start), l.end, l.plan).dead,
+				false,
+				`${bpm} ${difficulty}`
+			);
+		}
+	}
+	assert.ok(upside >= 2, `${upside} upside down stretches`);
 });
 
 test('the route planner retains automatic pads and held-note dash bridges', () => {

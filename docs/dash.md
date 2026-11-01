@@ -356,3 +356,68 @@ pro Sekunde als Hard; es ist enger, nicht dichter (wie bei handgebauten Levels, 
 - Gemessen ohne Audio (nur Beatmaps); mit Audio ändern sich Akzente und Intensität.
 - Die Generierung dauert länger (lange Maps auf dem Rechner hier ~3–5 s statt ~2–4 s, im Worker).
 - Nicht in der laufenden App gespielt (Tauri und osu!-Login fehlen hier).
+
+## 8. 0.6.76: Robot, Wave, keine Rastplätze, Spider-Treppen
+
+Nach Rückmeldung zum Spielen von 0.6.75. Alle Befunde habe ich an Bildern der generierten Abschnitte
+(Blöcke, Spikes, geplanter Weg) und mit Messungen geprüft.
+
+- **Robot:** Nach einem vollen Sprung ging kein sofortiger zweiter. Ein Robot-Sprung verlangte einen
+  _neuen_ Druck, und ein Druck kurz vor der Landung wurde bei der Landung verworfen. **Jetzt** springt
+  der Robot am Boden, sobald gedrückt ist, wie der Cube: gehalten durch die Landung gleich wieder,
+  ein Druck kurz davor geht nicht verloren (`native-robot.ts`, Tests in `robot.test.ts`).
+- **Wave:**
+  - Der Pfad lief oft bis an Boden oder Decke und rutschte dort entlang. Bei flachen Korridorseiten
+    war dann der Boden selbst die Wand, und die ist sicher: Man konnte einfach unten bleiben.
+  - **Jetzt** zickzackt der Wave in einem Band mit Abstand zu Boden und Decke. Ist der Weg bis zur
+    nächsten Note zu lang, knickt er am Bandrand auf einem Viertelbeat. Das Band steigt und fällt
+    über vier Takte, auf den harten Stufen gibt es Engstellen.
+  - Zwei Fehler dabei behoben: Knicke lagen zwischen den Physikschritten und summierten sich über
+    viele Knicke zu bis zu 2 Blöcken Abweichung; jetzt liegt jeder Knick auf einem Schritt. Und ein
+    Knick nach dem Abschnittsende fiel in den nächsten Abschnitt. Die Reparatur in `generate.ts`
+    hat in solchen Fällen den ganzen Korridor gelöscht; jetzt weitet sie ihn nur an der Stelle.
+- **Keine Rastplätze (UFO, Swing, Ship):**
+  - Nach dem Bauen wird von jedem Klick aus „nichts tun“ gespielt, beim Ship auch „dauerhaft
+    halten“. Rutscht der Spieler dann an einer Fläche entlang, kommt dorthin ein Spike. Wo dafür
+    kein Platz ist, ein kleiner Spike, sonst eine halbe Stufe. Danach wird alles wieder mit allen
+    Spielweisen geprüft.
+  - Der nachträgliche Fairness-Pass entfernte in Flugteilen Hindernisse und öffnete so wieder
+    Rastplätze. Er läuft jetzt nur noch für Cube und Robot; die Flug-Builder prüfen selbst mit
+    einzeln verschobenen Drücken.
+  - Gemessen auf drei echten Maps, Anteil der Klicks, nach denen 1,6 s Nichtstun überlebt
+    (vorher → nachher):
+
+    | Stufe   | Ship     | Swing     | UFO       | Wave     |
+    | ------- | -------- | --------- | --------- | -------- |
+    | normal  | 16 → 0 % | –         | 26 → 11 % | 0 → 0 %  |
+    | extreme | 32 → 0 % | 33 → 10 % | 13 → 8 %  | 11 → 0 % |
+
+- **Spider und Ball als Treppen:** Bisher waren Boden und Decke flach, und es ging nur hoch und
+  runter. Jetzt bewegt sich, während der Spieler auf einer Seite ist, die andere Seite eine bis drei
+  Stufen hoch oder runter, mitten im Aufenthalt und weg von Absprung und Landung. So ist jeder Wechsel
+  anders weit; wo die Musik lauter wird, eher nach oben. Spike-Reihen haben 1–3 Spikes statt immer
+  gleich. Beim Swing ist der Ausschlag auf den harten Stufen größer.
+- **Gravity-Portale in jedem Modus:** Bisher gab es sie nur in Ship, UFO, Ball und Spider, und dort
+  selten: Sie mussten auf einer Note liegen, und in 280 ms Nähe durfte kein Klick sein, was in
+  schnellen Teilen fast nie zutraf. Neu:
+  - _Flugteile_ (jetzt auch Swing): Portale auf den Taktanfängen jedes zweiten Takts, auch ohne Note
+    dort, mit 160 ms Abstand zu Klicks.
+  - _Wave_: Ab Hard wird ab und zu ein Knick auf einem starken Taktanfang zum Portal. Der Wave dreht
+    dort ohne Klick, danach ist die Steuerung umgekehrt (halten = runter).
+  - _Cube und Robot_: Kopfüber-Passagen. Ein Portal (ab Hard manchmal ein blauer Orb, also ein
+    Klick) dreht die Schwerkraft, der Spieler läuft unter einer Platte und springt auf den Noten nach
+    unten über hängende Spikes. Ein Portal oder Orb dreht zurück. Geprüft wird mit allen
+    Spielweisen, und jeder Druck muss nötig sein.
+  - Gemessen auf drei echten Maps: Auf Extreme kommen Gravity-Wechsel in bis zu sieben Modi pro
+    Level vor (vorher in höchstens zwei).
+- **Zwei Parser-Fixes (`chart.ts`):**
+  - Manche Maps nutzen absurde Tempopunkte als Effekt (gefunden in „Acid Rain [Aspire]“: eine
+    Beat-Länge von 1e-289 ms). Jede Schleife über Beats lief dann praktisch endlos, und das Level
+    wurde nie fertig. Das betraf auch die bisherigen Versionen (gemessen: nach 90 s abgebrochen).
+    Jetzt zählen Tempopunkte außerhalb 6–1200 BPM nicht als Takt; das Raster davor läuft weiter.
+  - Aus solchen Effekten entstanden auch Slider von Minuten Länge. Noten dauern jetzt höchstens 30 s.
+- **Tests:** Robot springt gehalten weiter und nimmt einen Druck kurz vor der Landung mit. Kein
+  Rastplatz in Flugteilen (unter 10 % auf den Testsongs). Spider- und Ball-Abschnitte haben Stufen.
+  Gravity-Wechsel in mindestens vier Modi; Kopfüber-Passagen im Cube durchspielbar und richtig
+  abgestützt. Absurde Tempopunkte: Das Level wird trotzdem gebaut.
+  Dazu alle bisherigen Prüfungen: durchspielbar, jedes Fenster ≥ Toleranz.

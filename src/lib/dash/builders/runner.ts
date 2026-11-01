@@ -11,10 +11,11 @@
 //
 // The terrain always stands on the floor (no floating upper lanes), the spikes stand on it.
 
-import { Attempt, byIntensity, freshness, half, used, type Context } from '../build';
+import { Attempt, byIntensity, freshness, half, tap, used, type Context } from '../build';
 import { composePhrases, musicalRest, phraseAt } from '../composition';
 import { hitAt } from '../audio';
 import {
+	cubeAt,
 	hitbox,
 	simulate,
 	STEP,
@@ -97,6 +98,9 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 			.near(entry.x - box.w, entry.x + box.w)
 			.find((s) => Math.abs(s.y1 - (entry.y - box.h)) < 0.02) ?? null;
 	let previous: { from: PlayerState; variants: InputEvent[][] } | null = null;
+	/** Upside down stretches so far in this part, and tries */
+	let upsides = 0;
+	let upsideTries = 0;
 	/** What was built for each rhythm: the same rhythm later, the same kind of thing again */
 	const motifKey = (rhythm: string) => `run:${sec.speedIndex}:${Number(sec.mini)}:${rhythm}`;
 
@@ -140,6 +144,27 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 		const room = (times[i + 1] ?? sec.end) - time;
 		let motifs = ctx.motifs.get(motifKey(phrase.rhythm));
 		const wanted = motifs?.[position];
+
+		// --- Now and then a phrase upside down (a gravity portal in, one out) ----------------
+		if (
+			!ctx.simplify &&
+			preset.level >= 1 &&
+			upsides < (preset.level >= 3 ? 2 : 1) &&
+			upsideTries < 5 &&
+			time > sec.start + 1500 &&
+			sec.end - time > 3200 &&
+			(position === 0 || rng() < 0.35) &&
+			rng() < preset.flips * (0.3 + intensity * 0.5)
+		) {
+			upsideTries++;
+			const last = upside(i, at, height);
+			if (last !== null) {
+				upsides++;
+				i = last;
+				previous = null;
+				continue;
+			}
+		}
 
 		// --- How it takes off: the notes after it in the air first (each an orb) --------------
 		const launches: Launch[] = [];
@@ -336,6 +361,124 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 		world.solids.touch();
 	}
 	return simulate(world, entry, sec.end, plan);
+
+	// --- Upside down ---------------------------------------------------------------------------
+
+	/**
+	 * A phrase upside down: on click i a gravity portal (or on the harder levels a blue orb, a
+	 * press) turns gravity around, up under a slab; the clicks after it jump (down) over spikes
+	 * hanging from it; the last one (a portal, or a blue orb) turns it back down onto the ground,
+	 * where small spikes wait for who didn't turn. Played on time, all early and late, short and
+	 * long, each a bit off; every press must be needed. Returns the last click it took (null: it
+	 * didn't fit).
+	 */
+	function upside(i: number, at: PlayerState, h: number): number | null {
+		const start = times[i];
+		const longest = Math.min(1800 + preset.level * 900, sec.end - 1200 - start);
+		let j = i;
+		while (j + 1 < times.length && times[j + 1] - start <= longest) j++;
+		if (j < i + 2) return null;
+		const end = times[j];
+		const x = at.x;
+		const endX = world.xAt(end);
+		if (endX + 8 > exitX) return null;
+		// After turning back it falls to the ground: the clicks while it falls are left out
+		let last = j;
+		while (last + 1 < times.length && times[last + 1] < end + 700) last++;
+		const cube = cubeAt(sec.speedIndex);
+		const air = ((2 * cube.jump) / cube.gravity) * (sec.mini ? 0.8 : 1);
+		const high = h + (sec.mini ? 3 : 4) + (preset.level >= 3 && rng() < 0.5 ? 1 : 0);
+		const length = robot ? 160 : 90;
+		const a = new Attempt(world, exitX);
+		const presses: number[] = [];
+		const portal = (px: number, gravity: 1 | -1) => {
+			const p = { x: px, y: h + 2.5, gravity, x0: px - 0.6, x1: px + 0.6 };
+			a.change(
+				() => world.gravityPortals.add(p),
+				() => world.gravityPortals.remove(p),
+				px
+			);
+		};
+		// In
+		const inByOrb = preset.level >= 2 && rng() < 0.35;
+		if (inByOrb) {
+			a.orb('blue', half(x), h + box.h);
+			presses.push(start);
+		} else portal(x, -1);
+		// The slab, from above where it turns to past where it turns back
+		a.solid({ x0: Math.floor(x) + 1, x1: Math.ceil(endX) + 2, y0: high, y1: high + 1, style: 1 });
+		// Out
+		const outByOrb = preset.level >= 2 && rng() < 0.4;
+		if (outByOrb) {
+			a.orb('blue', half(endX), high - box.h);
+			presses.push(end);
+		} else portal(endX, 1);
+		// Who doesn't turn around runs into these
+		a.spikes(Math.ceil(x + 2), Math.floor(endX - 1), h, 1, 'small');
+		const taps = () => presses.flatMap((t) => tap(t, length)).sort((p, q) => p.time - q.time);
+		const withPlan = (inputs: InputEvent[]) => [...plan, ...inputs].sort((p, q) => p.time - q.time);
+		// Upside down: jumps (down) over spikes hanging from the slab, on the clicks between
+		let jumps = 0;
+		for (const c of times.slice(i + 1, j)) {
+			if (c + air * 1000 + 150 > end) break;
+			const s = simulate(world, state, c, withPlan(taps()));
+			if (s.dead || !s.grounded || s.gravity > 0 || Math.abs(s.y - (high - box.h)) > 0.05) continue;
+			const mid = s.x + (speed * air) / 2;
+			const count = !robot && preset.level >= 2 && rng() < 0.45 ? 2 : 1;
+			const center = count % 2 ? Math.floor(mid) + 0.5 : Math.round(mid);
+			for (let k = 0; k < count; k++)
+				a.spike(center + k - (count - 1) / 2, high, -1, robot ? 'small' : 'spike');
+			presses.push(c);
+			presses.sort((p, q) => p - q);
+			jumps++;
+		}
+		const until = end + 750;
+		const shifted = (shift: (k: number) => number, hold: number) =>
+			withPlan(presses.flatMap((t, k) => tap(t + shift(k), hold)));
+		const variants = [
+			withPlan(taps()),
+			...[-tolerance, tolerance].flatMap((d) =>
+				[length - 30, length + 80].map((l) => shifted(() => d, l))
+			),
+			...[1, 2, 3, 4, 5].map((seed) =>
+				shifted((k) => Math.sin(seed * 12.9898 + k * 78.233) * tolerance * 0.75, length)
+			)
+		];
+		// (never long without pressing in it, from the press before to the click after)
+		const before = plan.reduce(
+			(t, e) => (e.down && e.time < start ? Math.max(t, e.time) : t),
+			-1e9
+		);
+		const marks = [
+			Math.max(before, start - 1500),
+			...presses,
+			outByOrb ? end : (times[last + 1] ?? sec.end)
+		].sort((p, q) => p - q);
+		const ok =
+			jumps > 0 &&
+			marks.every((t, k) => k === 0 || t - marks[k - 1] <= 1700) &&
+			a.legal() &&
+			variants.every((inputs) => !simulate(world, state, until, inputs).dead);
+		// Not without pressing, nor without turning around (the orb in)
+		const needed =
+			ok &&
+			simulate(world, state, until + 1000, plan).dead &&
+			(!inByOrb ||
+				simulate(
+					world,
+					state,
+					until + 1000,
+					withPlan(presses.slice(1).flatMap((t) => tap(t, length)))
+				).dead);
+		if (!ok || !needed) {
+			a.revert();
+			return null;
+		}
+		plan.push(...taps());
+		plan.sort((p, q) => p.time - q.time);
+		used(ctx, inByOrb || outByOrb ? 'upside-orb' : 'upside-portal');
+		return last;
+	}
 
 	// --- One jump ----------------------------------------------------------------------------
 

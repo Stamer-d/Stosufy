@@ -856,8 +856,7 @@ function removeNear(world: World, x: number, mode: Mode) {
 				walls.hi[k] += 0.5;
 			});
 		world.walls.touch();
-	}
-	else world.solids.removeIf(near);
+	} else world.solids.removeIf(near);
 	// What lost its surface goes too
 	world.hazards.removeIf(
 		(h) => near({ x0: h.x0 - 2, x1: h.x1 + 2 }) && !legalAround(world, h.x0, h.x1)

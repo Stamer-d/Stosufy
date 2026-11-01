@@ -145,29 +145,44 @@ export function buildFlight(
 
 	// --- Gravity portals: on strong downbeats, upside down and back -------------------------
 	const flips: GravityPortal[] = [];
-	// (not near a click: pressed a moment before or after the portal would go another way)
-	if (mode !== 'swing' && preset.level >= 1 && rng() < preset.flips) {
+	// (not right at a click: pressed a moment before or after the portal would go another way)
+	if (preset.level >= 1 && rng() < preset.flips * (mode === 'swing' ? 0.7 : 1)) {
 		let gravity: 1 | -1 = -1;
 		let last = -Infinity;
 		let count = 0;
-		for (const note of notes) {
+		// On the downbeats of every other bar (a note there, or the beat itself), the strong ones
+		// first
+		const downbeats: number[] = [];
+		for (const point of ctx.chart.timing) {
+			const bar = point.beatLength * point.meter;
+			const until = Math.min(
+				section.end,
+				ctx.chart.timing.find((p) => p.time > point.time)?.time ?? Infinity
+			);
+			for (
+				let t = point.time + Math.max(0, Math.ceil((section.start - point.time) / bar)) * bar;
+				t < until;
+				t += bar
+			)
+				downbeats.push(t);
+		}
+		for (const t of downbeats.sort((p, q) => p - q)) {
 			if (count >= preset.level) break;
-			const x = world.xAt(note.time);
-			if (x < startX + 4 || x > endX - 6 || note.time - last < 2400) continue;
-			if (beatStrength(ctx.chart.timing, note.time) < 1 && !(note.sound & 4)) continue;
-			const pos = musicalPosition(ctx.chart, note.time);
+			const x = world.xAt(t);
+			if (x < startX + 4 || x > endX - 6 || t - last < 2400) continue;
+			const pos = musicalPosition(ctx.chart, t + 1);
 			if (
 				pos.bar % 2 !== 0 ||
-				pos.inBar > 0.1 ||
-				musicalRest(ctx.chart, note.time) ||
-				clicks.some((c) => Math.abs(c - note.time) < 280)
+				musicalRest(ctx.chart, t) ||
+				clicks.some((c) => Math.abs(c - t) < 160) ||
+				rng() < 0.25
 			)
 				continue;
 			flips.push(
 				world.gravityPortals.add({ x, y: (floor + top) / 2, gravity, x0: x - 0.6, x1: x + 0.6 })
 			);
 			gravity = gravity > 0 ? -1 : 1;
-			last = note.time;
+			last = t;
 			count++;
 		}
 		if (count) used(ctx, 'gravity');
@@ -486,7 +501,8 @@ export function buildFlight(
 			if (!strong.has(c.x)) continue;
 			if (lowRoom >= highRoom && lowRoom > spikeRoom) c.spike = 1;
 			else if (highRoom > spikeRoom) c.spike = -1;
-			if (c.spike) run = preset.level >= 2 ? 2 : 1;
+			// (rows of one to three, by chance)
+			if (c.spike) run = Math.floor(rng() * (preset.level >= 2 ? 3 : 2));
 		}
 	};
 	function roomAbove(c: Column) {
@@ -505,6 +521,66 @@ export function buildFlight(
 	}
 	pickSpikes();
 	timingSpikes();
+
+	/**
+	 * Stairs for the spider and the ball: while it's on one side, the other side moves up or down
+	 * a step or a few (in the middle of its stay there, away from where it got there and where it
+	 * leaves), so the switches go different distances and the surfaces climb and fall like
+	 * stairs, with the music (up where it gets more intense). False when nothing was changed.
+	 */
+	function stairs() {
+		if ((mode !== 'spider' && mode !== 'ball') || preset.level < 1 || !columns.length) return false;
+		const middle = (floor + top) / 2;
+		// Where it is on which side (the ball's way across counts to the side it's going to)
+		const stays: { x0: number; x1: number; ceiling: boolean }[] = [];
+		for (const p of runs[0]) {
+			if (p.x < startX || p.x > endX) continue;
+			const ceiling = p.y > middle;
+			const last = stays[stays.length - 1];
+			if (last && last.ceiling === ceiling) last.x1 = p.x;
+			else stays.push({ x0: p.x, x1: p.x, ceiling });
+		}
+		const gapMin = mode === 'spider' ? 3 : 3.5;
+		const most = preset.level >= 3 ? 3 : 2;
+		const reach = Math.min(4, Math.floor((top - floor - gapMin) / 2));
+		const margin = 1.2 + (speed * tolerance * 1.5) / 1000;
+		let low = floor;
+		let high = top;
+		let changed = false;
+		for (const stay of stays) {
+			const from = stay.x0 + margin + (mode === 'ball' ? speed * 0.25 : 0);
+			const to = stay.x1 - margin;
+			if (to - from < 2 || musicalRest(ctx.chart, world.timeAt((from + to) / 2))) continue;
+			// (now and then the same height again: not every stay a step)
+			if (rng() < 0.25) continue;
+			const at = Math.round((from + to) / 2);
+			const energy = ctx.chart.sound
+				? loudness(ctx.chart.sound, world.timeAt(at) - 400, world.timeAt(at) + 400) - 0.5
+				: 0;
+			const size = 1 + Math.floor(rng() * most);
+			const way = rng() < 0.5 + energy * 0.6 ? 1 : -1;
+			// (up or down a step; where that's past how far it may go, the other way)
+			const move = (now: number, lowest: number, highest: number, by: number) => {
+				const next = clamp(now + by, lowest, highest);
+				return next !== now ? next : clamp(now - by, lowest, highest);
+			};
+			if (stay.ceiling) {
+				// On the ceiling: the floor moves
+				const next = move(low, floor, Math.min(floor + reach, high - gapMin), way * size);
+				if (next === low) continue;
+				low = next;
+				for (const c of columns) if (c.x >= at) c.low = low;
+			} else {
+				const next = move(high, Math.max(top - reach, low + gapMin), top, -way * size);
+				if (next === high) continue;
+				high = next;
+				for (const c of columns) if (c.x >= at) c.high = high;
+			}
+			changed = true;
+		}
+		if (changed) used(ctx, `${mode}-stairs`);
+		return changed;
+	}
 
 	/**
 	 * The ball and the spider switch from one side to the other on a click: a spike on the side it
@@ -588,6 +664,19 @@ export function buildFlight(
 		}
 	};
 	build();
+	if (stairs()) {
+		// The ways again, over the stairs, and the spikes for them
+		build();
+		runs.length = 0;
+		for (const inputs of variants) {
+			const trace: { x: number; y: number; time: number }[] = [];
+			simulate(world, entry, section.end, inputs, { trace });
+			runs.push(trace);
+		}
+		pickSpikes();
+		timingSpikes();
+		build();
+	}
 	const saws: Hazard[] = [];
 	if (style === 'open' || (close > 0.35 && mode !== 'spider' && mode !== 'swing'))
 		for (const note of notes) {
