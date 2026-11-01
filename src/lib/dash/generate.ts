@@ -42,11 +42,14 @@ import { removeUnsupportedSpikes } from './geometry';
 import { buildRunner } from './builders/runner';
 import { buildFlight } from './builders/flight';
 import { buildWave } from './builders/wave';
+import { buildBlocks } from './builders/blocks';
+import { buildShip } from './builders/ship';
+import { drumClicks } from './rhythm';
 
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-2.2091-route2';
+export const GENERATOR_VERSION = 'gd-3.0-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -265,6 +268,18 @@ function cubeClicks(chart: DashChart, notes: DashNote[], sec: Section, preset: P
 		orbsBefore = orbs;
 	}
 	return clicks;
+}
+
+/**
+ * The clicks of a cube or robot part made of building blocks: on the drums (see rhythm.ts), on
+ * the easiest levels a whole jump apart (nothing else takes a click there), on normal at least
+ * half of one (an orb in the air takes the one between)
+ */
+function runnerClicks(chart: DashChart, notes: DashNote[], sec: Section, preset: Preset) {
+	const cube = cubeAt(sec.speedIndex);
+	const air = ((2 * cube.jump) / cube.gravity) * (sec.mini ? 0.8 : 1) * 1000;
+	const least = preset.level === 0 ? air + 60 : preset.level === 1 ? air * 0.5 : 0;
+	return drumClicks(chart, notes, preset, sec.start, sec.end, least);
 }
 
 /** Notes at least `gap` (s) apart, the stronger one of two close ones */
@@ -572,6 +587,11 @@ export interface LevelOptions {
 	modes?: Mode[];
 	/** The kinds of parts gravity portals come in: all when not given */
 	gravity?: Mode[];
+	/**
+	 * How the cube, robot and ship parts are made: from building blocks on the drums (the
+	 * default), or the older way, from the notes ('classic')
+	 */
+	generator?: 'blocks' | 'classic';
 }
 
 export function generateLevel(chart: DashChart, options: LevelOptions): Level {
@@ -582,6 +602,7 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		? { ...base, modes: base.modes.filter((m) => m === 'cube' || allowed.includes(m as Mode)) }
 		: base;
 	const rng = random(hash(`${options.seed}:${options.difficulty}`));
+	const blocks = options.generator !== 'classic';
 	const own = new Set(chart.notes);
 	chart = { ...chart, notes: withBeats(chart) };
 	const notes = chart.notes;
@@ -674,9 +695,13 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		const oldHazards = new Set(world.hazards.items);
 		const oldHistory = [...ctx.history];
 		const oldMotifs = new Map([...ctx.motifs].map(([key, value]) => [key, [...value]]));
-		if (sec.mode === 'cube' || sec.mode === 'robot')
+		if ((sec.mode === 'cube' || sec.mode === 'robot') && blocks)
+			state = buildBlocks(ctx, sec, runnerClicks(chart, inside, sec, preset), state);
+		else if (sec.mode === 'cube' || sec.mode === 'robot')
 			state = buildRunner(ctx, sec, cubeClicks(chart, inside, sec, preset), state);
 		else if (sec.mode === 'wave') state = buildWave(ctx, sec, inside, state);
+		else if (sec.mode === 'ship' && blocks)
+			state = buildShip(ctx, sec, drumClicks(chart, inside, preset, sec.start, sec.end), state);
 		else {
 			// The UFO and swing click often, the ball and spider like the cube
 			const gap =
@@ -697,7 +722,9 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		// (the flying parts are checked as a person plays them, each press a bit early or late on
 		// its own, by their builder: see builders/flight.ts. Taking things out of them here
 		// would open places to rest)
-		if (sec.mode === 'cube' || sec.mode === 'robot')
+		// (the blocks are played that way as they're put in: taking things out of them here would
+		// leave presses for nothing)
+		if ((sec.mode === 'cube' || sec.mode === 'robot') && !blocks)
 			fairness(world, plan, entry, sec, preset, options.seed);
 		state = simulate(world, entry, sec.end, plan);
 		const removed = constructed.filter((h) => !world.hazards.items.includes(h)).length;
@@ -713,12 +740,14 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 				rng: random(hash(`${options.seed}:${sec.index}:recompose`)),
 				preset: { ...preset, chain: 0, height: Math.min(preset.height, 3) }
 			};
-			buildRunner(simpler, sec, cubeClicks(chart, inside, sec, simpler.preset), entry);
+			if (blocks)
+				buildBlocks(simpler, sec, runnerClicks(chart, inside, sec, simpler.preset), entry);
+			else buildRunner(simpler, sec, cubeClicks(chart, inside, sec, simpler.preset), entry);
 			ctx.history = simpler.history;
 			ctx.motifs = simpler.motifs;
 			plan.sort((a, b) => a.time - b.time);
 			state = repair(world, plan, entry, sec);
-			fairness(world, plan, entry, sec, preset, options.seed);
+			if (!blocks) fairness(world, plan, entry, sec, preset, options.seed);
 			state = simulate(world, entry, sec.end, plan);
 		}
 		// Never left dead for the parts after it: what's in the way goes, else the part is cleared

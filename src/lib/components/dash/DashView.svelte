@@ -180,7 +180,8 @@
 					duration,
 					sound,
 					modes: kinds.modes,
-					gravity: kinds.gravity
+					gravity: kinds.gravity,
+					generator: kinds.generator
 				});
 				if (cancelled) return;
 				const made = new DashGame(level);

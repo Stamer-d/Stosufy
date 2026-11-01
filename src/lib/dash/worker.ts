@@ -7,21 +7,23 @@ import { levelData } from './level';
 import type { SongSound } from './audio';
 
 self.onmessage = (event: MessageEvent) => {
-	const { id, content, difficulty, seed, duration, sound, modes, gravity } = event.data as {
-		id: number;
-		content: string;
-		difficulty: Difficulty;
-		seed: string;
-		duration: number;
-		sound?: SongSound | null;
-		modes?: Mode[];
-		gravity?: Mode[];
-	};
+	const { id, content, difficulty, seed, duration, sound, modes, gravity, generator } =
+		event.data as {
+			id: number;
+			content: string;
+			difficulty: Difficulty;
+			seed: string;
+			duration: number;
+			sound?: SongSound | null;
+			modes?: Mode[];
+			gravity?: Mode[];
+			generator?: 'blocks' | 'classic';
+		};
 	try {
 		const chart = parseChart(content);
 		if (!chart) throw new Error('This beatmap has no notes');
 		chart.sound = sound;
-		const level = generateLevel(chart, { difficulty, seed, duration, modes, gravity });
+		const level = generateLevel(chart, { difficulty, seed, duration, modes, gravity, generator });
 		self.postMessage({ id, level: levelData(level) });
 	} catch (error) {
 		self.postMessage({ id, error: error instanceof Error ? error.message : String(error) });

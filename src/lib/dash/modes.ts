@@ -20,13 +20,16 @@ export interface DashModeSettings {
 	off: Mode[];
 	/** Kinds of parts without gravity portals (the cube and robot: never upside down) */
 	noGravity: Mode[];
+	/** The cube, robot and ship parts made the older way (from the notes), not from blocks */
+	classic?: boolean;
 }
 
 /** The kinds a level may have, and those with gravity portals (for the generator) */
 export function allowedModes(settings: DashModeSettings) {
 	return {
 		modes: ALL_MODES.filter((m) => m === 'cube' || !settings.off.includes(m)),
-		gravity: ALL_MODES.filter((m) => !settings.noGravity.includes(m))
+		gravity: ALL_MODES.filter((m) => !settings.noGravity.includes(m)),
+		generator: settings.classic ? ('classic' as const) : ('blocks' as const)
 	};
 }
 
@@ -37,9 +40,11 @@ export function allowedModes(settings: DashModeSettings) {
 export function modesMark(settings: DashModeSettings) {
 	const off = ALL_MODES.filter((m) => m !== 'cube' && settings.off.includes(m));
 	const still = ALL_MODES.filter((m) => settings.noGravity.includes(m));
-	if (!off.length && !still.length) return '';
 	const letters = (list: Mode[]) => list.map((m) => ALL_MODES.indexOf(m)).join('');
-	return `m${letters(off)}g${letters(still)}`;
+	return (
+		(off.length || still.length ? `m${letters(off)}g${letters(still)}` : '') +
+		(settings.classic ? 'c' : '')
+	);
 }
 
 const KEY = 'stosufy-dash-modes';
@@ -50,7 +55,11 @@ function load(): DashModeSettings {
 		const read = JSON.parse(localStorage.getItem(KEY) ?? '{}');
 		const valid = (list: unknown) =>
 			Array.isArray(list) ? (list.filter((m) => ALL_MODES.includes(m)) as Mode[]) : [];
-		return { off: valid(read.off).filter((m) => m !== 'cube'), noGravity: valid(read.noGravity) };
+		return {
+			off: valid(read.off).filter((m) => m !== 'cube'),
+			noGravity: valid(read.noGravity),
+			classic: read.classic === true
+		};
 	} catch {
 		return { ...DEFAULTS };
 	}

@@ -18,7 +18,9 @@
 		spider: 'Spider'
 	};
 
-	let changed = $derived($dashModes.off.length > 0 || $dashModes.noGravity.length > 0);
+	let changed = $derived(
+		$dashModes.off.length > 0 || $dashModes.noGravity.length > 0 || !!$dashModes.classic
+	);
 
 	/** Turns a kind of part on or off, or its gravity portals */
 	function toggle(list, mode) {
@@ -50,6 +52,27 @@
 			transition:fly={{ y: -6, duration: 150 }}
 		>
 			<div class="flex items-center justify-between px-1 text-xs text-white/55">
+				<span class="font-bold uppercase tracking-wider">Levels</span>
+			</div>
+			<div class="flex p-0.5 rounded-full bg-white/10 text-sm" role="radiogroup">
+				{#each [{ classic: false, label: 'Blocks' }, { classic: true, label: 'Classic' }] as { classic, label } (label)}
+					<button
+						class="flex-1 h-7 rounded-full transition cursor-pointer {!!$dashModes.classic ===
+						classic
+							? 'bg-primary-400 text-white font-semibold'
+							: 'text-white/60 hover:text-white'}"
+						role="radio"
+						aria-checked={!!$dashModes.classic === classic}
+						title={classic
+							? 'Cube, robot and ship parts made from the notes, the older way'
+							: 'Cube, robot and ship parts built from blocks on the drums'}
+						onclick={() => dashModes.update((s) => ({ ...s, classic }))}
+					>
+						{label}
+					</button>
+				{/each}
+			</div>
+			<div class="flex items-center justify-between px-1 pt-1 text-xs text-white/55">
 				<span class="font-bold uppercase tracking-wider">Parts</span>
 				<span class="flex gap-6 pr-1 font-bold uppercase tracking-wider">
 					<span>On</span>
@@ -98,13 +121,14 @@
 				</div>
 			{/each}
 			<p class="px-1 pt-1 text-xs text-white/40">
-				Gravity in the cube and robot: stretches upside down. Which parts a difficulty has stays its
-				own (easy has no wave). Levels with other settings keep their own best.
+				Blocks: the cube, robot and ship parts are built from known pieces on the drums. Gravity in
+				the cube and robot: stretches upside down. Which parts a difficulty has stays its own (easy
+				has no wave). Levels with other settings keep their own best.
 			</p>
 			{#if changed}
 				<button
 					class="self-start px-1 text-xs font-semibold text-white/60 hover:text-white cursor-pointer"
-					onclick={() => dashModes.set({ off: [], noGravity: [] })}
+					onclick={() => dashModes.set({ off: [], noGravity: [], classic: false })}
 				>
 					Back to all
 				</button>

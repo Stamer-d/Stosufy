@@ -89,7 +89,7 @@ export function makeLevel(
 	content: string,
 	options: LevelOptions & { sound?: SongSound | null }
 ): Promise<Level> {
-	const kinds = `${options.modes?.join(',') ?? 'all'}/${options.gravity?.join(',') ?? 'all'}`;
+	const kinds = `${options.modes?.join(',') ?? 'all'}/${options.gravity?.join(',') ?? 'all'}/${options.generator ?? 'blocks'}`;
 	const key = `${GENERATOR_VERSION}:${options.seed}:${options.difficulty}:${Math.round(options.duration / 1000)}:${content.length}:${options.sound ? 'heard' : ''}:${kinds}`;
 	if (!cache.has(key)) {
 		const made = new Promise<Level>((resolve, reject) => {

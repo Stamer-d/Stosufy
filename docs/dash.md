@@ -527,3 +527,59 @@ Was es war und was geändert wurde:
 
 Grenzen: Beim Ball ist noch ein Viertel der Klicks unnötig. Die Generierung eines 4,5-Minuten-Songs
 auf Extreme dauert jetzt ~10–12 s (im Worker, vorher ~8 s).
+
+## 12. 0.6.81: Generator v2 aus 50 Bausteinen
+
+Rückmeldung zu 0.6.80: die Level fühlen sich nicht nach Geometry Dash an. Die Ursache lag im Aufbau
+des Generators: Klicks folgten den osu!-Noten (der Melodie, nicht dem Schlagzeug), Hindernisse wurden
+pro Klick frei erzeugt, und was danach die Prüfung nicht bestand, wurde herausgerissen
+(`repair`, `fairness`). Dadurch blieben Klicks ohne Hindernis übrig, Strukturen wirkten zufällig.
+
+Cube, Robot und Ship werden jetzt anders gebaut (Standard, im Zahnrad-Menü umschaltbar auf
+„Classic“; Bestwerte werden getrennt gespeichert):
+
+- **Rhythmus (`rhythm.ts`)**: Klicks liegen auf einer Ebene der Musik, dem Schlagzeug (Noten mit
+  Finish/Clap, was im Song zu hören ist, Taktschwerpunkte), auf dem Beat-Raster (halbe Beats,
+  ab Insane Viertel). Pro Abschnitt wird ein Zwei-Takt-Muster gewählt und Takt für Takt wiederholt,
+  so wie Creator synchronisieren. Dichte nach Schwierigkeit (0,5 bis 1,5 Klicks pro Beat), keine
+  langen Lücken im Muster, auf Easy mindestens ein ganzer Sprung Abstand (Easy hat keine Orbs).
+- **38 Cube/Robot-Bausteine (`builders/blocks.ts`)**: einzelne, doppelte, dreifache Spikes,
+  kleine Spikes, Säge in der Reihe, Säule, Block, Stufe hoch (1 und 2), Stufe runter, Abgang auf den
+  Boden, Lücke, Ringe (gelb, rot, pink, über Lücke), Dash-Orb auf gehaltenen Noten, Orb über einer
+  Reihe (gelb, pink, rot hoch, Stufe, über Lücke), Orb-Ketten (2 und 3), Treppen hoch/runter,
+  Hügel, Lücken-Ketten, Säulenpaare, Zickzack, Kopfüber-Stücke (Blue Orbs oder Gravity-Portale).
+  Ein Baustein springt auf einem Klick ab, nimmt seine Orbs auf den Klicks in der Luft und den
+  nächsten Sprung auf dem ersten Klick nach der Landung.
+- **12 Ship-Bausteine (`builders/ship.ts`)**: gerade, Anstieg, Abstieg, Zickzack, Engstelle,
+  Säulen-Slalom, um eine Säge, gelber Orb hoch, schwarzer Orb runter, kopfüber zwischen zwei
+  Portalen, zwischen Spike-Reihen, Trichter. Wände sind Blöcke auf dem Halbblock-Raster entlang der
+  Mitte des Stücks, Steigungen nach der gemessenen Steigrate des Ships (~14 Blöcke/s).
+- **Prüfen beim Einsetzen statt Reparieren danach**: Jeder Baustein wird gebaut und mit der Physik
+  gespielt: pünktlich, alle Klicks früh und spät, jeder Klick einzeln verschoben, beim Robot kürzer
+  und länger gehalten, zusammen mit dem Baustein davor. Jeder Klick muss nötig sein (ohne ihn: tot).
+  Besteht er nicht, wird er ganz entfernt und der nächste versucht. Von den passenden wird der
+  gewählt, der die wenigsten Klicks auslässt. Danach wird gemessen, wie viel Spielraum der erste
+  Klick wirklich hat; ist es mehr als die Schwierigkeit verlangt, wird er enger nachgebaut.
+  `fairness` läuft für diese Abschnitte nicht mehr: Genau dieser Durchlauf hatte nachträglich
+  Spikes entfernt und Klicks unnötig gemacht (63 von 351 auf einem Extreme-Level).
+- **Ship ohne Rastplatz**: Würde man in einem Stück am Boden (nicht drücken) oder an der Decke
+  (halten) durchrutschen, kommen dort Spikes hin, sofern die Flugwege (Mitte, ±0,3 Blöcke) noch
+  durchkommen. Ein Orb-Stück ist nur gültig, wenn man ohne den Orb in die Wand fliegt.
+- **Höhe**: Bausteine nach oben werden seltener, je höher das Gelände ist, solche nach unten
+  häufiger. Das Level kommt immer wieder auf den Boden zurück.
+
+Gemessen auf vier echten Maps (Easy bis Extreme, 20 Level; Cube/Robot-Abschnitte):
+
+|                         | Leerlauf (Lücken > 1 s mit Noten) | unnötige Klicks | Klicks/s |
+| ----------------------- | --------------------------------- | --------------- | -------- |
+| Classic, Extreme        | 16–20 %                           | 8–15 pro Level  | 1,3–1,5  |
+| Bausteine, Hard–Extreme | 1–14 %                            | 0               | 1,3–1,9  |
+| Bausteine, Easy         | 22–31 % (gewollt: ~1 Sprung/s)    | 0               | 1,0–1,2  |
+
+Alle 20 Level sind durchspielbar. Generierung eines 4,5-Minuten-Songs: 9–16 s im Worker. Neue
+Tests: `tests/dash/blocks.test.ts` (50 Bausteine, Raster, Durchspielbarkeit, jeder Klick nötig,
+kein langer Leerlauf, Classic weiterhin verfügbar).
+
+Grenzen: UFO, Ball, Spider, Wave und Swing nutzen noch die bisherigen Builder. Normal hat auf
+manchen Songs noch ~30 % Leerlauf (der Cube kann bei hohem BPM nicht jeden Beat springen, und
+Normal hat wenige Orbs).

@@ -66,7 +66,7 @@ function onTheMusic(ctx: Context, section: Section, notes: DashNote[]) {
  * swing turns toward it, on the music (`music`: the times it may turn on) unless it must;
  * with a `delay` (ms) it turns that much after it sees it should, as a person reacts.
  */
-function flyShip(
+export function flyShip(
 	ctx: Context,
 	from: PlayerState,
 	until: number,
@@ -137,7 +137,7 @@ function flyShip(
 }
 
 /** An orb on the ship's way: when, and (the first flight) how to put it there */
-interface ShipOrb {
+export interface ShipOrb {
 	time: number;
 	place?: (x: number, y: number) => void;
 	orb?: Orb;
