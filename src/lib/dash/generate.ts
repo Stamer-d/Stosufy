@@ -42,11 +42,15 @@ import {
 	type Random
 } from './build';
 import { hitAt, loudness } from './audio';
+import { sectionPortals } from './portals';
 import { buildCube } from './builders/cube';
 import { buildFlight } from './builders/flight';
 import { buildWave } from './builders/wave';
 
 export { DIFFICULTIES, type Difficulty };
+
+/** Changes when physics/generation semantics change; also separates cached levels. */
+export const GENERATOR_VERSION = 'gd-2.2091-rea2';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube'>, number> = {
@@ -59,6 +63,8 @@ export const BOUNDS: Record<Exclude<Mode, 'cube'>, number> = {
 };
 
 export interface Level {
+	/** Missing only on older level data. */
+	generatorVersion?: string;
 	world: World;
 	/** The presses and releases that finish the level (autoplay) */
 	plan: InputEvent[];
@@ -558,29 +564,25 @@ export function generateLevel(
 	const portals: Portal[] = [];
 	for (const sec of world.sections) {
 		state = simulate(world, state, sec.start + STEP, plan);
-		const before = world.sections[sec.index - 1];
-		if (before && (before.mode !== sec.mode || before.mini !== sec.mini))
-			portals.push({
-				kind: 'mode',
-				mode: sec.mode,
-				mini: sec.mini,
+		// Builders start their musical parts in normal gravity. Make that level-design
+		// decision an explicit visible portal, never an implicit mode/section side effect.
+		if (sec.index > 0 && (state.gravity < 0 || world.sections[sec.index - 1].mode !== sec.mode)) {
+			world.gravityPortals.add({
 				x: sec.x0,
-				y: state.y,
-				x0: sec.x0 - 1,
-				x1: sec.x0 + 1
+				y: Math.max(1.6, state.y),
+				gravity: 1,
+				sectionEntry: true,
+				x0: sec.x0 - 0.6,
+				x1: sec.x0 + 0.6
 			});
-		if (before && before.speedIndex !== sec.speedIndex)
-			portals.push({
-				kind: 'speed',
-				speedIndex: sec.speedIndex,
-				x: sec.x0 - 1.5,
-				y: state.y,
-				x0: sec.x0 - 2.5,
-				x1: sec.x0 - 0.5
-			});
+			state = simulate(world, startState(world, start), sec.start + STEP, plan);
+		}
+		const before = world.sections[sec.index - 1];
+		portals.push(...sectionPortals(before, sec, state.y));
 		const inside = notes.filter((n) => n.time >= sec.start && n.time < sec.end);
 		const entry = state;
-		if (sec.mode === 'cube') state = buildCube(ctx, sec, cubeClicks(chart, inside, sec, preset), state);
+		if (sec.mode === 'cube')
+			state = buildCube(ctx, sec, cubeClicks(chart, inside, sec, preset), state);
 		else if (sec.mode === 'wave') state = buildWave(ctx, sec, inside, state);
 		else {
 			// The UFO and swing click often, the ball and spider like the cube
@@ -626,6 +628,10 @@ export function generateLevel(
 	// so nothing of it can stop the level)
 	playThrough(world, plan, start, end);
 
+	// Later filling/repair can change the approach state: check swing windows on the final world.
+	widenSwingWindows(world, plan, start, end, preset.tolerance);
+	playThrough(world, plan, start, end);
+
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {
 		const point = chart.timing[i];
@@ -635,6 +641,7 @@ export function generateLevel(
 	}
 
 	return {
+		generatorVersion: GENERATOR_VERSION,
 		world,
 		plan,
 		start,
@@ -889,6 +896,55 @@ function playThrough(world: World, plan: InputEvent[], start: number, end: numbe
 	}
 }
 
+/** Check isolated swing clicks after every generation pass has finished changing geometry. */
+function widenSwingWindows(
+	world: World,
+	plan: InputEvent[],
+	start: number,
+	end: number,
+	tolerance: number
+) {
+	if (!world.sections.some((s) => s.mode === 'swing')) return;
+	for (let pass = 0; pass < 32; pass++) {
+		const states: PlayerState[] = [];
+		let state = startState(world, start);
+		for (let time = start; time <= end; time += 250) {
+			state = simulate(world, state, time, plan);
+			states.push(state);
+		}
+		let failed: PlayerState | null = null;
+		for (let i = 0; i < plan.length && !failed; i++) {
+			const event = plan[i];
+			if (!event.down || world.sectionAt(event.time).mode !== 'swing') continue;
+			const release = plan.findIndex((e, k) => k > i && !e.down);
+			const next = plan.find((e, k) => k > i && e.down);
+			const until = Math.min(end, (next?.time ?? event.time + 1000) + 400);
+			const k = Math.max(
+				0,
+				Math.min(states.length - 1, Math.floor((event.time - start - 160) / 250) - 1)
+			);
+			for (
+				let shift = STEP;
+				shift <= Math.ceil(tolerance / (2 * STEP)) * STEP && !failed;
+				shift += STEP
+			) {
+				for (const way of [-1, 1]) {
+					const inputs = plan
+						.map((e, n) => (n === i || n === release ? { ...e, time: e.time + way * shift } : e))
+						.sort((a, b) => a.time - b.time);
+					const run = simulate(world, states[k], until, inputs);
+					if (run.dead) {
+						failed = run;
+						break;
+					}
+				}
+			}
+		}
+		if (!failed) return;
+		removeNear(world, failed.x, world.sectionAt(failed.time).mode);
+	}
+}
+
 /** Takes out what's in the way at a place: spikes first, then the blocks of flying parts */
 function removeNear(world: World, x: number, mode: Mode) {
 	const near = (o: { x0: number; x1: number }) => o.x1 > x - 1.8 && o.x0 < x + 1.3;
@@ -927,7 +983,7 @@ function removeNear(world: World, x: number, mode: Mode) {
 /** What turns a cube upside down (onto a slab that's gone now): between two places */
 function upsideGone(world: World, x0: number, x1: number) {
 	const inside = (o: { x0: number; x1: number }) => o.x1 > x0 && o.x0 < x1;
-	world.gravityPortals.removeIf(inside);
+	world.gravityPortals.removeIf((o) => inside(o) && !o.sectionEntry);
 	world.orbs.removeIf((o) => inside(o) && (o.kind === 'blue' || o.kind === 'green'));
 	world.pads.removeIf((p) => inside(p) && p.kind === 'blue');
 }

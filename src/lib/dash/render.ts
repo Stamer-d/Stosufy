@@ -66,7 +66,7 @@ export interface Frame {
 	/** The song time (ms) it shows */
 	time: number;
 	attempt: number;
-	/** 0–100 */
+	/** 0â€“100 */
 	progress: number;
 	best: number;
 	practice: boolean;
@@ -127,7 +127,7 @@ const MODE_NAMES: Record<Mode, [string, string]> = {
 	ship: ['SHIP', 'hold to fly up'],
 	ball: ['BALL', 'tap to flip'],
 	ufo: ['UFO', 'tap to hop'],
-	wave: ['WAVE', 'hold: up · let go: down'],
+	wave: ['WAVE', 'hold: up Â· let go: down'],
 	swing: ['SWING', 'tap to flip the pull'],
 	spider: ['SPIDER', 'tap to teleport']
 };
@@ -1717,7 +1717,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const over = free - (stop - 3);
 		camX = over <= 0 ? free : stop - 3 * Math.exp(-over / 3);
 		let targetY: number;
-		if (section.ceil !== null) targetY = section.floor + section.ceil / 2 - VIEW / 2;
+		if (section.ceil !== null) targetY = (section.floor + section.ceil) / 2 - VIEW / 2;
 		else targetY = Math.max(-2.2, state.y - 7.2);
 		// (eased the same however many frames a second)
 		camY += (targetY - camY) * (1 - Math.exp(-dt * (section.ceil !== null ? 5 : 3.5)));
@@ -1730,14 +1730,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		background(p, pulse, section.kiai);
 		decorations(p, time, pulse, section.kiai);
 		scenery(p, section.floor, pulse, section.kiai);
-		// The floor and the ceiling (it comes in from above at the start of a part)
-		const ceilingF = ease((state.time - section.start) / 450);
-		if (section.ceil !== null) ground(p, section.ceil + (1 - ceilingF) * 8, -1, pulse, camX);
-		else {
-			const before = world.sections[section.index - 1];
-			if (before?.ceil != null && ceilingF < 1)
-				ground(p, before.ceil + ceilingF * 8, -1, pulse, camX);
-		}
+		// Collision surfaces stay at their actual world heights throughout camera transitions.
+		if (section.ceil !== null) ground(p, section.ceil, -1, pulse, camX);
 		ground(p, section.floor, 1, pulse, camX);
 
 		const left = camX - 1;
@@ -1801,7 +1795,17 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 					sec.ceil !== null
 						? Math.max(sec.floor + 1.6, Math.min(sec.ceil - 1.6, portalItem.y))
 						: Math.max(1.6, portalItem.y);
-				const [name, how] = MODE_NAMES[portalItem.mode];
+				const [modeName, how] = MODE_NAMES[portalItem.mode];
+				const size = level.portals.find((p) => p.x === portalItem.x && p.kind === 'size');
+				const speed = level.portals.find((p) => p.x === portalItem.x && p.kind === 'speed');
+				const normalGravity = world.gravityPortals.items.some(
+					(g) => g.sectionEntry && g.x === portalItem.x
+				);
+				const name =
+					modeName +
+					(size ? (size.mini ? ' MINI' : ' NORMAL') : '') +
+					(speed ? ` ${['0.5x', '1x', '2x', '3x', '4x'][speed.speedIndex ?? 1]}` : '') +
+					(normalGravity ? ' ↓' : '');
 				portal(
 					portalItem.x,
 					y,
@@ -1811,11 +1815,28 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 					PORTAL_SPRITES[portalItem.mode],
 					first ? how : ''
 				);
-				if (portalItem.mini) portal(portalItem.x + 1.3, y, '#ff6ad5', time + 300, '');
-			} else speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);
+			} else if (portalItem.kind === 'size') {
+				if (level.portals.some((p) => p.x === portalItem.x && p.kind === 'mode')) continue;
+				const speed = level.portals.find((p) => p.x === portalItem.x && p.kind === 'speed');
+				const label =
+					(portalItem.mini ? 'MINI' : 'NORMAL') +
+					(speed ? ` ${['0.5x', '1x', '2x', '3x', '4x'][speed.speedIndex ?? 1]}` : '');
+				portal(
+					portalItem.x,
+					Math.max(1.6, portalItem.y),
+					portalItem.mini ? '#ff6ad5' : '#5dff8b',
+					time,
+					label
+				);
+			} else if (!level.portals.some((p) => p.x === portalItem.x && p.kind !== 'speed')) {
+				speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);
+			}
 		}
-		for (const g of world.gravityPortals.near(left, right))
+		for (const g of world.gravityPortals.near(left, right)) {
+			// A shared mode/reset plane has one combined cue, so its rings/labels don't hide each other.
+			if (g.sectionEntry && level.portals.some((p) => p.x === g.x && p.kind === 'mode')) continue;
 			gravityPortal(g.x, g.y, g.gravity, time);
+		}
 
 		// The end
 		if (level.xEnd < right) {

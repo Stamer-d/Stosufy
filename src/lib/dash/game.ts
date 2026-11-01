@@ -62,7 +62,7 @@ export class DashGame {
 	/** When this attempt started (song ms) */
 	attemptStart = 0;
 	/** The state one step before (for drawing between the steps) */
-	private before = { time: 0, y: 0, rotation: 0, mode: '' };
+	private before = { time: 0, y: 0, rotation: 0, mode: '', mini: false, gravity: 1, section: 0 };
 
 	constructor(public level: Level) {
 		this.state = startState(level.world, level.start);
@@ -71,7 +71,15 @@ export class DashGame {
 
 	private remember() {
 		const s = this.state;
-		this.before = { time: s.time, y: s.y, rotation: s.rotation, mode: s.mode };
+		this.before = {
+			time: s.time,
+			y: s.y,
+			rotation: s.rotation,
+			mode: s.mode,
+			mini: s.mini,
+			gravity: s.gravity,
+			section: s.section
+		};
 	}
 
 	/**
@@ -81,7 +89,15 @@ export class DashGame {
 	view(time: number): PlayerState {
 		const s = this.state;
 		const b = this.before;
-		if (this.status !== 'playing' || s.time <= b.time || b.mode !== s.mode) return s;
+		if (
+			this.status !== 'playing' ||
+			s.time <= b.time ||
+			b.mode !== s.mode ||
+			b.mini !== s.mini ||
+			b.gravity !== s.gravity ||
+			b.section !== s.section
+		)
+			return s;
 		const f = Math.max(0, Math.min(1, (time - s.time) / STEP));
 		const at = b.time + (s.time - b.time) * f;
 		// A teleport (the spider) or a snap: no sliding across
