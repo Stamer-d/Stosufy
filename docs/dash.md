@@ -263,7 +263,7 @@ Tags, keine Leveldateien). Daraus übernommen:
 
 ### 7.3 Was geändert wurde
 
-**Schwierigkeiten (`build.ts`).** Hard ist jetzt etwa das bisherige Extreme (Tempo 2x/3x, alle
+**Schwierigkeiten (`build.ts`).** Hard ist jetzt etwa das bisherige Extreme (Tempo 3x/4x, alle
 Modi, Orb-Ketten); Insane und Extreme gehen darüber hinaus. Neue Werte je Stufe statt fester
 Listen im Code: Ziel-Zeitfenster `window` (ruhig/intensiv), längste Pause ohne Klick `idle`,
 Abschnittslängen `parts`, Enge der Flugteile `tight`, Orbs, Gravity-Wechsel.
@@ -272,7 +272,7 @@ Abschnittslängen `parts`, Enge der Flugteile `tight`, Orbs, Gravity-Wechsel.
 | ------- | ----------------- | ------------------------------- | ------ | ---------- | ------------------------ |
 | easy    | 80 ms             | 340 → 280 ms                    | 1x     | 14–32 s    | 2,5                      |
 | normal  | 60 ms             | 300 → 230 ms                    | 1x, 2x | 9–24 s     | 1,9                      |
-| hard    | 32 ms             | 270 → 190 ms                    | 2x, 3x | 6–15 s     | 1,3                      |
+| hard    | 32 ms             | 270 → 190 ms                    | 3x, 4x | 6–15 s     | 1,3                      |
 | insane  | 28 ms             | 210 → 140 ms                    | 3x, 4x | 5–12 s     | 1,05                     |
 | extreme | 24 ms             | 160 → 100 ms                    | 3x, 4x | 4–10 s     | 0,85                     |
 
@@ -328,6 +328,26 @@ auf den Testsongs zusätzlich:
 - Checkpoints: setzen (am Boden und in der Luft), zwischen zwei Physikschritten angefordert,
   entfernen (auch im Tod), bleiben beim Tod direkt danach, überstehen den Rollback, ohne Practice
   keine.
+
+### 7.5 Vorher/nachher an echten Beatmaps
+
+Fünf Beatmaps (jeweils die schwerste der Map): Sparkling Daydream [Insane], Remote Control [Max
+Control!], FREEDOM DiVE [FOUR DIMENSIONS], Tsukinami [Nostalgia], MONONOKE [Orientalism]. Je Stufe
+gemittelt über die fünf Level; „vorher“ ist 0.6.74 mit dem Absturz-Fix aus 7.1. Alle 50 Level sind
+durchspielbar, kein Klick hat weniger Platz als die Toleranz.
+
+| Stufe   | Median-Fenster je Klick | Tempo Ø (Blöcke/s) | Klicks/s    | Sägen je Level |
+| ------- | ----------------------- | ------------------ | ----------- | -------------- |
+| easy    | 310 → 307 ms            | 10,4 → 10,4        | 0,55 → 0,56 | 0 → 0          |
+| normal  | 302 → 296 ms            | 11,0 → 11,2        | 0,92 → 0,95 | 0 → 0          |
+| hard    | 303 → 266 ms            | 11,0 → 16,8        | 1,22 → 1,69 | 0 → 8          |
+| insane  | 296 → 223 ms            | 13,5 → 16,8        | 1,53 → 1,55 | 0 → 12         |
+| extreme | 261 → 202 ms            | 16,4 → 16,7        | 1,56 → 1,41 | 0 → 13         |
+
+Neues Hard ≈ altes Extreme (Fenster 266 zu 261 ms, Tempo 16,8 zu 16,4). Die Sprünge von Cube und
+Robot allein: auf Extreme Median ~140–155 ms (vorher ~260 ms). Ship- und UFO-Tunnel auf Extreme im
+Median 2,5–3,5 Blöcke hoch (vorher im Mittel aller Flugteile 6–7). Extreme hat nicht mehr Klicks
+pro Sekunde als Hard; es ist enger, nicht dichter (wie bei handgebauten Levels, 7.2).
 
 ### 7.6 Grenzen
 

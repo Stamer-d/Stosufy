@@ -128,7 +128,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		wave: 1.6,
 		waveGap: 0.16,
 		tight: 0.72,
-		speeds: [2, 3],
+		speeds: [3, 4],
 		chain: 5,
 		strong: 0.95,
 		mini: 0.32,
