@@ -1,19 +1,17 @@
-// The cube parts: a library of the genre's building blocks (spikes, stairs, blocks to hop
-// onto, gaps over spike pits, pads up, an orb over a pit, low ceilings, a dash over a pit on a
-// held note, stretches upside down under a slab, in and out by blue or spider orbs, pads or
-// gravity portals), picked for each click by what fits the time to the next one, how high the
-// level is, what was used lately and what this level and part like most (each its own).
-// Everything stands on the grid; every pick is played early and late before it stays, and a
-// click whose obstacle could be passed without it is no click.
+// Cube structures are composed in two-bar musical phrases. Each phrase establishes a main
+// family and a counter-motif; repeated rhythms first try their stored shapes and dimensions.
+// Candidates still need to fit the actual landing state and survive the shared physics
+// checks on time, early and late. Infeasible motifs retain simpler fallbacks.
 
-import { beatAt } from '../chart';
-import { loudness } from '../audio';
+import { composePhrases, musicalRest, orderPatterns, patternFamily } from '../composition';
+import { hitAt, loudness } from '../audio';
 import { cubeAt, simulate, STEP, type PlayerState, type Section, type Solid } from '../physics';
 import {
 	legalAround,
+	hash,
+	random,
 	Attempt,
 	clickChecks,
-	freshness,
 	half,
 	passes,
 	shuffleByWeight,
@@ -39,26 +37,6 @@ interface Pattern {
 	padFirst?: boolean;
 }
 
-/** The kinds of patterns, for what a level and a part like most */
-const FAMILIES = [
-	'spikes',
-	'leap',
-	'stairs',
-	'hop',
-	'spikeStep',
-	'saw',
-	'sawBig',
-	'gap',
-	'padUp',
-	'padOver',
-	'orbPit',
-	'padOrb',
-	'dash',
-	'pillar',
-	'window',
-	'pinkPad'
-];
-
 export function buildCube(ctx: Context, section: Section, clicks: number[], entry: PlayerState) {
 	const { world, plan, rng, preset } = ctx;
 	const speed = section.speed;
@@ -67,31 +45,18 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 	const air = (2 * cube.jump) / cube.gravity;
 	const noteTimes = ctx.chart.notes.map((n) => n.time);
 	const ends = new Map(ctx.chart.notes.map((n) => [n.time, n.end]));
-	const heights = new Map(ctx.chart.notes.map((n) => [n.time, n.height]));
-	/** The orb for a note, by where the melody goes: up a lot red, down pink, else yellow */
-	const orbFor = (from: number, to: number) => {
-		const leap = (heights.get(to) ?? 0.5) - (heights.get(from) ?? 0.5);
-		return leap > 0.25 && preset.level >= 2 ? 'red' : leap < -0.25 ? 'pink' : 'yellow';
+	const noteAt = new Map(ctx.chart.notes.map((n) => [n.time, n]));
+	// Orb accents follow transients/hitsounds; osu! coordinates are not song pitch.
+	const orbFor = (_from: number, to: number) => {
+		const n = noteAt.get(to);
+		const strength = ctx.chart.sound?.hits
+			? hitAt(ctx.chart.sound, to)
+			: (n?.sound ?? 0) & 4
+				? 1
+				: (n?.volume ?? 0.5);
+		return strength > 0.8 && preset.level >= 2 ? 'red' : strength < 0.25 ? 'pink' : 'yellow';
 	};
 	let state = entry;
-	// Each level has its taste in patterns, each part its own on top of it and two favourites,
-	// so levels and their parts don't all look alike
-	const familyOf = (id: string) => id.replace(/[\d-]+s?$/, '');
-	const levelTaste = (ctx.taste ??= new Map());
-	const partTaste = new Map<string, number>();
-	const favourites = new Set(
-		shuffleByWeight(
-			rng,
-			FAMILIES.map((item) => ({ item, weight: 1 }))
-		).slice(0, 2)
-	);
-	const taste = (id: string) => {
-		const family = familyOf(id);
-		if (!levelTaste.has(family)) levelTaste.set(family, Math.exp((rng() - 0.5) * 1.8));
-		if (!partTaste.has(family))
-			partTaste.set(family, Math.exp((rng() - 0.5) * 1.1) * (favourites.has(family) ? 2.4 : 1));
-		return levelTaste.get(family)! * partTaste.get(family)!;
-	};
 	/** The structure the cube runs on (none: the ground) */
 	let platform: Solid | null = null;
 	let level = 0;
@@ -99,7 +64,9 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 	let chain = 0;
 	let upsides = 0;
 	const limit = section.x1 - 2;
-	const times = clicks.filter((t) => t > section.start + 350 && t < section.end - 400);
+	const times = clicks.filter(
+		(t) => t > section.start + 350 && t < section.end - 400 && !musicalRest(ctx.chart, t)
+	);
 	// How high the level wants to be: higher where the music is busier and (where it can be
 	// heard) louder
 	const sound = ctx.chart.sound;
@@ -107,21 +74,9 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		noteTimes.filter((n) => n > t - 2000 && n < t + 2000).length / 4 +
 		(sound ? (loudness(sound, t - 1500, t + 1500) - 0.55) * 4 : 0);
 
-	// The rhythm of each measure: its clicks on a grid of sixteenths. A rhythm heard before
-	// gets what was built for it then (where it still fits), click for click.
-	const measures = new Map<string, number[]>();
-	const measureOf = (t: number) => {
-		const { point } = beatAt(ctx.chart.timing, t);
-		const length = point.beatLength * point.meter;
-		const index = Math.floor((t - point.time) / length + 1e-6);
-		const slot = Math.round((t - point.time - index * length) / (point.beatLength / 4));
-		return { key: `${point.time}:${index}`, slot };
-	};
-	for (const t of times) {
-		const { key, slot } = measureOf(t);
-		measures.set(key, [...(measures.get(key) ?? []), slot]);
-	}
-	/** The measure being remembered now (the first time its rhythm comes) */
+	const phrases = composePhrases(ctx.chart, times);
+	const phraseOf = (time: number) => phrases.find((p) => time >= p.start && time < p.end)!;
+	const families = new Map<string, Set<string>>();
 	let remembering = '';
 
 	const extend = (until: number) => {
@@ -133,6 +88,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 
 	for (let i = 0; i < times.length; i++) {
 		const time = times[i];
+		const phrase = phraseOf(time);
 		const next = times[i + 1] ?? section.end - 250;
 		const after = times[i + 2] ?? section.end - 250;
 		extend(after);
@@ -154,14 +110,15 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		if (grounded) level = Math.round(at.y - 0.5);
 		chain = grounded ? 0 : chain + 1;
 		if (!grounded && chain > preset.chain) continue;
-		// Now and then upside down for a few clicks (in the genre's levels gravity turns around
-		// about 20 times a minute in cube parts): every part tries from a quarter in until one
-		// fits, more of them the harder
-		const due = upsides === 0 && time > section.start + (section.end - section.start) / 4;
+		// A gravity sequence is a phrase-level accent, not a compulsory trick in every part.
+		const phraseFirst = times.find((t) => t >= phrase.start) === time;
 		if (
 			grounded &&
-			preset.level >= 1 &&
-			(due || rng() < UPSIDE[preset.level] * freshness(ctx, 'upside'))
+			!ctx.simplify &&
+			preset.level >= 2 &&
+			section.kiai &&
+			phraseFirst &&
+			upsides === 0
 		) {
 			const last = upside(i, x);
 			if (last !== null) {
@@ -170,6 +127,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				continue;
 			}
 		}
+
 		const room = (next - time) / 1000;
 		// Checked until the next click, and at least until it has landed again
 		const until = Math.max(next - 2, time + air * 1000 + 150);
@@ -177,23 +135,30 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 			preset.height,
 			Math.max(preset.level >= 1 ? 1 : 0, Math.round(busy(time) * 0.6 + (section.kiai ? 1 : 0)))
 		);
-		const { key: measure, slot } = measureOf(time);
-		const slots = measures.get(measure)!;
-		const rhythm = slots.length >= 2 ? slots.join(',') : '';
-		let motif = rhythm ? ctx.motifs.get(rhythm) : undefined;
-		if (rhythm && !motif) {
+		const measure = phrase.key;
+		const rhythm = `${section.speedIndex}:${Number(section.mini)}:${phrase.rhythm}`;
+		let motif = ctx.motifs.get(rhythm);
+		if (!motif) {
 			motif = [];
 			ctx.motifs.set(rhythm, motif);
 			remembering = measure;
 		}
-		const position = slots.indexOf(slot);
-		const wanted = remembering === measure ? undefined : motif?.[position];
+		const position = times.filter((t) => t >= phrase.start && t < phrase.end).indexOf(time);
+		const wanted = remembering === measure ? undefined : motif[position];
+		let established = families.get(measure);
+		if (!established) families.set(measure, (established = new Set()));
+		// Dimensions are tied to the musical motif, so a repeated shape doesn't reroll its size.
+		const shape = (key: string) => random(hash(`${ctx.seed ?? 0}:${rhythm}:${position}:${key}`))();
 		const patterns: Pattern[] = [];
-		const add = (p: Pattern) =>
-			patterns.push({
-				...p,
-				weight: (p.id === wanted ? 2.5 : freshness(ctx, p.id)) * p.weight * taste(p.id)
-			});
+		const add = (p: Pattern) => {
+			if (
+				ctx.simplify &&
+				!['spikes', 'hop', 'stairs', 'leap', 'gap', 'orb'].includes(patternFamily(p.id))
+			)
+				return;
+			patterns.push(p);
+		};
+
 		const land = x + speed * air;
 		const middle = x + (speed * air) / 2;
 
@@ -207,7 +172,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 						id: `spikes${count}`,
 						weight: [0, 1.2, 0.9, 0.55][count] * (shift ? 0.15 : 1),
 						build: (a) => {
-							const small = count === 1 && rng() < 0.25;
+							const small = count === 1 && shape('spikes') < 0.25;
 							for (let k = 0; k < count; k++)
 								a.spike(center + shift + k - (count - 1) / 2, level, 1, small ? 'small' : 'spike');
 							return true;
@@ -226,7 +191,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 						]
 					: [[1, 2.2]];
 				for (const [dh, w] of options) {
-					const slab = rng() < 0.45;
+					const slab = shape(`slab:${dh}`) < 0.45;
 					add({
 						id: `leap${dh}${slab ? 's' : ''}`,
 						weight: w,
@@ -246,7 +211,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 			}
 			// A block to hop onto and drop off again
 			if (level < preset.height && room > air + 0.25) {
-				const length = 2 + Math.floor(rng() * 3);
+				const length = 2 + Math.floor(shape('hop') * 3);
 				add({
 					id: 'hop',
 					weight: 1.1,
@@ -386,9 +351,15 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 			add({ id: 'orb', weight: 1, build: (a) => airOrb(a, at) });
 		}
 
-		const ordered = shuffleByWeight(
-			rng,
-			patterns.map((p) => ({ item: p, weight: p.weight }))
+		const ordered = orderPatterns(
+			shuffleByWeight(
+				rng,
+				patterns.map((p) => ({ item: p, weight: p.weight }))
+			),
+			wanted,
+			phrase.theme,
+			established,
+			position
 		);
 		let done: Pattern | null = null;
 		for (const pattern of ordered) {
@@ -452,6 +423,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 				}
 				recent = checks;
 				used(ctx, pattern.id);
+				established.add(patternFamily(pattern.id));
 				if (remembering === measure && motif) motif[position] = pattern.id;
 				done = pattern;
 				break;
@@ -460,7 +432,8 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		}
 		if (!done) continue;
 		// A long run after it: down to the ground, or a low ceiling over it
-		runway(time, done.pair ? (times[i + 1] ?? section.end - 250) : next);
+		if (next >= phrase.end - 1)
+			runway(time, done.pair ? (times[i + 1] ?? section.end - 250) : next);
 	}
 	if (platform) {
 		(platform as Solid).x1 = Math.max((platform as Solid).x0 + 1, Math.floor(section.x1 - 1));
@@ -824,7 +797,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 		const runFrom = landed.x;
 		const runTo = world.xAt(next) - speed * (tolerance / 1000) - 1;
 		if (runTo - runFrom < 3) return;
-		const choice = rng();
+		const choice = level > 1 ? 0.2 : 1;
 		if (platform && level >= 1 && choice < 0.45) {
 			// Off the edge, down to the ground (or one lower)
 			const old = platform;
@@ -853,7 +826,7 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 			if (noteTimes.some((t) => t > t0 && t < t1)) return;
 			const attempt = new Attempt(world, limit);
 			attempt.solid({ x0, x1, y0: level + 3, y1: level + 4, style: 1 });
-			for (let sx = x0 + 0.5; sx < x1; sx += 1) if (rng() < 0.75) attempt.spike(sx, level + 3, -1);
+			for (let sx = x0 + 0.5; sx < x1; sx += 1) attempt.spike(sx, level + 3, -1);
 			const check = { from: landed, inputs: [], until: next - 2 };
 			if (attempt.legal() && passes(world, check) && recent.every((c) => passes(world, c)))
 				used(ctx, 'ceiling');
@@ -865,6 +838,3 @@ export function buildCube(ctx: Context, section: Section, clicks: number[], entr
 /** A yellow pad's push, and a pink one's (blocks/s) */
 const PHYSICS_PAD = 864 / 30;
 const PINK_PAD = 561.6 / 30;
-
-/** How often a click on the ground turns into an upside-down stretch, by difficulty */
-const UPSIDE = [0, 0.12, 0.2, 0.26, 0.32];

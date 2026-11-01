@@ -49,7 +49,10 @@ const MAX = 160;
 
 export function checkLevel(level: Level, options: { windows?: boolean } = {}): LevelReport {
 	const { world, plan, start, end } = level;
-	const run = simulate(world, startState(world, start), end, plan);
+	// The game completes on the first fixed tick that reaches the finish line. Songs
+	// need not end on a tick: stopping at `end` could leave a living player 1-4 ms short.
+	const finishTick = start + Math.ceil((end - start) / STEP - 1e-8) * STEP;
+	const run = simulate(world, startState(world, start), finishTick, plan);
 	const finishes = !run.dead && run.x >= level.xEnd - 1e-6;
 
 	// The planned run every quarter second, to start from there

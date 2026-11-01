@@ -173,6 +173,9 @@ export function shuffleByWeight<T>(rng: Random, items: { item: T; weight: number
 // --- Building -------------------------------------------------------------------------------
 
 export interface Context {
+	seed?: number;
+	/** A whole section may be rebuilt with simpler structures after destructive repair. */
+	simplify?: boolean;
 	world: World;
 	plan: InputEvent[];
 	rng: Random;
@@ -181,13 +184,11 @@ export interface Context {
 	/** The kinds of things used lately (to not use them again and again) */
 	history: string[];
 	/**
-	 * What the cube parts built for a rhythm (the clicks of a measure, on its grid): the same
+	 * What the cube parts built for a rhythm (the clicks of a two-bar phrase, on its grid): the same
 	 * rhythm later in the song gets the same things again, so the level repeats where the
 	 * music does
 	 */
 	motifs: Map<string, string[]>;
-	/** How much this level likes each kind of thing (set as they come up): no two alike */
-	taste?: Map<string, number>;
 }
 
 /** A stretch of the level played from a state with some presses */

@@ -16,6 +16,8 @@ import {
 } from '../physics';
 import { clamp, half, used, type Context } from '../build';
 import type { DashNote } from '../chart';
+import { musicalPosition, musicalRest } from '../composition';
+import { hash } from '../build';
 
 export function buildWave(ctx: Context, section: Section, notes: DashNote[], entry: PlayerState) {
 	const { world, plan, preset, rng } = ctx;
@@ -31,7 +33,12 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	// The turns: notes far enough apart, put on the grid
 	const turns: number[] = [];
 	for (const note of notes) {
-		if (note.time < section.start + 650 || note.time > section.end - 500) continue;
+		if (
+			note.time < section.start + 650 ||
+			note.time > section.end - 500 ||
+			musicalRest(ctx.chart, note.time)
+		)
+			continue;
 		const x = half(world.xAt(note.time));
 		const last = turns[turns.length - 1];
 		if (last !== undefined && (x - last) / section.speed < gap) continue;
@@ -88,7 +95,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		return simulate(world, entry, section.end, plan);
 	}
 
-	// The corridor: even, or flat above or below, changing every few turns
+	// The corridor: even, or flat above or below, changing at musical phrase boundaries
 	const first = turns[0];
 	const walls: Walls = { xs: [], lo: [], hi: [], x0: first - 3, x1: world.xAt(section.end - 350) };
 	const extra = new Map<number, number>();
@@ -106,16 +113,19 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		...points.map((p) => p.x).filter((px) => px > walls.x0 + 0.01 && px < walls.x1 - 0.01),
 		walls.x1
 	];
-	const styles = xs.map(() => 'even');
-	let style = 'even';
-	let left = 0;
-	for (let k = 0; k < xs.length; k++) {
-		if (left-- <= 0) {
-			style = ['even', 'even', 'flatTop', 'flatBottom'][Math.floor(rng() * 4)];
-			left = 5 + Math.floor(rng() * 6);
+	// One architectural treatment per musical phrase, independent of how many turns fit.
+	for (const rest of ctx.chart.breaks) {
+		for (const time of [rest.start + 100, rest.end - 100]) {
+			const x = world.xAt(time);
+			if (x > walls.x0 && x < walls.x1) xs.push(x);
 		}
-		styles[k] = style;
 	}
+	xs.sort((a, b) => a - b);
+	const styles = xs.map((x) => {
+		const pos = musicalPosition(ctx.chart, world.timeAt(x));
+		const slot = hash(`${ctx.seed ?? 0}:${pos.point.meter}:${Math.floor(pos.bar / 2) % 2}`) % 4;
+		return ['even', 'even', 'flatTop', 'flatBottom'][slot];
+	});
 	const build = () => {
 		walls.xs = [];
 		walls.lo = [];
@@ -139,6 +149,10 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 				const ys = xs.slice(a, b + 1).map(pathAt);
 				if (styles[k] === 'flatTop') hi = Math.min(top + 0.5, Math.max(...ys) + w);
 				else lo = Math.max(floor - 0.5, Math.min(...ys) - w);
+			}
+			if (musicalRest(ctx.chart, world.timeAt(px))) {
+				lo = floor - 0.5;
+				hi = top + 0.5;
 			}
 			walls.xs.push(px);
 			walls.lo.push(lo);

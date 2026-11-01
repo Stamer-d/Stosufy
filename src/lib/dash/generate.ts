@@ -7,21 +7,16 @@
 // and its structures. The parts are built by
 // the builders (builders/*.ts) from the notes, and every obstacle is checked with the
 // physics: the level is played on time, early and late, short and long presses, and what
-// can't be passed is taken out again. So every level can be finished, and nowhere can it be
-// played on for long without pressing.
+// can't be passed is recomposed or repaired. Musical rests remain intentional open space.
 
 import { beatAt, beatStrength, type DashChart, type DashNote } from './chart';
 import {
 	SPEEDS,
 	STEP,
 	World,
-	copyState,
 	cubeAt,
-	hitbox,
-	press,
 	simulate,
 	startState,
-	type Hazard,
 	type InputEvent,
 	type Mode,
 	type PlayerState,
@@ -33,8 +28,6 @@ import {
 	PRESETS,
 	hash,
 	random,
-	clamp,
-	freshness,
 	legalAround,
 	type Context,
 	type Difficulty,
@@ -43,6 +36,7 @@ import {
 } from './build';
 import { hitAt, loudness } from './audio';
 import { sectionPortals } from './portals';
+import { musicalRest } from './composition';
 import { buildCube } from './builders/cube';
 import { buildFlight } from './builders/flight';
 import { buildWave } from './builders/wave';
@@ -50,7 +44,7 @@ import { buildWave } from './builders/wave';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-2.2091-rea2';
+export const GENERATOR_VERSION = 'gd-2.2091-phrases1';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube'>, number> = {
@@ -279,7 +273,6 @@ export function spaced(chart: DashChart, notes: DashNote[], gap: number) {
  */
 export function withBeats(chart: DashChart): DashNote[] {
 	const notes = chart.notes;
-	const sound = chart.sound;
 	const from = notes[0].time;
 	const to = Math.max(...notes.map((n) => n.end));
 	const extra: DashNote[] = [];
@@ -291,7 +284,7 @@ export function withBeats(chart: DashChart): DashNote[] {
 		for (let b = firstBeat; ; b += 1) {
 			const time = point.time + b * point.beatLength;
 			if (time >= until) break;
-			if (sound && loudness(sound, time - 150, time + 150) < 0.05) continue;
+			if (musicalRest(chart, time)) continue;
 			const resting = chart.breaks.some((br) => time > br.start - 500 && time < br.end + 300);
 			if (resting && b % 2 !== 0) continue;
 			const near = point.beatLength * 0.75;
@@ -332,6 +325,7 @@ function loudParts(chart: DashChart, start: number, end: number) {
 	if (bars.length < 8) return [];
 	const sorted = bars.map((b) => b.loud).sort((a, b) => a - b);
 	const threshold = Math.max(
+		0.05,
 		sorted[Math.floor(sorted.length * 0.7)],
 		sorted[Math.floor(sorted.length * 0.92)] * 0.9
 	);
@@ -382,8 +376,8 @@ function planParts(
 ): Part[] {
 	// Phrases: every few measures (about 10–20 s, shorter the harder: more changes), and where
 	// the kiai starts and stops
-	const longest = [21000, 14000, 9000, 8000, 7000][preset.level];
-	const shortest = [9000, 6000, 4500, 3800, 3200][preset.level];
+	const longest = [32000, 26000, 18000, 14000, 12000][preset.level];
+	const shortest = [14000, 10000, 7000, 6000, 5000][preset.level];
 	const cuts = new Set<number>();
 	const timing = chart.timing;
 	for (let i = 0; i < timing.length; i++) {
@@ -396,7 +390,8 @@ function planParts(
 		const first =
 			point.time + Math.ceil((start - point.time) / (measure * measures)) * measure * measures;
 		for (let t = Math.max(point.time, first); t < until; t += measure * measures)
-			if (t > start + 4000 && t < end - 5000) cuts.add(Math.round(t));
+			if (t > start + 4000 && t < end - 5000 && !chart.breaks.some((b) => t > b.start && t < b.end))
+				cuts.add(Math.round(t));
 	}
 	const snap = (time: number) => {
 		const { point } = beatAt(timing, time);
@@ -559,7 +554,16 @@ export function generateLevel(
 	world.segments.push({ time: end, x, speed: world.sections[world.sections.length - 1].speed });
 
 	const plan: InputEvent[] = [];
-	const ctx: Context = { world, plan, rng, preset, chart, history: [], motifs: new Map() };
+	const ctx: Context = {
+		world,
+		plan,
+		rng,
+		preset,
+		chart,
+		seed: hash(`${options.seed}:${options.difficulty}`),
+		history: [],
+		motifs: new Map()
+	};
 	let state = startState(world, start);
 	const portals: Portal[] = [];
 	for (const sec of world.sections) {
@@ -581,6 +585,11 @@ export function generateLevel(
 		portals.push(...sectionPortals(before, sec, state.y));
 		const inside = notes.filter((n) => n.time >= sec.start && n.time < sec.end);
 		const entry = state;
+		const restore = sec.mode === 'cube' ? saveGeometry(world) : null;
+		const entryPlan = [...plan];
+		const oldHazards = new Set(world.hazards.items);
+		const oldHistory = [...ctx.history];
+		const oldMotifs = new Map([...ctx.motifs].map(([key, value]) => [key, [...value]]));
 		if (sec.mode === 'cube')
 			state = buildCube(ctx, sec, cubeClicks(chart, inside, sec, preset), state);
 		else if (sec.mode === 'wave') state = buildWave(ctx, sec, inside, state);
@@ -598,12 +607,34 @@ export function generateLevel(
 					: chooseClicks(chart, inside, gap, preset.cost * 0.9);
 			state = buildFlight(ctx, sec, inside, theirs, state);
 		}
+		const constructed = world.hazards.items.filter((h) => !oldHazards.has(h));
 		plan.sort((a, b) => a.time - b.time);
 		state = repair(world, plan, entry, sec);
 		// (the steered parts are checked as a person steers them: see builders/flight.ts)
 		if (sec.mode !== 'ship' && sec.mode !== 'wave' && sec.mode !== 'swing')
 			fairness(world, plan, entry, sec, preset, options.seed);
 		state = simulate(world, entry, sec.end, plan);
+		const removed = constructed.filter((h) => !world.hazards.items.includes(h)).length;
+		if (restore && (state.dead || (removed > 3 && removed > constructed.length * 0.2))) {
+			// Recompose the section as a unit before accepting a badly fragmented structure.
+			restore();
+			plan.splice(0, plan.length, ...entryPlan);
+			const simpler: Context = {
+				...ctx,
+				simplify: true,
+				history: oldHistory,
+				motifs: oldMotifs,
+				rng: random(hash(`${options.seed}:${sec.index}:recompose`)),
+				preset: { ...preset, chain: 0, height: Math.min(preset.height, 3) }
+			};
+			buildCube(simpler, sec, cubeClicks(chart, inside, sec, simpler.preset), entry);
+			ctx.history = simpler.history;
+			ctx.motifs = simpler.motifs;
+			plan.sort((a, b) => a.time - b.time);
+			state = repair(world, plan, entry, sec);
+			fairness(world, plan, entry, sec, preset, options.seed);
+			state = simulate(world, entry, sec.end, plan);
+		}
 		// Never left dead for the parts after it: what's in the way goes, else the part is cleared
 		for (let k = 0; k < 30 && state.dead; k++) {
 			removeNear(world, state.x, sec.mode);
@@ -622,11 +653,7 @@ export function generateLevel(
 	plan.sort((a, b) => a.time - b.time);
 
 	playThrough(world, plan, start, end);
-	fillEmpty(world, plan, start, end, chart);
-	requireInput(world, plan, start, end, preset);
-	// (what those two add is checked where it's added, each on its own: all together once more,
-	// so nothing of it can stop the level)
-	playThrough(world, plan, start, end);
+	// Builders own the geometry. Do not scatter hazards into idle stretches afterwards.
 
 	// Later filling/repair can change the approach state: check swing windows on the final world.
 	widenSwingWindows(world, plan, start, end, preset.tolerance);
@@ -662,235 +689,13 @@ export function generateLevel(
 }
 
 /**
- * Never long without anything (but in the beatmap's breaks): where nothing is for a while,
- * spikes on the floor and ceiling of the part, far enough from the way through
- */
-function fillEmpty(world: World, plan: InputEvent[], start: number, end: number, chart: DashChart) {
-	const trace: { x: number; y: number; time: number }[] = [];
-	simulate(world, startState(world, start), end, plan, { trace });
-	const busy = (a: number, b: number) =>
-		world.hazards.near(a, b).length +
-		world.orbs.near(a, b).length +
-		world.pads.near(a, b).length +
-		world.walls.near(a, b).length +
-		world.solids.near(a, b).filter((s) => s.x0 > a - 1 || s.style !== 0).length;
-	const entries = new Map<number, ReturnType<typeof startState>>();
-	const entryOf = (index: number) => {
-		if (!entries.has(index))
-			entries.set(
-				index,
-				simulate(world, startState(world, start), world.sections[index].start + STEP, plan)
-			);
-		return entries.get(index)!;
-	};
-	for (let t = start + 1500; t < end - 1500; t += 500) {
-		if (chart.breaks.some((b) => t > b.start - 500 && t < b.end + 500)) continue;
-		const sec = world.sectionAt(t);
-		if (sec.ceil === null || t < sec.start + 800 || t > sec.end - 800) continue;
-		const a = world.xAt(t);
-		const b = world.xAt(t + 1500);
-		if (busy(a, b)) continue;
-		const box = hitbox(sec.mode, sec.mini);
-		for (let x = Math.ceil(a); x + 1 <= b; x++) {
-			let low = Infinity;
-			let high = -Infinity;
-			for (const p of trace) {
-				if (Math.abs(p.x - (x + 0.5)) > box.w + 1) continue;
-				low = Math.min(low, p.y - box.h);
-				high = Math.max(high, p.y + box.h);
-			}
-			if (!isFinite(low)) continue;
-			const added = [];
-			if (low - sec.floor > 1.8) added.push(world.spike(x + 0.5, sec.floor, 1));
-			if (sec.ceil - high > 1.8) added.push(world.spike(x + 0.5, sec.ceil, -1));
-			if (!added.length) continue;
-			const run = simulate(world, entryOf(sec.index), Math.min(sec.end, world.timeAt(x + 3)), plan);
-			if (run.dead || !legalAround(world, x - 1, x + 2))
-				for (const h of added) world.hazards.remove(h);
-		}
-	}
-}
-
-/** How long the level may be played on without pressing (ms), by the kind of part */
-const IDLE: Record<Mode, number> = {
-	cube: 1600,
-	ship: 1500,
-	ball: 1300,
-	ufo: 1300,
-	wave: 1000,
-	swing: 1300,
-	spider: 1300
-};
-
-/**
- * Never long with nothing to do: where the level could be played on for a while without
- * pressing at all (an obstacle that was taken out again, a part drifting along its floor),
- * something on that way that only the planned presses get past: a spike on the surface it
- * would run along (or hang under), or, flying, a saw where it would drift. Played on time,
- * early and late, before it stays.
- */
-function requireInput(
-	world: World,
-	plan: InputEvent[],
-	start: number,
-	end: number,
-	preset: Preset
-) {
-	const EVERY = 250;
-	const trace: { x: number; y: number; time: number }[] = [];
-	simulate(world, startState(world, start), end, plan, { trace });
-	// The planned run every quarter second, to start from there
-	const states: PlayerState[] = [];
-	let run = startState(world, start);
-	for (let t = start; t <= end; t += EVERY) {
-		run = simulate(world, run, t, plan);
-		states.push(run);
-	}
-	const stateAt = (time: number) =>
-		states[Math.max(0, Math.min(states.length - 1, Math.floor((time - start) / EVERY)))];
-	/** Where the planned run is between two places: its lowest and highest middle */
-	const planned = (x0: number, x1: number) => {
-		let lo = 0;
-		let hi = trace.length;
-		while (lo < hi) {
-			const mid = (lo + hi) >> 1;
-			if (trace[mid].x < x0) lo = mid + 1;
-			else hi = mid;
-		}
-		let low = Infinity;
-		let high = -Infinity;
-		for (let i = lo; i < trace.length && trace[i].x <= x1; i++) {
-			low = Math.min(low, trace[i].y);
-			high = Math.max(high, trace[i].y);
-		}
-		return { low, high };
-	};
-	const steered = (mode: Mode) => mode === 'ship' || mode === 'wave' || mode === 'swing';
-	// (not the swing: it turns around a moment late wherever it is, so only on its surfaces)
-	const flying = (mode: Mode) => mode === 'ship' || mode === 'ufo';
-	let seed = 1;
-	const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-	/**
-	 * Whether the planned presses still get past it: on time, and (but steered) all early, all
-	 * late, and each a bit early or late and held shorter or longer, as a person plays
-	 */
-	const passes = (hazard: Hazard, mode: Mode) => {
-		if (hazard.kind !== 'saw' && !legalAround(world, hazard.x - 1.5, hazard.x + 1.5)) return false;
-		const at = world.timeAt(hazard.x);
-		const a = at - 1200;
-		const b = at + 500;
-		const from = stateAt(a - EVERY);
-		const runs = [plan];
-		const tolerance = preset.tolerance * 0.75;
-		if (!steered(mode))
-			for (let k = 0; k < 7; k++) {
-				// (a press and its release move together)
-				let shift = 0;
-				let longer = 0;
-				runs.push(
-					plan
-						.map((e) => {
-							if (e.time < a || e.time > b) return e;
-							if (e.down) {
-								shift = k < 2 ? (k ? tolerance : -tolerance) : (rnd() * 2 - 1) * tolerance;
-								longer = k < 2 ? 0 : (rnd() - 0.4) * 100;
-							}
-							return { ...e, time: e.time + shift + (e.down ? 0 : longer) };
-						})
-						.sort((p, q) => p.time - q.time)
-				);
-			}
-		return runs.every((inputs) => !simulate(world, from, b + 400, inputs).dead);
-	};
-
-	const added: Hazard[] = [];
-	for (let t = start + 1000; t < end - 1200; t += 500) {
-		const sec = world.sectionAt(t);
-		if (t < sec.start + 500) continue;
-		const until = Math.min(t + IDLE[sec.mode], sec.end - 250);
-		if (until - t < 900) continue;
-		const idle = copyState(stateAt(t));
-		if (idle.dead) break;
-		press(idle, false);
-		const path: { x: number; y: number; time: number }[] = [];
-		if (simulate(world, idle, until, [], { trace: path }).dead) continue;
-
-		// It got through without pressing: something on its way, where the planned run isn't
-		const box = hitbox(sec.mode, sec.mini);
-		const room = sec.mode === 'swing' ? 1.3 : steered(sec.mode) ? 0.9 : 0.25;
-		let lastColumn = -Infinity;
-		let fixed = false;
-		for (const p of path) {
-			if (fixed) break;
-			const column = Math.floor(p.x);
-			if (p.time < t + 200 || column === lastColumn || p.x > sec.x1 - 1.5) continue;
-			lastColumn = column;
-			// (where the planned run could touch it; played early and late below)
-			const x = column + 0.5;
-			const way = planned(x - box.w - 0.25, x + box.w + 0.25);
-			if (!isFinite(way.low)) continue;
-			const bottom = p.y - box.h;
-			const top = p.y + box.h;
-			// A spike on the surface it runs along (or under the one it slides along), the planned
-			// run well clear of it: a small one where there's less room
-			const spike = (kind: 'spike' | 'small', reach: number, extra: number) => [
-				() =>
-					world.surfaceAt(column + 0.05, column + 0.95, bottom, 1) &&
-					way.low - box.h > bottom + reach + extra
-						? world.spike(x, bottom, 1, kind)
-						: null,
-				() =>
-					world.surfaceAt(column + 0.05, column + 0.95, top, -1) &&
-					way.high + box.h < top - reach - extra
-						? world.spike(x, top, -1, kind)
-						: null
-			];
-			const options: (() => Hazard | null)[] = [
-				...spike('spike', 0.7, room),
-				...spike('small', 0.25, room / 2),
-				// Flying: a saw where it drifts
-				() => {
-					if (!flying(sec.mode)) return null;
-					const reach = 0.6 * 0.72 + box.h + room + 0.2;
-					if (way.low < p.y + reach && way.high > p.y - reach) return null;
-					if (world.solidAt(x - 0.7, x + 0.7, p.y - 0.7, p.y + 0.7)) return null;
-					if (world.hazards.near(x - 1.5, x + 1.5).length) return null;
-					return world.saw(x, p.y, 0.6);
-				}
-			];
-			for (const option of options) {
-				const hazard = option();
-				if (!hazard) continue;
-				if (passes(hazard, sec.mode) && simulate(world, idle, until, []).dead) {
-					added.push(hazard);
-					fixed = true;
-					break;
-				}
-				world.hazards.remove(hazard);
-			}
-		}
-	}
-
-	// Played through once more: what was added and stops it goes again
-	for (let k = 0; k < 40 && added.length; k++) {
-		const check = simulate(world, startState(world, start), end, plan);
-		if (!check.dead) break;
-		const near = added.filter((h) => Math.abs(h.x - check.x) < 2.5);
-		if (!near.length) break;
-		for (const h of near) {
-			world.hazards.remove(h);
-			added.splice(added.indexOf(h), 1);
-		}
-	}
-}
-
-/**
  * Played through from the start: whatever still stops the plan goes, until it gets to the end
  * (so every level can be finished, whatever the steps before left in it)
  */
 function playThrough(world: World, plan: InputEvent[], start: number, end: number) {
+	const finishTick = start + Math.ceil((end - start) / STEP - 1e-8) * STEP;
 	for (let attempt = 0; attempt < 120; attempt++) {
-		const run = simulate(world, startState(world, start), end, plan);
+		const run = simulate(world, startState(world, start), finishTick, plan);
 		if (!run.dead) return;
 		removeNear(world, run.x, world.sectionAt(run.time).mode);
 	}
@@ -1042,6 +847,26 @@ function fairness(
 	}
 }
 
-void clamp;
-void freshness;
-void beatStrength;
+/** A failed composition can be retried without leaving partial solids, pads or portals. */
+function saveGeometry(world: World) {
+	const solids = structuredClone(world.solids.items),
+		hazards = structuredClone(world.hazards.items);
+	const orbs = structuredClone(world.orbs.items),
+		pads = structuredClone(world.pads.items);
+	const walls = structuredClone(world.walls.items),
+		portals = structuredClone(world.gravityPortals.items);
+	return () => {
+		world.solids.items = solids;
+		world.hazards.items = hazards;
+		world.orbs.items = orbs;
+		world.pads.items = pads;
+		world.walls.items = walls;
+		world.gravityPortals.items = portals;
+		world.solids.touch();
+		world.hazards.touch();
+		world.orbs.touch();
+		world.pads.touch();
+		world.walls.touch();
+		world.gravityPortals.touch();
+	};
+}
