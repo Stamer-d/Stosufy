@@ -416,6 +416,13 @@ Nach Rückmeldung zum Spielen von 0.6.75. Alle Befunde habe ich an Bildern der g
     wurde nie fertig. Das betraf auch die bisherigen Versionen (gemessen: nach 90 s abgebrochen).
     Jetzt zählen Tempopunkte außerhalb 6–1200 BPM nicht als Takt; das Raster davor läuft weiter.
   - Aus solchen Effekten entstanden auch Slider von Minuten Länge. Noten dauern jetzt höchstens 30 s.
+- **0.6.77, ein unfairer Klick:** Auf „Acid Rain“ (Hard) hatte ein Mini-UFO-Klick nur ±4 ms
+  Spielraum. Das Fenster war nicht zusammenhängend: ±24 ms ging, ±8 ms nicht. Ursache: Am Ende
+  entfernte der Builder einen Orb, weil der pünktliche Lauf ihn nicht brauchte – den leicht
+  verfrühten Druck hatte aber genau dieser Orb abgefangen. Jetzt prüfen die Flug-Builder jeden
+  Druck auch einzeln (jeden Physikschritt bis zur halben Toleranz und ±75 %, die anderen pünktlich).
+  Ein Orb fliegt nur raus, wenn danach alle Spielweisen bestehen. Nachgemessen auf drei echten Maps ×
+  vier Stufen: kein Klick unter der Toleranz.
 - **Tests:** Robot springt gehalten weiter und nimmt einen Druck kurz vor der Landung mit. Kein
   Rastplatz in Flugteilen (unter 10 % auf den Testsongs). Spider- und Ball-Abschnitte haben Stufen.
   Gravity-Wechsel in mindestens vier Modi; Kopfüber-Passagen im Cube durchspielbar und richtig

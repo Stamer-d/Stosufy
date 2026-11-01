@@ -782,6 +782,34 @@ export function buildFlight(
 					}
 				}
 		}
+		// Each press alone a bit early or late, the others on time (as a click's room is measured:
+		// see validate.ts), through the obstacle after the next press
+		if (!failed && !steered) {
+			let state = entry;
+			for (let k = 0; k < events.length && !failed; k++) {
+				const e = events[k];
+				if (!e.down) continue;
+				const release = events.findIndex((u, n) => n > k && !u.down);
+				const after = events.find((u, n) => n > k && u.down);
+				const until = Math.min(section.end, (after?.time ?? e.time + 1000) + 400);
+				state = simulate(world, state, Math.max(state.time, e.time - tolerance - 20), events);
+				if (state.dead) break;
+				// (every step up to half the tolerance each way: the room must be in one piece; and
+				// three quarters of it)
+				const shifts = [0.75 * tolerance];
+				for (let d = STEP; d <= tolerance / 2 + STEP; d += STEP) shifts.push(d);
+				for (const shift of shifts.flatMap((d) => [-d, d])) {
+					const inputs = events
+						.map((u, n) => (n === k || n === release ? { ...u, time: u.time + shift } : u))
+						.sort((p, q) => p.time - q.time);
+					const run = simulate(world, state, until, inputs);
+					if (run.dead) {
+						failed = run;
+						break;
+					}
+				}
+			}
+		}
 		return failed;
 	};
 	/** The attempt whose way was played through (checked again the same way later) */
@@ -905,10 +933,10 @@ export function buildFlight(
 		if (added.length) used(ctx, `${mode}-unrested`);
 	}
 	// Every orb needed: one it gets through without (the press there a plain hop or switch)
-	// goes, so none is just in the air
+	// goes, so none is just in the air; unless a press a bit early or late needs it
 	for (const orb of orbs) {
 		world.orbs.remove(orb);
-		if (simulate(world, entry, section.end, events).dead) world.orbs.add(orb);
+		if (simulate(world, entry, section.end, events).dead || verify(settled)) world.orbs.add(orb);
 	}
 	plan.push(...events);
 	used(ctx, mode);
