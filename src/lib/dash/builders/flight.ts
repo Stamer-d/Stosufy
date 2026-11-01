@@ -333,22 +333,49 @@ export function buildFlight(
 						: 1.3 * tight;
 	const cap =
 		mode === 'spider' ? 0 : mode === 'ball' ? Math.floor((top - floor) / 2) - 1 : top - floor;
-	const group = 2;
+	// Architectural spans follow whole musical beats. A wall is planned across the
+	// whole span before rendering blocks, not fitted independently to each pixel of flight.
+	const anchors = new Set<number>([Math.ceil(startX)]);
+	for (const point of ctx.chart.timing) {
+		const from = Math.max(section.start + 450, point.time);
+		const until = Math.min(
+			section.end - 450,
+			ctx.chart.timing.find((p) => p.time > point.time)?.time ?? Infinity
+		);
+		for (
+			let t = point.time + Math.ceil((from - point.time) / point.beatLength) * point.beatLength;
+			t < until;
+			t += point.beatLength
+		)
+			anchors.add(Math.round(world.xAt(t)));
+	}
+	const boundaries: number[] = [];
+	for (const x of [...anchors].sort((a, b) => a - b))
+		if (
+			x >= Math.ceil(startX) &&
+			x <= Math.floor(endX) - 2 &&
+			(!boundaries.length || x - boundaries[boundaries.length - 1] >= 2)
+		)
+			boundaries.push(x);
+	boundaries.push(Math.floor(endX));
 	const columns: Column[] = [];
-	for (let x = Math.ceil(startX); x + group <= Math.floor(endX); x += group) {
-		let lowest = Infinity;
-		let highest = -Infinity;
+	for (let n = 1; n < boundaries.length; n++) {
+		const x = boundaries[n - 1],
+			end = boundaries[n];
+		let lowest = Infinity,
+			highest = -Infinity;
 		for (const trace of runs)
 			for (const p of trace) {
-				if (p.x < x - box.w - 0.3 || p.x > x + group + box.w + 0.3) continue;
+				if (p.x < x - box.w - 0.3 || p.x > end + box.w + 0.3) continue;
 				lowest = Math.min(lowest, p.y - box.h);
 				highest = Math.max(highest, p.y + box.h);
 			}
 		if (!isFinite(lowest)) continue;
-		const low = clamp(Math.floor(lowest - margin), floor, floor + cap);
-		const high = clamp(Math.ceil(highest + margin), top - cap, top);
-		for (let k = 0; k < group; k++) columns.push({ x: x + k, low, high, spike: 0 });
+		const low = clamp(Math.floor(lowest - margin), floor, floor + cap),
+			high = clamp(Math.ceil(highest + margin), top - cap, top);
+		for (let cell = x; cell < end; cell++) columns.push({ x: cell, low, high, spike: 0 });
 	}
+
 	// Give the end of each two-bar phrase room; declared rests are completely open.
 	const open = (x: number) => {
 		const time = world.timeAt(x + 0.5);

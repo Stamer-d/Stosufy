@@ -124,6 +124,7 @@ const SWING_COLOR = '#ffe14d';
 /** What each kind of part is called and how it's played: over its portal */
 const MODE_NAMES: Record<Mode, [string, string]> = {
 	cube: ['CUBE', 'tap to jump'],
+	robot: ['ROBOT', 'hold for a higher jump'],
 	ship: ['SHIP', 'hold to fly up'],
 	ball: ['BALL', 'tap to flip'],
 	ufo: ['UFO', 'tap to hop'],
@@ -997,7 +998,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	};
 	/** (The sheet has no red and blue pads: those are drawn) */
 	const PAD_SPRITES: Record<string, SpriteName> = { yellow: 'padYellow', pink: 'padPink' };
-	const PORTAL_SPRITES: Record<Mode, SpriteName> = {
+	const PORTAL_SPRITES: Partial<Record<Mode, SpriteName>> = {
 		cube: 'portalCube',
 		ship: 'portalShip',
 		ball: 'portalBall',
@@ -1009,6 +1010,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 
 	const PORTAL_COLORS: Record<Mode, string> = {
 		cube: '#5dff5a',
+		robot: '#f4f4ff',
 		ship: '#ff4fd8',
 		ball: '#ff9a1f',
 		wave: '#3ad7ff',
@@ -1371,6 +1373,37 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.stroke();
 	}
 
+	/** Original vector art: jointed legs and a thrust plume, with the player's icon as its head. */
+	function robotShape(state: PlayerState, icon: Icon, time: number) {
+		const s = scale;
+		if (state.gravity < 0) ctx.scale(1, -1);
+		const stride = state.grounded ? Math.sin(state.x * 3.2) : 0;
+		for (const side of [-1, 1]) {
+			const foot = state.grounded ? side * stride * 0.24 : side * 0.18;
+			ctx.beginPath();
+			ctx.moveTo(side * s * 0.18, 0);
+			ctx.lineTo((side * 0.24 - foot * 0.5) * s, s * 0.23);
+			ctx.lineTo(foot * s, s * 0.45);
+			ctx.strokeStyle = '#101225';
+			ctx.lineWidth = s * 0.15;
+			ctx.stroke();
+			ctx.strokeStyle = icon.secondary;
+			ctx.lineWidth = s * 0.075;
+			ctx.stroke();
+			ctx.fillStyle = icon.primary;
+			ctx.fillRect((foot - 0.16) * s, s * 0.36, s * 0.32, s * 0.13);
+		}
+		if (state.robotActive && state.held && !state.robotReleased && state.robotCharge < 1.5) {
+			ctx.beginPath();
+			ctx.moveTo(-s * 0.12, s * 0.2);
+			ctx.lineTo(0, s * (0.6 + 0.12 * Math.sin(time * 0.04)));
+			ctx.lineTo(s * 0.12, s * 0.2);
+			ctx.fillStyle = '#ffb347';
+			ctx.fill();
+		}
+		rider(icon, 0, -s * 0.12, 0.7);
+	}
+
 	function drawPlayer(state: PlayerState, icon: Icon, dt: number, time: number) {
 		const cx = sx(state.x);
 		const cy = sy(state.y);
@@ -1384,6 +1417,11 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		if (state.mini) ctx.scale(0.6, 0.6);
 		// The spider and the swing are drawn here (they move: legs, fins, the way they're
 		// pulled), carrying the player's own cube
+		if (state.mode === 'robot') {
+			robotShape(state, icon, time);
+			ctx.restore();
+			return;
+		}
 		if (state.mode === 'spider' || state.mode === 'swing') {
 			if (state.mode === 'spider') spiderShape(state, icon, time);
 			else swingShape(state, icon, dt, time);
@@ -1579,7 +1617,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 					});
 				} else if (
 					state.grounded &&
-					(state.mode === 'cube' || state.mode === 'ball' || state.mode === 'spider')
+					(state.mode === 'cube' ||
+						state.mode === 'robot' ||
+						state.mode === 'ball' ||
+						state.mode === 'spider')
 				) {
 					spawn({
 						x: state.x - 0.45,

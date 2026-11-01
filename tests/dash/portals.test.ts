@@ -11,7 +11,7 @@ import {
 } from '../../src/lib/dash/physics';
 import { world } from './worlds';
 
-for (const mode of ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider'] as Mode[]) {
+for (const mode of ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider'] as Mode[]) {
 	test(`section metadata alone does not change ${mode} player state`, () => {
 		const plain = world({ mode });
 		const split = world({ mode, length: 100 }, { mode });
@@ -118,15 +118,16 @@ test('a fresh press on the crossing tick still reaches swing', () => {
 });
 
 test('native mode toggle damping is applied once on each entry/exit path', () => {
-	const modes: Mode[] = ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider'];
+	const modes: Mode[] = ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider'];
 	const factors = [
-		[1, 0.5, 1, 0.5, 0.5, 0.5, 1],
-		[0.5, 1, 0.5, 0.25, 0.25, 0.25, 0.5],
-		[1, 0.5, 1, 0.5, 0.5, 0.5, 1],
-		[0.5, 0.25, 0.5, 1, 0.25, 0.25, 0.5],
-		[0.5, 0.25, 0.5, 0.25, 1, 0.25, 0.5],
-		[0.5, 0.25, 0.5, 0.25, 0.25, 1, 0.5],
-		[1, 0.5, 1, 0.5, 0.5, 0.5, 1]
+		[1, 1, 0.5, 1, 0.5, 0.5, 0.5, 1],
+		[1, 1, 0.5, 1, 0.5, 0.5, 0.5, 1],
+		[0.5, 0.5, 1, 0.5, 0.25, 0.25, 0.25, 0.5],
+		[1, 1, 0.5, 1, 0.5, 0.5, 0.5, 1],
+		[0.5, 0.5, 0.25, 0.5, 1, 0.25, 0.25, 0.5],
+		[0.5, 0.5, 0.25, 0.5, 0.25, 1, 0.25, 0.5],
+		[0.5, 0.5, 0.25, 0.5, 0.25, 0.25, 1, 0.5],
+		[1, 1, 0.5, 1, 0.5, 0.5, 0.5, 1]
 	];
 	for (let i = 0; i < modes.length; i++)
 		for (let j = 0; j < modes.length; j++) {

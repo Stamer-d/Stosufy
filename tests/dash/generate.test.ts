@@ -208,5 +208,14 @@ test('every kind of part comes up', async () => {
 	for (const name of Object.keys(SONGS))
 		for (const difficulty of DIFFICULTIES)
 			for (const s of (await level(name, difficulty)).world.sections) kinds.add(s.mode);
-	assert.deepEqual([...kinds].sort(), ['ball', 'cube', 'ship', 'spider', 'swing', 'ufo', 'wave']);
+	assert.deepEqual([...kinds].sort(), [
+		'ball',
+		'cube',
+		'robot',
+		'ship',
+		'spider',
+		'swing',
+		'ufo',
+		'wave'
+	]);
 });

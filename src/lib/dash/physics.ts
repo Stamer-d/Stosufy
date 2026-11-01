@@ -10,8 +10,9 @@ import { flightStep } from './native-flight';
 import { orbVelocity } from './native-orbs';
 import { nativeRound } from './native-number';
 import { padVelocity } from './native-pads';
+import { robotStep } from './native-robot';
 
-export type Mode = 'cube' | 'ship' | 'ball' | 'ufo' | 'wave' | 'swing' | 'spider';
+export type Mode = 'cube' | 'ship' | 'ball' | 'ufo' | 'wave' | 'swing' | 'spider' | 'robot';
 
 /** Horizontal speeds (blocks per second): 0.5Ã—, 1Ã—, 2Ã—, 3Ã—, 4Ã— */
 export const SPEEDS = [8.372, 10.386, 12.914, 15.6, 19.2];
@@ -67,6 +68,7 @@ export const PHYSICS = {
 		ufo: 0.75,
 		wave: 0,
 		swing: 0.6,
+		robot: 1,
 		spider: 0.7
 	} as Record<Mode, number>
 };
@@ -399,6 +401,9 @@ export interface PlayerState {
 	boostedAt: number;
 	/** Native flight cap-bypass state (not the particle timestamp). */
 	velocityBoosted: boolean;
+	robotCharge: number;
+	robotActive: boolean;
+	robotReleased: boolean;
 	landedAt: number;
 	/** The spider's last jump: from where to where (for its trail) */
 	teleport: { x: number; from: number; to: number; time: number } | null;
@@ -428,6 +433,9 @@ export function startState(world: World, time: number, y?: number): PlayerState 
 		jumpedAt: -1e9,
 		boostedAt: -1e9,
 		velocityBoosted: false,
+		robotCharge: 1.5,
+		robotActive: false,
+		robotReleased: true,
 		landedAt: -1e9,
 		teleport: null,
 		dash: null
@@ -471,6 +479,10 @@ const capFall = (vy: number, gravity: 1 | -1) =>
 /** Each changed Ship/UFO/Wave/Swing toggle halves vy, on entry AND exit.
  * Ball/Spider toggles do not. Native 0x1404fa150 dispatches the old mode's disable path. */
 function enterMode(s: PlayerState, from: Mode, to: Mode) {
+	if (to === 'robot') {
+		s.robotCharge = 1.5;
+		s.robotActive = false;
+	}
 	const halves = (m: Mode) => m === 'ship' || m === 'ufo' || m === 'wave' || m === 'swing';
 	if (halves(from)) s.vy *= 0.5;
 	if (halves(to)) s.vy *= 0.5;
@@ -493,6 +505,48 @@ function spiderTarget(
 	return up ? target - box.h : target + box.h;
 }
 
+/** pushButton processes already touching rings before the ordinary ground jump. */
+function activateOrb(world: World, s: PlayerState, orb: Orb, time: number, events: string[]) {
+	const section = world.sectionAt(time),
+		cube = cubeAt(section.speedIndex),
+		box = hitbox(s.mode, s.mini);
+	if (orb.kind === 'red' || orb.kind === 'black') s.velocityBoosted = true;
+	s.used.push(orb.id);
+	s.buffered = false;
+	s.switched = true;
+	s.grounded = false;
+	s.boostedAt = time;
+	events.push('orb');
+	if (orb.kind === 'blue') {
+		s.vy = orbVelocity(s.mode, 'blue', s.mini, s.gravity, cube.jump);
+		s.gravity = (s.gravity * -1) as 1 | -1;
+	} else if (orb.kind === 'green') {
+		s.gravity = (s.gravity * -1) as 1 | -1;
+		s.vy = orbVelocity(s.mode, 'green', s.mini, s.gravity, cube.jump);
+	} else if (orb.kind === 'dash') s.vy = s.dash = (orb.dir ?? 0) * section.speed * 0.45;
+	else if (orb.kind === 'spider') {
+		const from = s.y;
+		s.y = spiderTarget(world, s, section, box);
+		s.teleport = { x: s.x, from, to: s.y, time };
+		s.gravity = (s.gravity * -1) as 1 | -1;
+		s.vy = 0;
+		s.grounded = true;
+	} else s.vy = orbVelocity(s.mode, orb.kind, s.mini, s.gravity, cube.jump);
+	s.robotActive = true;
+}
+
+function touchingOrb(world: World, s: PlayerState) {
+	if (!s.buffered || !s.held || s.mode === 'wave') return undefined;
+	const box = hitbox(s.mode, s.mini);
+	return world.orbs
+		.near(s.x - box.w - 0.6, s.x + box.w + 0.6)
+		.find(
+			(orb) =>
+				!s.used.includes(orb.id) &&
+				Math.abs(orb.x - s.x) <= box.w + 0.6 &&
+				Math.abs(orb.y - s.y) <= box.h + 0.6
+		);
+}
 /**
  * One step of the physics, to `time` (at most a STEP after the state's). Changes the state;
  * returns what happened (for sounds and effects).
@@ -527,6 +581,8 @@ export function step(world: World, s: PlayerState, time: number) {
 	// GD 2.2091: PlayerObject::update calls updateJump before applying dy;
 	// GJBaseGameLayer checks collisions after PlayerObject::update. See docs/rea-status.md.
 	const wasGrounded = s.grounded;
+	const ring = touchingOrb(world, s);
+	if (ring) activateOrb(world, s, ring, time, events);
 	// The new speed up or down. Dashing: straight on while held (then as before)
 	const gg = s.gravity;
 	if (s.dash !== null && !s.held) s.dash = null;
@@ -537,7 +593,7 @@ export function step(world: World, s: PlayerState, time: number) {
 	}
 	switch (mode) {
 		case 'cube': {
-			if (s.grounded && s.held) {
+			if (s.grounded && s.held && !ring) {
 				s.vy = gg * cube.jump * (s.mini ? 0.8 : 1);
 				s.grounded = false;
 				s.buffered = false;
@@ -545,6 +601,34 @@ export function step(world: World, s: PlayerState, time: number) {
 				events.push('jump');
 			} else s.vy -= gg * cube.gravity * dt;
 			s.vy = capFall(s.vy, s.gravity);
+			break;
+		}
+		case 'robot': {
+			const result = robotStep(
+				{
+					vy: s.vy,
+					gravity: s.gravity,
+					mini: s.mini,
+					grounded: s.grounded,
+					held: s.held,
+					buffered: s.buffered,
+					active: s.robotActive,
+					released: s.robotReleased,
+					charge: s.robotCharge
+				},
+				cube,
+				dt
+			);
+			s.vy = capFall(result.vy, s.gravity);
+			s.robotCharge = result.charge;
+			s.robotActive = result.active;
+			s.robotReleased = result.released;
+			if (result.jumped) {
+				s.grounded = false;
+				s.buffered = false;
+				s.jumpedAt = time;
+				events.push('jump');
+			}
 			break;
 		}
 		case 'ball': {
@@ -628,28 +712,7 @@ export function step(world: World, s: PlayerState, time: number) {
 		for (const orb of world.orbs.near(player.x0 - 0.6, player.x1 + 0.6)) {
 			if (!s.buffered || !s.held || s.used.includes(orb.id)) continue;
 			if (Math.abs(orb.x - s.x) > box.w + 0.6 || Math.abs(orb.y - s.y) > box.h + 0.6) continue;
-			if (orb.kind === 'red' || orb.kind === 'black') s.velocityBoosted = true;
-			s.used.push(orb.id);
-			s.buffered = false;
-			s.switched = true;
-			s.grounded = false;
-			s.boostedAt = time;
-			events.push('orb');
-			if (orb.kind === 'blue') {
-				s.vy = orbVelocity(s.mode, 'blue', s.mini, s.gravity, cube.jump);
-				s.gravity = (s.gravity * -1) as 1 | -1;
-			} else if (orb.kind === 'green') {
-				s.gravity = (s.gravity * -1) as 1 | -1;
-				s.vy = orbVelocity(s.mode, 'green', s.mini, s.gravity, cube.jump);
-			} else if (orb.kind === 'dash') s.vy = s.dash = (orb.dir ?? 0) * speed * 0.45;
-			else if (orb.kind === 'spider') {
-				const from = s.y;
-				s.y = spiderTarget(world, s, section, box);
-				s.teleport = { x: s.x, from, to: s.y, time };
-				s.gravity = (s.gravity * -1) as 1 | -1;
-				s.vy = 0;
-				s.grounded = true;
-			} else s.vy = orbVelocity(s.mode, orb.kind, s.mini, s.gravity, cube.jump);
+			activateOrb(world, s, orb, time, events);
 			break;
 		}
 		for (const pad of world.pads.near(player.x0, player.x1)) {
@@ -782,7 +845,7 @@ export function step(world: World, s: PlayerState, time: number) {
 			s.rotation += (target - s.rotation) * Math.min(1, (dt / 0.075) * 2);
 		} else s.rotation += gg * dt * (Math.PI / (s.mini ? 0.328 : 0.41));
 	} else if (s.mode === 'ball') s.rotation += (s.gravity * dt * Math.PI * 2) / 0.5;
-	else if (s.mode === 'spider') s.rotation = 0;
+	else if (s.mode === 'spider' || s.mode === 'robot') s.rotation = 0;
 	return events;
 }
 
@@ -793,6 +856,7 @@ export function press(s: PlayerState, down: boolean) {
 		s.switched = false;
 	}
 	if (!down) {
+		s.robotReleased = true;
 		s.buffered = false;
 		s.switched = false;
 	}

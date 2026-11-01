@@ -73,7 +73,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		speeds: [1, 2],
 		chain: 2,
 		mini: 0.1,
-		modes: ['cube', 'ship', 'ball', 'ufo', 'wave']
+		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave']
 	},
 	hard: {
 		level: 2,
@@ -88,7 +88,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		speeds: [1, 2],
 		chain: 3,
 		mini: 0.24,
-		modes: ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
+		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
 	},
 	insane: {
 		level: 3,
@@ -103,7 +103,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		speeds: [2, 3],
 		chain: 4,
 		mini: 0.3,
-		modes: ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
+		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
 	},
 	// (about a medium demon: fast, tight, and every kind of part and trick)
 	extreme: {
@@ -119,7 +119,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		speeds: [3, 4],
 		chain: 5,
 		mini: 0.36,
-		modes: ['cube', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
+		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
 	}
 };
 

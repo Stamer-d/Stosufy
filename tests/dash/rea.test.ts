@@ -84,7 +84,8 @@ test('REA: red cube orb uses 1.38 and the native velocity grid', () => {
 	w.orbs.add({ id: 1, kind: 'red', x, y: 3, x0: x - 0.6, x1: x + 0.6 });
 	press(s, true);
 	assert.ok(step(w, s, STEP).includes('orb'));
-	near(s.vy, 27.7704);
+	// A touching ring is activated by pushButton before the tick's gravity.
+	near(s.vy, 27.3816);
 });
 
 // Frozen conversions of the native doubles, not calculated from production settings.

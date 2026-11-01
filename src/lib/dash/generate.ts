@@ -37,17 +37,18 @@ import {
 import { hitAt, loudness } from './audio';
 import { sectionPortals } from './portals';
 import { musicalRest } from './composition';
-import { buildCube } from './builders/cube';
+import { removeUnsupportedSpikes } from './geometry';
+import { buildRunner } from './builders/runner';
 import { buildFlight } from './builders/flight';
 import { buildWave } from './builders/wave';
 
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-2.2091-phrases1';
+export const GENERATOR_VERSION = 'gd-2.2091-route1';
 
 /** How tall the parts with a ceiling are (blocks) */
-export const BOUNDS: Record<Exclude<Mode, 'cube'>, number> = {
+export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
 	ship: 10,
 	ufo: 10,
 	wave: 10,
@@ -447,6 +448,7 @@ function planParts(
 		const drop = kiaiCuts.has(from);
 		const fits: Record<Mode, number> = {
 			cube: 1.1 + (energy < 0.8 ? 0.3 : 0),
+			robot: 0.6 + (held > 0.2 ? 0.9 : 0) + (energy > 1 ? 0.3 : 0),
 			ship: 0.45 + (held > 0.45 ? 1.3 : 0) + (energy < 0.6 ? 0.6 : 0),
 			wave: preset.wave > 0 ? 0.12 + (streamy > 0.4 ? 1.8 : 0) : 0,
 			ball: 0.6 + (streamy < 0.25 && energy > 0.7 ? 0.3 : 0),
@@ -545,7 +547,7 @@ export function generateLevel(
 			speed,
 			speedIndex,
 			floor: 0,
-			ceil: part.mode === 'cube' ? null : BOUNDS[part.mode],
+			ceil: part.mode === 'cube' || part.mode === 'robot' ? null : BOUNDS[part.mode],
 			palette,
 			kiai: part.kiai
 		});
@@ -585,13 +587,13 @@ export function generateLevel(
 		portals.push(...sectionPortals(before, sec, state.y));
 		const inside = notes.filter((n) => n.time >= sec.start && n.time < sec.end);
 		const entry = state;
-		const restore = sec.mode === 'cube' ? saveGeometry(world) : null;
+		const restore = sec.mode === 'cube' || sec.mode === 'robot' ? saveGeometry(world) : null;
 		const entryPlan = [...plan];
 		const oldHazards = new Set(world.hazards.items);
 		const oldHistory = [...ctx.history];
 		const oldMotifs = new Map([...ctx.motifs].map(([key, value]) => [key, [...value]]));
-		if (sec.mode === 'cube')
-			state = buildCube(ctx, sec, cubeClicks(chart, inside, sec, preset), state);
+		if (sec.mode === 'cube' || sec.mode === 'robot')
+			state = buildRunner(ctx, sec, cubeClicks(chart, inside, sec, preset), state);
 		else if (sec.mode === 'wave') state = buildWave(ctx, sec, inside, state);
 		else {
 			// The UFO and swing click often, the ball and spider like the cube
@@ -627,7 +629,7 @@ export function generateLevel(
 				rng: random(hash(`${options.seed}:${sec.index}:recompose`)),
 				preset: { ...preset, chain: 0, height: Math.min(preset.height, 3) }
 			};
-			buildCube(simpler, sec, cubeClicks(chart, inside, sec, simpler.preset), entry);
+			buildRunner(simpler, sec, cubeClicks(chart, inside, sec, simpler.preset), entry);
 			ctx.history = simpler.history;
 			ctx.motifs = simpler.motifs;
 			plan.sort((a, b) => a.time - b.time);
@@ -658,6 +660,8 @@ export function generateLevel(
 	// Later filling/repair can change the approach state: check swing windows on the final world.
 	widenSwingWindows(world, plan, start, end, preset.tolerance);
 	playThrough(world, plan, start, end);
+
+	removeUnsupportedSpikes(world);
 
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {

@@ -125,6 +125,7 @@ export class DashGame {
 			: startState(this.level.world, this.level.start);
 		this.state.held = false;
 		this.state.buffered = false;
+		this.state.robotReleased = true;
 		this.status = 'playing';
 		this.lastCheckpoint = this.state.time;
 		this.attemptStart = this.state.time;

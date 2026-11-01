@@ -40,9 +40,12 @@ export function orbVelocity(
 						: 1.02
 					: mode === 'ball' || mode === 'spider'
 						? 1.34
-						: 1.38;
+						: mode === 'robot'
+							? 1.28
+							: 1.38;
 		jump = f(jump * f(factor));
 	}
+	if (kind === 'yellow' && mode === 'robot') jump = f(jump * f(0.9));
 	let native = q(f(f(gravity * jump) * (mini ? f(0.8) : 1)));
 	if (mode === 'ball' || mode === 'spider') native *= f(0.7);
 	else if (mode === 'swing') native *= f(0.6);
