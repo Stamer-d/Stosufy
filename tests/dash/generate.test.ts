@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { parseChart } from '../../src/lib/dash/chart';
 import {
 	generateLevel,
+	intensities,
 	DIFFICULTIES,
 	type Difficulty,
 	type Level
@@ -17,7 +18,7 @@ import { PRESETS } from '../../src/lib/dash/build';
 import { hearSong, type SongSound } from '../../src/lib/dash/audio';
 import { levelData, levelFromData } from '../../src/lib/dash/level';
 import { simulate, startState, STEP } from '../../src/lib/dash/physics';
-import { checkLevel } from '../../src/lib/dash/validate';
+import { checkLevel, type LevelReport } from '../../src/lib/dash/validate';
 import { makeAudio, makeOsu, makeSound, type SongOptions } from './fixtures';
 
 const SONGS: Record<string, SongOptions> = {
@@ -57,6 +58,12 @@ async function level(name: string, difficulty: Difficulty, seed = 'tests') {
 	return made.get(key)!;
 }
 
+const reports = new Map<Level, LevelReport>();
+function report(l: Level) {
+	if (!reports.has(l)) reports.set(l, checkLevel(l));
+	return reports.get(l)!;
+}
+
 test('the same song, settings and seed: the same level; another seed: another', async () => {
 	const song = SONGS.mixed;
 	const make = (seed: string) => {
@@ -73,13 +80,13 @@ test('the same song, settings and seed: the same level; another seed: another', 
 for (const name of Object.keys(SONGS))
 	test(`${name} song: every difficulty can be finished, every click with room`, async () => {
 		for (const difficulty of DIFFICULTIES) {
-			const report = checkLevel(await level(name, difficulty));
+			const r = report(await level(name, difficulty));
 			const preset = PRESETS[difficulty];
 			const what = `${name} ${difficulty}`;
-			assert.ok(report.finishes, `${what}: crashes at ${report.crash}`);
-			assert.ok(report.clicks.length > 20, `${what}: ${report.clicks.length} clicks`);
+			assert.ok(r.finishes, `${what}: crashes at ${r.crash}`);
+			assert.ok(r.clicks.length > 20, `${what}: ${r.clicks.length} clicks`);
 			// Every click alone may be off by the difficulty's tolerance in all (early and late)
-			const narrow = report.clicks.filter((c) => c.early + c.late < preset.tolerance);
+			const narrow = r.clicks.filter((c) => c.early + c.late < preset.tolerance);
 			assert.equal(
 				narrow.length,
 				0,
@@ -88,9 +95,9 @@ for (const name of Object.keys(SONGS))
 			// Never too close: an orb comes 160 ms after its jump at the soonest, the swing turns
 			// 130 ms after the last turn; on easy (no orbs, no swing) the jumps' own gap
 			const least = difficulty === 'easy' ? preset.gap * 1000 : 130;
-			assert.ok(report.closest >= least - STEP * 2, `${what}: ${report.closest} ms apart`);
+			assert.ok(r.closest >= least - STEP * 2, `${what}: ${r.closest} ms apart`);
 			// Seen coming for at least half a second
-			assert.ok(report.sight >= 500, `${what}: seen ${report.sight} ms`);
+			assert.ok(r.sight >= 500, `${what}: seen ${r.sight} ms`);
 		}
 	});
 
@@ -218,4 +225,106 @@ test('every kind of part comes up', async () => {
 		'ufo',
 		'wave'
 	]);
+});
+
+// --- What the difficulties mean ------------------------------------------------------------
+
+/** The median of some numbers */
+const median = (values: number[]) => {
+	const sorted = [...values].sort((a, b) => a - b);
+	return sorted[sorted.length >> 1] ?? 0;
+};
+
+test('harder: less room for each click (the median over all songs), never less than allowed', async () => {
+	// The jumps of the cube and robot parts are built to the room the difficulty asks for; the
+	// other kinds of parts get closer with it too, by their tunnels and timing spikes
+	const jumps: number[] = [];
+	const all: number[] = [];
+	for (const difficulty of DIFFICULTIES) {
+		const ground: number[] = [];
+		const every: number[] = [];
+		for (const name of Object.keys(SONGS))
+			for (const c of report(await level(name, difficulty)).clicks) {
+				every.push(c.early + c.late);
+				if (c.mode === 'cube' || c.mode === 'robot') ground.push(c.early + c.late);
+			}
+		jumps.push(median(ground));
+		all.push(median(every));
+	}
+	const shown = `jumps ${jumps.map(Math.round)}, all ${all.map(Math.round)}`;
+	// (on the easy levels a jump over a spike or two has about all the room it can have)
+	for (let i = 1; i < 3; i++) assert.ok(jumps[i] <= jumps[i - 1], shown);
+	for (let i = 3; i < jumps.length; i++) assert.ok(jumps[i] < jumps[i - 1] - 20, shown);
+	assert.ok(jumps[4] < jumps[2] * 0.75, shown);
+	for (let i = 1; i < 3; i++) assert.ok(all[i] <= all[i - 1], shown);
+	assert.ok(Math.max(all[3], all[4]) < all[2], shown);
+	assert.ok(all[4] < all[0] * 0.75, shown);
+});
+
+test('harder: more parts (the kinds change more often), and tighter flying parts', async () => {
+	const parts = DIFFICULTIES.map(() => 0);
+	const room = DIFFICULTIES.map(() => [] as number[]);
+	for (const name of Object.keys(SONGS))
+		for (const [i, difficulty] of DIFFICULTIES.entries()) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			parts[i] += w.sections.length / ((l.end - l.start) / 60000);
+			// How high the tunnels of the ship and UFO parts are, block by block
+			for (const s of w.sections) {
+				if (s.mode !== 'ship' && s.mode !== 'ufo') continue;
+				for (let x = Math.ceil(s.x0 + 6); x < s.x1 - 6; x++) {
+					const here = w.solids
+						.near(x + 0.4, x + 0.6)
+						.filter((o) => o.x0 <= x + 0.5 && o.x1 >= x + 0.5);
+					const lo = Math.max(
+						s.floor,
+						...here.filter((o) => o.y0 <= s.floor + 1e-6).map((o) => o.y1)
+					);
+					const hi = Math.min(
+						s.ceil!,
+						...here.filter((o) => o.y1 >= s.ceil! - 1e-6).map((o) => o.y0)
+					);
+					room[i].push(hi - lo);
+				}
+			}
+		}
+	for (let i = 1; i < parts.length; i++)
+		assert.ok(parts[i] >= parts[i - 1] * 0.95, `parts a minute ${parts.map((p) => p.toFixed(1))}`);
+	assert.ok(parts[4] > parts[0] * 1.8, `parts a minute ${parts.map((p) => p.toFixed(1))}`);
+	const tunnels = room.map(median);
+	assert.ok(tunnels[4] < tunnels[1], `tunnel heights ${tunnels}`);
+	assert.ok(tunnels[4] <= 4, `tunnel heights ${tunnels}`);
+});
+
+test('a level builds up like the song: a calm start, the drops the most intense, a run-up to them', () => {
+	const parts = [
+		{ energy: 0.6, kiai: false },
+		{ energy: 0.9, kiai: false },
+		{ energy: 1.3, kiai: false },
+		{ energy: 1.1, kiai: true },
+		{ energy: 1.4, kiai: true },
+		{ energy: 0.7, kiai: false },
+		{ energy: 1.2, kiai: true },
+		{ energy: 1.5, kiai: false }
+	];
+	const v = intensities(parts);
+	assert.ok(v[0] <= 0.3, 'warm-up');
+	assert.ok(v[2] <= 0.45, 'the run-up to the drop is calmer than its energy alone');
+	for (const k of [3, 4, 6]) assert.ok(v[k] >= 0.85, `kiai ${k}: ${v[k]}`);
+	assert.ok(v[7] <= 0.55, 'the end is not the hardest stretch');
+	assert.ok(v.every((x) => x >= 0 && x <= 1));
+});
+
+test('the parts know how intense they are, and the intense ones are faster', async () => {
+	for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
+		const l = await level('mixed', difficulty);
+		for (const s of l.world.sections) assert.ok(s.intensity !== undefined);
+		const calm = l.world.sections.filter((s) => s.intensity! < 0.3);
+		const hot = l.world.sections.filter((s) => s.intensity! > 0.8);
+		assert.ok(hot.length && calm.length, difficulty);
+		assert.ok(
+			Math.min(...hot.map((s) => s.speedIndex)) >= Math.max(...calm.map((s) => s.speedIndex)),
+			difficulty
+		);
+	}
 });

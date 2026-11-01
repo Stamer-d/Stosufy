@@ -194,3 +194,115 @@ test('autoplay plays the level the same at any frame rate', () => {
 	assert.deepEqual(ends[1], ends[0]);
 	assert.deepEqual(ends[2], ends[0]);
 });
+
+test('practice: a checkpoint set by the player, also in the air, is where it starts again', () => {
+	const { level, inputs } = course();
+	const game = new DashGame(level);
+	game.practice = true;
+	game.autoCheckpoints = false;
+	game.begin(false);
+	for (const e of inputs.filter((e) => e.time < 2000)) game.input(e.down, e.time);
+	game.update(1450);
+	assert.equal(game.state.grounded, false, 'in the air after the jump at 1400');
+	assert.ok(game.placeCheckpoint(game.state.time));
+	assert.equal(game.checkpoints.length, 1);
+	const set = game.checkpoints[0];
+	assert.equal(set.manual, true);
+	assert.ok(set.state.vy !== 0, 'the jump goes on from there');
+	for (const t of steady(60, 3000)) game.update(t);
+	assert.equal(game.status, 'dead', 'no press for the spike at 2300');
+	assert.equal(game.checkpoints.length, 1, 'no automatic ones when they are off');
+	game.begin(true);
+	assert.equal(game.state.time, set.state.time);
+	assert.equal(game.state.y, set.state.y);
+	assert.equal(game.state.vy, set.state.vy);
+});
+
+test('practice: a checkpoint asked for between two steps is set when the game gets there', () => {
+	const { level } = course();
+	const game = new DashGame(level);
+	game.practice = true;
+	game.autoCheckpoints = false;
+	game.begin(false);
+	game.update(500);
+	assert.ok(game.placeCheckpoint(520));
+	assert.equal(game.checkpoints.length, 0);
+	const happened = game.update(560);
+	assert.ok(happened.includes('checkpoint'));
+	assert.equal(game.checkpoints.length, 1);
+	assert.ok(Math.abs(game.checkpoints[0].state.time - 520) <= STEP);
+});
+
+test('practice: the last checkpoint can be taken away, also while waiting to respawn', () => {
+	const { level } = course();
+	const game = new DashGame(level);
+	game.practice = true;
+	game.autoCheckpoints = false;
+	game.begin(false);
+	game.update(300);
+	game.placeCheckpoint(300);
+	game.update(500);
+	game.placeCheckpoint(500);
+	game.update(520);
+	assert.equal(game.checkpoints.length, 2);
+	assert.ok(game.removeCheckpoint());
+	assert.equal(game.checkpoints.length, 1);
+	assert.ok(Math.abs(game.checkpoints[0].state.time - 300) <= STEP);
+	// (one asked for and not set yet goes first)
+	game.placeCheckpoint(game.state.time + 30);
+	assert.ok(game.removeCheckpoint());
+	game.update(600);
+	assert.equal(game.checkpoints.length, 1);
+	// Crashes into the first spike, then the last one goes before it starts again
+	for (const t of steady(60, 2000)) game.update(t);
+	assert.equal(game.status, 'dead');
+	assert.ok(game.removeCheckpoint());
+	assert.equal(game.checkpoints.length, 0);
+	assert.equal(game.removeCheckpoint(), false);
+	assert.equal(game.begin(true), level.start, 'none left: from the start');
+});
+
+test('practice: a checkpoint of the player stays when it crashes right after it', () => {
+	const { level } = course();
+	const game = new DashGame(level);
+	game.practice = true;
+	game.begin(false);
+	// (no presses: it crashes into the first spike, a moment after the checkpoint)
+	let t = 0;
+	while (game.status === 'playing' && t < 2000) {
+		t += 1000 / 60;
+		game.update(t);
+		if (!game.checkpoints.some((c) => c.manual) && game.state.x > level.world.xAt(600) + 1.6)
+			game.placeCheckpoint(game.state.time);
+	}
+	assert.equal(game.status, 'dead');
+	assert.ok(game.checkpoints.some((c) => c.manual));
+});
+
+test('practice: a late press that goes back before a checkpoint of the player keeps it', () => {
+	const { level } = course();
+	const game = new DashGame(level);
+	game.practice = true;
+	game.autoCheckpoints = false;
+	game.begin(false);
+	game.update(580);
+	game.placeCheckpoint(580);
+	game.update(610);
+	// The press for the spike, made at 570 but handed over now: played again from before it
+	game.input(true, 570);
+	game.input(false, 660);
+	game.update(700);
+	assert.equal(game.checkpoints.length, 1, 'set again where it was');
+	assert.equal(game.checkpoints[0].manual, true);
+	assert.ok(Math.abs(game.checkpoints[0].state.time - 580) <= STEP);
+	assert.ok(game.checkpoints[0].state.jumpedAt > 0, 'from the run with the late press in it');
+});
+
+test('without practice no checkpoint is set', () => {
+	const { level } = course();
+	const game = new DashGame(level);
+	game.begin(false);
+	game.update(300);
+	assert.equal(game.placeCheckpoint(300), false);
+	assert.equal(game.checkpoints.length, 0);
+});

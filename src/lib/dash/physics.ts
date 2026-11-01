@@ -185,6 +185,11 @@ export interface Section {
 	/** Which colours (see render.ts) */
 	palette: number;
 	kiai: boolean;
+	/**
+	 * How intense the music is here, from the song's calmest parts (0) to its peak (1): how
+	 * demanding the part is built (missing on older level data)
+	 */
+	intensity?: number;
 }
 
 export interface SpeedSegment {

@@ -1,7 +1,8 @@
 <script>
 	// The Dash mode: the song that plays as a one-button rhythm level, made from its beatmap.
 	// Space, ↑, W, the gameplay keys or the mouse to jump; Esc pauses (and from the pause or the
-	// results back to the menu, from the menu out of Dash). F shows the frames per second.
+	// results back to the menu, from the menu out of Dash). F shows the frames per second. In
+	// practice Z sets a checkpoint and X takes the last one away (C and V where Z and X jump).
 	import { onMount, tick, untrack } from 'svelte';
 	import { fade, fly, scale as zoom } from 'svelte/transition';
 	import { get } from 'svelte/store';
@@ -27,11 +28,31 @@
 	import { SongClock } from '#lib/dash/clock.ts';
 
 	const DIFFICULTY_INFO = {
-		easy: { label: 'Easy', color: 'bg-sky-400 text-sky-950' },
-		normal: { label: 'Normal', color: 'bg-lime-400 text-lime-950' },
-		hard: { label: 'Hard', color: 'bg-amber-400 text-amber-950' },
-		insane: { label: 'Insane', color: 'bg-rose-400 text-rose-950' },
-		extreme: { label: 'Extreme', color: 'bg-fuchsia-500 text-white' }
+		easy: {
+			label: 'Easy',
+			color: 'bg-sky-400 text-sky-950',
+			about: 'Slow and roomy: cube, ship, ball and UFO'
+		},
+		normal: {
+			label: 'Normal',
+			color: 'bg-lime-400 text-lime-950',
+			about: 'Every basic part, a bit faster in the chorus'
+		},
+		hard: {
+			label: 'Hard',
+			color: 'bg-amber-400 text-amber-950',
+			about: 'Fast and busy: every kind of part, orb chains, small parts'
+		},
+		insane: {
+			label: 'Insane',
+			color: 'bg-rose-400 text-rose-950',
+			about: 'Tight timing, narrow tunnels and the top speeds in the drops'
+		},
+		extreme: {
+			label: 'Extreme',
+			color: 'bg-fuchsia-500 text-white',
+			about: 'Demon level: very little room per click, 2–3 block tunnels, short parts'
+		}
 	};
 
 	const stored = (key, fallback) => {
@@ -52,6 +73,12 @@
 	let difficulty = $state(stored('stosufy-dash-difficulty', 'normal'));
 	let iconIndex = $state(Number(stored('stosufy-dash-icon', '0')) || 0);
 	let practice = $state(stored('stosufy-dash-practice', '0') === '1');
+	/** Practice: checkpoints on their own too (the player's own come always) */
+	let autoCheckpoints = $state(stored('stosufy-dash-auto-checkpoints', '1') === '1');
+	$effect(() => store('stosufy-dash-auto-checkpoints', autoCheckpoints ? '1' : '0'));
+	$effect(() => {
+		if (game) game.autoCheckpoints = autoCheckpoints;
+	});
 	let showFps = $state(stored('stosufy-dash-fps', '1') === '1');
 	$effect(() => store('stosufy-dash-fps', showFps ? '1' : '0'));
 	$effect(() => store('stosufy-dash-difficulty', difficulty));
@@ -151,6 +178,7 @@
 				if (cancelled) return;
 				const made = new DashGame(level);
 				made.practice = practice;
+				made.autoCheckpoints = autoCheckpoints;
 				game = made;
 				best = bestOfSet(current.id, chosen);
 				screen = 'ready';
@@ -209,6 +237,7 @@
 		renderer?.reset(game.state);
 		renderer?.event('spawn', game.state, ICONS[iconIndex]);
 		screen = 'playing';
+		checkpointCount = 0;
 		held.clear();
 	}
 
@@ -216,6 +245,7 @@
 		if (!game || screen !== 'playing') return;
 		game.attempt++;
 		const from = game.begin(game.practice);
+		checkpointCount = game.checkpoints.length;
 		renderer?.reset(game.state);
 		renderer?.event('spawn', game.state, ICONS[iconIndex]);
 		seekAndPlay(from);
@@ -244,6 +274,7 @@
 		game.practice = practice && !auto;
 		game.attempt++;
 		seekAndPlay(game.begin(false));
+		checkpointCount = 0;
 		renderer?.reset(game.state);
 		renderer?.event('spawn', game.state, ICONS[iconIndex]);
 		screen = 'playing';
@@ -254,7 +285,42 @@
 		if (!game) return;
 		game.practice = practice && !game.auto;
 		if (!practice) game.checkpoints = [];
+		checkpointCount = game.checkpoints.length;
 	}
+
+	/** How many checkpoints there are now (for the buttons) */
+	let checkpointCount = $state(0);
+
+	/** Practice: a checkpoint where the player is (at the time of the press) */
+	function placeCheckpoint(event) {
+		if (!game || screen !== 'playing') return;
+		const at = event ? eventTime(event) : songTime();
+		const now = game.checkpoints.length;
+		if (!game.placeCheckpoint(at)) return;
+		// (set already: it was asked for at a time that's played; else it comes with the update)
+		if (game.checkpoints.length > now) {
+			renderer?.event('checkpoint', game.state, ICONS[iconIndex]);
+			playDashSound('checkpoint', 0.25);
+		}
+		checkpointCount = game.checkpoints.length;
+	}
+
+	/** Practice: the last checkpoint goes */
+	function removeCheckpoint() {
+		if (!game || (screen !== 'playing' && screen !== 'paused')) return;
+		if (game.removeCheckpoint()) playDashSound('click', 0.4);
+		checkpointCount = game.checkpoints.length;
+	}
+
+	/** The keys that set and take away checkpoints: Z and X, or C and V where those jump */
+	const checkpointKeys = () => {
+		const jump = keys();
+		return {
+			place: jump.includes('KeyZ') ? 'KeyC' : 'KeyZ',
+			remove: jump.includes('KeyX') ? 'KeyV' : 'KeyX'
+		};
+	};
+	const keyName = (code) => code.replace(/^Key/, '');
 
 	function exit() {
 		clearTimeout(respawnTimer);
@@ -381,6 +447,11 @@
 				(screen === 'playing' || screen === 'paused')
 			)
 				togglePractice();
+			if (event.type === 'keydown' && !event.repeat && game?.practice) {
+				const cp = checkpointKeys();
+				if (event.code === cp.place) placeCheckpoint(event);
+				else if (event.code === cp.remove) removeCheckpoint();
+			}
 			return;
 		}
 		event.preventDefault();
@@ -450,8 +521,10 @@
 						if (!g.auto) best = saveBest(key, Math.floor(g.progress), g.practice, g.attempt);
 						clearTimeout(respawnTimer);
 						respawnTimer = setTimeout(respawn, RESPAWN);
-					} else if (name === 'checkpoint') playDashSound('checkpoint', 0.25);
-					else if (name === 'complete') {
+					} else if (name === 'checkpoint') {
+						playDashSound('checkpoint', 0.25);
+						checkpointCount = g.checkpoints.length;
+					} else if (name === 'complete') {
 						playDashSound('complete', 0.35);
 						finish();
 					}
@@ -527,6 +600,32 @@
 					<span class="icon-[mingcute--flag-2-line] size-4"></span>
 					PRACTICE
 				</span>
+				<button
+					class="flex items-center gap-1.5 h-9 px-3 rounded-full bg-black/40 ring-1 ring-emerald-300/40 text-emerald-200 hover:text-white text-xs font-bold cursor-pointer"
+					title="Set a checkpoint here ({keyName(checkpointKeys().place)})"
+					aria-label="Set a checkpoint"
+					onpointerdown={(e) => {
+						e.stopPropagation();
+						placeCheckpoint(e);
+					}}
+				>
+					<span class="icon-[mingcute--add-line] size-4"></span>
+					<kbd class="font-sans">{keyName(checkpointKeys().place)}</kbd>
+				</button>
+				<button
+					class="flex items-center gap-1.5 h-9 px-3 rounded-full bg-black/40 ring-1 ring-white/15 text-white/75 hover:text-white text-xs font-bold cursor-pointer disabled:opacity-40 disabled:cursor-default"
+					title="Remove the last checkpoint ({keyName(checkpointKeys().remove)})"
+					aria-label="Remove the last checkpoint"
+					disabled={!checkpointCount}
+					onpointerdown={(e) => {
+						e.stopPropagation();
+						removeCheckpoint();
+					}}
+				>
+					<span class="icon-[mingcute--delete-2-line] size-4"></span>
+					<kbd class="font-sans">{keyName(checkpointKeys().remove)}</kbd>
+					<span class="tabular-nums text-white/50">{checkpointCount}</span>
+				</button>
 			{/if}
 			{#if game?.auto}
 				<span
@@ -553,6 +652,10 @@
 			>
 				Click, <kbd class="font-sans">Space</kbd> or <kbd class="font-sans">↑</kbd> to jump · hold
 				to keep jumping · <kbd class="font-sans">Esc</kbd> pauses
+				{#if game.practice}
+					· <kbd class="font-sans">{keyName(checkpointKeys().place)}</kbd> checkpoint ·
+					<kbd class="font-sans">{keyName(checkpointKeys().remove)}</kbd> removes it
+				{/if}
 			</p>
 		{/if}
 	{/if}
@@ -609,6 +712,7 @@
 									? 'ring-white/50 bg-white/10'
 									: 'ring-white/5 bg-white/[0.03] hover:bg-white/[0.08]'}"
 								aria-pressed={difficulty === d}
+								title={DIFFICULTY_INFO[d].about}
 								onclick={() => (difficulty = d)}
 							>
 								<span
@@ -619,6 +723,7 @@
 							</button>
 						{/each}
 					</div>
+					<p class="-mt-3 text-center text-xs text-white/50">{DIFFICULTY_INFO[difficulty].about}</p>
 
 					<div class="flex items-center justify-between gap-3">
 						<div class="flex gap-1.5">
@@ -645,6 +750,21 @@
 								<span class="icon-[mingcute--flag-2-line] size-4"></span>
 								Practice
 							</button>
+							{#if practice}
+								<button
+									class="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-bold cursor-pointer transition {autoCheckpoints
+										? 'bg-emerald-400/20 text-emerald-200 ring-1 ring-emerald-300/40'
+										: 'bg-white/10 text-white/60 hover:text-white'}"
+									role="switch"
+									aria-checked={autoCheckpoints}
+									title="Checkpoints on their own every few seconds. Your own: {keyName(
+										checkpointKeys().place
+									)} sets one, {keyName(checkpointKeys().remove)} removes the last"
+									onclick={() => (autoCheckpoints = !autoCheckpoints)}
+								>
+									Auto
+								</button>
+							{/if}
 							<DashSoundMenu />
 						</div>
 					</div>
@@ -719,6 +839,17 @@
 					>
 						<span class="icon-[mingcute--flag-2-line] size-6"></span>
 					</button>
+					{#if game.practice}
+						<button
+							class="grid place-items-center size-12 rounded-full bg-white/15 cursor-pointer hover:bg-white/25 transition disabled:opacity-40 disabled:cursor-default"
+							title="Remove the last checkpoint ({keyName(checkpointKeys().remove)})"
+							aria-label="Remove the last checkpoint"
+							disabled={!checkpointCount}
+							onclick={removeCheckpoint}
+						>
+							<span class="icon-[mingcute--delete-2-line] size-6"></span>
+						</button>
+					{/if}
 					<button
 						class="grid place-items-center size-12 rounded-full bg-white/15 cursor-pointer hover:bg-white/25 transition"
 						title="Back to the songs"

@@ -24,8 +24,16 @@ export interface Preset {
 	cost: number;
 	/** The shortest time between two clicks (s) */
 	gap: number;
-	/** How early or late a press may be (ms) */
+	/** The longest time without a click where the song has notes (s) */
+	idle: number;
+	/** How early or late a press may always be (ms, each way) */
 	tolerance: number;
+	/**
+	 * How much room a click should leave in all (ms, early + late), in the calm parts and in the
+	 * most intense ones: the builders pick, of what fits, what comes closest. Less is more precise
+	 * (never less than twice the tolerance)
+	 */
+	window: [number, number];
 	spikes: number;
 	/** The highest a cube part builds (blocks) */
 	height: number;
@@ -34,94 +42,152 @@ export interface Preset {
 	wave: number;
 	/** The shortest time between two turns of the wave (s) */
 	waveGap: number;
-	/** Speeds: normal parts, the kiai */
+	/** How close the blocks of the UFO, ball and spider parts come to their way (1: normal) */
+	tight: number;
+	/** Speeds: calm parts, the most intense ones */
 	speeds: [number, number];
 	/** How many orbs in a row at most */
 	chain: number;
+	/** How strong a note in the middle of a jump must be to get an orb there */
+	strong: number;
 	/** Parts that are small */
 	mini: number;
+	/** How long the parts are: the shortest, the longest (ms) */
+	parts: [number, number];
+	/** How likely a flying part turns upside down for a while, and how many orbs it has at most */
+	flips: number;
+	orbs: number;
 	/** The kinds of parts there are */
 	modes: string[];
 }
 
+const ALL_MODES = ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider'];
+
+/**
+ * The difficulties. What the levels of each are like (measured on real beatmaps, see
+ * docs/dash.md): easy and normal for getting into it; hard is fast and busy (what extreme was
+ * up to 0.6.74); insane and extreme are tighter, faster and busier still, the extreme one with
+ * the precision and pace of the hardest levels people build by hand.
+ */
 export const PRESETS: Record<Difficulty, Preset> = {
 	easy: {
 		level: 0,
-		cost: 1.2,
-		gap: 0.52,
+		cost: 1.15,
+		gap: 0.5,
+		idle: 1.6,
 		tolerance: 80,
+		window: [340, 280],
 		spikes: 2,
 		height: 2,
 		ship: 2.5,
 		wave: 0,
 		waveGap: 0.3,
+		tight: 1.25,
 		speeds: [1, 1],
 		chain: 0,
+		strong: 1.45,
 		mini: 0,
+		parts: [14000, 32000],
+		flips: 0,
+		orbs: 0,
 		modes: ['cube', 'ship', 'ball', 'ufo']
 	},
 	normal: {
 		level: 1,
-		cost: 0.95,
-		gap: 0.36,
-		tolerance: 65,
-		spikes: 2,
+		cost: 0.8,
+		gap: 0.3,
+		idle: 1.3,
+		tolerance: 60,
+		window: [300, 230],
+		spikes: 3,
 		height: 4,
-		ship: 2.2,
-		wave: 2.4,
-		waveGap: 0.3,
+		ship: 1.9,
+		wave: 2.3,
+		waveGap: 0.27,
+		tight: 1.05,
 		speeds: [1, 2],
 		chain: 2,
-		mini: 0.1,
+		strong: 1.3,
+		mini: 0.15,
+		parts: [9000, 24000],
+		flips: 0.5,
+		orbs: 2,
 		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave']
 	},
+	// (what extreme was before: fast, tight, and every kind of part and trick)
 	hard: {
 		level: 2,
-		cost: 0.6,
-		gap: 0.24,
-		tolerance: 48,
+		cost: 0.15,
+		gap: 0.13,
+		idle: 1.0,
+		tolerance: 32,
+		window: [270, 190],
 		spikes: 3,
-		height: 5,
-		ship: 1.6,
-		wave: 2.15,
-		waveGap: 0.24,
-		speeds: [1, 2],
-		chain: 3,
-		mini: 0.24,
-		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
+		height: 6,
+		ship: 1.3,
+		wave: 1.6,
+		waveGap: 0.16,
+		tight: 0.72,
+		speeds: [2, 3],
+		chain: 5,
+		strong: 0.95,
+		mini: 0.32,
+		parts: [6000, 15000],
+		flips: 0.85,
+		orbs: 6,
+		modes: ALL_MODES
 	},
 	insane: {
 		level: 3,
-		cost: 0.38,
-		gap: 0.17,
-		tolerance: 38,
-		spikes: 3,
-		height: 6,
-		ship: 1.35,
-		wave: 1.85,
-		waveGap: 0.19,
-		speeds: [2, 3],
-		chain: 4,
-		mini: 0.3,
-		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
-	},
-	// (about a medium demon: fast, tight, and every kind of part and trick)
-	extreme: {
-		level: 4,
-		cost: 0.15,
-		gap: 0.13,
-		tolerance: 30,
+		cost: -0.1,
+		gap: 0.12,
+		idle: 0.8,
+		tolerance: 28,
+		window: [210, 140],
 		spikes: 3,
 		height: 7,
-		ship: 1.15,
-		wave: 1.6,
-		waveGap: 0.15,
+		ship: 1.05,
+		wave: 1.3,
+		waveGap: 0.13,
+		tight: 0.55,
 		speeds: [3, 4],
-		chain: 5,
-		mini: 0.36,
-		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider']
+		chain: 6,
+		strong: 0.82,
+		mini: 0.4,
+		parts: [5000, 12000],
+		flips: 0.95,
+		orbs: 9,
+		modes: ALL_MODES
+	},
+	// (a hard demon: the clicks on nearly every note, little room for them, tight tunnels and
+	// corridors, the fastest speeds in the intense parts, and many short parts)
+	extreme: {
+		level: 4,
+		cost: -0.35,
+		gap: 0.11,
+		idle: 0.65,
+		tolerance: 24,
+		window: [160, 100],
+		spikes: 3,
+		height: 8,
+		ship: 0.85,
+		wave: 1.05,
+		waveGap: 0.11,
+		tight: 0.42,
+		speeds: [3, 4],
+		chain: 7,
+		strong: 0.7,
+		mini: 0.5,
+		parts: [4000, 10000],
+		flips: 1,
+		orbs: 12,
+		modes: ALL_MODES
 	}
 };
+
+/** Between two values of a preset by how intense the music is there (0 calm, 1 the peak) */
+export const byIntensity = (range: [number, number], intensity: number) =>
+	range[0] + (range[1] - range[0]) * Math.max(0, Math.min(1, intensity));
 
 // --- Randomness, the same for the same song ----------------------------------------------
 

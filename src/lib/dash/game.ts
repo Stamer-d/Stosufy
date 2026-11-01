@@ -2,6 +2,11 @@
 // practice from the last checkpoint), autoplay, and the best progress per song. Presses count
 // at the song time they were made, also when they come in a moment late (the page was busy
 // drawing): the game goes back to just before them and plays those steps again.
+//
+// Practice checkpoints come two ways: on their own every few seconds (where the player is on
+// the ground or flying steadily; can be turned off), and set by the player wherever they are,
+// also in the air (`placeCheckpoint`). The last one can be taken away again
+// (`removeCheckpoint`), also while the player is waiting to respawn.
 
 import {
 	STEP,
@@ -20,12 +25,16 @@ export interface Checkpoint {
 	state: PlayerState;
 	x: number;
 	y: number;
+	/** Set by the player (not one of the automatic ones) */
+	manual?: boolean;
 }
 
 /** How long it waits after dying before it starts again (ms) */
 export const RESPAWN = 1000;
 /** How long the player waits at a checkpoint before it goes on (ms of the song) */
 const CHECKPOINT_LEAD = 450;
+/** How often the automatic checkpoints come at most (ms of the song) */
+export const AUTO_CHECKPOINT = 2200;
 /** How far back a press that comes in late may still change what happened (ms of the song) */
 export const ROLLBACK = 60;
 /** How many steps are kept for that */
@@ -46,6 +55,8 @@ export class DashGame {
 	practice = false;
 	auto = false;
 	checkpoints: Checkpoint[] = [];
+	/** Practice: checkpoints on their own as well (the player's own come always) */
+	autoCheckpoints = true;
 	diedAt = 0;
 	jumps = 0;
 	/** The presses and releases of this attempt, in order of time; from `next` on not used yet */
@@ -59,6 +70,12 @@ export class DashGame {
 	private replayed = -Infinity;
 	private planIndex = 0;
 	private lastCheckpoint = 0;
+	/**
+	 * The player's own checkpoints still to be set (song ms): one asked for ahead of the game
+	 * (the press came between two steps), or one taken back with a late press, to be set again
+	 * where it was when that stretch is played again
+	 */
+	private requests: number[] = [];
 	/** When this attempt started (song ms) */
 	attemptStart = 0;
 	/** The state one step before (for drawing between the steps) */
@@ -118,6 +135,7 @@ export class DashGame {
 		this.kept = [];
 		this.told = [];
 		this.replayed = -Infinity;
+		this.requests = [];
 		const checkpoint =
 			fromCheckpoint && this.practice ? this.checkpoints[this.checkpoints.length - 1] : null;
 		this.state = checkpoint
@@ -162,9 +180,47 @@ export class DashGame {
 		this.state = copyState(kept.state);
 		this.next = kept.next;
 		this.lastCheckpoint = kept.lastCheckpoint;
-		this.checkpoints.length = kept.checkpoints;
+		// (the player's own come back at the same time when that's played again)
+		for (const c of this.checkpoints.splice(kept.checkpoints))
+			if (c.manual) this.requests.push(c.state.time);
+		this.requests.sort((a, b) => a - b);
 		this.remember();
 		return true;
+	}
+
+	/**
+	 * Practice: a checkpoint where the player is at a song time (now, if that's already played),
+	 * on the ground or in the air. False when there's no attempt to set one in.
+	 */
+	placeCheckpoint(time: number) {
+		if (!this.practice || this.auto || this.status !== 'playing' || this.state.dead) return false;
+		if (time > this.state.time) {
+			this.requests.push(time);
+			this.requests.sort((a, b) => a - b);
+			return true;
+		}
+		this.setCheckpoint(true);
+		return true;
+	}
+
+	/** Practice: the last checkpoint goes (the one before is where it starts again then) */
+	removeCheckpoint() {
+		if (!this.practice || this.auto) return false;
+		if (this.requests.length) {
+			this.requests.pop();
+			return true;
+		}
+		const gone = this.checkpoints.pop();
+		if (!gone) return false;
+		// (an automatic one isn't set again right where that one was)
+		this.lastCheckpoint = Math.max(this.lastCheckpoint, this.state.time);
+		return true;
+	}
+
+	private setCheckpoint(manual: boolean) {
+		const s = this.state;
+		this.lastCheckpoint = s.time;
+		this.checkpoints.push({ state: copyState(s), x: s.x, y: s.y, manual });
 	}
 
 	/** Until the song time; returns what happened */
@@ -204,19 +260,27 @@ export class DashGame {
 			if (s.dead) {
 				this.status = 'dead';
 				this.diedAt = performance.now();
-				// A checkpoint right before dying is no good
+				// An automatic checkpoint right before dying is no good (the player's own stays:
+				// they take it away themselves)
 				const last = this.checkpoints[this.checkpoints.length - 1];
-				if (last && s.time - last.state.time < 350 && this.checkpoints.length > 1)
+				if (last && !last.manual && s.time - last.state.time < 350 && this.checkpoints.length > 1)
 					this.checkpoints.pop();
+				this.requests = [];
 				break;
 			}
 			if (s.x >= this.level.xEnd) {
 				this.status = 'complete';
 				this.tell(happened, 'complete', next);
 			}
-			if (
-				this.practice &&
-				s.time - this.lastCheckpoint > 2200 &&
+			if (this.status !== 'playing' || !this.practice) continue;
+			if (this.requests.length && this.requests[0] <= next) {
+				// The player's own, where they asked for it
+				while (this.requests.length && this.requests[0] <= next) this.requests.shift();
+				this.setCheckpoint(true);
+				this.tell(happened, 'checkpoint', next);
+			} else if (
+				this.autoCheckpoints &&
+				s.time - this.lastCheckpoint > AUTO_CHECKPOINT &&
 				(s.grounded ||
 					s.mode === 'ship' ||
 					s.mode === 'wave' ||
@@ -224,9 +288,7 @@ export class DashGame {
 					s.mode === 'ufo') &&
 				s.time - s.boostedAt > 300
 			) {
-				this.lastCheckpoint = s.time;
-				const copy = copyState(s);
-				this.checkpoints.push({ state: copy, x: s.x, y: s.y });
+				this.setCheckpoint(false);
 				this.tell(happened, 'checkpoint', next);
 			}
 		}

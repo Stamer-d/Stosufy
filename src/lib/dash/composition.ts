@@ -77,6 +77,19 @@ export function composePhrases(chart: DashChart, clicks: number[]): MusicalPhras
 	});
 }
 
+/**
+ * The phrase a click is in. By its musical key, not by its start and end: a note a hair before a
+ * bar line counts in the next bar (see `musicalPosition`), and would fall between two phrases.
+ */
+export function phraseAt(chart: DashChart, phrases: MusicalPhrase[], time: number) {
+	const key = musicalPosition(chart, time).key;
+	return (
+		phrases.find((p) => p.key === key) ??
+		phrases.find((p) => time >= p.start && time < p.end) ??
+		phrases.reduce((best, p) => (Math.abs(p.start - time) < Math.abs(best.start - time) ? p : best))
+	);
+}
+
 export function patternFamily(id: string) {
 	return id.replace(/[\d-]+s?$/, '');
 }

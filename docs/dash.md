@@ -220,3 +220,119 @@ Außerdem: `npm run check` (svelte-check, 1095 Dateien): 0 Fehler, 0 Warnungen. 
   nicht zurückgenommen.
 - **Installation:** `node_modules` passte nicht zur `package.json` (vite 6 statt 8, Fonts fehlten). Ich habe
   `npm install` ausgeführt; `package-lock.json` ist unverändert.
+
+## 7. Überarbeitung 0.6.75: Schwierigkeiten, Levelaufbau, eigene Checkpoints
+
+Stand: 01.11.2026.
+
+### 7.1 Ausgangslage, gemessen an echten Beatmaps
+
+Bisher war nur an synthetischen Testsongs gemessen. Neu habe ich die Level von echten osu!-Beatmaps
+gemessen (öffentlich unter `osu.ppy.sh/osu/<id>`, nur zum Messen geladen, nicht im Repo; ohne
+Audio). Mit 0.6.74 zeigte sich:
+
+- **Extreme war kaum strenger als Hard.** Der Median des Zeitfensters je Klick lag auf allen
+  Stufen bei 250–300 ms: Ein Spike unter einem Sprung lässt bei Tempo 3x/4x fast den ganzen Sprung
+  Platz. Die Toleranz der Stufe (Extreme 30 ms) war nur eine _Untergrenze_, nach oben gab es kein
+  Ziel.
+- **Tunnel von Ship und UFO** waren auf allen Stufen im Mittel 6–7 Blöcke offen (Wandspalten einen
+  ganzen Beat breit, ganzzahlig gerundet, alle zwei Takte ganz offen).
+- **Spider und Ball** hatten keine Hindernisse, die das Timing eines Klicks bestimmen.
+- **Absturz:** Bei manchen Beatmaps brach die Generierung ab (`phrase` undefiniert). Ursache:
+  `musicalPosition` rundet mit einem Epsilon, eine Note einen Hauch vor einem Taktstrich fiel
+  zwischen zwei Phrasen. **Behoben:** Phrasen werden über ihren musikalischen Schlüssel gefunden
+  (`phraseAt` in `composition.ts`).
+- Der Cube-Builder übersprang ganze Abschnitte, wenn die Noten dichter als ein Sprung lagen (er
+  konnte eine Note nicht bewusst überspringen), und verlangte, dass die Landung 1,5 Blöcke vor dem
+  nächsten Klick liegt (bei 4x fast nie).
+
+### 7.2 Recherche: Wie handgebaute Level aufgebaut sind
+
+Quellen: RobTops Bewertungsdokument, das Geometry-Dash-Wiki (Abschnittslisten der offiziellen und
+bekannter Demon-Level), Steam-Guides, die öffentliche API der GD Demon Ladder (Bewertungen und
+Tags, keine Leveldateien). Daraus übernommen:
+
+- **Klicks pro Sekunde steigen kaum mit der Stufe** (offizielle Level: ~0,6–1,3/s auf allen
+  Stufen). Schwerer wird es durch engere Zeitfenster, engere Korridore (Extreme Demons: 1,5 Blöcke),
+  Tempo und häufigere Moduswechsel.
+- **Abschnittslängen:** Easy–Hard ~22–31 s, Insane ~4–10 s, Demons ~4–6 s.
+- **Aufbau:** ruhiger Einstieg, vor dem Drop ein ruhigerer Anlauf, der Drop mit Modus- und
+  Tempowechsel auf dem Schlag, keine Schwierigkeitsspitze am Ende.
+- **Practice:** Z setzt einen Checkpoint, X entfernt den letzten; automatische Checkpoints
+  zusätzlich.
+
+### 7.3 Was geändert wurde
+
+**Schwierigkeiten (`build.ts`).** Hard ist jetzt etwa das bisherige Extreme (Tempo 2x/3x, alle
+Modi, Orb-Ketten); Insane und Extreme gehen darüber hinaus. Neue Werte je Stufe statt fester
+Listen im Code: Ziel-Zeitfenster `window` (ruhig/intensiv), längste Pause ohne Klick `idle`,
+Abschnittslängen `parts`, Enge der Flugteile `tight`, Orbs, Gravity-Wechsel.
+
+| Stufe   | Toleranz je Seite | Ziel-Fenster (ruhig → intensiv) | Tempo  | Abschnitte | Ship-Tunnel (halbe Höhe) |
+| ------- | ----------------- | ------------------------------- | ------ | ---------- | ------------------------ |
+| easy    | 80 ms             | 340 → 280 ms                    | 1x     | 14–32 s    | 2,5                      |
+| normal  | 60 ms             | 300 → 230 ms                    | 1x, 2x | 9–24 s     | 1,9                      |
+| hard    | 32 ms             | 270 → 190 ms                    | 2x, 3x | 6–15 s     | 1,3                      |
+| insane  | 28 ms             | 210 → 140 ms                    | 3x, 4x | 5–12 s     | 1,05                     |
+| extreme | 24 ms             | 160 → 100 ms                    | 3x, 4x | 4–10 s     | 0,85                     |
+
+**Intensitätskurve (`generate.ts: intensities`).** Jeder Abschnitt bekommt eine Intensität
+0–1: sein Rang nach Dichte und Lautstärke unter den Abschnitten des Songs, Kiai oben. Erster
+Abschnitt höchstens 0,3 (Einstieg), der Abschnitt direkt vor einem Drop höchstens 0,45 (Anlauf),
+der letzte höchstens 0,55. Daraus folgen Tempo, Ziel-Zeitfenster, Enge der Tunnel, Anteil kleiner
+Modi und auf den harten Stufen die Wahl schnellerer Modi (Wave, UFO, Spider) im Intensiven.
+
+**Cube und Robot (`builders/runner.ts`, neu geschrieben).** Jeder Sprung wird als Ganzes geplant:
+Absprung (Sprung, Orb am Boden, Pad, Dash-Orb auf gehaltener Note), Orbs in der Luft auf den
+folgenden Noten (Ketten bis 4), Landung (gleiche Höhe, Stufe hoch, über eine Kante hinunter).
+Das Hindernis wird so gesetzt, dass es das Zeitfenster bestimmt: der erste Spike (oder die
+Absprungkante) so weit nach dem Absprung, wie ein später Klick kommen darf, der letzte Spike (oder
+der Beginn der Landefläche) so weit vor der Landung, wie ein früher darf. Mehrere Layouts werden
+gebaut und mit der Physik gespielt; gemessen wird das echte Fenster des Klicks, und wenn es zu
+groß ist, wird das Layout um den Überschuss je Seite enger gebaut. Gewählt wird das Layout, das dem
+Ziel am nächsten kommt (mit etwas Zufall, Abwechslung und Wiederholung, wo die Musik sich
+wiederholt). Neue Formen: Spike-Reihen mit kleinen Spikes oder einer Säge in der Mitte, Stufen,
+Gruben mit Kanten, Orb-Ketten, Ringe am Boden. Noten, die zu dicht für einen eigenen Sprung sind,
+werden bewusst übersprungen statt den ganzen Takt leer zu lassen.
+
+**Flugteile (`builders/flight.ts`).** Auf den harten Stufen im Intensiven: Wandspalten je halben
+Beat und auf dem Halbblock-Raster, Öffnungen nur alle vier Takte, Ship-Pfad gerader
+(Straight-Fly), Sägen halb in den Tunnelwänden. **Ball und Spider** bekommen Timing-Spikes: einer
+auf der Seite, die sie verlassen (zu spät = tot), einer auf der Seite, auf der sie ankommen (zu früh
+= tot). **Wave:** das „ungenaue Spieler“-Modell, nach dem Korridore verbreitert werden, ist auf
+den höheren Stufen genauer.
+
+**Eigene Checkpoints (`game.ts`, `DashView.svelte`).** Im Practice-Modus setzt **Z** einen
+Checkpoint dort, wo man gerade ist (auch in der Luft, mit Geschwindigkeit), **X** entfernt den
+letzten, auch während man auf den Neustart wartet. Wo Z/X Sprungtasten sind (osu!-Tasten), sind es
+**C** und **V**. Dazu Knöpfe oben rechts (mit Anzahl) und im Pausenmenü. Automatische Checkpoints
+lassen sich im Menü abschalten („Auto“). Ein eigener Checkpoint bleibt auch, wenn man kurz danach
+stirbt (automatische werden dann wie bisher verworfen). Kommt ein Druck verspätet an und das Spiel
+rechnet zurück (Rollback), wird ein eigener Checkpoint an derselben Stelle neu gesetzt.
+
+**Sonstiges.** `GENERATOR_VERSION` ist `gd-2.2091-route2` (alte Level im Cache werden nicht
+weiterverwendet). Im Menü steht zu jeder Stufe ein Satz, was sie bedeutet.
+
+### 7.4 Gemessen
+
+Siehe Tabelle 7.5 (fünf echte Beatmaps, je Stufe gemittelt). Tests (`npm run test:dash`) prüfen
+auf den Testsongs zusätzlich:
+
+- jede Stufe durchspielbar, jedes Klickfenster ≥ Toleranz, Sichtzeit ≥ 0,5 s (wie bisher);
+- **Median der Cube/Robot-Klickfenster sinkt** von Hard zu Insane zu Extreme jeweils um mehr als
+  20 ms, Extreme < 75 % von Hard; Gesamtmedian Extreme < 75 % von Easy;
+- **mehr Abschnitte pro Minute** (Extreme > 1,8 × Easy) und **engere Ship/UFO-Tunnel**
+  (Median auf Extreme ≤ 4 Blöcke, enger als Normal);
+- Intensitätskurve: Einstieg ruhig, Anlauf vor dem Drop ruhiger, Kiai oben, Ende nicht am
+  schwersten; intensive Abschnitte nie langsamer als ruhige;
+- Checkpoints: setzen (am Boden und in der Luft), zwischen zwei Physikschritten angefordert,
+  entfernen (auch im Tod), bleiben beim Tod direkt danach, überstehen den Rollback, ohne Practice
+  keine.
+
+### 7.6 Grenzen
+
+- **UFO und Swing** haben noch keine eigenen Timing-Hindernisse; ihre Fenster sind auch auf
+  Extreme oft groß (Median ~250 ms). Orb-Klicks ebenso (der Orb wirkt in ±1,1 Blöcken).
+- Gemessen ohne Audio (nur Beatmaps); mit Audio ändern sich Akzente und Intensität.
+- Die Generierung dauert länger (lange Maps auf dem Rechner hier ~3–5 s statt ~2–4 s, im Worker).
+- Nicht in der laufenden App gespielt (Tauri und osu!-Login fehlen hier).

@@ -23,7 +23,16 @@ import {
 	type Section,
 	type Solid
 } from '../physics';
-import { clamp, jittered, legalAround, shuffleByWeight, tap, used, type Context } from '../build';
+import {
+	byIntensity,
+	clamp,
+	jittered,
+	legalAround,
+	shuffleByWeight,
+	tap,
+	used,
+	type Context
+} from '../build';
 import { beatStrength, type DashNote } from '../chart';
 import { composePhrases, musicalPosition, musicalRest } from '../composition';
 import { hitAt, loudness } from '../audio';
@@ -126,12 +135,16 @@ export function buildFlight(
 	const endX = world.xAt(section.end - 450);
 
 	// How hard: room around the way, spikes, breathers
-	const tight = [1.25, 1.1, 1, 0.82, 0.65][preset.level];
+	const intensity = section.intensity ?? 0.5;
+	const tight = preset.tight * (1.15 - intensity * 0.3);
+	// How much the hard levels close the parts in where it's intense (0 on easy and normal):
+	// narrower walls, straighter flying, fewer open stretches
+	const close = Math.max(0, (preset.level - 1) / 3) * (0.4 + intensity * 0.6);
 
 	// --- Gravity portals: on strong downbeats, upside down and back -------------------------
 	const flips: GravityPortal[] = [];
 	// (not near a click: pressed a moment before or after the portal would go another way)
-	if (mode !== 'swing' && preset.level >= 1 && rng() < [0, 0.5, 0.75, 0.85, 0.95][preset.level]) {
+	if (mode !== 'swing' && preset.level >= 1 && rng() < preset.flips) {
 		let gravity: 1 | -1 = -1;
 		let last = -Infinity;
 		let count = 0;
@@ -173,8 +186,9 @@ export function buildFlight(
 			if (x < startX + 2 || x > endX) continue;
 			const last = keys[keys.length - 1];
 			if (x - last.x < 2.5) continue;
-			// (the swing in a narrower band: it swings around its way)
-			const band = mode === 'swing' ? 0.28 : 1;
+			// (the swing in a narrower band: it swings around its way; the ship straighter, in a
+			// tight corridor, the harder it is)
+			const band = mode === 'swing' ? 0.28 : 1 - close * 0.55;
 			const pos = musicalPosition(ctx.chart, note.time);
 			const phase = clamp((note.time - pos.start) / (pos.end - pos.start), 0, 1);
 			const energy = ctx.chart.sound
@@ -205,7 +219,7 @@ export function buildFlight(
 			(t) => t > section.start + 400 && t < section.end - 400 && !musicalRest(ctx.chart, t)
 		);
 		const noteAt = new Map(notes.map((n) => [n.time, n]));
-		const most = [0, 2, 4, 6, 8][preset.level];
+		const most = Math.round(preset.orbs * (0.6 + intensity * 0.6));
 		let placed = 0;
 		let lastOrb = -Infinity;
 		let previous: DashNote | null = null;
@@ -242,7 +256,7 @@ export function buildFlight(
 	}
 
 	// The ways it may go: on time, and early and late (not for the ship, a person steers it)
-	const runs: { x: number; y: number }[][] = [];
+	const runs: { x: number; y: number; time: number }[][] = [];
 	const variants: InputEvent[][] = [events];
 	if (!steered) {
 		// (each press held about as long as planned: a tap shorter or longer, a dash let go a
@@ -333,8 +347,11 @@ export function buildFlight(
 						: 1.3 * tight;
 	const cap =
 		mode === 'spider' ? 0 : mode === 'ball' ? Math.floor((top - floor) / 2) - 1 : top - floor;
-	// Architectural spans follow whole musical beats. A wall is planned across the
-	// whole span before rendering blocks, not fitted independently to each pixel of flight.
+	// Architectural spans follow whole musical beats (half beats where it's built closer). A wall
+	// is planned across the whole span before rendering blocks, not fitted independently to each
+	// pixel of flight.
+	const division = close > 0.5 ? 2 : 1;
+	const narrowest = close > 0.3 ? 1 : 2;
 	const anchors = new Set<number>([Math.ceil(startX)]);
 	for (const point of ctx.chart.timing) {
 		const from = Math.max(section.start + 450, point.time);
@@ -342,19 +359,16 @@ export function buildFlight(
 			section.end - 450,
 			ctx.chart.timing.find((p) => p.time > point.time)?.time ?? Infinity
 		);
-		for (
-			let t = point.time + Math.ceil((from - point.time) / point.beatLength) * point.beatLength;
-			t < until;
-			t += point.beatLength
-		)
+		const span = point.beatLength / division;
+		for (let t = point.time + Math.ceil((from - point.time) / span) * span; t < until; t += span)
 			anchors.add(Math.round(world.xAt(t)));
 	}
 	const boundaries: number[] = [];
 	for (const x of [...anchors].sort((a, b) => a - b))
 		if (
 			x >= Math.ceil(startX) &&
-			x <= Math.floor(endX) - 2 &&
-			(!boundaries.length || x - boundaries[boundaries.length - 1] >= 2)
+			x <= Math.floor(endX) - narrowest &&
+			(!boundaries.length || x - boundaries[boundaries.length - 1] >= narrowest)
 		)
 			boundaries.push(x);
 	boundaries.push(Math.floor(endX));
@@ -371,17 +385,22 @@ export function buildFlight(
 				highest = Math.max(highest, p.y + box.h);
 			}
 		if (!isFinite(lowest)) continue;
-		const low = clamp(Math.floor(lowest - margin), floor, floor + cap),
-			high = clamp(Math.ceil(highest + margin), top - cap, top);
+		// (on the grid of half blocks where it's built closer)
+		const grid = close > 0.3 ? 2 : 1;
+		const low = clamp(Math.floor((lowest - margin) * grid) / grid, floor, floor + cap),
+			high = clamp(Math.ceil((highest + margin) * grid) / grid, top - cap, top);
 		for (let cell = x; cell < end; cell++) columns.push({ x: cell, low, high, spike: 0 });
 	}
 
-	// Give the end of each two-bar phrase room; declared rests are completely open.
+	// Give the end of each two-bar phrase room (each four-bar one where it's built closer: a
+	// breath, not a gap every few seconds); declared rests are completely open.
+	const every = close > 0.45 ? 4 : 2;
 	const open = (x: number) => {
 		const time = world.timeAt(x + 0.5);
 		const pos = musicalPosition(ctx.chart, time);
 		return (
-			musicalRest(ctx.chart, time) || (pos.bar % 2 !== 0 && pos.inBar > pos.point.meter - 0.75)
+			musicalRest(ctx.chart, time) ||
+			(pos.bar % every === every - 1 && pos.inBar > pos.point.meter - 0.75)
 		);
 	};
 	for (const c of columns)
@@ -418,7 +437,7 @@ export function buildFlight(
 			? 'tunnel'
 			: themes.filter((p) => p.theme === 'steps').length > themes.length / 2
 				? 'pillars'
-				: themes.length > 0 && themes.every((p) => p.theme === 'pulse')
+				: themes.length > 0 && themes.every((p) => p.theme === 'pulse') && close < 0.5
 					? 'open'
 					: 'tunnel';
 	used(ctx, `${mode}-${style}`);
@@ -426,7 +445,7 @@ export function buildFlight(
 		if (
 			style === 'open' ||
 			(style === 'pillars' &&
-				((musicalPosition(ctx.chart, world.timeAt(c.x)).beat % 2) + 2) % 2 > 1.1)
+				((musicalPosition(ctx.chart, world.timeAt(c.x)).beat % 2) + 2) % 2 > 1.1 + close * 0.6)
 		) {
 			c.low = floor;
 			c.high = top;
@@ -480,6 +499,49 @@ export function buildFlight(
 		return c.high - highest;
 	}
 	pickSpikes();
+	timingSpikes();
+
+	/**
+	 * The ball and the spider switch from one side to the other on a click: a spike on the side it
+	 * leaves, as far after where it leaves as a late click may come, and one on the side it gets
+	 * to, as far before where it gets there as an early click may come. So each click has about
+	 * the room the difficulty asks for there, not the whole stretch between two spikes.
+	 */
+	function timingSpikes() {
+		if ((mode !== 'ball' && mode !== 'spider') || preset.level < 1) return;
+		const aim = Math.max(2 * tolerance + 12, byIntensity(preset.window, intensity));
+		const trace = runs[0];
+		const cell = (x: number) => columns.find((c) => c.x === Math.floor(x));
+		const brush = 0.6 + speed * (mode === 'ball' ? 0.04 : 0.01);
+		for (const e of events) {
+			if (!e.down) continue;
+			const k = trace.findIndex((p) => p.time >= e.time);
+			if (k < 1) continue;
+			const from = trace[k - 1];
+			// Where it gets to the other side: the next point it's on a surface again
+			let land = -1;
+			for (let n = k; n < trace.length && trace[n].time < e.time + 900; n++) {
+				const moved = Math.abs(trace[n].y - from.y) > 1;
+				const still = n + 1 < trace.length && Math.abs(trace[n + 1].y - trace[n].y) < 1e-6;
+				if (moved && still) {
+					land = n;
+					break;
+				}
+			}
+			if (land < 0) continue;
+			const up = trace[land].y > from.y;
+			const share = 0.35 + rng() * 0.3;
+			const spare = Math.max(0, aim - 2 * tolerance - 30);
+			const late = (speed * (tolerance + spare * share)) / 1000;
+			const early = (speed * (tolerance + spare * (1 - share))) / 1000;
+			const leave = cell(from.x + late + brush);
+			const reach = cell(trace[land].x - early - brush);
+			// (on the surface it's on, if there's nothing on that column yet)
+			if (leave && !leave.spike && !musicalRest(ctx.chart, world.timeAt(leave.x + 0.5)))
+				leave.spike = up ? 1 : -1;
+			if (reach && !reach.spike && reach.x > from.x + 1) reach.spike = up ? -1 : 1;
+		}
+	}
 
 	let made: { solids: Solid[]; spikes: ReturnType<typeof world.spike>[] } = {
 		solids: [],
@@ -520,7 +582,7 @@ export function buildFlight(
 	};
 	build();
 	const saws: Hazard[] = [];
-	if (style === 'open')
+	if (style === 'open' || (close > 0.35 && mode !== 'spider' && mode !== 'swing'))
 		for (const note of notes) {
 			const x = world.xAt(note.time);
 			if (!strongAt(note) || x < startX + 2 || x > endX - 2 || musicalRest(ctx.chart, note.time))
@@ -538,14 +600,27 @@ export function buildFlight(
 			if (!isFinite(low)) continue;
 			const radius = 0.7;
 			const reach = radius * 0.72 + 0.6 * tight;
-			const below = low - reach - (floor + 1.2);
-			const above = top - 1.2 - (high + reach);
-			const y =
-				above >= below && above > 0
-					? high + reach + above / 2
-					: below > 0
-						? floor + 1.2 + below / 2
-						: null;
+			let y: number | null = null;
+			if (style === 'open') {
+				const below = low - reach - (floor + 1.2);
+				const above = top - 1.2 - (high + reach);
+				y =
+					above >= below && above > 0
+						? high + reach + above / 2
+						: below > 0
+							? floor + 1.2 + below / 2
+							: null;
+			} else {
+				// Half sunk into the wall on the side with more room, its blade toward the way
+				const here = columns.filter((c) => Math.abs(c.x + 0.5 - x) <= 1);
+				if (!here.length) continue;
+				const wallLow = Math.max(...here.map((c) => c.low));
+				const wallHigh = Math.min(...here.map((c) => c.high));
+				const up = wallHigh < top && wallHigh - (high + reach) >= 0;
+				const down = wallLow > floor && low - reach - wallLow >= 0;
+				y = up && (!down || wallHigh - high >= low - wallLow) ? wallHigh : down ? wallLow : null;
+				if (y !== null && here.some((c) => c.spike)) y = null;
+			}
 			if (y !== null) saws.push(world.saw(x, y, radius));
 		}
 	if (saws.length) used(ctx, 'saws');

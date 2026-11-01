@@ -26,6 +26,7 @@ import {
 import {
 	DIFFICULTIES,
 	PRESETS,
+	byIntensity,
 	hash,
 	random,
 	legalAround,
@@ -45,7 +46,7 @@ import { buildWave } from './builders/wave';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-2.2091-route1';
+export const GENERATOR_VERSION = 'gd-2.2091-route2';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -129,7 +130,13 @@ function weight(chart: DashChart, note: DashNote) {
  * them (the best sum of their weights, less what each click costs), and in long stretches
  * without any the strongest note there.
  */
-export function chooseClicks(chart: DashChart, notes: DashNote[], gap: number, cost: number) {
+export function chooseClicks(
+	chart: DashChart,
+	notes: DashNote[],
+	gap: number,
+	cost: number,
+	idle = Math.max(1.1, gap * 2.6)
+) {
 	const n = notes.length;
 	if (!n) return [] as number[];
 	const weights = notes.map((note) => weight(chart, note) - cost);
@@ -157,7 +164,7 @@ export function chooseClicks(chart: DashChart, notes: DashNote[], gap: number, c
 	}
 	chosen.reverse();
 	// Never long without a click: in every stretch longer than that, the strongest note there
-	const longest = Math.max(1100, gap * 2600);
+	const longest = Math.max(idle, gap * 1.5) * 1000;
 	const filled: number[] = [];
 	let k = 0;
 	let last = -Infinity;
@@ -207,9 +214,16 @@ export function chooseClicks(chart: DashChart, notes: DashNote[], gap: number, c
 function cubeClicks(chart: DashChart, notes: DashNote[], sec: Section, preset: Preset) {
 	const cube = cubeAt(sec.speedIndex);
 	const air = ((2 * cube.jump) / cube.gravity) * 1000;
-	const jumps = chooseClicks(chart, notes, Math.max(preset.gap, air / 1000 + 0.04), preset.cost);
+	const jumps = chooseClicks(
+		chart,
+		notes,
+		Math.max(preset.gap, air / 1000 + 0.04),
+		preset.cost,
+		preset.idle
+	);
 	if (preset.chain < 1) return jumps;
-	const strong = [1.45, 1.35, 1.12, 1.0, 0.9][preset.level];
+	// (the more intense the part, the weaker a note may be and still take an orb)
+	const strong = preset.strong - ((sec.intensity ?? 0.5) - 0.5) * 0.3;
 	const weightAt = new Map(notes.map((n) => [n.time, weight(chart, n)]));
 	const clicks: number[] = [];
 	let orbsBefore = 0;
@@ -366,6 +380,33 @@ interface Part {
 	energy: number;
 	/** How much faster its sliders are than the song's usual (the mapper speeding it up) */
 	drive: number;
+	/** Where it is between the song's calmest part (0) and its peak (1) */
+	intensity: number;
+}
+
+/**
+ * How intense each part is, for how demanding it's built: by how busy and loud it is next to the
+ * song's other parts (its rank among them), the kiai near the top. Like a level made by hand, it
+ * starts easier (the first part is a warm-up), the part right before a drop is a calmer run-up
+ * to it (so the drop hits), and the end isn't its hardest stretch.
+ */
+export function intensities(parts: { energy: number; kiai: boolean }[]) {
+	const n = parts.length;
+	if (n === 1) return [0.5];
+	const order = parts.map((p, i) => ({ e: p.energy, i })).sort((a, b) => a.e - b.e);
+	const rank = new Array<number>(n);
+	order.forEach((o, k) => (rank[o.i] = k / (n - 1)));
+	return parts.map((p, i) => {
+		let v = 0.15 + rank[i] * 0.7;
+		if (p.kiai) v = Math.max(v, 0.78) + 0.12;
+		// (a drop: the first part of a kiai after a calmer one is its peak)
+		if (p.kiai && i > 0 && !parts[i - 1].kiai) v += 0.05;
+		const drop = i + 1 < n && parts[i + 1].kiai && !p.kiai;
+		if (drop) v = Math.min(v, 0.45);
+		if (i === 0) v = Math.min(v, 0.3);
+		if (i === n - 1) v = Math.min(v, 0.55);
+		return Math.max(0, Math.min(1, v));
+	});
 }
 
 function planParts(
@@ -377,8 +418,7 @@ function planParts(
 ): Part[] {
 	// Phrases: every few measures (about 10–20 s, shorter the harder: more changes), and where
 	// the kiai starts and stops
-	const longest = [32000, 26000, 18000, 14000, 12000][preset.level];
-	const shortest = [14000, 10000, 7000, 6000, 5000][preset.level];
+	const [shortest, longest] = preset.parts;
 	const cuts = new Set<number>();
 	const timing = chart.timing;
 	for (let i = 0; i < timing.length; i++) {
@@ -423,10 +463,8 @@ function planParts(
 	const svs = chart.notes.map((n) => n.sv).sort((a, b) => a - b);
 	const usualSv = svs[svs.length >> 1] || 1;
 
-	const parts: Part[] = [];
-	const history: Mode[] = [];
-	for (let i = 0; i < bounds.length - 1; i++) {
-		const from = bounds[i];
+	// What each part's music is like
+	const features = bounds.slice(0, -1).map((from, i) => {
 		const to = bounds[i + 1];
 		const notes = chart.notes.filter((n) => n.time >= from && n.time < to);
 		const seconds = (to - from) / 1000;
@@ -445,16 +483,26 @@ function planParts(
 		const held =
 			notes.reduce((sum, n) => sum + (n.kind === 'circle' ? 0 : Math.min(n.end, to) - n.time), 0) /
 			(to - from);
-		const drop = kiaiCuts.has(from);
+		return { from, to, kiai, energy, drive, streamy, held, drop: kiaiCuts.has(from) };
+	});
+	const intensity = intensities(features);
+	// How much the hard levels lean on the quick parts where it's intense (0 on easy and normal)
+	const quick = Math.max(0, (preset.level - 1) / 3);
+
+	const parts: Part[] = [];
+	const history: Mode[] = [];
+	features.forEach((f, i) => {
+		const { from, to, kiai, energy, drive, streamy, held, drop } = f;
+		const hot = intensity[i] * quick;
 		const fits: Record<Mode, number> = {
-			cube: 1.1 + (energy < 0.8 ? 0.3 : 0),
-			robot: 0.6 + (held > 0.2 ? 0.9 : 0) + (energy > 1 ? 0.3 : 0),
-			ship: 0.45 + (held > 0.45 ? 1.3 : 0) + (energy < 0.6 ? 0.6 : 0),
-			wave: preset.wave > 0 ? 0.12 + (streamy > 0.4 ? 1.8 : 0) : 0,
-			ball: 0.6 + (streamy < 0.25 && energy > 0.7 ? 0.3 : 0),
-			ufo: 0.55 + (streamy < 0.3 ? 0.2 : 0),
-			swing: 0.45 + (kiai ? 0.4 : 0),
-			spider: 0.3 + (streamy < 0.25 ? 0.15 : 0)
+			cube: 1.1 + (energy < 0.8 ? 0.3 : 0) - hot * 0.35,
+			robot: 0.6 + (held > 0.2 ? 0.9 : 0) + (energy > 1 ? 0.3 : 0) + hot * 0.15,
+			ship: 0.45 + (held > 0.45 ? 1.3 : 0) + (energy < 0.6 ? 0.6 : 0) - hot * 0.15,
+			wave: preset.wave > 0 ? 0.12 + (streamy > 0.4 ? 1.8 : 0) + hot * (0.5 + streamy) : 0,
+			ball: 0.6 + (streamy < 0.25 && energy > 0.7 ? 0.3 : 0) + hot * 0.3,
+			ufo: 0.55 + (streamy < 0.3 ? 0.2 : 0) + hot * 0.35,
+			swing: 0.45 + (kiai ? 0.4 : 0) + hot * 0.3,
+			spider: 0.3 + (streamy < 0.25 ? 0.15 : 0) + hot * 0.45
 		};
 		let mode: Mode = 'cube';
 		// Now and then the same kind again, small (or big) now: a size portal
@@ -463,7 +511,7 @@ function planParts(
 		if (resize) mode = before.mode;
 		else if (i > 0) {
 			const options = (preset.modes as Mode[]).map((m) => {
-				let w = fits[m];
+				let w = Math.max(0.05, fits[m]);
 				// Not the same kind again and again, and at a drop something new
 				const back = history.lastIndexOf(m);
 				if (back >= 0) {
@@ -471,7 +519,7 @@ function planParts(
 					w *= ago === 1 ? (m === 'cube' ? 0.5 : drop ? 0.05 : 0.25) : ago === 2 ? 0.6 : 0.9;
 				}
 				const share = history.filter((h) => h === m).length / Math.max(1, history.length);
-				if (m === 'cube' && share < 0.35) w *= 1.8;
+				if (m === 'cube' && share < 0.35 - quick * 0.12) w *= 1.8;
 				if (m !== 'cube' && share > 0.3) w *= 0.4;
 				return { m, w };
 			});
@@ -486,15 +534,26 @@ function planParts(
 			}
 		}
 		history.push(mode);
-		const mini = resize ? !before.mini : i > 0 && mode !== 'ball' && rng() < preset.mini;
-		parts.push({ start: from, end: to, mode, mini, kiai, energy, drive });
-	}
+		// (small more often where it's intense)
+		const miniChance = preset.mini * (0.55 + intensity[i] * 0.9);
+		const mini = resize ? !before.mini : i > 0 && mode !== 'ball' && rng() < miniChance;
+		parts.push({
+			start: from,
+			end: to,
+			mode,
+			mini,
+			kiai,
+			energy,
+			drive,
+			intensity: intensity[i]
+		});
+	});
 	// The end comes on the cube
 	const last = parts[parts.length - 1];
 	if (last.mode !== 'cube' && last.end - last.start > 11000) {
 		const at = snap(last.end - 5000);
 		if (at > last.start + 6000) {
-			parts.push({ ...last, start: at, mode: 'cube', mini: false });
+			parts.push({ ...last, start: at, mode: 'cube', mini: false, intensity: 0.4 });
 			last.end = at;
 		}
 	}
@@ -528,9 +587,13 @@ export function generateLevel(
 	let x = 0;
 	let palette = Math.floor(rng() * 8);
 	parts.forEach((part, index) => {
-		// Faster in the kiai (and where the mapper's sliders speed up), slower in calm parts
-		let speedIndex = part.kiai || part.drive >= 1.3 ? preset.speeds[1] : preset.speeds[0];
-		if (!part.kiai && part.energy < 0.45 && preset.level >= 1)
+		// Faster in the kiai and the most intense parts (and where the mapper's sliders speed up),
+		// slower in calm ones
+		let speedIndex =
+			part.kiai || part.drive >= 1.3 || part.intensity >= 0.72
+				? preset.speeds[1]
+				: preset.speeds[0];
+		if (!part.kiai && (part.energy < 0.45 || part.intensity < 0.2) && preset.level >= 1)
 			speedIndex = Math.max(0, speedIndex - 1);
 		const speed = SPEEDS[speedIndex];
 		world.segments.push({ time: part.start, x, speed });
@@ -549,7 +612,8 @@ export function generateLevel(
 			floor: 0,
 			ceil: part.mode === 'cube' || part.mode === 'robot' ? null : BOUNDS[part.mode],
 			palette,
-			kiai: part.kiai
+			kiai: part.kiai,
+			intensity: Math.round(part.intensity * 1000) / 1000
 		});
 		x = x1;
 	});
@@ -606,7 +670,7 @@ export function generateLevel(
 			const theirs =
 				sec.mode === 'ship' || sec.mode === 'swing'
 					? []
-					: chooseClicks(chart, inside, gap, preset.cost * 0.9);
+					: chooseClicks(chart, inside, gap, preset.cost * 0.9, preset.idle);
 			state = buildFlight(ctx, sec, inside, theirs, state);
 		}
 		const constructed = world.hazards.items.filter((h) => !oldHazards.has(h));

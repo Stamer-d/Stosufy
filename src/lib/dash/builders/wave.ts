@@ -165,7 +165,8 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	// Checked: on time, and played like a person, who turns a bit early or late at every
 	// corner (by up to half a block of the way: twice as high for the steeper small wave) but
 	// sees where the corridor goes (so the errors don't add up); where it crashes, wider
-	const SLOPPY = 0.6 * slope;
+	// (a player of the harder levels is less sloppy: the corridor isn't widened for as much)
+	const SLOPPY = (0.6 - preset.level * 0.05) * slope;
 	const person = (seed: number) => {
 		let r = seed * 7919 + 17;
 		const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647) * 2 - 1;
