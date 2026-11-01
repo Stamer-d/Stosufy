@@ -157,8 +157,8 @@ export function buildFlight(
 	const speed = section.speed;
 	const tolerance = preset.tolerance;
 	const box = hitbox(mode, section.mini);
-	const startX = world.xAt(section.start + 450);
-	const endX = world.xAt(section.end - 450);
+	const startX = world.xAt(section.start + 300);
+	const endX = world.xAt(section.end - 300);
 
 	// How hard: room around the way, spikes, breathers
 	const intensity = section.intensity ?? 0.5;
@@ -310,7 +310,11 @@ export function buildFlight(
 		// The clicks; the ball and the spider only switch on a surface, else a blue orb does it.
 		// Some clicks take an orb, for what the music does there (see musicalOrb)
 		const times = clicks.filter(
-			(t) => t > section.start + 400 && t < section.end - 400 && !musicalRest(ctx.chart, t)
+			// (not right at the end: a click a bit off would land in the next part's first obstacle)
+			(t) =>
+				t > section.start + 250 &&
+				t < section.end - (mode === 'ball' || mode === 'spider' ? 700 : 450) &&
+				!musicalRest(ctx.chart, t)
 		);
 		const noteAt = new Map(notes.map((n) => [n.time, n]));
 		const most = Math.round(preset.orbs * (0.6 + intensity * 0.6));
@@ -568,6 +572,40 @@ export function buildFlight(
 			c.low = floor;
 			c.high = top;
 		}
+	// The ship between a tight tunnel and a slalom, phrase by phrase: in a slalom the tunnel is
+	// wide but for pillars on the accents, from the floor and from the ceiling by turns, up to near
+	// the way (around them it flies)
+	if (mode === 'ship' && style === 'tunnel' && preset.level >= 1) {
+		const accents = notes
+			.filter((n) => strongAt(n) || beatStrength(ctx.chart.timing, n.time) >= 0.65)
+			.map((n) => world.xAt(n.time));
+		const slalom = new Map<string, boolean>();
+		let pillar = rng() < 0.5 ? 1 : -1;
+		let lastPillar = -Infinity;
+		for (const c of columns) {
+			const pos = musicalPosition(ctx.chart, world.timeAt(c.x + 0.5));
+			if (!slalom.has(pos.key))
+				slalom.set(
+					pos.key,
+					rng() < (0.25 + (1 - intensity) * 0.25) * (preset.level >= 3 ? 0.6 : 1)
+				);
+			if (!slalom.get(pos.key)) continue;
+			const accent = accents.some((ax) => Math.abs(ax - (c.x + 0.5)) < 1.1);
+			if (accent && c.x - lastPillar >= 3) {
+				// (a pillar here, the other side open; the next one from the other side)
+				if (pillar > 0) c.high = top;
+				else c.low = floor;
+				pillar = -pillar;
+				lastPillar = c.x;
+			} else if (!accent || c.x - lastPillar > 1) {
+				// (between the pillars a wide tunnel: two blocks more room each way)
+				c.low = Math.max(floor, c.low - 2);
+				c.high = Math.min(top, c.high + 2);
+			} else if (pillar < 0) c.high = top;
+			else c.low = floor;
+		}
+		if ([...slalom.values()].some(Boolean)) used(ctx, 'ship-slalom');
+	}
 
 	// Spikes on the surfaces where there's room, in little rows that start on the strong notes
 	// (the beats in between now and then)
@@ -620,6 +658,30 @@ export function buildFlight(
 	pickSpikes();
 	timingSpikes();
 	orbJumpSpikes();
+
+	/**
+	 * The rules of a clean level, kept by what breaks them going (not every spike: one orb in a
+	 * step of the stairs used to take all the spikes of the part with it)
+	 */
+	function keepRules() {
+		for (let round = 0; round < 4 && !legalAround(world, startX - 1, endX + 1); round++) {
+			for (const c of columns)
+				if (c.spike && !legalAround(world, c.x - 0.5, c.x + 1.5)) {
+					c.spike = 0;
+					c.small = false;
+				}
+			// An orb in a block, or right at a spike: the orb goes
+			for (const orb of orbs)
+				if (world.orbs.items.includes(orb) && !legalAround(world, orb.x - 0.6, orb.x + 0.6))
+					world.orbs.remove(orb);
+			build();
+		}
+		if (!legalAround(world, startX - 1, endX + 1)) {
+			// (still: the spikes go after all)
+			for (const c of columns) c.spike = 0;
+			build();
+		}
+	}
 
 	/**
 	 * The spider's orb jumps: spikes on its side under the jump (without the press it runs into
@@ -867,11 +929,7 @@ export function buildFlight(
 	/** Played the ways it may be played (steered: flown again); where it crashes, if it does */
 	const verify = (attempt: number) => {
 		let failed: PlayerState | null = null;
-		if (!legalAround(world, startX - 1, endX + 1)) {
-			// A spike broke a rule: the spikes go
-			for (const c of columns) c.spike = 0;
-			build();
-		}
+		if (!legalAround(world, startX - 1, endX + 1)) keepRules();
 		for (const inputs of steered ? [] : variants) {
 			const run = simulate(world, entry, section.end, inputs);
 			if (run.dead) {
@@ -938,11 +996,9 @@ export function buildFlight(
 				const until = Math.min(section.end, (after?.time ?? e.time + 1000) + 400);
 				state = simulate(world, state, Math.max(state.time, e.time - tolerance - 20), events);
 				if (state.dead) break;
-				// (every step up to half the tolerance each way: the room must be in one piece; and
-				// three quarters of it)
-				const shifts = [0.75 * tolerance];
-				for (let d = STEP; d <= tolerance / 2 + STEP; d += STEP) shifts.push(d);
-				for (const shift of shifts.flatMap((d) => [-d, d])) {
+				// (half the tolerance and three quarters of it; every step in between is checked once
+				// more on the finished level: see generate.ts, clickRoom)
+				for (const shift of [0.5, 0.75].flatMap((f) => [-f * tolerance, f * tolerance])) {
 					const inputs = events
 						.map((u, n) => (n === k || n === release ? { ...u, time: u.time + shift } : u))
 						.sort((p, q) => p.time - q.time);
@@ -981,13 +1037,14 @@ export function buildFlight(
 	noResting();
 
 	/**
-	 * Nowhere to rest: from each click on, doing nothing (the ship also: holding on) must not get
-	 * it through by riding along a floor, ceiling or wall for long. Where it would, a spike on that
+	 * Nowhere to rest, every click needed: from each click on, doing nothing (the ship also:
+	 * holding on) must not get it through by riding along a floor, ceiling or wall for long; and
+	 * a click of the UFO, ball or spider left out must not either. Where it would, a spike on that
 	 * surface, where the way itself keeps clear of it (checked again with all the ways it may be
 	 * played; a spike that breaks one goes again).
 	 */
 	function noResting() {
-		if (preset.level < 1 || (mode !== 'ufo' && mode !== 'swing' && mode !== 'ship')) return;
+		if (preset.level < 1 || mode === 'wave') return;
 		const trace: { x: number; y: number; time: number }[] = [];
 		simulate(world, entry, section.end, events, { trace });
 		const ways = [...runs, trace];
@@ -1015,19 +1072,42 @@ export function buildFlight(
 		for (let pass = 0; pass < 4; pass++) {
 			let changed = false;
 			let state = entry;
-			for (const e of events) {
-				if (!e.down || e.time < section.start + 300 || e.time > section.end - 1200) continue;
-				state = simulate(world, state, e.time, events);
+			for (let k = 0; k < events.length; k++) {
+				const e = events[k];
+				if (!e.down || e.time < section.start + 250) continue;
+				if (e.time > section.end - (steered ? 1200 : 400)) continue;
+				if (steered) {
+					state = simulate(world, state, e.time, events);
+				} else {
+					// (just before this click: the ride is without it)
+					state = simulate(world, state, Math.max(state.time, e.time - 20), events);
+				}
 				if (state.dead) break;
 				for (const hold of mode === 'ship' ? [false, true] : [false]) {
 					const ride: { x: number; y: number; time: number }[] = [];
-					// (the button as it is then: let go, or held on)
-					const from = { ...state, used: [...state.used], held: hold, buffered: false };
-					const until = Math.min(section.end - 300, e.time + 1600);
-					if (simulate(world, from, until, [], { trace: ride }).dead) continue;
+					let survived: boolean;
+					if (steered) {
+						// (the button as it is then: let go, or held on; and nothing more)
+						const from = { ...state, used: [...state.used], held: hold, buffered: false };
+						const until = Math.min(section.end - 300, e.time + 1600);
+						survived = !simulate(world, from, until, [], { trace: ride }).dead;
+					} else {
+						// This click left out (and its letting go), the others as they are
+						const release = events.findIndex((u, n) => n > k && !u.down);
+						const after = events.find((u, n) => n > k && u.down);
+						const inputs = events.filter((_, n) => n !== k && n !== release);
+						const until = Math.min(
+							section.end - 250,
+							e.time + 1500,
+							(after?.time ?? Infinity) + 500
+						);
+						survived = !simulate(world, state, until, inputs, { trace: ride }).dead;
+					}
+					if (!survived) continue;
 					// Where it rode along a surface, the way well clear of that surface there
 					for (const p of ride) {
-						if (p.time < e.time + 250 || musicalRest(ctx.chart, p.time)) continue;
+						const settle = mode === 'spider' || mode === 'ball' ? 120 : 250;
+						if (p.time < e.time + settle || musicalRest(ctx.chart, p.time)) continue;
 						const c = columns.find((col) => col.x === Math.floor(p.x));
 						if (!c || c.spike || added.some((a) => a.c === c)) continue;
 						const side: 0 | 1 | -1 =
@@ -1099,10 +1179,35 @@ export function buildFlight(
 	}
 	// Every orb needed: one it gets through without (the press there a plain hop or switch)
 	// goes, so none is just in the air; unless a press a bit early or late needs it
+	// (the spider's orbs on the ground: needed on time, or they go; what that breaks is mended)
+	let dropped = false;
 	for (const orb of orbs) {
 		world.orbs.remove(orb);
-		if (simulate(world, entry, section.end, events).dead || verify(settled)) world.orbs.add(orb);
+		const needed = simulate(world, entry, section.end, events).dead;
+		const jump = mode === 'spider' && jumpOrbs.some((j) => j.orb === orb);
+		if (needed || (!jump && verify(settled))) world.orbs.add(orb);
+		else if (jump) dropped = true;
 	}
+	// Orbs the way doesn't touch do nothing: they go
+	const touched = simulate(world, entry, section.end, events).used;
+	for (const orb of orbs)
+		if (world.orbs.items.includes(orb) && !touched.includes(orb.id)) {
+			world.orbs.remove(orb);
+			dropped = true;
+		}
+	if (dropped)
+		for (let attempt = 0; attempt < 12; attempt++) {
+			const failed = verify(settled);
+			if (!failed) break;
+			const near = columns.filter((c) => Math.abs(c.x + 0.5 - failed.x) < 3);
+			if (!near.length) break;
+			for (const c of near) {
+				c.spike = 0;
+				if (failed.y - c.low < c.high - failed.y) c.low = Math.max(floor, c.low - 1);
+				else c.high = Math.min(top, c.high + 1);
+			}
+			build();
+		}
 	plan.push(...events);
 	used(ctx, mode);
 	return simulate(world, entry, section.end, plan);

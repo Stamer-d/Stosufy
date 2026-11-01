@@ -36,7 +36,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	const turns: number[] = [];
 	for (const note of notes) {
 		if (
-			note.time < section.start + 650 ||
+			note.time < section.start + 400 ||
 			note.time > section.end - 500 ||
 			musicalRest(ctx.chart, note.time)
 		)

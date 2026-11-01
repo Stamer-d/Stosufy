@@ -483,3 +483,47 @@ abgeschaltet ist.
 Tests (`tests/dash/modes.test.ts`): abgeschaltete Modi kommen nie vor, nur Cube ergibt nur Cube, und
 beides bleibt durchspielbar; ohne Gravity keine Portale und kein Cube kopfüber; Gravity nur im Ship
 heißt Portale nur im Ship; Bestleistungen getrennt.
+
+## 11. 0.6.80: weniger Leerlauf, jeder Klick nötig, Ship mit Slalom
+
+Gemessen auf drei echten Maps (Hard und Extreme). „Leerlauf“ heißt hier: eine Strecke von mindestens
+1 s ohne Klick, in der die Map mindestens drei Noten hat. „Unnötig“ heißt: Ohne diesen einen Klick
+überlebt man die nächsten 1,2 s trotzdem.
+
+| Modus  | Leerlauf vorher → nachher | unnötige Klicks vorher → nachher |
+| ------ | ------------------------- | -------------------------------- |
+| Cube   | 35 → 18 %                 | 5 → 5 %                          |
+| Robot  | 26 → 15 %                 | 3 → 4 %                          |
+| Spider | 29 → 2–10 %               | 29 → 7 %                         |
+| Ball   | 1 → 5 %                   | 61 → 25 %                        |
+| UFO    | 0 → 0 %                   | 28 → 7 %                         |
+
+Was es war und was geändert wurde:
+
+- **Ein Regelverstoß löschte alle Spikes eines Abschnitts.** Verletzte ein einziges Objekt eine
+  Bauregel (seit den Treppen oft ein Orb, der in eine Stufe ragte), wurden alle Spikes des Flugteils
+  entfernt. Ball- und Spider-Abschnitte waren dadurch oft ganz ohne Spikes: Klicks waren unnötig, und
+  Orb-Sprünge gingen über nichts. Jetzt verschwindet nur, was die Regel verletzt.
+- **Leere Mini-Cube-Abschnitte:** Der kleine Cube springt kurz; die angestrebten Fenster passten auf
+  den höheren Stufen nicht hinein, und keine Variante wurde gebaut. Jetzt gibt es eine
+  Rückfall-Variante, so knapp wie die Toleranz erlaubt (und einen Block unter dem Sprung).
+- **Tote Zeit an den Abschnitts-Enden:** Cube und Robot ließen die ersten 0,65 s und die letzten
+  0,85 s aus, Flugteile je 0,4 s. Jetzt sind es 0,3 / 0,35 s (Flugteile 0,25 s am Anfang; am Ende
+  0,45 s, Ball und Spider 0,7 s, weil ein verschobener Klick sonst in den nächsten Abschnitt ragt).
+  Kopfüber-Passagen drehen direkt nach dem letzten Sprung zurück.
+- **Spider und Ball dichter:** mindestens 0,26 bzw. 0,24 s zwischen Klicks statt 0,42 bzw. 0,3 s.
+- **Jeder Klick nötig:** Für UFO, Ball und Spider wird jeder Klick einzeln weggelassen. Überlebt man
+  dann, an einer Fläche entlang, kommt dort ein Spike hin (oder ein kleiner, oder eine Stufe).
+- **Orbs, die nichts bringen:** Ein Orb bleibt nur, wenn der Weg ihn braucht. Orbs, die der Weg gar
+  nicht berührt, werden entfernt.
+- **Ship:** Phrasenweise wechselt es zwischen engem Tunnel und Slalom (weiter Tunnel, Säulen von oben
+  und unten auf den Akzenten), dazu Orbs und Gravity wie bisher. Auf den hohen Stufen ist der
+  Slalom seltener.
+- **Mehr Modi-Vielfalt:** Ein Abschnitt wiederholt seltener nur den vorigen Modus mit anderer Größe,
+  und noch nicht vorgekommene Modi werden bevorzugt.
+- **Schlussprüfung:** Am fertigen Level wird jeder UFO-, Ball- und Spider-Klick jeden Physikschritt
+  bis zur halben Toleranz früh und spät gespielt, wie der Validator misst; was dabei stört, wird
+  entfernt. Auf sechs Leveln von drei Maps: kein Klick unter der Toleranz.
+
+Grenzen: Beim Ball ist noch ein Viertel der Klicks unnötig. Die Generierung eines 4,5-Minuten-Songs
+auf Extreme dauert jetzt ~10–12 s (im Worker, vorher ~8 s).

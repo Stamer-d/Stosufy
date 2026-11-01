@@ -59,6 +59,8 @@ interface Layout {
 	early: number;
 	/** Aimed at the room asked for (and how much of it late): measured, it may be set closer */
 	aimed?: number;
+	/** Only tried when nothing else fits */
+	fallback?: boolean;
 }
 
 /** The first spike place (x.5) at or after a place, and the last at or before one */
@@ -86,13 +88,14 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 	const box = hitbox(sec.mode, sec.mini);
 	const notes = new Map(ctx.chart.notes.map((n) => [n.time, n]));
 	const times = clicks.filter(
-		(t) => t > sec.start + 650 && t < sec.end - 850 && !musicalRest(ctx.chart, t)
+		// (right from the portal in to just before the one out: no dead time at the ends)
+		(t) => t > sec.start + 300 && t < sec.end - 350 && !musicalRest(ctx.chart, t)
 	);
 	const phrases = composePhrases(ctx.chart, times);
 	const intensity = sec.intensity ?? 0.5;
 	const tolerance = preset.tolerance;
 	const speed = sec.speed;
-	const exitX = world.xAt(sec.end - 700);
+	const exitX = world.xAt(sec.end - 150);
 	const robot = sec.mode === 'robot';
 	// The room a press should have here (ms, early + late): never less than the tolerance allows
 	const aim = Math.max(2 * tolerance + 12, byIntensity(preset.window, intensity));
@@ -274,12 +277,34 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 					);
 				}
 			}
-			if (!ctx.simplify && launch.chain === 0 && preset.level <= 1 && !robot)
-				layouts.push({ landing: height, cut: false, fill: 'block', late: 0, early: 0 });
+			// When none of those fits (a short jump: the small cube), as close as the tolerance
+			// allows, and on the ground it's on; and a low block under the jump
+			const tight = tolerance + 4;
+			layouts.push(
+				{ landing: height, cut: false, fill: 'spikes', late: tight, early: tight, fallback: true },
+				{
+					landing: height,
+					cut: false,
+					fill: 'small',
+					late: tolerance,
+					early: tolerance,
+					fallback: true
+				}
+			);
+			if (!ctx.simplify && launch.chain === 0 && !robot && (preset.level <= 1 || sec.mini))
+				layouts.push({
+					landing: height,
+					cut: false,
+					fill: 'block',
+					late: 0,
+					early: 0,
+					fallback: true
+				});
 
 			const usable: { layout: Layout; window: number; family: string }[] = [];
 			for (let n = 0; n < layouts.length; n++) {
 				const layout = layouts[n];
+				if (layout.fallback && usable.length) break;
 				// (enough: one about as precise as asked for, and a few to choose from)
 				if (usable.length >= 3 && usable.some((u) => Math.abs(u.window - aim) < aim * 0.2)) break;
 				const a = new Attempt(world, exitX);
@@ -382,11 +407,13 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 	 * long, each a bit off; every press must be needed. Returns the last click it took (null: it
 	 * didn't fit).
 	 */
-	function upside(i: number, at: PlayerState, h: number): number | null {
+	function upside(i: number, at: PlayerState, h: number, outAt?: number): number | null {
 		const start = times[i];
 		const longest = Math.min(1800 + preset.level * 900, sec.end - 1200 - start);
 		let j = i;
 		while (j + 1 < times.length && times[j + 1] - start <= longest) j++;
+		// (turned back right after the last jump down, when that's known: no dead time before it)
+		if (outAt !== undefined) j = outAt;
 		if (j < i + 2) return null;
 		const end = times[j];
 		const x = at.x;
@@ -394,7 +421,7 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 		if (endX + 8 > exitX) return null;
 		// After turning back it falls to the ground: the clicks while it falls are left out
 		let last = j;
-		while (last + 1 < times.length && times[last + 1] < end + 700) last++;
+		while (last + 1 < times.length && times[last + 1] < end + 450) last++;
 		const cube = cubeAt(sec.speedIndex);
 		const air = ((2 * cube.jump) / cube.gravity) * (sec.mini ? 0.8 : 1);
 		const high = h + (sec.mini ? 3 : 4) + (preset.level >= 3 && rng() < 0.5 ? 1 : 0);
@@ -429,6 +456,7 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 		const withPlan = (inputs: InputEvent[]) => [...plan, ...inputs].sort((p, q) => p.time - q.time);
 		// Upside down: jumps (down) over spikes hanging from the slab, on the clicks between
 		let jumps = 0;
+		let lastJump = -1;
 		for (const c of times.slice(i + 1, j)) {
 			if (c + air * 1000 + 150 > end) break;
 			const s = simulate(world, state, c, withPlan(taps()));
@@ -441,6 +469,16 @@ export function buildRunner(ctx: Context, sec: Section, clicks: number[], entry:
 			presses.push(c);
 			presses.sort((p, q) => p - q);
 			jumps++;
+			lastJump = times.indexOf(c);
+		}
+		// Clicks left between the last jump and turning back: turned back sooner instead
+		if (outAt === undefined && jumps > 0) {
+			let sooner = lastJump + 1;
+			while (sooner < j && times[sooner] < times[lastJump] + air * 1000 + 150) sooner++;
+			if (sooner < j) {
+				a.revert();
+				return upside(i, at, h, sooner);
+			}
 		}
 		const until = end + 750;
 		const shifted = (shift: (k: number) => number, hold: number) =>

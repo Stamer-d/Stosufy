@@ -154,7 +154,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		chain: 6,
 		strong: 0.82,
 		mini: 0.4,
-		parts: [5000, 12000],
+		parts: [6000, 13000],
 		flips: 0.95,
 		orbs: 9,
 		modes: ALL_MODES
@@ -178,7 +178,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		chain: 7,
 		strong: 0.7,
 		mini: 0.5,
-		parts: [4000, 10000],
+		parts: [5000, 12000],
 		flips: 1,
 		orbs: 12,
 		modes: ALL_MODES

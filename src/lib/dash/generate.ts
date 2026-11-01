@@ -507,7 +507,7 @@ function planParts(
 		let mode: Mode = 'cube';
 		// Now and then the same kind again, small (or big) now: a size portal
 		const before = parts[parts.length - 1];
-		const resize = !!before && !drop && before.mode !== 'ball' && rng() < preset.mini * 0.8;
+		const resize = !!before && !drop && before.mode !== 'ball' && rng() < preset.mini * 0.4;
 		if (resize) mode = before.mode;
 		else if (i > 0) {
 			const options = (preset.modes as Mode[]).map((m) => {
@@ -516,8 +516,10 @@ function planParts(
 				const back = history.lastIndexOf(m);
 				if (back >= 0) {
 					const ago = history.length - back;
-					w *= ago === 1 ? (m === 'cube' ? 0.5 : drop ? 0.05 : 0.25) : ago === 2 ? 0.6 : 0.9;
+					w *= ago === 1 ? (m === 'cube' ? 0.3 : drop ? 0.05 : 0.25) : ago === 2 ? 0.6 : 0.9;
 				}
+				// (one not had yet in this level is welcome: variety)
+				if (!history.includes(m)) w *= 1.7;
 				const share = history.filter((h) => h === m).length / Math.max(1, history.length);
 				if (m === 'cube' && share < 0.35 - quick * 0.12) w *= 1.8;
 				if (m !== 'cube' && share > 0.3) w *= 0.4;
@@ -681,8 +683,8 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 				sec.mode === 'ufo' || sec.mode === 'swing'
 					? Math.max(preset.gap, 0.22)
 					: sec.mode === 'spider'
-						? Math.max(preset.gap, 0.42)
-						: Math.max(preset.gap, 0.3);
+						? Math.max(preset.gap, 0.26)
+						: Math.max(preset.gap, 0.24);
 			const theirs =
 				sec.mode === 'ship' || sec.mode === 'swing'
 					? []
@@ -741,6 +743,7 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 
 	// Later filling/repair can change the approach state: check swing windows on the final world.
 	widenSwingWindows(world, plan, start, end, preset.tolerance);
+	clickRoom(world, plan, start, end, preset.tolerance);
 	playThrough(world, plan, start, end);
 
 	removeUnsupportedSpikes(world);
@@ -833,6 +836,68 @@ function widenSwingWindows(
 		}
 		if (!failed) return;
 		removeNear(world, failed.x, world.sectionAt(failed.time).mode);
+	}
+}
+
+/**
+ * The last check of the UFO, ball and spider clicks, on the finished level: each one alone a bit
+ * early or late (every step up to half the tolerance, the others on time) gets past the click
+ * after it, as validate.ts measures a click's room. Where one doesn't, what's in the way there
+ * goes.
+ */
+function clickRoom(
+	world: World,
+	plan: InputEvent[],
+	start: number,
+	end: number,
+	tolerance: number
+) {
+	const modes: Mode[] = ['ufo', 'ball', 'spider'];
+	if (!world.sections.some((s) => modes.includes(s.mode))) return;
+	// The planned run every quarter second, to start from there (again from a change on)
+	const states: PlayerState[] = [startState(world, start)];
+	const fill = (from: number) => {
+		for (let k = Math.max(1, from); start + k * 250 <= end; k++)
+			states[k] = simulate(world, states[k - 1], start + k * 250, plan);
+	};
+	fill(1);
+	let first = 0;
+	for (let pass = 0; pass < 60; pass++) {
+		let failed: PlayerState | null = null;
+		let at = -1;
+		for (let i = first; i < plan.length && !failed; i++) {
+			const press = plan[i];
+			if (!press.down || !modes.includes(world.sectionAt(press.time).mode)) continue;
+			const release = plan.findIndex((e, k) => k > i && !e.down);
+			const next = plan.find((e, k) => k > i && e.down);
+			const until = Math.min(end, (next?.time ?? press.time + 1000) + 400);
+			const k = Math.max(
+				0,
+				Math.min(states.length - 1, Math.floor((press.time - 160 - start) / 250) - 1)
+			);
+			for (let shift = STEP; shift <= tolerance / 2 + STEP && !failed; shift += STEP)
+				for (const way of [-1, 1]) {
+					const inputs = plan
+						.map((e, n) => (n === i || n === release ? { ...e, time: e.time + way * shift } : e))
+						.sort((a, b) => a.time - b.time);
+					const run = simulate(world, states[k], until, inputs);
+					if (run.dead) {
+						failed = run;
+						at = i;
+						break;
+					}
+				}
+		}
+		if (!failed) return;
+		removeNear(world, failed.x, world.sectionAt(failed.time).mode);
+		// On from a bit before what changed (the run before it is the same)
+		const changed = world.timeAt(failed.x - 3);
+		fill(Math.floor((changed - start) / 250));
+		first = Math.max(
+			0,
+			plan.findIndex((e) => e.time >= changed - 1500)
+		);
+		if (first > at) first = at;
 	}
 }
 
