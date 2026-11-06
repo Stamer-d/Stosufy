@@ -116,7 +116,11 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	 */
 	let gravity: 1 | -1 = 1;
 	let lastPortal = -Infinity;
-	let portalsLeft = !gravityIn(ctx, 'wave') ? 0 : preset.level >= 4 ? 2 : preset.level >= 2 ? 1 : 0;
+	// (the intense parts of the hardest levels: twice as many, on any bar, a bar and a half apart)
+	const busy = preset.level >= 3 && (section.intensity ?? 0.5) >= 0.72;
+	let portalsLeft = !gravityIn(ctx, 'wave')
+		? 0
+		: (preset.level >= 4 ? 2 : preset.level >= 2 ? 1 : 0) * (busy ? 2 : 1);
 	const upsideDown: [number, number][] = [];
 	const turn = (at: number, portal = false) => {
 		up = !up;
@@ -144,9 +148,10 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 		// Upside down: back after a bar, on a downbeat, or after two bars at the latest
 		if (gravity < 0)
 			return at - lastPortal >= barX && (at - lastPortal >= 2 * barX || pos.inBar < 0.1);
-		if (portalsLeft <= 0 || at - lastPortal < 3 * barX) return false;
-		if (pos.bar % 2 !== 0 || pos.inBar > 0.1 || musicalRest(ctx.chart, time)) return false;
-		return rng() < preset.flips * (0.35 + (section.intensity ?? 0.5) * 0.4);
+		if (portalsLeft <= 0 || at - lastPortal < (busy ? 1.5 : 3) * barX) return false;
+		if ((!busy && pos.bar % 2 !== 0) || pos.inBar > 0.1 || musicalRest(ctx.chart, time))
+			return false;
+		return rng() < (busy ? 0.8 : preset.flips * (0.35 + (section.intensity ?? 0.5) * 0.4));
 	};
 	/** Straight on to a place: turning at the band's edge (on a quarter beat) on the way */
 	const advance = (toX: number) => {

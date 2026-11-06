@@ -10,6 +10,7 @@ import {
 	type InputEvent,
 	type Orb,
 	type OrbKind,
+	type Pad,
 	type PadKind,
 	type PlayerState,
 	type Section,
@@ -333,8 +334,9 @@ export class Attempt {
 	to = -Infinity;
 	/** Something broke a rule or went past the end of the part */
 	broken = false;
-	/** The orbs it put in */
+	/** The orbs and pads it put in */
 	orbs: Orb[] = [];
+	pads: Pad[] = [];
 
 	constructor(
 		private world: World,
@@ -389,7 +391,11 @@ export class Attempt {
 		this.mark(x - 0.5, x + 0.5);
 		const pad = { id: this.world.id(), kind, x, y, dir, x0: x - 0.5, x1: x + 0.5 };
 		this.world.pads.add(pad);
-		this.undo.push(() => this.world.pads.remove(pad));
+		this.pads.push(pad);
+		this.undo.push(() => {
+			this.world.pads.remove(pad);
+			this.pads.splice(this.pads.indexOf(pad), 1);
+		});
 		return pad;
 	}
 

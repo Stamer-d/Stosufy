@@ -35,7 +35,7 @@ import {
 	type Context
 } from '../build';
 import { beatStrength, type DashNote } from '../chart';
-import { composePhrases, musicalPosition, musicalRest } from '../composition';
+import { accentAt, composePhrases, musicalPosition, musicalRest } from '../composition';
 import { hitAt, loudness } from '../audio';
 
 interface Column {
@@ -172,10 +172,13 @@ export function buildFlight(
 	/** When the gravity portals come */
 	const portalTimes: number[] = [];
 	// (not right at a click: pressed a moment before or after the portal would go another way)
+	// In the intense parts of the hardest levels on every bar and the song's strong accents, two
+	// beats apart at least, and twice as many
+	const busy = preset.level >= 3 && intensity >= 0.72;
 	if (
 		preset.level >= 1 &&
 		gravityIn(ctx, mode) &&
-		rng() < preset.flips * (mode === 'swing' ? 0.7 : 1)
+		(busy || rng() < preset.flips * (mode === 'swing' ? 0.7 : 1))
 	) {
 		let gravity: 1 | -1 = -1;
 		let last = -Infinity;
@@ -183,25 +186,33 @@ export function buildFlight(
 		// On the downbeats of every other bar (a note there, or the beat itself), the strong ones
 		// first
 		const downbeats: number[] = [];
+		const beatOf = (t: number) =>
+			ctx.chart.timing.reduce((a, p) => (p.time <= t ? p : a), ctx.chart.timing[0]).beatLength;
 		for (const point of ctx.chart.timing) {
-			const bar = point.beatLength * point.meter;
+			const step = busy ? point.beatLength : point.beatLength * point.meter;
 			const until = Math.min(
 				section.end,
 				ctx.chart.timing.find((p) => p.time > point.time)?.time ?? Infinity
 			);
 			for (
-				let t = point.time + Math.max(0, Math.ceil((section.start - point.time) / bar)) * bar;
+				let t = point.time + Math.max(0, Math.ceil((section.start - point.time) / step)) * step;
 				t < until;
-				t += bar
-			)
+				t += step
+			) {
+				const pos = musicalPosition(ctx.chart, t + 1);
+				// (busy: the bar's downbeat, or a beat the song hits hard on)
+				if (busy && pos.inBar > 0.1 && accentAt(ctx.chart, t) < 0.6) continue;
 				downbeats.push(t);
+			}
 		}
 		for (const t of downbeats.sort((p, q) => p - q)) {
-			if (count >= preset.level) break;
+			if (count >= preset.level * (busy ? 2 : 1)) break;
 			const x = world.xAt(t);
-			if (x < startX + 4 || x > endX - 6 || t - last < 2400) continue;
+			if (x < startX + 4 || x > endX - 6) continue;
+			if (t - last < (busy ? Math.max(1100, beatOf(t) * 2) : 2400)) continue;
 			const pos = musicalPosition(ctx.chart, t + 1);
-			if (pos.bar % 2 !== 0 || musicalRest(ctx.chart, t) || rng() < 0.25) continue;
+			if ((!busy && pos.bar % 2 !== 0) || musicalRest(ctx.chart, t) || rng() < (busy ? 0.1 : 0.25))
+				continue;
 			// (the portal takes the downbeat: no click right at it, pressed a moment before or after
 			// it would go another way)
 			portalTimes.push(t);
@@ -360,6 +371,7 @@ export function buildFlight(
 		const most = Math.round(preset.orbs * (0.6 + intensity * 0.6));
 		let placed = 0;
 		let lastOrb = -Infinity;
+		let lastPad = -Infinity;
 		let previous: DashNote | null = null;
 		let airborneUntil = -Infinity;
 		let s = entry;
@@ -388,6 +400,31 @@ export function buildFlight(
 			let hold = mode === 'ufo' ? 70 : 90;
 			// (the notes while it's in the air after an orb jump go by)
 			if (time < airborneUntil) continue;
+			// On a hard accent in the intense parts of the hardest levels, now and then a blue pad
+			// where it rolls instead of the press: it turns over on the beat by itself
+			if (
+				(mode === 'ball' || mode === 'spider') &&
+				busy &&
+				at.grounded &&
+				time - lastPad > 1500 &&
+				accentAt(ctx.chart, time) >= 0.6 &&
+				rng() < 0.45
+			) {
+				const x = Math.round((at.x + 0.5 + box.w) * 4) / 4;
+				world.pads.add({
+					id: world.id(),
+					kind: 'blue',
+					x,
+					y: at.gravity > 0 ? at.y - box.h : at.y + box.h,
+					dir: at.gravity,
+					x0: x - 0.5,
+					x1: x + 0.5
+				});
+				used(ctx, `${mode}-pad`);
+				lastPad = time;
+				s = at;
+				continue;
+			}
 			if (
 				mode === 'spider' &&
 				at.grounded &&

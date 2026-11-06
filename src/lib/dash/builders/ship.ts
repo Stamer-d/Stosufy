@@ -540,6 +540,8 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 				weight:
 					b.weight *
 					freshness(ctx, `ship-${b.id}`) *
+					// (upside down more often where it's intense on the hardest levels)
+					(b.gravity && preset.level >= 3 && intensity >= 0.72 ? 3 : 1) *
 					// (up where it's low, down where it's high)
 					(b.id === 'rise' ? 1.4 - (c - floor) / (top - floor) : 1) *
 					(b.id === 'fall' ? 0.4 + (c - floor) / (top - floor) : 1)

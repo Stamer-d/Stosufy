@@ -20,7 +20,7 @@ import {
 	used,
 	type Context
 } from '../build';
-import { musicalRest } from '../composition';
+import { accentAt, musicalRest } from '../composition';
 import { reach } from './runner';
 import {
 	cubeAt,
@@ -29,6 +29,7 @@ import {
 	STEP,
 	type InputEvent,
 	type OrbKind,
+	type PadKind,
 	type PlayerState,
 	type Section,
 	type Solid
@@ -45,6 +46,8 @@ interface Leap {
 	ring?: OrbKind;
 	/** Held: a dash orb (on a held note) */
 	dash?: boolean;
+	/** Taken off by a pad where it is on the click, without a press: on the beat by itself */
+	pad?: PadKind;
 	orbs?: OrbKind[];
 	fill?: Fill;
 	/** The most spikes in its row */
@@ -70,7 +73,7 @@ export interface Block {
 
 const leap = (landing: Landing, more: Partial<Leap> = {}): Leap => ({ landing, ...more });
 
-/** The library: 38 pieces */
+/** The library: 44 pieces */
 export const BLOCKS: Block[] = [
 	// A jump over something, or onto something
 	{ id: 'spike1', level: 0, weight: 1.1, leaps: [leap('same', { most: 1 })] },
@@ -96,6 +99,23 @@ export const BLOCKS: Block[] = [
 	{ id: 'ringPink', level: 1, weight: 0.4, leaps: [leap('same', { ring: 'pink', most: 1 })] },
 	{ id: 'ringGap', level: 2, weight: 0.4, high: 1, leaps: [leap('gap', { ring: 'yellow' })] },
 	{ id: 'dash', level: 1, weight: 2, held: true, leaps: [leap('same', { dash: true })] },
+	// Pads on the beat: it takes off by itself
+	{ id: 'padYellow', level: 2, weight: 0.9, leaps: [leap('same', { pad: 'yellow' })] },
+	{ id: 'padPink', level: 2, weight: 0.6, leaps: [leap('same', { pad: 'pink', most: 1 })] },
+	{ id: 'padUp', level: 2, weight: 0.6, leaps: [leap('up2', { pad: 'yellow' })] },
+	{ id: 'padRed', level: 3, weight: 0.5, leaps: [leap('up2', { pad: 'red' })] },
+	{
+		id: 'padOrb',
+		level: 3,
+		weight: 0.6,
+		leaps: [leap('same', { pad: 'yellow', orbs: ['yellow'] })]
+	},
+	{
+		id: 'padThenJump',
+		level: 2,
+		weight: 0.7,
+		leaps: [leap('same', { pad: 'yellow' }), leap('same', { most: 2 })]
+	},
 	// Orbs on the clicks in the air
 	{ id: 'orbRow', level: 1, weight: 1.2, leaps: [leap('same', { orbs: ['yellow'] })] },
 	{ id: 'orbPink', level: 1, weight: 0.7, leaps: [leap('same', { orbs: ['pink'] })] },
@@ -250,6 +270,7 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		// takes it, on the beat, where a plain jump would leave it out)
 		const inAir = times[i + 1] !== undefined && times[i + 1] - time < air - 60;
 		const takesAir = (b: Block) => !!b.leaps?.[0]?.orbs?.length || b.upside === 'orbs';
+		const accent = accentAt(ctx.chart, time);
 		const order = shuffleByWeight(
 			rng,
 			fits.map((b) => ({
@@ -260,6 +281,10 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 					(b.level >= 2 ? 0.6 + intensity * 0.8 : 1) *
 					(remembered === b.id ? 5 : 1) *
 					(inAir && takesAir(b) ? 2.5 : 1) *
+					// (a pad where the song hits hard: the jump on the accent by itself)
+					(b.leaps?.[0]?.pad && accent >= 0.6 ? 2.5 : 1) *
+					// (upside down more often where it's intense on the hardest levels)
+					(b.gravity && preset.level >= 3 && intensity >= 0.72 ? 2 : 1) *
 					// (up where it's low, down where it's high: it comes back to the ground)
 					(rise(b) > 0 ? Math.pow(0.45, Math.max(0, height - 1)) : 1) *
 					(rise(b) < 0 ? 1 + height * 0.5 : 1)
@@ -376,7 +401,7 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 				continue;
 			}
 			const built: Built = { block, late, early, next, skipped };
-			if (how === 'measure') {
+			if (how === 'measure' && nominal.some((e) => e.down)) {
 				// (the first press and its release moved, the others on time)
 				const first = nominal.findIndex((e) => e.down);
 				const release = nominal.findIndex((e, k) => k > first && !e.down);
@@ -440,8 +465,15 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 			return false;
 		const without = (t: number) =>
 			nominal.filter((e, k) => (e.down ? e.time : nominal[k - 1]?.time) !== t);
-		if (!(must.length > 0 && must.every((t) => simulate(world, state, until, without(t)).dead)))
-			return false;
+		// (a piece taken off by a pad may need no press: then its pads must be needed)
+		if (must.length === 0 && a.pads.length === 0) return false;
+		if (!must.every((t) => simulate(world, state, until, without(t)).dead)) return false;
+		for (const pad of a.pads) {
+			world.pads.remove(pad);
+			const dead = simulate(world, state, until, nominal).dead;
+			world.pads.add(pad);
+			if (!dead) return false;
+		}
 		// Every orb needed too: without it (the press there a plain jump, or nothing in the air) it
 		// mustn't get through, else the orb is only there to look at
 		return a.orbs.every((orb) => {
@@ -508,11 +540,18 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		const sustain = Math.min(700, (ends.get(time) ?? time) - time);
 		if (leap.ring) a.orb(leap.ring, half(takeoff), height + box.h);
 		if (leap.dash) a.orb('dash', half(takeoff), height + box.h, 1);
-		let length =
-			(leap.dash ? sustain : leap.landing.startsWith('up') && robot ? 240 : hold) + before;
-		if (orbTimes.length) length = Math.min(length, orbTimes[0] - time - 30);
-		kit.presses.push(...tap(time, length));
-		kit.must.push(time, ...orbTimes);
+		if (leap.pad) {
+			// (where it touches it just as the click comes: its front reaches the pad's)
+			const x = Math.round((takeoff + 0.5 + box.w) * 4) / 4;
+			a.pad(leap.pad, x, height, 1);
+			kit.must.push(...orbTimes);
+		} else {
+			let length =
+				(leap.dash ? sustain : leap.landing.startsWith('up') && robot ? 240 : hold) + before;
+			if (orbTimes.length) length = Math.min(length, orbTimes[0] - time - 30);
+			kit.presses.push(...tap(time, length));
+			kit.must.push(time, ...orbTimes);
+		}
 		for (let k = 0; k < orbTimes.length; k++) {
 			const t = orbTimes[k];
 			const there = simulate(world, state, t, withPlan(kit));

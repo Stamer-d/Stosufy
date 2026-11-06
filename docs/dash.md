@@ -750,3 +750,47 @@ Ursachen und Änderungen:
 
 Grenzen: Gemessen mit synthetischen Songs. Spider kommt weiterhin nur auf 0,55–0,64 Klicks pro
 Beat.
+
+## 16. 0.6.85: Volle Drops: Abschnitte pro Phrase, Gravity auf den Akzenten, Pads
+
+Rückmeldung: Bei richtig schnellen Parts (Extreme) passiert zu wenig, im Song passiert doppelt so
+viel wie im Spiel. Gemessen auf einem Testsong mit 174 BPM, intensiv, Kiai 30–75 s, Extreme: Der
+Modus wechselte nur alle ~11 s (Abschnittslänge 5–12 s, acht Takte), im Kiai 2–3 Orbs, kein Pad,
+Gravity-Portale höchstens alle zwei Takte und nur `preset.level` pro Abschnitt.
+
+Änderungen:
+
+- **Abschnitte pro Phrase** (`planParts`): In Teilen mit hoher Geschwindigkeitsstufe wird auf
+  Extreme alle 2 oder 4 Takte geschnitten (das, was näher an 4,5 s liegt, mindestens 2,8 s), auf
+  Insane näher an 6,5 s. Jeder Schnitt darf einen Takt vor- oder zurückrücken, auf den Taktstrich,
+  den der Song deutlich härter trifft (`accentAt`: Anschlag und Kick). An diesen Schnitten kommt
+  fast immer ein neuer Modus (oder derselbe in der anderen Größe). Ein Größenwechsel auf die kleine
+  Wave, die bei der Geschwindigkeit nicht erlaubt ist, wird nicht mehr geplant (er ergab zwei
+  gleiche Abschnitte hintereinander).
+- **Gravity auf den Akzenten**: In intensiven Teilen auf Insane und Extreme setzen UFO, Ball,
+  Spider und Swing Portale auf jedem Takt und jedem stark getroffenen Beat (mindestens zwei Beats
+  auseinander, doppelt so viele); die Wave doppelt so viele Portale in 1,5 statt 3 Takten Abstand;
+  das Ship-Stück mit Portalen und die Cube/Robot-Kopfüber-Stücke werden dort 3- bzw. 2-mal so oft
+  gewählt.
+- **Pads**: Sechs neue Cube/Robot-Bausteine (gelbes Pad über eine Reihe, pinkes über einen Spike,
+  gelbes und rotes eine Stufe hoch, Pad mit Orb in der Luft, Pad und danach ein Sprung). Das Pad
+  liegt so, dass es genau auf dem Klick auslöst, ohne Druck; auf starken Akzenten werden sie
+  bevorzugt. Wie Orbs muss jedes Pad nötig sein (ohne: tot). Ball und Spider bekommen in
+  intensiven Teilen auf starken Akzenten manchmal ein blaues Pad statt des Klicks (dreht die
+  Schwerkraft auf dem Schlag). `uselessOrbs` prüft auch Pads.
+
+Gemessen (Kiai, Ereignisse = Portale + Abschnittswechsel + Orbs + Pads):
+
+|                       | vorher       | jetzt                               |
+| --------------------- | ------------ | ----------------------------------- |
+| Moduswechsel, 174 BPM | 2 in 22 s    | 7 in 45 s (alle 4 Takte)            |
+| Moduswechsel, 128 BPM | –            | 11 in 40 s (alle 2 Takte)           |
+| Gravity-Portale       | 5–15 je Kiai | 17–23 je Kiai                       |
+| Pads                  | 0            | 3–11 je Kiai                        |
+| Ereignisse pro Beat   | ~0,15        | Extreme 0,26–0,54, Insane 0,32–0,52 |
+
+32 Level mit anderen Seeds: alle durchspielbar, alle 351 Gravity-Portale wirken. Neue Tests:
+`tests/dash/busy.test.ts`. `GENERATOR_VERSION` ist `gd-3.4-blocks`.
+
+Grenzen: Nur mit synthetischen Songs gemessen. Die Geschwindigkeit wechselt innerhalb eines
+Drops noch nicht.

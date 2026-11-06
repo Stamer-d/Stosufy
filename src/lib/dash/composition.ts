@@ -1,5 +1,5 @@
-import type { DashChart } from './chart';
-import { loudness } from './audio';
+import { beatStrength, type DashChart } from './chart';
+import { hitAt, loudness } from './audio';
 
 export type Theme = 'pulse' | 'steps' | 'leaps' | 'sustain';
 export interface MusicalPhrase {
@@ -31,6 +31,22 @@ export function musicalPosition(chart: DashChart, time: number) {
 		key: `${point.time}:${pair}`,
 		point
 	};
+}
+
+/**
+ * How hard the song hits at a moment (0–1): what's heard there (its hits and kick), else how
+ * strong the beat is there. Where a level's events go: a portal, a pad, a new part
+ */
+export function accentAt(chart: DashChart, time: number) {
+	const sound = chart.sound;
+	if (!sound?.hits) return beatStrength(chart.timing, time) * 0.8;
+	let kick = 0;
+	if (sound.kicks) {
+		const a = Math.max(0, Math.floor((time - 30) / sound.hop));
+		const b = Math.min(sound.kicks.length - 1, Math.ceil((time + 30) / sound.hop));
+		for (let n = a; n <= b; n++) kick = Math.max(kick, sound.kicks[n]);
+	}
+	return Math.min(1, hitAt(sound, time) * 0.6 + kick * 0.4);
 }
 
 /** Rest is a level-design decision from real data, never a random empty column. */

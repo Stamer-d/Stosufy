@@ -1,4 +1,4 @@
-// The levels built from blocks (builders/blocks.ts, builders/ship.ts, rhythm.ts): 50 pieces;
+// The levels built from blocks (builders/blocks.ts, builders/ship.ts, rhythm.ts): 56 pieces;
 // the cube's clicks on the beat grid, a whole jump apart on easy; the levels can be finished;
 // every press of a cube or robot part is needed, there's always something to do, and the old
 // way of making them is still there.
@@ -40,10 +40,11 @@ function level(name: string, difficulty: Difficulty, generator: 'blocks' | 'clas
 	return made.get(key)!;
 }
 
-test('50 building blocks: 38 for the cube and robot, 12 for the ship, each its own', () => {
-	assert.equal(BLOCKS.length, 38);
+test('56 building blocks: 44 for the cube and robot (6 with pads), 12 for the ship, each its own', () => {
+	assert.equal(BLOCKS.length, 44);
+	assert.equal(BLOCKS.filter((b) => b.leaps?.some((l) => l.pad)).length, 6);
 	assert.equal(SHIP_PIECES.length, 12);
-	assert.equal(new Set(BLOCKS.map((b) => b.id)).size, 38);
+	assert.equal(new Set(BLOCKS.map((b) => b.id)).size, 44);
 	assert.equal(new Set(SHIP_PIECES).size, 12);
 	// (easy has its own few, every level some more)
 	for (let level = 0; level <= 4; level++)

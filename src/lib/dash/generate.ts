@@ -38,7 +38,7 @@ import {
 } from './build';
 import { hitAt, loudness, type SongSound } from './audio';
 import { sectionPortals } from './portals';
-import { musicalRest } from './composition';
+import { accentAt, musicalRest } from './composition';
 import { removeUnsupportedSpikes } from './geometry';
 import { buildRunner } from './builders/runner';
 import { buildFlight } from './builders/flight';
@@ -51,7 +51,7 @@ import { alignTiming } from './timing';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.3-blocks';
+export const GENERATOR_VERSION = 'gd-3.4-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -577,6 +577,15 @@ export function musicalChanges(chart: DashChart, start: number, end: number): Mu
 /** How fast a part goes: 0 calm (slower than usual), 1 usual, 2 intense (faster) */
 export type Pace = 0 | 1 | 2;
 
+/** The speed of a pace on a difficulty */
+function speedIndexOf(preset: Preset, pace: Pace) {
+	return pace === 2
+		? preset.speeds[1]
+		: pace === 0
+			? Math.max(0, preset.speeds[0] - 1)
+			: preset.speeds[0];
+}
+
 /**
  * How fast each part goes, from what its music is like next to the whole song's (not its rank
  * among the parts: a song that stays the same stays at one speed). Faster in the kiai, where it's
@@ -838,16 +847,61 @@ function planParts(
 		if (p === 2) intensity[i] = Math.max(intensity[i], 0.72);
 		if (p === 0) intensity[i] = Math.min(intensity[i], 0.4);
 	});
+	// In the intense parts of the hardest levels the kinds change by phrase, as the song does
+	// there: every two or four bars (about 4.5 s on extreme, 6.5 s on insane), each cut on the bar
+	// line the song hits hardest near it (a bar either way, where it's clearly harder)
+	const phrase = preset.level >= 4 ? 4500 : preset.level >= 3 ? 6500 : 0;
+	const parted: ((typeof features)[number] & { phrase: boolean })[] = [];
+	const partedIntensity: number[] = [];
+	const partedPace: Pace[] = [];
+	features.forEach((f, i) => {
+		const cuts = [f.from];
+		if (phrase && pace[i] === 2 && f.rest < 0.5) {
+			const { point } = beatAt(timing, f.from + 1);
+			const bar = point.beatLength * point.meter;
+			let n = 2;
+			for (const m of [4, 8]) if (Math.abs(m * bar - phrase) < Math.abs(n * bar - phrase)) n = m;
+			while (n * bar < 2800 && n < 8) n *= 2;
+			const least = Math.max(2800, n * bar * 0.5);
+			for (let t = f.from + n * bar; t <= f.to - least; t += n * bar) {
+				let at = t;
+				for (const c of [t - bar, t + bar])
+					if (
+						c - cuts[cuts.length - 1] >= least &&
+						f.to - c >= least &&
+						accentAt(chart, c) > accentAt(chart, at) * 1.25
+					)
+						at = c;
+				if (at - cuts[cuts.length - 1] >= least) cuts.push(Math.round(at));
+			}
+		}
+		cuts.forEach((from, k) => {
+			parted.push({
+				...f,
+				from,
+				to: cuts[k + 1] ?? f.to,
+				change: k === 0 && f.change,
+				drop: k === 0 && f.drop,
+				phrase: k > 0
+			});
+			partedIntensity.push(intensity[i]);
+			partedPace.push(pace[i]);
+		});
+	});
 	// How much the hard levels lean on the quick parts where it's intense (0 on easy and normal)
 	const quick = Math.max(0, (preset.level - 1) / 3);
+	/** The small wave isn't at the top speeds (see generateLevel): not where it's that fast */
+	const smallWaveToo = (p: Pace) => speedIndexOf(preset, p) <= (preset.level >= 4 ? 3 : 2);
 
 	const parts: Part[] = [];
 	const history: Mode[] = [];
-	features.forEach((f, i) => {
+	parted.forEach((f, i) => {
 		const { from, to, kiai, energy, drive, streamy, held } = f;
-		// (where the music changes, something new: another kind, not only another size)
+		// (where the music changes, something new: another kind, not only another size; at a
+		// phrase cut too, or now and then the same kind in the other size)
 		const drop = f.change;
-		const hot = intensity[i] * quick;
+		const fresh = drop || f.phrase;
+		const hot = partedIntensity[i] * quick;
 		const fits: Record<Mode, number> = {
 			cube: 1.1 + (energy < 0.8 ? 0.3 : 0) - hot * 0.35,
 			robot: 0.6 + (held > 0.2 ? 0.9 : 0) + (energy > 1 ? 0.3 : 0) + hot * 0.15,
@@ -864,7 +918,12 @@ function planParts(
 		// (where the music mostly rests, the big cube: a place to rest)
 		const resting = f.rest >= 0.5;
 		const resize =
-			!!before && !drop && !resting && before.mode !== 'ball' && rng() < preset.mini * 0.4;
+			!!before &&
+			!drop &&
+			!resting &&
+			before.mode !== 'ball' &&
+			(before.mode !== 'wave' || smallWaveToo(partedPace[i])) &&
+			rng() < preset.mini * 0.4;
 		if (resize) mode = before.mode;
 		else if (i > 0) {
 			const kinds = (preset.modes as Mode[]).filter((m) => !resting || m === 'cube');
@@ -874,7 +933,7 @@ function planParts(
 				const back = history.lastIndexOf(m);
 				if (back >= 0) {
 					const ago = history.length - back;
-					w *= ago === 1 ? (m === 'cube' ? 0.3 : drop ? 0.05 : 0.25) : ago === 2 ? 0.6 : 0.9;
+					w *= ago === 1 ? (m === 'cube' ? 0.3 : fresh ? 0.05 : 0.25) : ago === 2 ? 0.6 : 0.9;
 				}
 				// (one not had yet in this level is welcome: variety)
 				if (!history.includes(m)) w *= 1.7;
@@ -895,8 +954,14 @@ function planParts(
 		}
 		history.push(mode);
 		// (small more often where it's intense)
-		const miniChance = preset.mini * (0.55 + intensity[i] * 0.9);
-		const mini = resize ? !before.mini : i > 0 && mode !== 'ball' && !resting && rng() < miniChance;
+		const miniChance = preset.mini * (0.55 + partedIntensity[i] * 0.9);
+		const mini = resize
+			? !before.mini
+			: i > 0 &&
+				mode !== 'ball' &&
+				!resting &&
+				(mode !== 'wave' || smallWaveToo(partedPace[i])) &&
+				rng() < miniChance;
 		parts.push({
 			start: from,
 			end: to,
@@ -905,8 +970,8 @@ function planParts(
 			kiai,
 			energy,
 			drive,
-			intensity: intensity[i],
-			pace: pace[i]
+			intensity: partedIntensity[i],
+			pace: partedPace[i]
 		});
 	});
 	// The end comes on the cube
@@ -976,12 +1041,7 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	parts.forEach((part, index) => {
 		// Its pace (see `paces`: faster in the kiai, at a drop and a higher tempo, slower where
 		// it's calm; changing only where the music does)
-		const speedIndex =
-			part.pace === 2
-				? preset.speeds[1]
-				: part.pace === 0
-					? Math.max(0, preset.speeds[0] - 1)
-					: preset.speeds[0];
+		const speedIndex = speedIndexOf(preset, part.pace);
 		// (the small wave, twice as steep, not at the top speeds: there it's the big one, the speed
 		// stays the music's)
 		if (part.mode === 'wave' && part.mini && speedIndex > (preset.level >= 4 ? 3 : 2))
@@ -1202,15 +1262,30 @@ function uselessOrbs(world: World, plan: InputEvent[], start: number, end: numbe
 	};
 	fill();
 	const touched = simulate(world, startState(world, start), finishTick, plan).used;
-	for (const orb of [...world.orbs.items]) {
-		world.orbs.remove(orb);
-		if (touched.includes(orb.id)) {
+	// (the pads too: one it gets through without does nothing)
+	const things = [
+		...world.orbs.items.map((o) => ({
+			id: o.id,
+			x: o.x,
+			remove: () => world.orbs.remove(o),
+			add: () => void world.orbs.add(o)
+		})),
+		...world.pads.items.map((p) => ({
+			id: p.id,
+			x: p.x,
+			remove: () => world.pads.remove(p),
+			add: () => void world.pads.add(p)
+		}))
+	];
+	for (const thing of things) {
+		thing.remove();
+		if (touched.includes(thing.id)) {
 			const k = Math.max(
 				0,
-				Math.min(states.length - 1, Math.floor((world.timeAt(orb.x) - 1000 - start) / 250))
+				Math.min(states.length - 1, Math.floor((world.timeAt(thing.x) - 1000 - start) / 250))
 			);
 			if (simulate(world, states[k], finishTick, plan).dead) {
-				world.orbs.add(orb);
+				thing.add();
 				continue;
 			}
 			fill();
