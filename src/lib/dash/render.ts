@@ -50,14 +50,14 @@ export interface Icon {
 }
 
 export const ICONS: Icon[] = [
-	{ sprite: 'icon0', primary: '#ffc21a', secondary: '#ff8a00' },
-	{ sprite: 'icon1', primary: '#2fd0ff', secondary: '#1b8cff' },
-	{ sprite: 'icon2', primary: '#9b5cff', secondary: '#21e0ff' },
-	{ sprite: 'icon3', primary: '#ff3fd2', secondary: '#b04dff' },
-	{ sprite: 'icon4', primary: '#ff8a1f', secondary: '#ffd21f' },
-	{ sprite: 'icon5', primary: '#3cdc3c', secondary: '#9dff5a' },
-	{ sprite: 'icon6', primary: '#2f7bff', secondary: '#2fd0ff' },
-	{ sprite: 'icon7', primary: '#e83fd8', secondary: '#ff7ae6' }
+	{ sprite: 'icon0', primary: '#7d6cff', secondary: '#7dff3a' },
+	{ sprite: 'icon1', primary: '#9d7bff', secondary: '#21e0ff' },
+	{ sprite: 'icon2', primary: '#a3abd0', secondary: '#21e0ff' },
+	{ sprite: 'icon3', primary: '#7dff3a', secondary: '#21e0ff' },
+	{ sprite: 'icon4', primary: '#ffd93d', secondary: '#ffe14d' },
+	{ sprite: 'icon5', primary: '#21e0ff', secondary: '#1b62ff' },
+	{ sprite: 'icon6', primary: '#ffe14d', secondary: '#ff5ec4' },
+	{ sprite: 'icon7', primary: '#ff5ec4', secondary: '#ff4fd8' }
 ];
 
 export interface Frame {
@@ -994,16 +994,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		red: 'orbRed',
 		blue: 'orbBlue',
 		green: 'orbGreen',
-		black: 'orbBlack',
-		dash: 'orbDash',
-		spider: 'orbSpider'
+		black: 'orbBlack'
 	};
-	const PAD_SPRITES: Record<string, SpriteName> = {
-		yellow: 'padYellow',
-		pink: 'padPink',
-		red: 'padRed',
-		blue: 'padBlue'
-	};
+	/** (The sheet has no red and blue pads: those are drawn) */
+	const PAD_SPRITES: Record<string, SpriteName> = { yellow: 'padYellow', pink: 'padPink' };
 	const PORTAL_SPRITES: Partial<Record<Mode, SpriteName>> = {
 		cube: 'portalCube',
 		ship: 'portalShip',
@@ -1011,17 +1005,16 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		wave: 'portalWave',
 		ufo: 'portalUfo',
 		swing: 'portalSwing',
-		spider: 'portalSpider',
-		robot: 'portalRobot'
+		spider: 'portalSpider'
 	};
 
 	const PORTAL_COLORS: Record<Mode, string> = {
 		cube: '#5dff5a',
 		robot: '#f4f4ff',
 		ship: '#ff4fd8',
-		ball: '#ff4040',
+		ball: '#ff9a1f',
 		wave: '#3ad7ff',
-		ufo: '#ff9a1f',
+		ufo: '#ffd93d',
 		swing: '#ffe14d',
 		spider: '#b14dff'
 	};
@@ -1087,9 +1080,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	/** A gravity portal: yellow turns it upside down, blue back; arrows the way it then falls */
 	function gravityPortal(x: number, y: number, gravity: 1 | -1, time: number) {
 		const color = gravity < 0 ? '#ffe14d' : '#3ad7ff';
-		portal(x, y, color, time, '', gravity < 0 ? 'portalUpside' : 'portalNormal');
-		// (the sprite has its arrow; drawn by hand while it loads)
-		if (sprites()) return;
+		portal(x, y, color, time, '');
 		const cx = sx(x);
 		ctx.lineJoin = 'round';
 		ctx.lineCap = 'round';
@@ -1111,15 +1102,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 	}
 
-	const SPEED_SPRITES: SpriteName[] = ['speed0', 'speed1', 'speed2', 'speed3', 'speed4'];
-
 	function speedPortal(x: number, y: number, index: number) {
-		const look = SPEED_SPRITES[index];
-		if (look) {
-			const [, , fw, fh] = SPRITES[look];
-			const h = scale * 1.3;
-			if (sprite(look, sx(x), sy(y), (h * fw) / fh, h)) return;
-		}
 		const colors = ['#ffb347', '#5ad1ff', '#5dff8b', '#ff5ec4', '#ff4040'];
 		const color = colors[index] ?? '#ffffff';
 		const arrows = index === 0 ? 1 : index;
@@ -1434,21 +1417,6 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		if (state.mini) ctx.scale(0.6, 0.6);
 		// The spider and the swing are drawn here (they move: legs, fins, the way they're
 		// pulled), carrying the player's own cube
-		// (the robot, spider and swing as sprites like the others, upside down with gravity; drawn
-		// by hand while they load)
-		if (
-			(state.mode === 'robot' || state.mode === 'spider' || state.mode === 'swing') &&
-			sprites()
-		) {
-			const s = scale;
-			if (state.gravity < 0) ctx.scale(1, -1);
-			if (state.mode === 'swing') ctx.rotate(-Math.atan2(state.vy * state.gravity, 14) * 0.6);
-			if (state.mode === 'robot') sprite('robot', 0, -s * 0.06, s * 1.3);
-			else if (state.mode === 'spider') sprite('spider', 0, -s * 0.04, s * 1.4);
-			else sprite('swing', 0, 0, s * 1.45);
-			ctx.restore();
-			return;
-		}
 		if (state.mode === 'robot') {
 			robotShape(state, icon, time);
 			ctx.restore();
@@ -1899,8 +1867,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 					Math.max(1.6, portalItem.y),
 					portalItem.mini ? '#ff6ad5' : '#5dff8b',
 					time,
-					label,
-					portalItem.mini ? 'portalMini' : 'portalBig'
+					label
 				);
 			} else if (!level.portals.some((p) => p.x === portalItem.x && p.kind !== 'speed')) {
 				speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);

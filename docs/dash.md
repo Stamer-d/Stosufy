@@ -837,22 +837,7 @@ langsamer sein als der Drop (nicht mehr: nicht schneller als das ruhige Intro).
 
 Grenzen: Der Spider bleibt der Modus mit den wenigsten Klicks.
 
-## 18. 0.6.86: Neue Grafiken
-
-Ein neues Sprite-Sheet (8 × 9 Zellen, transparenter Hintergrund, mit einer Bild-KI gemacht) ersetzt
-das alte. `scripts/dash-sprites.py` schneidet es neu: Jede zusammenhängende Form gehört zu der
-Zelle, in der ihr Mittelpunkt liegt (die Bild-KI hält kein gleichmäßiges Raster ein), und jedes
-Sprite bekommt in `sprites.webp` einen eigenen Platz von 176 × 176 px (so überlappt keins ein
-anderes). Kein Magenta-Hintergrund mehr: pinke Objekte bleiben pink.
-
-Neu im Sheet und im Renderer: Dash- und Spider-Orb, rotes und blaues Pad, Robot-, Gravity-
-(normal/kopfüber), Größen- (mini/normal) und Speed-Portale (0,5× bis 4×), Robot, Spider und Swing
-als Sprites (vorher von Hand gezeichnet; die Zeichnungen bleiben, solange die Sprites laden),
-Deko (Säule, Rahmen, Lichtstrahl) für später. Die Portalfarben folgen der Farb-Logik des Genres:
-Ball rot, UFO orange (vorher orange und gelb). Die Spurfarben der acht Spieler-Würfel passen zu den
-neuen Würfeln.
-
-## 19. 0.6.86: Bausteine für die Flugteile
+## 18. 0.6.86: Bausteine für die Flugteile
 
 Bisher hatten nur Cube/Robot (44) und Ship (12) eine Bibliothek fester Bausteine; UFO, Ball,
 Spider und Swing waren ein Tunnel um den Flugweg (pro Abschnitt höchstens „Säulen“ oder „offen“).
@@ -880,3 +865,6 @@ Spider-Orbs zählt jetzt über beide Seeds der Testsongs. `GENERATOR_VERSION` is
 
 Grenzen: Die Wave hat noch keine eigenen Bausteine (ihr Korridor wechselt schon zwischen weit,
 eng, einseitig flach).
+
+Die neuen Grafiken aus 0.6.86 (das Sprite-Sheet mit transparentem Hintergrund) sind in 0.6.87
+wieder entfernt: Sprites, Ausschneide-Skript und Renderer sind auf dem Stand von 0.6.85.
