@@ -14,6 +14,12 @@ export interface SongOptions {
 	kiai?: [number, number][];
 	/** Where the mapper's sliders go faster (from, to, how much) */
 	sv?: [number, number, number][];
+	/**
+	 * A build-up (a snare roll getting louder, no kick; streams in the map) and the drop after it
+	 * (kick and eighths, as intense), without a kiai
+	 */
+	buildup?: [number, number];
+	drop?: [number, number];
 	/** Where the song is louder still (at the same tempo and notes): from, to, how loud (1.1) */
 	louder?: [number, number, number?][];
 	breaks?: [number, number][];
@@ -77,7 +83,10 @@ export function makeOsu(options: SongOptions) {
 	const intenseAt = (t: number) =>
 		style === 'intense' ||
 		(style === 'mixed' && t > end / 2) ||
-		kiai.some(([a, b]) => t >= a && t < b);
+		kiai.some(([a, b]) => t >= a && t < b) ||
+		(!!options.drop && t >= options.drop[0] && t < options.drop[1]);
+	const rolling = (t: number) =>
+		!!options.buildup && t >= options.buildup[0] && t < options.buildup[1];
 	let x = 256;
 	let y = 192;
 	let count = 0;
@@ -112,8 +121,10 @@ export function makeOsu(options: SongOptions) {
 				continue;
 			}
 		}
-		// Calm: a beat (now and then two); intense: eighths, now and then a run of sixteenths
-		if (!intense) t += rnd() < 0.2 ? beat * 2 : beat;
+		// Calm: a beat (now and then two); intense: eighths, now and then a run of sixteenths; a
+		// build-up: a stream
+		if (rolling(t)) t += beat / 4;
+		else if (!intense) t += rnd() < 0.2 ? beat * 2 : beat;
 		else if (rnd() < 0.12) {
 			for (let k = 1; k < 4 && t + (beat / 4) * k < end - 1500; k++)
 				lines.push(
@@ -175,11 +186,19 @@ export function makeAudio(options: SongOptions) {
 		const intense =
 			options.style === 'intense' ||
 			(options.style === 'mixed' && t > end / 2) ||
-			(options.kiai ?? []).some(([a, b]) => t >= a && t < b);
+			(options.kiai ?? []).some(([a, b]) => t >= a && t < b) ||
+			(!!options.drop && t >= options.drop[0] && t < options.drop[1]);
 		const louder = (options.louder ?? []).find(([a, b]) => t >= a && t < b);
 		const gain = quiet ? 0.03 : louder ? (louder[2] ?? 1.1) : intense ? 0.8 : 0.4;
 		const start = Math.floor((t / 1000) * rate);
-		if (kick) {
+		const roll = options.buildup;
+		if (roll && t >= roll[0] && t < roll[1]) {
+			// (the roll: a snare on every half beat, louder and louder, no kick)
+			const up = 0.5 + (0.5 * (t - roll[0])) / (roll[1] - roll[0]);
+			hats.push(t);
+			for (let i = 0; i < rate * 0.07 && start + i < length; i++)
+				data[start + i] += up * 0.9 * (rnd() * 2 - 1) * Math.exp(-i / (0.02 * rate));
+		} else if (kick) {
 			kicks.push(t);
 			for (let i = 0; i < rate * 0.15 && start + i < length; i++)
 				data[start + i] +=

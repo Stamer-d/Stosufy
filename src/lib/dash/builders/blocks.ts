@@ -210,6 +210,19 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		);
 	};
 
+	/**
+	 * Where it is at a click, on the ground: there, or down a moment after (up to 30 ms: a press
+	 * held from then jumps as it lands, so the click right after a jump's landing is on the beat
+	 * too, not left out)
+	 */
+	const LAND = 30;
+	const downAt = (from: PlayerState, time: number, inputs: InputEvent[]) => {
+		const at = simulate(world, from, time, inputs);
+		if (at.grounded || at.dead) return at;
+		const soon = simulate(world, at, time + LAND, inputs);
+		return soon.grounded && !soon.dead ? soon : at;
+	};
+
 	/** From far enough before the click to measure a press that much earlier */
 	let ahead = entry;
 	for (let i = 0; i < times.length; i++) {
@@ -217,7 +230,7 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		ahead = simulate(world, state, Math.max(state.time, time - 170 - STEP * 3), plan);
 		state = simulate(world, state, time - tolerance - STEP * 3, plan);
 		if (state.dead) break;
-		const at = simulate(world, state, time, plan);
+		const at = downAt(state, time, plan);
 		if (!at.grounded || at.gravity !== 1) continue;
 		const height = half(at.y - box.h);
 		const beat = beatAt(time);
@@ -233,6 +246,10 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		);
 		const key = motifKey(i);
 		const remembered = ctx.motifs.get(key)?.[0];
+		// (the next click comes while a jump from here is in the air: a piece with an orb there
+		// takes it, on the beat, where a plain jump would leave it out)
+		const inAir = times[i + 1] !== undefined && times[i + 1] - time < air - 60;
+		const takesAir = (b: Block) => !!b.leaps?.[0]?.orbs?.length || b.upside === 'orbs';
 		const order = shuffleByWeight(
 			rng,
 			fits.map((b) => ({
@@ -242,6 +259,7 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 					freshness(ctx, b.id) *
 					(b.level >= 2 ? 0.6 + intensity * 0.8 : 1) *
 					(remembered === b.id ? 5 : 1) *
+					(inAir && takesAir(b) ? 2.5 : 1) *
 					// (up where it's low, down where it's high: it comes back to the ground)
 					(rise(b) > 0 ? Math.pow(0.45, Math.max(0, height - 1)) : 1) *
 					(rise(b) < 0 ? 1 + height * 0.5 : 1)
@@ -250,12 +268,14 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		// The first few that work; the one that leaves the fewest clicks out
 		let best: Built | null = null;
 		let works = 0;
-		for (const block of order.slice(0, 12)) {
+		for (const block of order.slice(0, inAir ? 16 : 12)) {
 			const built = place(block, i, null, 'try');
 			if (!built) continue;
 			works++;
-			if (!best || built.skipped < best.skipped) best = built;
-			if (built.skipped === 0 || works >= 3) break;
+			// (a stretch upside down is worth a click left out: else the plain jumps always win)
+			const cost = (b: Built) => b.skipped - (b.block.gravity ? 1 : 0);
+			if (!best || cost(built) < cost(best)) best = built;
+			if (built.skipped === 0 || works >= (inAir ? 8 : 3)) break;
 		}
 		if (!best) continue;
 		// More room than the difficulty asks for: the same closer, by what it had too much on
@@ -347,7 +367,7 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 					: (block.leaps ?? []).every((l, k) => jump(kit, l, k === 0))) && kit.landX + 1.5 <= exitX;
 			// The click after it: the first once it's down
 			let next = kit.at;
-			while (next < times.length && times[next] < kit.landTime + 40) next++;
+			while (next < times.length && times[next] < kit.landTime - LAND) next++;
 			const skipped = kit.skipped + (next - kit.at);
 			const nominal = [...kit.presses].sort((p, q) => p.time - q.time);
 			const until = Math.min(sec.end, Math.max(kit.landTime + 500, (times[next] ?? sec.end) + 120));
@@ -444,13 +464,15 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 	function jump(kit: Kit, leap: Leap, first: boolean) {
 		const { a } = kit;
 		let c = kit.at;
-		while (!first && c < times.length && times[c] < kit.landTime + 40) c++;
+		while (!first && c < times.length && times[c] < kit.landTime - LAND) c++;
 		if (c >= times.length) return false;
 		kit.skipped += c - kit.at;
 		const time = times[c];
 		kit.at = c + 1;
-		const at = simulate(world, state, time, withPlan(kit));
+		const at = downAt(state, time, withPlan(kit));
 		if (at.dead || !at.grounded || at.gravity !== 1) return false;
+		/** How long before it's down the press comes (held till it is) */
+		const before = Math.max(0, at.time - time);
 		const height = half(at.y - box.h);
 		const takeoff = at.x;
 		const lateX = (speed * kit.late) / 1000;
@@ -486,7 +508,8 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		const sustain = Math.min(700, (ends.get(time) ?? time) - time);
 		if (leap.ring) a.orb(leap.ring, half(takeoff), height + box.h);
 		if (leap.dash) a.orb('dash', half(takeoff), height + box.h, 1);
-		let length = leap.dash ? sustain : leap.landing.startsWith('up') && robot ? 240 : hold;
+		let length =
+			(leap.dash ? sustain : leap.landing.startsWith('up') && robot ? 240 : hold) + before;
 		if (orbTimes.length) length = Math.min(length, orbTimes[0] - time - 30);
 		kit.presses.push(...tap(time, length));
 		kit.must.push(time, ...orbTimes);
@@ -619,7 +642,7 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		const { a } = kit;
 		const byOrb = block.upside === 'orbs';
 		const inAt = times[kit.at];
-		const at = simulate(world, state, inAt, withPlan(kit));
+		const at = downAt(state, inAt, withPlan(kit));
 		if (at.dead || !at.grounded || at.gravity !== 1) return false;
 		const h = half(at.y - box.h);
 		const x = at.x;
@@ -634,7 +657,8 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 			);
 		};
 		if (byOrb) a.orb('blue', half(x), h + box.h);
-		kit.presses.push(...tap(inAt, hold));
+		// (held till it's down, where the press comes just before)
+		kit.presses.push(...tap(inAt, hold + Math.max(0, at.time - inAt)));
 		kit.must.push(inAt);
 		// (the slab from where it turns, as long as it may be: shortened once it's known where it
 		// turns back)

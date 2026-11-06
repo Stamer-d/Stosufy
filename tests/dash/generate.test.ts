@@ -102,14 +102,21 @@ for (const name of Object.keys(SONGS))
 		}
 	});
 
-test('generated mode changes retain explicit normal-gravity portals through repair and serialization', async () => {
+test('a part reached upside down starts with an explicit normal-gravity portal, kept through serialization', async () => {
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'extreme'] as const) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			for (const sec of w.sections.slice(1)) {
+				const s = simulate(w, startState(w, l.start), sec.start - 10, l.plan);
+				if (s.gravity > 0) continue;
+				assert.ok(
+					w.gravityPortals.items.some((p) => p.sectionEntry && p.gravity === 1 && p.x === sec.x0),
+					`${name} ${difficulty}: part ${sec.index} reached upside down`
+				);
+			}
+		}
 	const l = await level('slow', 'normal');
-	for (const sec of l.world.sections.slice(1)) {
-		if (l.world.sections[sec.index - 1].mode === sec.mode) continue;
-		assert.ok(
-			l.world.gravityPortals.items.some((p) => p.sectionEntry && p.gravity === 1 && p.x === sec.x0)
-		);
-	}
 	const restored = levelFromData(JSON.parse(JSON.stringify(levelData(l))));
 	assert.deepEqual(restored.world.gravityPortals.items, l.world.gravityPortals.items);
 	assert.equal(
@@ -258,7 +265,9 @@ test('harder: less room for each click (the median over all songs), never less t
 	const shown = `jumps ${jumps.map(Math.round)}, all ${all.map(Math.round)}`;
 	// (on the easy levels a jump over a spike or two has about all the room it can have)
 	for (let i = 1; i < 3; i++) assert.ok(jumps[i] <= jumps[i - 1] + STEP, shown);
-	for (let i = 3; i < jumps.length; i++) assert.ok(jumps[i] < jumps[i - 1] - 20, shown);
+	// (by at least 10 ms: insane's median moves by about 20 ms from one pair of seeds to the next,
+	// extreme's stays at what a jump over one spike at its speed leaves)
+	for (let i = 3; i < jumps.length; i++) assert.ok(jumps[i] < jumps[i - 1] - 10, shown);
 	assert.ok(jumps[4] < jumps[2] * 0.75, shown);
 	for (let i = 1; i < 3; i++) assert.ok(all[i] <= all[i - 1], shown);
 	assert.ok(Math.max(all[3], all[4]) < all[2], shown);
@@ -416,6 +425,29 @@ test('gravity portals come up in many kinds of parts on the hard levels', async 
 					modes.add(w.sectionAt(w.timeAt(o.x)).mode);
 		}
 	assert.ok(modes.size >= 4, `gravity turned in ${[...modes]}`);
+});
+
+test('every gravity portal turns gravity where the player gets to it', async () => {
+	// (the presses and orbs before it turn gravity too: one set by turns would do nothing)
+	let portals = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of DIFFICULTIES) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			let s = startState(w, l.start);
+			for (const g of [...w.gravityPortals.items].sort((a, b) => a.x - b.x)) {
+				const at = w.timeAt(g.x);
+				s = simulate(w, s, Math.max(s.time, at - 10), l.plan);
+				// (a press right at it is turned back by it: that counts)
+				const pressed = l.plan.some((e) => e.down && Math.abs(e.time - at) < 10);
+				assert.ok(
+					s.gravity !== g.gravity || pressed,
+					`${name} ${difficulty}: a portal at ${at.toFixed(0)} ms turns nothing`
+				);
+				portals++;
+			}
+		}
+	assert.ok(portals >= 10, `only ${portals} portals`);
 });
 
 test('the wave keeps room: no small wave at the top speed, corridors of a few blocks', async () => {

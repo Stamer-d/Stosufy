@@ -22,6 +22,18 @@ const SONGS: Record<string, SongOptions> = {
 	faster: { bpm: 140, length: 100, style: 'calm', change: { at: 50000, bpm: 185 } },
 	/** The same tempo and notes all through, the mapper's sliders faster from 49 s to 75 s */
 	sliders: { bpm: 150, length: 100, style: 'intense', sv: [[49000, 75000, 1.4]] },
+	/**
+	 * Calm, a build-up from 37.8 s (a snare roll, no kick, streamed in the map: more notes than the
+	 * drop), the drop at 50.6 s (kick, louder); the kiai only later
+	 */
+	buildup: {
+		bpm: 150,
+		length: 100,
+		style: 'calm',
+		buildup: [37800, 50600],
+		drop: [50600, 77000],
+		kiai: [[86000, 95000]]
+	},
 	/** Calm, then from the middle busy and loud; the map's kiai only near the end */
 	drop: { bpm: 150, length: 100, style: 'mixed', kiai: [[82000, 94000]] }
 };
@@ -161,5 +173,18 @@ test("where the mapper's sliders speed up, at the same tempo, it goes faster", a
 			`${difficulty}: ${l.world.sections.map((s) => `${s.start}:${s.speedIndex}`).join(' ')}`
 		);
 		assert.ok(speedAt(l, 80000) < speedAt(l, 60000), `${difficulty}: not slower again after`);
+	}
+});
+
+test('the drop after a build-up is faster, not the build-up with its stream', async () => {
+	for (const difficulty of ['normal', 'hard'] as const) {
+		const l = await level('buildup', difficulty);
+		const shown = l.world.sections.map((s) => `${s.start}:${s.speedIndex}`).join(' ');
+		assert.ok(
+			l.world.sections.some((s) => Math.abs(s.start - 50600) < 5),
+			`${difficulty}: no part starts at the drop: ${shown}`
+		);
+		assert.ok(speedAt(l, 51000) > speedAt(l, 50000), `${difficulty}: ${shown}`);
+		assert.ok(speedAt(l, 45000) <= speedAt(l, 30000), `${difficulty}: the build-up: ${shown}`);
 	}
 });

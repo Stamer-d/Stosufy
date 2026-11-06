@@ -17,6 +17,7 @@ import {
 	cubeAt,
 	simulate,
 	startState,
+	type GravityPortal,
 	type InputEvent,
 	type Mode,
 	type PlayerState,
@@ -35,7 +36,7 @@ import {
 	type Preset,
 	type Random
 } from './build';
-import { hitAt, loudness } from './audio';
+import { hitAt, loudness, type SongSound } from './audio';
 import { sectionPortals } from './portals';
 import { musicalRest } from './composition';
 import { removeUnsupportedSpikes } from './geometry';
@@ -50,7 +51,7 @@ import { alignTiming } from './timing';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.2-blocks';
+export const GENERATOR_VERSION = 'gd-3.3-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -386,6 +387,28 @@ function loudParts(chart: DashChart, start: number, end: number) {
 
 // --- Where the music changes -------------------------------------------------------------
 
+/** How much kick a stretch has (the bass's hits, all added up: 0 without them) */
+function kickiness(sound: SongSound | null | undefined, from: number, to: number) {
+	const kicks = sound?.kicks;
+	if (!kicks) return 0;
+	const a = Math.max(0, Math.floor(from / sound!.hop));
+	const b = Math.min(kicks.length, Math.ceil(to / sound!.hop));
+	let sum = 0;
+	for (let n = a; n < b; n++) sum += kicks[n];
+	return b > a ? sum / (b - a) : 0;
+}
+
+/**
+ * How intense a stretch is next to the song's mean (1): how busy the map is there, how loud the
+ * song, and how hard its kick (a drop has it where the build-up before it has none, however
+ * many notes that stream has: the notes count half)
+ */
+function energyOf(busy: number, loud: number, kick: number, sound: SongSound | null | undefined) {
+	if (!sound) return busy;
+	if (!sound.kicks) return (busy + loud) / 2;
+	return (busy * 0.5 + loud + kick) / 2.5;
+}
+
 /** The beat nearest a time */
 function snapToBeat(chart: DashChart, time: number) {
 	const { point } = beatAt(chart.timing, time);
@@ -426,6 +449,7 @@ export function barEnergies(chart: DashChart, start: number, end: number) {
 		end: number;
 		busy: number;
 		loud: number;
+		kick: number;
 		energy: number;
 		/** How fast the mapper's sliders are there (the bar before's without notes) */
 		sv: number;
@@ -450,6 +474,7 @@ export function barEnergies(chart: DashChart, start: number, end: number) {
 				end: to,
 				busy: (from(to) - from(t)) / ((to - t) / 1000),
 				loud: sound ? loudness(sound, t, to) : 0,
+				kick: kickiness(sound, t, to),
 				energy: 1
 			});
 		}
@@ -457,8 +482,9 @@ export function barEnergies(chart: DashChart, start: number, end: number) {
 	const span = bars.reduce((s, b) => s + b.end - b.start, 0) || 1;
 	const meanBusy = Math.max(0.1, bars.reduce((s, b) => s + b.busy * (b.end - b.start), 0) / span);
 	const meanLoud = Math.max(0.05, bars.reduce((s, b) => s + b.loud * (b.end - b.start), 0) / span);
+	const meanKick = Math.max(1e-4, bars.reduce((s, b) => s + b.kick * (b.end - b.start), 0) / span);
 	for (const b of bars)
-		b.energy = sound ? (b.busy / meanBusy + b.loud / meanLoud) / 2 : b.busy / meanBusy;
+		b.energy = energyOf(b.busy / meanBusy, b.loud / meanLoud, b.kick / meanKick, sound);
 	return bars;
 }
 
@@ -489,20 +515,35 @@ export function musicalChanges(chart: DashChart, start: number, end: number): Mu
 	// How busy and loud: the four bars before a bar line against the four from it on
 	const bars = barEnergies(chart, start, end);
 	const found: MusicalChange[] = [];
+	// (each on its own too: how loud the song is, and its kick. A drop is louder with a kick
+	// where its build-up had none, even with fewer notes than the build-up's stream)
+	const meanOf = (list: typeof bars, key: 'energy' | 'loud' | 'kick') =>
+		list.reduce((s, b) => s + b[key], 0) / list.length;
+	const scale = {
+		energy: 1,
+		loud: Math.max(0.05, meanOf(bars, 'loud')),
+		kick: Math.max(1e-4, meanOf(bars, 'kick'))
+	};
+	const sound = chart.sound;
+	const keys: { key: 'energy' | 'loud' | 'kick'; least: number }[] = [
+		{ key: 'energy', least: 1.3 },
+		...(sound ? [{ key: 'loud' as const, least: 1.35 }] : []),
+		...(sound?.kicks ? [{ key: 'kick' as const, least: 1.6 }] : [])
+	];
 	for (let j = 2; j <= bars.length - 2; j++) {
 		const before = bars.slice(Math.max(0, j - 4), j);
 		const after = bars.slice(j, j + 4);
-		const mean = (list: typeof bars) => list.reduce((s, b) => s + b.energy, 0) / list.length;
-		const a = mean(before);
-		const b = mean(after);
-		const ratio = (b + 0.05) / (a + 0.05);
-		if (Math.abs(b - a) < 0.25 || Math.abs(Math.log(ratio)) < Math.log(1.4)) continue;
-		found.push({
-			time: Math.round(bars[j].start),
-			kind: 'energy',
-			up: ratio > 1,
-			strength: Math.abs(Math.log(ratio))
-		});
+		let best: MusicalChange | null = null;
+		for (const { key, least } of keys) {
+			const a = meanOf(before, key) / scale[key];
+			const b = meanOf(after, key) / scale[key];
+			const ratio = (b + 0.05) / (a + 0.05);
+			if (Math.abs(b - a) < 0.2 || Math.abs(Math.log(ratio)) < Math.log(least)) continue;
+			const strength = Math.abs(Math.log(ratio));
+			if (!best || strength > best.strength)
+				best = { time: Math.round(bars[j].start), kind: 'energy', up: ratio > 1, strength };
+		}
+		if (best) found.push(best);
 	}
 	// Where the mapper's sliders get clearly faster or slower and stay so (they speed them up
 	// where the song gets more intense, on its time)
@@ -705,6 +746,7 @@ function planParts(
 	const meanDensity = chart.notes.length / Math.max(1, (end - start) / 1000);
 	const sound = chart.sound;
 	const meanLoud = sound ? Math.max(0.05, loudness(sound, start, end)) : 1;
+	const meanKick = Math.max(1e-4, kickiness(sound, start, end));
 	const svs = chart.notes.map((n) => n.sv).sort((a, b) => a - b);
 	const usualSv = svs[svs.length >> 1] || 1;
 	/** The song's usual tempo (beats a minute): the one it's in longest */
@@ -736,7 +778,12 @@ function planParts(
 		const kiai = inKiai(chart, (from + to) / 2);
 		const density = notes.length / seconds / Math.max(0.1, meanDensity);
 		// (as loud as it is busy: a loud part with few notes isn't calm)
-		const energy = sound ? (density + loudness(sound, from, to) / meanLoud) / 2 : density;
+		const energy = energyOf(
+			density,
+			sound ? loudness(sound, from, to) / meanLoud : 0,
+			kickiness(sound, from, to) / meanKick,
+			sound
+		);
 		const partSv = notes.map((n) => n.sv).sort((a, b) => a - b);
 		const drive = (partSv[partSv.length >> 1] ?? usualSv) / usualSv;
 		let stream = 0;
@@ -980,8 +1027,9 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	for (const sec of world.sections) {
 		state = simulate(world, state, sec.start + STEP, plan);
 		// Builders start their musical parts in normal gravity. Make that level-design
-		// decision an explicit visible portal, never an implicit mode/section side effect.
-		if (sec.index > 0 && (state.gravity < 0 || world.sections[sec.index - 1].mode !== sec.mode)) {
+		// decision an explicit visible portal, never an implicit mode/section side effect (and
+		// only where it's upside down: a portal that turns nothing is only in the way)
+		if (sec.index > 0 && state.gravity < 0) {
 			world.gravityPortals.add({
 				x: sec.x0,
 				y: Math.max(1.6, state.y),
@@ -1087,8 +1135,12 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		clickRoom(world, plan, start, end, preset.tolerance);
 		playThrough(world, plan, start, end);
 		removeUnsupportedSpikes(world);
-		if (!uselessOrbs(world, plan, start, end)) break;
+		const orbs = uselessOrbs(world, plan, start, end);
+		const gates = uselessPortals(world, plan, start, end);
+		if (!orbs && !gates) break;
 	}
+	// (what the last round changed: a portal that turns nothing now only goes)
+	uselessPortals(world, plan, start, end, true);
 
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {
@@ -1166,6 +1218,51 @@ function uselessOrbs(world: World, plan: InputEvent[], start: number, end: numbe
 		removed++;
 	}
 	return removed;
+}
+
+/**
+ * Every gravity portal turns gravity on the finished level: one the player gets to with the
+ * gravity it gives already (the presses and orbs before it turned it) turns the other way where
+ * the level is still played through so, else it goes where it's still played through without it.
+ * The portals at a part's start (back to normal gravity) only on the last pass: what changes
+ * after would need them again. The portals it took out
+ */
+function uselessPortals(
+	world: World,
+	plan: InputEvent[],
+	start: number,
+	end: number,
+	/** The last pass: only taken out, those at a part's start too */
+	last = false
+) {
+	const finishTick = start + Math.ceil((end - start) / STEP - 1e-8) * STEP;
+	const gone: GravityPortal[] = [];
+	let changed = 0;
+	let s = startState(world, start);
+	for (const portal of [...world.gravityPortals.items].sort((a, b) => a.x - b.x)) {
+		s = simulate(world, s, Math.max(s.time, world.timeAt(portal.x) - STEP * 2), plan);
+		if (s.dead) break;
+		if (s.gravity !== portal.gravity) continue;
+		if (portal.sectionEntry && !last) continue;
+		if (!last && !portal.sectionEntry) {
+			portal.gravity = portal.gravity > 0 ? -1 : 1;
+			if (!simulate(world, s, finishTick, plan).dead) {
+				changed++;
+				continue;
+			}
+			portal.gravity = portal.gravity > 0 ? -1 : 1;
+		}
+		world.gravityPortals.remove(portal);
+		if (simulate(world, s, finishTick, plan).dead) world.gravityPortals.add(portal);
+		else {
+			gone.push(portal);
+			changed++;
+		}
+	}
+	// (played through once more from the start: what went is back where it's needed after all)
+	if (gone.length && simulate(world, startState(world, start), finishTick, plan).dead)
+		for (const portal of gone) world.gravityPortals.add(portal);
+	return changed;
 }
 
 /** Check isolated swing clicks after every generation pass has finished changing geometry. */

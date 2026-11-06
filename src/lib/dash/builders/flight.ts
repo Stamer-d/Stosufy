@@ -215,6 +215,23 @@ export function buildFlight(
 		if (count) used(ctx, 'gravity');
 	}
 
+	/**
+	 * Which way each gravity portal turns it: away from the gravity it has there. The presses and
+	 * orbs before it decide that (the ball's and spider's presses turn it too, and the blue and
+	 * green orbs): a portal set beforehand by turns would do nothing now and then
+	 */
+	const turned = new Set<GravityPortal>();
+	const settle = (until: number) => {
+		for (const portal of [...flips].sort((a, b) => a.x - b.x)) {
+			if (turned.has(portal)) continue;
+			const time = world.timeAt(portal.x);
+			if (time > until) break;
+			const before = simulate(world, entry, Math.max(entry.time, time - STEP * 2), events);
+			portal.gravity = before.gravity > 0 ? -1 : 1;
+			turned.add(portal);
+		}
+	};
+
 	// --- The way through ---------------------------------------------------------------
 	let events: InputEvent[] = [];
 	const orbs: Orb[] = [];
@@ -347,6 +364,7 @@ export function buildFlight(
 		let airborneUntil = -Infinity;
 		let s = entry;
 		for (const time of times) {
+			settle(time);
 			const at = simulate(world, s, time, events);
 			if (at.dead) break;
 			const note = noteAt(time);
@@ -415,6 +433,8 @@ export function buildFlight(
 			previous = note ?? previous;
 			s = at;
 		}
+		// (and those after the last press)
+		settle(Infinity);
 	}
 
 	// The ways it may go: on time, and early and late (not for the ship, a person steers it)

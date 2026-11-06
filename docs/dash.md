@@ -699,3 +699,54 @@ Neue Tests: `tests/dash/timing.test.ts`, SV-Fall in `tests/dash/speeds.test.ts`.
 
 Grenzen: Alles mit synthetischen Testsongs gemessen. Der Timing-Abgleich braucht klare Anschläge
 im Audio; bei sehr dichter Musik bleibt die Map unverändert.
+
+## 15. 0.6.84: Gravity-Portale, die wirken; mehr Klicks auf dem Beat; Drops nach Build-ups
+
+Rückmeldung zu 0.6.83: Manche Gravity-Portale tun nichts, weil Orbs, die die Schwerkraft drehen,
+nicht mitgerechnet werden. Zu wenig passiert zum Beat. Beim Drop eines Songs ändert sich teils
+nichts.
+
+Gemessen (vier Testsongs × Normal/Hard/Extreme × zwei Seeds):
+
+|                                             | 0.6.83      | jetzt       |
+| ------------------------------------------- | ----------- | ----------- |
+| Gravity-Portale in Abschnitten ohne Wirkung | 28 von 89   | 0 (*)       |
+| Portale an Abschnittsanfängen ohne Wirkung  | 94 von 125  | 0 von 30    |
+| Klicks pro Beat, Cube/Robot Normal          | 0,55 / 0,47 | 0,58 / 0,52 |
+| Klicks pro Beat, Cube/Robot Hard            | 0,63 / 0,63 | 0,73 / 0,70 |
+| Klicks pro Beat, Cube/Robot Extreme         | 0,72 / 0,72 | 0,82 / 0,90 |
+
+(*) Die Messung zählt zwei Swing-Portale mit, auf die genau ein Klick fällt: Das Portal dreht dort
+den Klick zurück, wirkt also.
+
+Ursachen und Änderungen:
+
+- **Portale**: Ein Portal setzt die Schwerkraft auf einen festen Wert. Die Flugteile setzten ihre
+  Portale abwechselnd (kopfüber, normal, …), ohne zu rechnen, dass Ball- und Spider-Klicks und
+  blaue/grüne Orbs die Schwerkraft dazwischen drehen. Jetzt bekommt jedes Portal seine Richtung
+  erst, wenn klar ist, mit welcher Schwerkraft man dort ankommt (`settle` in `flight.ts`). Am Ende
+  prüft `uselessPortals` das fertige Level: ein Portal ohne Wirkung wird umgedreht (wenn das Level
+  so durchspielbar bleibt) oder entfernt; jede Änderung wird bis zum Levelende gespielt. Das
+  Rücksetz-Portal am Abschnittsanfang kommt nur noch, wenn man kopfüber ankommt (vorher bei jedem
+  Moduswechsel), und wird nur im allerletzten Durchgang entfernt (eine frühere Fassung entfernte
+  es zu früh, ein Robot flog danach kopfüber aus dem Level).
+- **Mehr auf dem Beat**: Ein Cube-Sprung dauert etwa so lang wie ein Beat; der Klick danach wurde
+  erst 40 ms nach der Landung angenommen und fiel deshalb meist weg. Jetzt darf er bis 30 ms vor
+  der Landung kommen (gehalten bis zum Aufsetzen: der Cube springt beim Landen). Fällt der nächste
+  Klick in die Luft, werden Bausteine mit Orb dort bevorzugt und bis zu acht Kandidaten verglichen.
+  Eine Kopfüber-Strecke zählt bei der Auswahl wie ein ausgelassener Klick (sonst gewinnen die
+  einfachen Sprünge immer).
+- **Drops nach Build-ups**: Ein Build-up mit Snare-Roll hat in der Map einen Stream (viele Noten),
+  aber keinen Kick; der Drop hat weniger Noten, ist lauter und hat den Kick. Die Energie zählte nur
+  Notendichte und Lautstärke, also sah der Build-up intensiver aus als der Drop: schneller wurde
+  es beim Build-up, am Drop nicht. Jetzt zählt der Kick mit (Energie = (Dichte × 0,5 + Lautstärke
+  - Kick) / 2,5), und ein Wechsel ist auch, wo Lautstärke (ab × 1,35) oder Kick (ab × 1,6) allein
+    klar springen; die Schwelle der Energie selbst ist von × 1,4 auf × 1,3 gesenkt.
+- Tests: neuer Testsong mit Build-up und Drop, Prüfung, dass jedes Portal wirkt. Der Test zum
+  Klick-Spielraum verlangt zwischen Insane und Extreme jetzt 10 statt 20 ms Abstand: Extreme liegt
+  bei jedem Seed bei 163 ms (ein Sprung über einen Spike bei seiner Geschwindigkeit), Insane
+  schwankt je Seed-Paar um etwa 20 ms.
+- `GENERATOR_VERSION` ist `gd-3.3-blocks`.
+
+Grenzen: Gemessen mit synthetischen Songs. Spider kommt weiterhin nur auf 0,55–0,64 Klicks pro
+Beat.
