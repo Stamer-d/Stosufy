@@ -921,7 +921,7 @@ Gemessen (vier Songs × Normal/Hard/Extreme × zwei Seeds × mit/ohne Audio = 48
 Extreme < 77 % von Hard (statt 75 %: Extreme liegt an der Grenze eines Sprungs über einen Spike).
 `GENERATOR_VERSION` ist `gd-3.7-blocks`.
 
-## 20. Das Level in den Farben des Beatmap-Hintergrunds
+## 20. 0.6.89: Das Level in den Farben des Beatmap-Hintergrunds
 
 Die Farben eines Levels kamen aus acht festen Paletten. Jetzt lädt die Dash-Ansicht den
 Hintergrund der Beatmap (die Kopie im Songs-Ordner, sonst online in voller Größe, sonst das
