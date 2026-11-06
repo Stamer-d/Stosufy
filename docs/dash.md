@@ -583,3 +583,65 @@ kein langer Leerlauf, Classic weiterhin verfügbar).
 Grenzen: UFO, Ball, Spider, Wave und Swing nutzen noch die bisherigen Builder. Normal hat auf
 manchen Songs noch ~30 % Leerlauf (der Cube kann bei hohem BPM nicht jeden Beat springen, und
 Normal hat wenige Orbs).
+
+## 13. 0.6.82: Geschwindigkeit und Abschnitte folgen den Wechseln der Musik
+
+Rückmeldung: Wird der Song schneller oder kommt ein Drop, ändert sich oft nichts. Dafür wird es
+manchmal schneller, obwohl sich in der Musik nichts ändert.
+
+Ursachen (gemessen mit Testsongs, je Normal und Hard):
+
+- **Rang statt Musik**: Die Geschwindigkeit hing an der _Intensität_, und die war der Rang eines
+  Abschnitts unter allen Abschnitten. In einem Song, der durchgehend gleich klingt, landet trotzdem
+  ein Abschnitt im oberen Fünftel. Gemessen: Normal 0 → 2 → 1 → … → 2 → 1, Hard 2 → 3 → 4 → 3,
+  ohne jeden Wechsel in der Musik.
+- **Schnitte nur im Phrasenraster und am Kiai**: Ein BPM-Wechsel (140 → 185 bei 60 s) fiel weg,
+  weil er zu nah am vorherigen Rasterschnitt lag. Das Tempo selbst ging nie in die Geschwindigkeit
+  ein. Ergebnis: Ab 70 s schneller, ab 91 s wieder langsamer, obwohl die BPM blieben.
+- **Drops nur über das Kiai**: Ein Drop im Audio wurde nur bei Maps _ganz ohne_ Kiai erkannt.
+  Hat eine Map ihr Kiai woanders, blieb ein Drop wirkungslos.
+- **Slider-Velocity**: Schnellere Slider des Mappers (`drive ≥ 1,3`) machten einen Abschnitt
+  schnell, auch wenn die Musik dort ruhig war.
+- **Mini-Wave**: Sie wurde auf Speed 2 (Extreme: 3) gedeckelt. Fiel ein Drop auf eine Mini-Wave,
+  blieb er langsam, und der Abschnitt danach war plötzlich schnell.
+
+Was geändert wurde (`generate.ts`):
+
+- **`musicalChanges`**: Wechsel der Musik sind BPM-Wechsel (ab 3 %), Kiai-Anfang und -Ende und
+  Energiesprünge: Takt für Takt Notendichte und Lautstärke (`barEnergies`), die vier Takte vor
+  einem Taktstrich gegen die vier danach, ab Faktor 1,4 (stärkster innerhalb von vier Takten).
+  So werden Drops und Breakdowns auch ohne Kiai erkannt, und Breaks bekommen Anfang und Ende.
+- **Abschnitte**: Jeder Wechsel ist eine Abschnittsgrenze (zwei nahe: der stärkere, Tempo vor
+  Kiai vor Energie; mindestens 4 s, Easy 5,6 s, Abstand). Das Phrasenraster füllt nur die
+  Strecken dazwischen, gezählt ab dem Wechsel.
+- **`paces`**: Die Geschwindigkeit hat drei Stufen (ruhig, normal, intensiv →
+  `speeds[0] − 1`, `speeds[0]`, `speeds[1]`), bestimmt aus der Musik selbst: intensiv im Kiai,
+  bei Energie ≥ 1,25 × Songmittel, bei Tempo ≥ 1,1 × üblichem Tempo (oder schnellen Slidern,
+  wenn die Energie mindestens dem Mittel entspricht). Ruhig ab Normal bei Energie ≤ 0,6 oder
+  Tempo ≤ 0,9. Gewechselt wird nur an einem musikalischen Wechsel (oder wenn sich die Energie
+  seit dem letzten Wechsel um mehr als 20 % verschoben hat). Vor einem schnelleren Drop ist der
+  Anlauf nicht schon intensiv. Die Intensität der Builder folgt der Stufe (intensiv ≥ 0,72,
+  ruhig ≤ 0,4).
+- **Mini-Wave**: Bei zu hoher Geschwindigkeit wird sie zur normalen Wave. Die Geschwindigkeit
+  bleibt die der Musik.
+- **Pausen**: Ein Abschnitt, der überwiegend Pause ist (Break oder Stille), wird ein großer Cube.
+  Das Ship setzt in Pausen keine Spikes gegen das Ausruhen mehr. Vorher fiel das nicht auf, weil
+  Pausen mitten in anderen Abschnitten lagen.
+- `GENERATOR_VERSION` ist jetzt `gd-3.1-blocks` (die Level ändern sich).
+
+Gemessen (Abschnittsgrenzen und Geschwindigkeitsstufe, Seed fest):
+
+| Testsong                             | vorher                                                      | nachher                                                         |
+| ------------------------------------ | ----------------------------------------------------------- | --------------------------------------------------------------- |
+| gleichbleibend, 150 BPM              | Normal 0/2/1/1/1/1/2/1/1/1, Hard 2/2/3/…/4/3                | Normal überall 1, Hard überall 3                                |
+| 140 → 185 BPM bei 60 s               | kein Schnitt bei 60 s, schneller ab 70 s, ab 91 s langsamer | Schnitt bei 60,0 s, Normal 0 → 1, Hard 2 → 3, bleibt            |
+| ruhig, Drop bei 60 s, Kiai bei 100 s | kein Schnitt am Drop, nur 65–78 s schnell                   | Schnitt bei 60,2 s, Normal 0 → 2, Hard 2 → 4, bis zum Kiai-Ende |
+| Kiai 45–75 s                         | Kiai schnell, Hard am Ende grundlos 2                       | Kiai schnell, sonst gleich                                      |
+
+Neue Tests: `tests/dash/speeds.test.ts` (Wechsel werden erkannt, gleichbleibender Song hat eine
+Geschwindigkeit, höheres Tempo ab dem Wechsel schneller, Drop ohne Kiai schneller, Regeln von
+`paces`).
+
+Grenzen: Easy hat weiterhin nur eine Geschwindigkeit (`speeds: [1, 1]`). Gemessen ist nur mit
+synthetischen Testsongs. Wie gut die Energiesprünge auf echten Songs sitzen (z. B. bei
+Build-ups mit langsam steigender Lautstärke), ist noch nicht an echten Maps überprüft.

@@ -49,7 +49,7 @@ import { drumClicks } from './rhythm';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.0-blocks';
+export const GENERATOR_VERSION = 'gd-3.1-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -383,6 +383,182 @@ function loudParts(chart: DashChart, start: number, end: number) {
 	return parts;
 }
 
+// --- Where the music changes -------------------------------------------------------------
+
+/** The beat nearest a time */
+function snapToBeat(chart: DashChart, time: number) {
+	const { point } = beatAt(chart.timing, time);
+	const beats = Math.round((time - point.time) / point.beatLength);
+	return Math.round(point.time + beats * point.beatLength);
+}
+
+/** A moment the music changes: its tempo, the kiai, or how busy and loud it is */
+export interface MusicalChange {
+	time: number;
+	kind: 'tempo' | 'kiai' | 'energy';
+	/** Faster, into the kiai, busier and louder (a drop); or the other way */
+	up: boolean;
+	/** How much it changes (for which of two close ones counts) */
+	strength: number;
+}
+
+/**
+ * The song bar by bar: how busy (notes a second) and how loud (where it could be heard) each bar
+ * is, next to the song's mean (1)
+ */
+export function barEnergies(chart: DashChart, start: number, end: number) {
+	const times = chart.notes.map((n) => n.time);
+	/** The first note at or after a time */
+	const from = (t: number) => {
+		let lo = 0;
+		let hi = times.length;
+		while (lo < hi) {
+			const mid = (lo + hi) >> 1;
+			if (times[mid] < t) lo = mid + 1;
+			else hi = mid;
+		}
+		return lo;
+	};
+	const sound = chart.sound;
+	const bars: { start: number; end: number; busy: number; loud: number; energy: number }[] = [];
+	for (let i = 0; i < chart.timing.length; i++) {
+		const point = chart.timing[i];
+		const until = Math.min(chart.timing[i + 1]?.time ?? end, end);
+		const bar = point.beatLength * point.meter;
+		if (!(bar > 0)) continue;
+		for (
+			let t = point.time + Math.max(0, Math.ceil((start - point.time) / bar)) * bar;
+			t + bar * 0.5 <= until;
+			t += bar
+		) {
+			const to = Math.min(t + bar, until);
+			bars.push({
+				start: t,
+				end: to,
+				busy: (from(to) - from(t)) / ((to - t) / 1000),
+				loud: sound ? loudness(sound, t, to) : 0,
+				energy: 1
+			});
+		}
+	}
+	const span = bars.reduce((s, b) => s + b.end - b.start, 0) || 1;
+	const meanBusy = Math.max(0.1, bars.reduce((s, b) => s + b.busy * (b.end - b.start), 0) / span);
+	const meanLoud = Math.max(0.05, bars.reduce((s, b) => s + b.loud * (b.end - b.start), 0) / span);
+	for (const b of bars)
+		b.energy = sound ? (b.busy / meanBusy + b.loud / meanLoud) / 2 : b.busy / meanBusy;
+	return bars;
+}
+
+/**
+ * Where the music changes, as a level's creator hears it and puts a portal there: a new tempo,
+ * the kiai's start and end, and where the song gets clearly busier and louder (a drop) or calmer
+ * (a breakdown) from one bar on, the four bars before against the four after. These are the
+ * places the speed and the kind of part may change, wherever they fall in the phrase grid.
+ */
+export function musicalChanges(chart: DashChart, start: number, end: number): MusicalChange[] {
+	const changes: MusicalChange[] = [];
+	const timing = chart.timing;
+	for (let i = 1; i < timing.length; i++) {
+		const ratio = timing[i - 1].beatLength / timing[i].beatLength;
+		if (Math.abs(Math.log(ratio)) < Math.log(1.03)) continue;
+		changes.push({
+			time: Math.round(timing[i].time),
+			kind: 'tempo',
+			up: ratio > 1,
+			strength: 3 + Math.abs(Math.log(ratio))
+		});
+	}
+	const snap = (time: number) => snapToBeat(chart, time);
+	for (const k of chart.kiai) {
+		changes.push({ time: snap(k.start), kind: 'kiai', up: true, strength: 2 });
+		changes.push({ time: snap(k.end), kind: 'kiai', up: false, strength: 2 });
+	}
+	// How busy and loud: the four bars before a bar line against the four from it on
+	const bars = barEnergies(chart, start, end);
+	const found: MusicalChange[] = [];
+	for (let j = 2; j <= bars.length - 2; j++) {
+		const before = bars.slice(Math.max(0, j - 4), j);
+		const after = bars.slice(j, j + 4);
+		const mean = (list: typeof bars) => list.reduce((s, b) => s + b.energy, 0) / list.length;
+		const a = mean(before);
+		const b = mean(after);
+		const ratio = (b + 0.05) / (a + 0.05);
+		if (Math.abs(b - a) < 0.25 || Math.abs(Math.log(ratio)) < Math.log(1.4)) continue;
+		found.push({
+			time: Math.round(bars[j].start),
+			kind: 'energy',
+			up: ratio > 1,
+			strength: Math.abs(Math.log(ratio))
+		});
+	}
+	// (one change, not four bars of them: the strongest within four bars)
+	found.sort((p, q) => q.strength - p.strength);
+	const bar = (t: number) => {
+		const { point } = beatAt(timing, t);
+		return point.beatLength * point.meter;
+	};
+	for (const c of found)
+		if (!changes.some((k) => k.kind === 'energy' && Math.abs(k.time - c.time) < 3.5 * bar(c.time)))
+			changes.push(c);
+	return changes.sort((p, q) => p.time - q.time);
+}
+
+/** How fast a part goes: 0 calm (slower than usual), 1 usual, 2 intense (faster) */
+export type Pace = 0 | 1 | 2;
+
+/**
+ * How fast each part goes, from what its music is like next to the whole song's (not its rank
+ * among the parts: a song that stays the same stays at one speed). Faster in the kiai, where it's
+ * clearly busier and louder than the song's mean, at a higher tempo (and where the mapper's
+ * sliders speed up, if it isn't calm there); slower where it's clearly calmer or slower. The
+ * speed only changes where the music does: between two parts without a change in it (a cut in
+ * the phrase grid), it stays, unless the music has moved on far enough since the speed last
+ * changed. Before a drop that's faster, the part leading up to it isn't fast already (so the
+ * drop is felt).
+ */
+export function paces(
+	parts: {
+		energy: number;
+		kiai: boolean;
+		/** Its tempo next to the song's usual (1) */
+		tempo: number;
+		drive: number;
+		/** It starts where the music changes */
+		change: boolean;
+		drop: boolean;
+	}[],
+	level: number
+): Pace[] {
+	const raw = parts.map((p): Pace => {
+		if (p.kiai || p.energy >= 1.25 || p.tempo >= 1.1 || (p.drive >= 1.3 && p.energy >= 1)) return 2;
+		if (level >= 1 && (p.energy <= 0.6 || p.tempo <= 0.9)) return 0;
+		return 1;
+	});
+	const pace: Pace[] = [];
+	let anchor = 0;
+	parts.forEach((p, i) => {
+		if (i === 0) {
+			pace.push(raw[0]);
+			return;
+		}
+		const was = pace[i - 1];
+		const moved = Math.abs(Math.log((p.energy + 0.05) / (parts[anchor].energy + 0.05)));
+		const changes =
+			p.change ||
+			p.kiai !== parts[i - 1].kiai ||
+			Math.abs(Math.log(p.tempo / parts[i - 1].tempo)) >= Math.log(1.03) ||
+			moved >= Math.log(1.2);
+		const now = raw[i] !== was && changes ? raw[i] : was;
+		if (now !== was) anchor = i;
+		pace.push(now);
+	});
+	// The run-up to a faster drop: not as fast as the drop itself
+	for (let i = 1; i < parts.length; i++)
+		if (parts[i].drop && pace[i] === 2 && pace[i - 1] === 2 && (i < 2 || pace[i - 2] < 2))
+			pace[i - 1] = 1;
+	return pace;
+}
+
 // --- The parts of the song ---------------------------------------------------------------
 
 interface Part {
@@ -397,6 +573,8 @@ interface Part {
 	drive: number;
 	/** Where it is between the song's calmest part (0) and its peak (1) */
 	intensity: number;
+	/** How fast it goes */
+	pace: Pace;
 }
 
 /**
@@ -405,18 +583,20 @@ interface Part {
  * starts easier (the first part is a warm-up), the part right before a drop is a calmer run-up
  * to it (so the drop hits), and the end isn't its hardest stretch.
  */
-export function intensities(parts: { energy: number; kiai: boolean }[]) {
+export function intensities(parts: { energy: number; kiai: boolean; drop?: boolean }[]) {
 	const n = parts.length;
 	if (n === 1) return [0.5];
 	const order = parts.map((p, i) => ({ e: p.energy, i })).sort((a, b) => a.e - b.e);
 	const rank = new Array<number>(n);
 	order.forEach((o, k) => (rank[o.i] = k / (n - 1)));
+	/** A drop: the first part of a kiai after a calmer one, or where the song gets much busier */
+	const dropAt = (k: number) => k > 0 && ((parts[k].kiai && !parts[k - 1].kiai) || !!parts[k].drop);
 	return parts.map((p, i) => {
 		let v = 0.15 + rank[i] * 0.7;
 		if (p.kiai) v = Math.max(v, 0.78) + 0.12;
-		// (a drop: the first part of a kiai after a calmer one is its peak)
-		if (p.kiai && i > 0 && !parts[i - 1].kiai) v += 0.05;
-		const drop = i + 1 < n && parts[i + 1].kiai && !p.kiai;
+		// (a drop is the peak)
+		if (dropAt(i)) v += 0.05;
+		const drop = i + 1 < n && dropAt(i + 1) && !p.kiai;
 		if (drop) v = Math.min(v, 0.45);
 		if (i === 0) v = Math.min(v, 0.3);
 		if (i === n - 1) v = Math.min(v, 0.55);
@@ -431,52 +611,77 @@ function planParts(
 	preset: Preset,
 	rng: Random
 ): Part[] {
-	// Phrases: every few measures (about 10–20 s, shorter the harder: more changes), and where
-	// the kiai starts and stops
 	const [shortest, longest] = preset.parts;
-	const cuts = new Set<number>();
 	const timing = chart.timing;
-	for (let i = 0; i < timing.length; i++) {
-		const point = timing[i];
-		const until = timing[i + 1]?.time ?? end;
+	// First where the music changes (a new tempo, the kiai, a drop or a breakdown): a part starts
+	// there, wherever it falls. Of two close ones, the stronger (a tempo before the kiai before a
+	// change heard).
+	const closest = Math.max(4000, shortest * 0.4);
+	const changes: MusicalChange[] = [];
+	for (const c of musicalChanges(chart, start, end)) {
+		if (c.time <= start + 3000 || c.time >= end - 6000) continue;
+		const last = changes[changes.length - 1];
+		if (last && c.time - last.time < closest) {
+			if (c.strength > last.strength) changes[changes.length - 1] = { ...c, up: c.up || last.up };
+			else last.up ||= c.up;
+			continue;
+		}
+		changes.push(c);
+	}
+	// Then, between them, a cut every few measures (about 10–20 s, shorter the harder: more
+	// changes), from the change on (a phrase starts there), else on the timing point's grid
+	const cuts: { time: number; change?: MusicalChange }[] = [];
+	const marks = [start, ...changes.map((c) => c.time), end];
+	for (let m = 0; m + 1 < marks.length; m++) {
+		const a = marks[m];
+		const b = marks[m + 1];
+		if (m > 0) cuts.push({ time: a, change: changes[m - 1] });
+		const { point } = beatAt(timing, a + 1);
 		const measure = point.beatLength * point.meter;
 		let measures = 8;
 		while (measures * measure > longest && measures > 2) measures /= 2;
 		while (measures * measure < shortest) measures *= 2;
-		const first =
-			point.time + Math.ceil((start - point.time) / (measure * measures)) * measure * measures;
-		for (let t = Math.max(point.time, first); t < until; t += measure * measures)
-			if (t > start + 4000 && t < end - 5000 && !chart.breaks.some((b) => t > b.start && t < b.end))
-				cuts.add(Math.round(t));
-	}
-	const snap = (time: number) => {
-		const { point } = beatAt(timing, time);
-		const beats = Math.round((time - point.time) / point.beatLength);
-		return Math.round(point.time + beats * point.beatLength);
-	};
-	const kiaiCuts = new Set<number>();
-	for (const k of chart.kiai)
-		for (const t of [k.start, k.end]) {
-			const at = snap(t);
-			if (at > start + 3000 && at < end - 4000) {
-				cuts.add(at);
-				kiaiCuts.add(at);
-			}
+		const step = measure * measures;
+		const origin = m === 0 ? point.time : a;
+		let last = a;
+		for (
+			let t = origin + Math.max(1, Math.ceil((a + 1 - origin) / step)) * step;
+			t < b - Math.max(4500, shortest * 0.7);
+			t += step
+		) {
+			if (t - last < shortest - 1500 || t <= start + 4000) continue;
+			if (chart.breaks.some((br) => t > br.start && t < br.end)) continue;
+			cuts.push({ time: Math.round(t) });
+			last = t;
 		}
-	const sorted = [...cuts].sort((a, b) => a - b);
-	const kept: number[] = [];
-	for (const cut of sorted) {
-		const last = kept[kept.length - 1] ?? start;
-		if (cut - last >= shortest - 1500) kept.push(cut);
-		else if (kiaiCuts.has(cut) && !kiaiCuts.has(last) && kept.length) kept[kept.length - 1] = cut;
 	}
-	if (kept.length && end - kept[kept.length - 1] < Math.min(6000, shortest)) kept.pop();
-	const bounds = [start, ...kept, end];
+	const bounds = [start, ...cuts.map((c) => c.time), end];
+	const changeAt = new Map(cuts.filter((c) => c.change).map((c) => [c.time, c.change!]));
 	const meanDensity = chart.notes.length / Math.max(1, (end - start) / 1000);
 	const sound = chart.sound;
 	const meanLoud = sound ? Math.max(0.05, loudness(sound, start, end)) : 1;
 	const svs = chart.notes.map((n) => n.sv).sort((a, b) => a - b);
 	const usualSv = svs[svs.length >> 1] || 1;
+	/** The song's usual tempo (beats a minute): the one it's in longest */
+	const tempoAt = (time: number) => 60000 / beatAt(timing, time).point.beatLength;
+	const usualTempo = (() => {
+		const spans = new Map<number, number>();
+		for (let i = 0; i < timing.length; i++) {
+			const from = Math.max(start, timing[i].time);
+			const to = Math.min(end, timing[i + 1]?.time ?? end);
+			if (to <= from) continue;
+			const bpm = Math.round(60000 / timing[i].beatLength);
+			spans.set(bpm, (spans.get(bpm) ?? 0) + to - from);
+		}
+		let best = tempoAt(start);
+		let most = -1;
+		for (const [bpm, ms] of spans)
+			if (ms > most) {
+				most = ms;
+				best = bpm;
+			}
+		return best;
+	})();
 
 	// What each part's music is like
 	const features = bounds.slice(0, -1).map((from, i) => {
@@ -498,16 +703,44 @@ function planParts(
 		const held =
 			notes.reduce((sum, n) => sum + (n.kind === 'circle' ? 0 : Math.min(n.end, to) - n.time), 0) /
 			(to - from);
-		return { from, to, kiai, energy, drive, streamy, held, drop: kiaiCuts.has(from) };
+		const change = changeAt.get(from);
+		// (how much of it the music rests: a break, a silence)
+		let resting = 0;
+		let samples = 0;
+		for (let t = from + 125; t < to; t += 250, samples++) if (musicalRest(chart, t)) resting++;
+		const rest = resting / Math.max(1, samples);
+		// (its tempo where most of it is)
+		const tempo = tempoAt((from + to) / 2) / usualTempo;
+		return {
+			from,
+			to,
+			kiai,
+			energy,
+			drive,
+			streamy,
+			held,
+			tempo,
+			change: !!change,
+			drop: !!change?.up && change.kind !== 'tempo',
+			rest
+		};
 	});
 	const intensity = intensities(features);
+	const pace = paces(features, preset.level);
+	// (fast is intense, slow is calm: the builders build them that way)
+	pace.forEach((p, i) => {
+		if (p === 2) intensity[i] = Math.max(intensity[i], 0.72);
+		if (p === 0) intensity[i] = Math.min(intensity[i], 0.4);
+	});
 	// How much the hard levels lean on the quick parts where it's intense (0 on easy and normal)
 	const quick = Math.max(0, (preset.level - 1) / 3);
 
 	const parts: Part[] = [];
 	const history: Mode[] = [];
 	features.forEach((f, i) => {
-		const { from, to, kiai, energy, drive, streamy, held, drop } = f;
+		const { from, to, kiai, energy, drive, streamy, held } = f;
+		// (where the music changes, something new: another kind, not only another size)
+		const drop = f.change;
 		const hot = intensity[i] * quick;
 		const fits: Record<Mode, number> = {
 			cube: 1.1 + (energy < 0.8 ? 0.3 : 0) - hot * 0.35,
@@ -522,10 +755,14 @@ function planParts(
 		let mode: Mode = 'cube';
 		// Now and then the same kind again, small (or big) now: a size portal
 		const before = parts[parts.length - 1];
-		const resize = !!before && !drop && before.mode !== 'ball' && rng() < preset.mini * 0.4;
+		// (where the music mostly rests, the big cube: a place to rest)
+		const resting = f.rest >= 0.5;
+		const resize =
+			!!before && !drop && !resting && before.mode !== 'ball' && rng() < preset.mini * 0.4;
 		if (resize) mode = before.mode;
 		else if (i > 0) {
-			const options = (preset.modes as Mode[]).map((m) => {
+			const kinds = (preset.modes as Mode[]).filter((m) => !resting || m === 'cube');
+			const options = kinds.map((m) => {
 				let w = Math.max(0.05, fits[m]);
 				// Not the same kind again and again, and at a drop something new
 				const back = history.lastIndexOf(m);
@@ -553,7 +790,7 @@ function planParts(
 		history.push(mode);
 		// (small more often where it's intense)
 		const miniChance = preset.mini * (0.55 + intensity[i] * 0.9);
-		const mini = resize ? !before.mini : i > 0 && mode !== 'ball' && rng() < miniChance;
+		const mini = resize ? !before.mini : i > 0 && mode !== 'ball' && !resting && rng() < miniChance;
 		parts.push({
 			start: from,
 			end: to,
@@ -562,15 +799,22 @@ function planParts(
 			kiai,
 			energy,
 			drive,
-			intensity: intensity[i]
+			intensity: intensity[i],
+			pace: pace[i]
 		});
 	});
 	// The end comes on the cube
 	const last = parts[parts.length - 1];
 	if (last.mode !== 'cube' && last.end - last.start > 11000) {
-		const at = snap(last.end - 5000);
+		const at = snapToBeat(chart, last.end - 5000);
 		if (at > last.start + 6000) {
-			parts.push({ ...last, start: at, mode: 'cube', mini: false, intensity: 0.4 });
+			parts.push({
+				...last,
+				start: at,
+				mode: 'cube',
+				mini: false,
+				intensity: last.pace === 2 ? 0.72 : 0.4
+			});
 			last.end = at;
 		}
 	}
@@ -622,17 +866,18 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	let x = 0;
 	let palette = Math.floor(rng() * 8);
 	parts.forEach((part, index) => {
-		// Faster in the kiai and the most intense parts (and where the mapper's sliders speed up),
-		// slower in calm ones
-		let speedIndex =
-			part.kiai || part.drive >= 1.3 || part.intensity >= 0.72
+		// Its pace (see `paces`: faster in the kiai, at a drop and a higher tempo, slower where
+		// it's calm; changing only where the music does)
+		const speedIndex =
+			part.pace === 2
 				? preset.speeds[1]
-				: preset.speeds[0];
-		if (!part.kiai && (part.energy < 0.45 || part.intensity < 0.2) && preset.level >= 1)
-			speedIndex = Math.max(0, speedIndex - 1);
-		// (the small wave, twice as steep, not at the top speeds)
-		if (part.mode === 'wave' && part.mini)
-			speedIndex = Math.min(speedIndex, preset.level >= 4 ? 3 : 2);
+				: part.pace === 0
+					? Math.max(0, preset.speeds[0] - 1)
+					: preset.speeds[0];
+		// (the small wave, twice as steep, not at the top speeds: there it's the big one, the speed
+		// stays the music's)
+		if (part.mode === 'wave' && part.mini && speedIndex > (preset.level >= 4 ? 3 : 2))
+			part.mini = false;
 		const speed = SPEEDS[speedIndex];
 		world.segments.push({ time: part.start, x, speed });
 		const x1 = x + ((part.end - part.start) / 1000) * speed;

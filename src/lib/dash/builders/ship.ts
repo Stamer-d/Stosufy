@@ -459,8 +459,9 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 			world.orbs.add(so.orb);
 		}
 		// Nowhere to rest: riding along the floor (not pressing) or the ceiling (holding on)
-		// mustn't get it through. Spikes where it would slide, if the ways still get through
-		if (ok && s.tb - s.ta >= 400)
+		// mustn't get it through. Spikes where it would slide, if the ways still get through (not
+		// where the music rests: there it may)
+		if (ok && s.tb - s.ta >= 400 && !musicalRest(ctx.chart, s.ta))
 			for (const held of [false, true]) {
 				const trace: { x: number; y: number; time: number }[] = [];
 				const lazy = simulate(
