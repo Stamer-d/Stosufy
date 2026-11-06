@@ -8,6 +8,7 @@ import { wallAt, hitbox, type Mode, type PlayerState, type Section, type Solid }
 import type { Level } from './generate';
 import spritesUrl from './sprites.webp';
 import { SPRITES, type SpriteName } from './sprites';
+import { palettesFromPixels } from './theme';
 
 export { spritesUrl };
 
@@ -160,6 +161,47 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	let lastMode: Mode | null = null;
 	let lastKiai = false;
 	let zoom = 0;
+	/**
+	 * The beatmap's background: the level's palettes from its colours, and the picture itself
+	 * soft and dim behind the level (null: the usual palettes, no picture)
+	 */
+	let theme: { palettes: Palette[] | null; backdrop: HTMLCanvasElement | null } = {
+		palettes: null,
+		backdrop: null
+	};
+
+	/** The level in the colours of a picture (its beatmap's background), or null for none */
+	function setTheme(image: CanvasImageSource | null) {
+		if (!image) {
+			theme = { palettes: null, backdrop: null };
+			return;
+		}
+		const iw = (image as HTMLImageElement).naturalWidth || (image as HTMLCanvasElement).width;
+		const ih = (image as HTMLImageElement).naturalHeight || (image as HTMLCanvasElement).height;
+		if (!iw || !ih) return;
+		// Soft: drawn very small, then large again (a blur that works everywhere)
+		const small = document.createElement('canvas');
+		small.width = 48;
+		small.height = 27;
+		const s = small.getContext('2d')!;
+		const k = Math.max(small.width / iw, small.height / ih);
+		s.drawImage(image, (small.width - iw * k) / 2, (small.height - ih * k) / 2, iw * k, ih * k);
+		const backdrop = document.createElement('canvas');
+		backdrop.width = 480;
+		backdrop.height = 270;
+		const b = backdrop.getContext('2d')!;
+		b.imageSmoothingEnabled = true;
+		b.imageSmoothingQuality = 'high';
+		b.drawImage(small, 0, 0, backdrop.width, backdrop.height);
+		// Its colours (where the picture may be read: one from another site may not)
+		let palettes: Palette[] | null = null;
+		try {
+			palettes = palettesFromPixels(s.getImageData(0, 0, small.width, small.height).data);
+		} catch {
+			palettes = null;
+		}
+		theme = { palettes, backdrop };
+	}
 
 	function resize() {
 		const ratio = Math.min(2, window.devicePixelRatio || 1);
@@ -325,11 +367,12 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	function paletteAt(level: Level, time: number): Palette {
 		const sections = level.world.sections;
 		const section = level.world.sectionAt(time);
-		const current = PALETTES[section.palette];
+		const list = theme.palettes ?? PALETTES;
+		const current = list[section.palette % list.length];
 		const before = sections[section.index - 1];
 		const f = before ? ease((time - section.start) / 700) : 1;
 		if (!before || f >= 1) return current;
-		const old = PALETTES[before.palette];
+		const old = list[before.palette % list.length];
 		return {
 			top: mix(old.top, current.top, f),
 			bottom: mix(old.bottom, current.bottom, f),
@@ -378,6 +421,23 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		gradient.addColorStop(1, p.bottom);
 		ctx.fillStyle = gradient;
 		ctx.fillRect(0, 0, width, height);
+		// The beatmap's background, soft and dim, a little bigger on the beat and drifting slowly;
+		// the part's colours over it (the level stays easy to read)
+		const backdrop = theme.backdrop;
+		if (backdrop) {
+			const k = Math.max(width / backdrop.width, height / backdrop.height) * (1.08 + pulse * 0.012);
+			const w = backdrop.width * k;
+			const h = backdrop.height * k;
+			const drift = Math.sin(camX * 0.004) * (w - width) * 0.45;
+			ctx.globalAlpha = 0.55;
+			ctx.drawImage(backdrop, (width - w) / 2 + drift, (height - h) / 2, w, h);
+			ctx.globalAlpha = 1;
+			const tint = ctx.createLinearGradient(0, 0, 0, height);
+			tint.addColorStop(0, rgba(p.top, 0.5));
+			tint.addColorStop(1, rgba(p.bottom, 0.78));
+			ctx.fillStyle = tint;
+			ctx.fillRect(0, 0, width, height);
+		}
 		if (kiai && pulse > 0.02) {
 			ctx.fillStyle = `rgba(255,255,255,${pulse * 0.06})`;
 			ctx.fillRect(0, 0, width, height);
@@ -1935,7 +1995,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		if (frame.hud) hud(frame);
 	}
 
-	return { draw, event, reset, resize };
+	return { draw, event, reset, resize, setTheme };
 }
 
 export type DashRenderer = ReturnType<typeof createDashRenderer>;

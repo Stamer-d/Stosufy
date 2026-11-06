@@ -24,6 +24,7 @@
 	import { DIFFICULTIES } from '#lib/dash/generate.ts';
 	import { DashGame, RESPAWN, bestKey, bestOfSet, saveBest } from '#lib/dash/game.ts';
 	import { createDashRenderer, ICONS, spritesUrl } from '#lib/dash/render.ts';
+	import { backgroundUrls } from '#lib/stores/data.ts';
 	import { ATLAS, SPRITES } from '#lib/dash/sprites.ts';
 	import { playDashSound } from '#lib/dash/sound.ts';
 	import { dashSounds } from '#lib/dash/sounds.ts';
@@ -89,6 +90,34 @@
 
 	let canvas = $state();
 	let renderer = null;
+	/** The beatmap's background for the level's colours (kept for a renderer made later) */
+	let themeImage = null;
+	/** The set and difficulty whose background was asked for last */
+	let themeFor = '';
+
+	/** Loads the background of a beatmap (the first of its places that loads) for the level */
+	async function loadTheme(setId, mapId) {
+		const key = `${setId}:${mapId}`;
+		if (key === themeFor) return;
+		themeFor = key;
+		themeImage = null;
+		renderer?.setTheme(null);
+		const urls = await backgroundUrls(setId, mapId).catch(() => []);
+		for (const url of urls) {
+			const image = new Image();
+			image.crossOrigin = 'anonymous';
+			image.src = url;
+			try {
+				await image.decode();
+			} catch {
+				continue;
+			}
+			if (themeFor !== key) return;
+			themeImage = image;
+			renderer?.setTheme(image);
+			return;
+		}
+	}
 	/** @type {DashGame | null} */
 	let game = $state(null);
 	/** 'loading' | 'error' | 'ready' | 'playing' | 'paused' | 'complete' */
@@ -184,6 +213,8 @@
 					generator: kinds.generator
 				});
 				if (cancelled) return;
+				// (in the colours of its background, once that's loaded)
+				loadTheme(current.id, id);
 				const made = new DashGame(level);
 				made.practice = practice;
 				made.autoCheckpoints = autoCheckpoints;
@@ -490,6 +521,7 @@
 
 	onMount(() => {
 		renderer = createDashRenderer(canvas);
+		if (themeImage) renderer.setTheme(themeImage);
 		let frame;
 		let lastProgress = -1;
 		let frames = 0;

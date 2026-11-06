@@ -920,3 +920,22 @@ Gemessen (vier Songs × Normal/Hard/Extreme × zwei Seeds × mit/ohne Audio = 48
 40 weitere Level (Easy bis Extreme): alle durchspielbar. Der Test zum Klick-Spielraum verlangt
 Extreme < 77 % von Hard (statt 75 %: Extreme liegt an der Grenze eines Sprungs über einen Spike).
 `GENERATOR_VERSION` ist `gd-3.7-blocks`.
+
+## 20. Das Level in den Farben des Beatmap-Hintergrunds
+
+Die Farben eines Levels kamen aus acht festen Paletten. Jetzt lädt die Dash-Ansicht den
+Hintergrund der Beatmap (die Kopie im Songs-Ordner, sonst online in voller Größe, sonst das
+Banner; `backgroundUrls`) und gibt ihn dem Renderer (`setTheme`):
+
+- `theme.ts` zieht aus dem Bild (klein gerechnet) die prägenden Farbtöne: nach Fläche und
+  Sättigung (Grau, Schwarz und Weiß zählen kaum), bis zu vier, mindestens 45° auseinander. Daraus
+  werden die acht Paletten des Levels (dunkler Himmel im Farbton, Boden darin, helles Akzentlicht);
+  die Abschnitte wechseln wie bisher an musikalischen Wechseln, jetzt innerhalb der Farbwelt des
+  Bildes.
+- Das Bild selbst liegt weich und abgedunkelt hinter dem Level, wird auf dem Beat ein wenig größer
+  und wandert langsam mit; darüber ein Schleier in den Farben des Abschnitts, damit Blöcke und
+  Spikes lesbar bleiben.
+- Ohne Bild, ein Bild ohne Farbe oder eines, dessen Pixel nicht gelesen werden dürfen: die
+  bisherigen Paletten.
+
+Tests: `tests/dash/theme.test.ts`.
