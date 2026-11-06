@@ -8,6 +8,7 @@ import {
 	World,
 	simulate,
 	type InputEvent,
+	type Orb,
 	type OrbKind,
 	type PadKind,
 	type PlayerState,
@@ -332,6 +333,8 @@ export class Attempt {
 	to = -Infinity;
 	/** Something broke a rule or went past the end of the part */
 	broken = false;
+	/** The orbs it put in */
+	orbs: Orb[] = [];
 
 	constructor(
 		private world: World,
@@ -374,7 +377,11 @@ export class Attempt {
 		this.mark(x - 0.6, x + 0.6);
 		const orb = { id: this.world.id(), kind, x, y, dir, x0: x - 0.6, x1: x + 0.6 };
 		this.world.orbs.add(orb);
-		this.undo.push(() => this.world.orbs.remove(orb));
+		this.orbs.push(orb);
+		this.undo.push(() => {
+			this.world.orbs.remove(orb);
+			this.orbs.splice(this.orbs.indexOf(orb), 1);
+		});
 		return orb;
 	}
 

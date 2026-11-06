@@ -20,6 +20,8 @@ const SONGS: Record<string, SongOptions> = {
 	same: { bpm: 150, length: 100, style: 'intense' },
 	/** Faster from 50 s on */
 	faster: { bpm: 140, length: 100, style: 'calm', change: { at: 50000, bpm: 185 } },
+	/** The same tempo and notes all through, the mapper's sliders faster from 49 s to 75 s */
+	sliders: { bpm: 150, length: 100, style: 'intense', sv: [[49000, 75000, 1.4]] },
 	/** Calm, then from the middle busy and loud; the map's kiai only near the end */
 	drop: { bpm: 150, length: 100, style: 'mixed', kiai: [[82000, 94000]] }
 };
@@ -147,4 +149,17 @@ test('the pace only changes where the music does', () => {
 	);
 	// The mapper's faster sliders alone, where it's calm, aren't a reason
 	assert.deepEqual(paces([part(1), part(0.8, { drive: 1.5, change: true })], 2), [1, 1]);
+});
+
+test("where the mapper's sliders speed up, at the same tempo, it goes faster", async () => {
+	for (const difficulty of ['normal', 'hard'] as const) {
+		const l = await level('sliders', difficulty);
+		const cut = l.world.sections.find((s) => Math.abs(s.start - 49000) < 5);
+		assert.ok(cut, `${difficulty}: no part starts where the sliders speed up`);
+		assert.ok(
+			speedAt(l, 49500) > speedAt(l, 48500),
+			`${difficulty}: ${l.world.sections.map((s) => `${s.start}:${s.speedIndex}`).join(' ')}`
+		);
+		assert.ok(speedAt(l, 80000) < speedAt(l, 60000), `${difficulty}: not slower again after`);
+	}
 });

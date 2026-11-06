@@ -645,3 +645,57 @@ Geschwindigkeit, höheres Tempo ab dem Wechsel schneller, Drop ohne Kiai schnell
 Grenzen: Easy hat weiterhin nur eine Geschwindigkeit (`speeds: [1, 1]`). Gemessen ist nur mit
 synthetischen Testsongs. Wie gut die Energiesprünge auf echten Songs sitzen (z. B. bei
 Build-ups mit langsam steigender Lautstärke), ist noch nicht an echten Maps überprüft.
+
+## 14. 0.6.83: Flugteile, Pflicht-Orbs, Beat, Timing-Abgleich, Slider-Velocity
+
+Rückmeldung: Beim Spider läuft man teils lange und die Spikes sind oben, beim UFO muss man an der
+Decke nur spammen, viele Orbs braucht man nicht. Dazu: mehr auf dem Beat, BPM-Wechsel der Maps
+manchmal zu früh/spät gesetzt, und seit 0.6.82 wird es dort, wo der Song bei gleichem BPM
+intensiver wird, manchmal nicht mehr schneller.
+
+Gemessen (vier Testsongs × Hard/Insane/Extreme × drei Seeds, vorher → nachher):
+
+| Modus  | Orbs nötig        | Spikes außer Reichweite (> 2 Blöcke vom Weg) |
+| ------ | ----------------- | -------------------------------------------- |
+| Cube   | 213/268 → 192/192 | –                                            |
+| Robot  | 162/230 → 141/141 | –                                            |
+| Ball   | 39/71 → 42/42     | 535/915 → 48/414                             |
+| Spider | 102/103 → 107/107 | 614/928 → 324/580 (Rest: Timing-Spikes)      |
+| UFO    | 52/70 → 41/41     | UFO an der Decke 6 % → 2–4 %                 |
+
+Was geändert wurde:
+
+- **Pflicht-Orbs** (`blocks.ts`, `flight.ts`, `generate.ts`): Ein Cube/Robot-Baustein gilt nur,
+  wenn jedes seiner Orbs nötig ist (ohne Orb, Klick bleibt: tot). In UFO, Ball und Spider wird ein
+  Orb, den man pünktlich nicht braucht, nötig gemacht: ein Spike (auf hochgezogenem Boden oder
+  heruntergezogener Decke) dort, wo der Weg ohne Orb hinführt und die Wege mit Orb nicht. Passt
+  keiner, fällt das Orb weg. Vorher reichte es, dass ein zu früher/später Klick es brauchte. Am
+  Ende prüft `uselessOrbs` das fertige Level: Orbs, die der Plan nicht berührt oder ohne die er
+  durchkommt, gehen (die Nachbearbeitung entfernt Hindernisse und konnte Orbs überflüssig machen).
+- **UFO nicht an der Decke**: Ein Klick, nach dem das UFO bis 0,9 Blöcke an die Decke käme, wird
+  ausgelassen (zuerst nur sein Orb). Es sinkt bis zum nächsten Beat.
+- **Spider und Ball ohne Deko-Spikes**: Die Spike-Reihen kamen auf die Seite mit dem meisten Platz,
+  also immer die, auf der man nicht ist. Ab Normal kommen ihre Spikes nur noch von `timingSpikes`
+  (der Zeitpunkt des Wechsels) und `noResting` (jeder Klick nötig). Easy bleibt wie bisher.
+- **Mehr auf dem Beat**: UFO, Ball und Spider klicken wie Cube, Robot und Ship auf dem Schlagzeug
+  (`drumClicks`: Zwei-Takt-Muster, Takt für Takt), nicht mehr auf den Noten. Gravity-Portale
+  nehmen ihren Downbeat (kein Klick direkt daneben).
+- **Timing-Abgleich** (`timing.ts`, neu): Die Timing-Punkte der Map werden gegen die Anschläge im
+  Song geprüft. Ein BPM-Wechsel geht dorthin, wo das alte Raster aufhört und das neue passt
+  (auf halben Beats verglichen, bis acht Beats in beide Richtungen, nur wenn klar besser). Ein
+  Raster, das 10–60 ms neben dem Song liegt (gemessen gegen den Versatz des restlichen Songs), wird
+  verschoben, die Noten darauf mit. Ohne Audio oder wenn es nicht klar ist, bleibt die Map.
+- **Schneller bei gleichem BPM**: In 0.6.82 machte eine schnellere Slider-Velocity nur zusammen mit
+  überdurchschnittlicher Energie schneller, und die Energie musste 25 % über dem Songmittel
+  liegen. Jetzt sind SV-Sprünge des Mappers (4 Takte gegen 4 Takte, ab 20 %) eigene Wechsel, SV ≥
+  1,25 macht schnell (außer es ist klar ruhig), und schnell ist auch, was im oberen Drittel der
+  Energie-Spanne dieses Songs liegt (nur wenn der Song überhaupt Unterschiede hat).
+- Testsongs: Das Audio folgt jetzt dem BPM-Wechsel (vorher lief es im alten Tempo weiter). Neue
+  Optionen für falsch gesetzte Timing-Punkte, SV-Abschnitte und lautere Abschnitte. Der Test zum
+  Klick-Spielraum mittelt über zwei Seeds (ein Seed allein schwankte um mehr als die geprüften
+  20 ms).
+
+Neue Tests: `tests/dash/timing.test.ts`, SV-Fall in `tests/dash/speeds.test.ts`.
+
+Grenzen: Alles mit synthetischen Testsongs gemessen. Der Timing-Abgleich braucht klare Anschläge
+im Audio; bei sehr dichter Musik bleibt die Map unverändert.

@@ -420,7 +420,16 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 			return false;
 		const without = (t: number) =>
 			nominal.filter((e, k) => (e.down ? e.time : nominal[k - 1]?.time) !== t);
-		return must.length > 0 && must.every((t) => simulate(world, state, until, without(t)).dead);
+		if (!(must.length > 0 && must.every((t) => simulate(world, state, until, without(t)).dead)))
+			return false;
+		// Every orb needed too: without it (the press there a plain jump, or nothing in the air) it
+		// mustn't get through, else the orb is only there to look at
+		return a.orbs.every((orb) => {
+			world.orbs.remove(orb);
+			const dead = simulate(world, state, until, nominal).dead;
+			world.orbs.add(orb);
+			return dead;
+		});
 	}
 
 	/** The presses so far with the piece's */

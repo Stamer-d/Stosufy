@@ -45,11 +45,12 @@ import { buildWave } from './builders/wave';
 import { buildBlocks } from './builders/blocks';
 import { buildShip } from './builders/ship';
 import { drumClicks } from './rhythm';
+import { alignTiming } from './timing';
 
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.1-blocks';
+export const GENERATOR_VERSION = 'gd-3.2-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -395,7 +396,7 @@ function snapToBeat(chart: DashChart, time: number) {
 /** A moment the music changes: its tempo, the kiai, or how busy and loud it is */
 export interface MusicalChange {
 	time: number;
-	kind: 'tempo' | 'kiai' | 'energy';
+	kind: 'tempo' | 'kiai' | 'energy' | 'drive';
 	/** Faster, into the kiai, busier and louder (a drop); or the other way */
 	up: boolean;
 	/** How much it changes (for which of two close ones counts) */
@@ -420,7 +421,16 @@ export function barEnergies(chart: DashChart, start: number, end: number) {
 		return lo;
 	};
 	const sound = chart.sound;
-	const bars: { start: number; end: number; busy: number; loud: number; energy: number }[] = [];
+	const bars: {
+		start: number;
+		end: number;
+		busy: number;
+		loud: number;
+		energy: number;
+		/** How fast the mapper's sliders are there (the bar before's without notes) */
+		sv: number;
+	}[] = [];
+	let sv = 1;
 	for (let i = 0; i < chart.timing.length; i++) {
 		const point = chart.timing[i];
 		const until = Math.min(chart.timing[i + 1]?.time ?? end, end);
@@ -432,7 +442,10 @@ export function barEnergies(chart: DashChart, start: number, end: number) {
 			t += bar
 		) {
 			const to = Math.min(t + bar, until);
+			const own = chart.notes.slice(from(t), from(to)).map((n) => n.sv);
+			if (own.length) sv = own.sort((a, b) => a - b)[own.length >> 1];
 			bars.push({
+				sv,
 				start: t,
 				end: to,
 				busy: (from(to) - from(t)) / ((to - t) / 1000),
@@ -491,6 +504,23 @@ export function musicalChanges(chart: DashChart, start: number, end: number): Mu
 			strength: Math.abs(Math.log(ratio))
 		});
 	}
+	// Where the mapper's sliders get clearly faster or slower and stay so (they speed them up
+	// where the song gets more intense, on its time)
+	for (let j = 2; j <= bars.length - 2; j++) {
+		const median = (list: typeof bars) =>
+			list.map((b) => b.sv).sort((p, q) => p - q)[list.length >> 1];
+		const a = median(bars.slice(Math.max(0, j - 4), j));
+		const b = median(bars.slice(j, j + 4));
+		if (bars[j].sv === bars[j - 1].sv) continue;
+		const ratio = b / a;
+		if (Math.abs(Math.log(ratio)) < Math.log(1.2)) continue;
+		found.push({
+			time: Math.round(bars[j].start),
+			kind: 'drive',
+			up: ratio > 1,
+			strength: 1.5 + Math.abs(Math.log(ratio))
+		});
+	}
 	// (one change, not four bars of them: the strongest within four bars)
 	found.sort((p, q) => q.strength - p.strength);
 	const bar = (t: number) => {
@@ -498,7 +528,7 @@ export function musicalChanges(chart: DashChart, start: number, end: number): Mu
 		return point.beatLength * point.meter;
 	};
 	for (const c of found)
-		if (!changes.some((k) => k.kind === 'energy' && Math.abs(k.time - c.time) < 3.5 * bar(c.time)))
+		if (!changes.some((k) => k.kind === c.kind && Math.abs(k.time - c.time) < 3.5 * bar(c.time)))
 			changes.push(c);
 	return changes.sort((p, q) => p.time - q.time);
 }
@@ -527,10 +557,24 @@ export function paces(
 		change: boolean;
 		drop: boolean;
 	}[],
-	level: number
+	level: number,
+	/**
+	 * How busy and loud the song's calmer and its more intense bars are (a fifth of its bars below
+	 * the one, a tenth above the other): what's intense for this song
+	 */
+	song?: { low: number; high: number }
 ): Pace[] {
+	// (only where the song has parts that differ: one that stays the same has no intense part)
+	const varied = !!song && song.high >= song.low * 1.2;
 	const raw = parts.map((p): Pace => {
-		if (p.kiai || p.energy >= 1.25 || p.tempo >= 1.1 || (p.drive >= 1.3 && p.energy >= 1)) return 2;
+		if (
+			p.kiai ||
+			p.energy >= 1.25 ||
+			p.tempo >= 1.1 ||
+			(p.drive >= 1.25 && p.energy >= 0.85) ||
+			(varied && p.energy >= 1.05 && p.energy >= song!.low + (song!.high - song!.low) * 0.7)
+		)
+			return 2;
 		if (level >= 1 && (p.energy <= 0.6 || p.tempo <= 0.9)) return 0;
 		return 1;
 	});
@@ -547,6 +591,7 @@ export function paces(
 			p.change ||
 			p.kiai !== parts[i - 1].kiai ||
 			Math.abs(Math.log(p.tempo / parts[i - 1].tempo)) >= Math.log(1.03) ||
+			Math.abs(Math.log(p.drive / parts[i - 1].drive)) >= Math.log(1.2) ||
 			moved >= Math.log(1.2);
 		const now = raw[i] !== was && changes ? raw[i] : was;
 		if (now !== was) anchor = i;
@@ -726,7 +771,21 @@ function planParts(
 		};
 	});
 	const intensity = intensities(features);
-	const pace = paces(features, preset.level);
+	// (the song's calmer and more intense bars, by how long they last)
+	const bars = barEnergies(chart, start, end).filter(
+		(b) => !musicalRest(chart, (b.start + b.end) / 2)
+	);
+	const sorted = bars.map((b) => b.energy).sort((a, b) => a - b);
+	const pace = paces(
+		features,
+		preset.level,
+		sorted.length >= 8
+			? {
+					low: sorted[Math.floor(sorted.length * 0.2)],
+					high: sorted[Math.floor(sorted.length * 0.9)]
+				}
+			: undefined
+	);
 	// (fast is intense, slow is calm: the builders build them that way)
 	pace.forEach((p, i) => {
 		if (p === 2) intensity[i] = Math.max(intensity[i], 0.72);
@@ -847,6 +906,8 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		: base;
 	const rng = random(hash(`${options.seed}:${options.difficulty}`));
 	const blocks = options.generator !== 'classic';
+	// (the map's timing points where the song has them: see timing.ts)
+	chart = alignTiming(chart);
 	const own = new Set(chart.notes);
 	chart = { ...chart, notes: withBeats(chart) };
 	const notes = chart.notes;
@@ -955,10 +1016,14 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 					: sec.mode === 'spider'
 						? Math.max(preset.gap, 0.26)
 						: Math.max(preset.gap, 0.24);
+			// (on the drums, the part's two-bar pattern bar after bar, as the cube's: see rhythm.ts;
+			// the older way from the notes)
 			const theirs =
 				sec.mode === 'ship' || sec.mode === 'swing'
 					? []
-					: chooseClicks(chart, inside, gap, preset.cost * 0.9, preset.idle);
+					: blocks
+						? drumClicks(chart, inside, preset, sec.start, sec.end, gap * 1000)
+						: chooseClicks(chart, inside, gap, preset.cost * 0.9, preset.idle);
 			state = buildFlight(ctx, sec, inside, theirs, state);
 		}
 		const constructed = world.hazards.items.filter((h) => !oldHazards.has(h));
@@ -1017,10 +1082,13 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 
 	// Later filling/repair can change the approach state: check swing windows on the final world.
 	widenSwingWindows(world, plan, start, end, preset.tolerance);
-	clickRoom(world, plan, start, end, preset.tolerance);
-	playThrough(world, plan, start, end);
-
-	removeUnsupportedSpikes(world);
+	// (what goes there can leave an orb with nothing to do: it goes too, and that's checked again)
+	for (let round = 0; round < 4; round++) {
+		clickRoom(world, plan, start, end, preset.tolerance);
+		playThrough(world, plan, start, end);
+		removeUnsupportedSpikes(world);
+		if (!uselessOrbs(world, plan, start, end)) break;
+	}
 
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {
@@ -1062,6 +1130,42 @@ function playThrough(world: World, plan: InputEvent[], start: number, end: numbe
 		if (!run.dead) return;
 		removeNear(world, run.x, world.sectionAt(run.time).mode);
 	}
+}
+
+/**
+ * Every orb needed on the finished level: one the plan doesn't touch, or one it gets to the end
+ * without (the press there a plain one), goes. How many went
+ */
+function uselessOrbs(world: World, plan: InputEvent[], start: number, end: number) {
+	const finishTick = start + Math.ceil((end - start) / STEP - 1e-8) * STEP;
+	let removed = 0;
+	const states: PlayerState[] = [];
+	const fill = () => {
+		states.length = 0;
+		let s = startState(world, start);
+		for (let t = start; t <= end; t += 250) {
+			s = simulate(world, s, t, plan);
+			states.push(s);
+		}
+	};
+	fill();
+	const touched = simulate(world, startState(world, start), finishTick, plan).used;
+	for (const orb of [...world.orbs.items]) {
+		world.orbs.remove(orb);
+		if (touched.includes(orb.id)) {
+			const k = Math.max(
+				0,
+				Math.min(states.length - 1, Math.floor((world.timeAt(orb.x) - 1000 - start) / 250))
+			);
+			if (simulate(world, states[k], finishTick, plan).dead) {
+				world.orbs.add(orb);
+				continue;
+			}
+			fill();
+		}
+		removed++;
+	}
+	return removed;
 }
 
 /** Check isolated swing clicks after every generation pass has finished changing geometry. */

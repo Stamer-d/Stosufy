@@ -169,6 +169,8 @@ export function buildFlight(
 
 	// --- Gravity portals: on strong downbeats, upside down and back -------------------------
 	const flips: GravityPortal[] = [];
+	/** When the gravity portals come */
+	const portalTimes: number[] = [];
 	// (not right at a click: pressed a moment before or after the portal would go another way)
 	if (
 		preset.level >= 1 &&
@@ -199,13 +201,10 @@ export function buildFlight(
 			const x = world.xAt(t);
 			if (x < startX + 4 || x > endX - 6 || t - last < 2400) continue;
 			const pos = musicalPosition(ctx.chart, t + 1);
-			if (
-				pos.bar % 2 !== 0 ||
-				musicalRest(ctx.chart, t) ||
-				clicks.some((c) => Math.abs(c - t) < 160) ||
-				rng() < 0.25
-			)
-				continue;
+			if (pos.bar % 2 !== 0 || musicalRest(ctx.chart, t) || rng() < 0.25) continue;
+			// (the portal takes the downbeat: no click right at it, pressed a moment before or after
+			// it would go another way)
+			portalTimes.push(t);
 			flips.push(
 				world.gravityPortals.add({ x, y: (floor + top) / 2, gravity, x0: x - 0.6, x1: x + 0.6 })
 			);
@@ -314,9 +313,33 @@ export function buildFlight(
 			(t) =>
 				t > section.start + 250 &&
 				t < section.end - (mode === 'ball' || mode === 'spider' ? 700 : 450) &&
-				!musicalRest(ctx.chart, t)
+				!musicalRest(ctx.chart, t) &&
+				!portalTimes.some((p) => Math.abs(p - t) < 160)
 		);
-		const noteAt = new Map(notes.map((n) => [n.time, n]));
+		/** The note at a click (within 40 ms: the clicks may be on the beat grid) */
+		const noteAt = (time: number) => {
+			let best: DashNote | null = null;
+			for (const n of notes)
+				if (
+					Math.abs(n.time - time) <= 40 &&
+					(!best || Math.abs(n.time - time) < Math.abs(best.time - time))
+				)
+					best = n;
+			return best;
+		};
+		/**
+		 * The UFO up against the ceiling (or the floor, upside down) after a press here: there it
+		 * would only be hammered along it, so the press is left out and it sinks to the next beat
+		 */
+		const pinned = (from: PlayerState, time: number, hold: number) => {
+			if (mode !== 'ufo') return false;
+			const trace: { x: number; y: number; time: number }[] = [];
+			simulate(world, from, time + 450, [...events, ...tap(time, hold)], { trace });
+			return trace.some(
+				(p) =>
+					p.time > time && (from.gravity > 0 ? p.y + box.h > top - 0.9 : p.y - box.h < floor + 0.9)
+			);
+		};
 		const most = Math.round(preset.orbs * (0.6 + intensity * 0.6));
 		let placed = 0;
 		let lastOrb = -Infinity;
@@ -326,12 +349,22 @@ export function buildFlight(
 		for (const time of times) {
 			const at = simulate(world, s, time, events);
 			if (at.dead) break;
-			const note = noteAt.get(time) ?? null;
+			const note = noteAt(time);
+			const was = { placed, lastOrb };
+			const fresh: { orb: Orb | null } = { orb: null };
 			const add = (kind: OrbKind, dir?: number) => {
 				const id = world.id();
-				orbs.push(
-					world.orbs.add({ id, kind, x: at.x, y: at.y, dir, x0: at.x - 0.6, x1: at.x + 0.6 })
-				);
+				const orb = world.orbs.add({
+					id,
+					kind,
+					x: at.x,
+					y: at.y,
+					dir,
+					x0: at.x - 0.6,
+					x1: at.x + 0.6
+				});
+				fresh.orb = orb;
+				orbs.push(orb);
 				used(ctx, `orb-${kind}`);
 			};
 			let hold = mode === 'ufo' ? 70 : 90;
@@ -367,6 +400,16 @@ export function buildFlight(
 					placed++;
 					lastOrb = time;
 				}
+			}
+			if (pinned(at, time, hold)) {
+				// (its orb first: the plain press may stay below)
+				if (fresh.orb) {
+					world.orbs.remove(fresh.orb);
+					orbs.pop();
+					({ placed, lastOrb } = was);
+					hold = 70;
+				}
+				if (!fresh.orb || pinned(at, time, hold)) continue;
 			}
 			events.push(...tap(time, hold));
 			previous = note ?? previous;
@@ -618,6 +661,10 @@ export function buildFlight(
 	const spikeRoom = mode === 'swing' ? 1.6 : 1.05;
 	const pickSpikes = () => {
 		for (const c of columns) c.spike = 0;
+		// (the ball and the spider are always on one side: a row on the other side, where there's
+		// room, is only to look at. Their spikes come where they make a click's time: timingSpikes,
+		// noResting; on easy, without those, the rows stay)
+		if ((mode === 'ball' || mode === 'spider') && preset.level >= 1) return;
 		let run = 0;
 		for (let i = 0; i < columns.length; i++) {
 			const c = columns[i];
@@ -1177,16 +1224,81 @@ export function buildFlight(
 		for (const so of shipOrbs)
 			if (so.orb && !touched.includes(so.orb.id)) world.orbs.remove(so.orb);
 	}
-	// Every orb needed: one it gets through without (the press there a plain hop or switch)
-	// goes, so none is just in the air; unless a press a bit early or late needs it
-	// (the spider's orbs on the ground: needed on time, or they go; what that breaks is mended)
+	// Every orb needed, on time: flown without it (the press there a plain hop or switch), it
+	// must crash. Where it doesn't yet, a spike where that way goes and the ways with the orb don't
+	// (on the floor or ceiling, raised up to it there); where none fits, the orb goes (what that
+	// breaks is mended below)
 	let dropped = false;
+	const ways = variants.map((inputs) => {
+		const trace: { x: number; y: number; time: number }[] = [];
+		simulate(world, entry, section.end, inputs, { trace });
+		return trace;
+	});
+	const playable = !verify(settled);
 	for (const orb of orbs) {
+		if (!world.orbs.items.includes(orb)) continue;
+		if (needs(orb) || (playable && require(orb))) continue;
 		world.orbs.remove(orb);
-		const needed = simulate(world, entry, section.end, events).dead;
-		const jump = mode === 'spider' && jumpOrbs.some((j) => j.orb === orb);
-		if (needed || (!jump && verify(settled))) world.orbs.add(orb);
-		else if (jump) dropped = true;
+		dropped = true;
+	}
+	/** Whether it crashes without the orb, the presses as they are */
+	function needs(orb: Orb) {
+		world.orbs.remove(orb);
+		const dead = simulate(world, entry, section.end, events).dead;
+		world.orbs.add(orb);
+		return dead;
+	}
+	/** A spike where the way without the orb goes (and the ways with it don't): true if one fits */
+	function require(orb: Orb) {
+		world.orbs.remove(orb);
+		const without: { x: number; y: number; time: number }[] = [];
+		simulate(world, entry, section.end, events, { trace: without });
+		world.orbs.add(orb);
+		const time = world.timeAt(orb.x);
+		const tried = new Set<number>();
+		for (const p of without) {
+			if (p.time < time + 60) continue;
+			if (p.time > time + 1500 || tried.size >= 6) break;
+			const c = columns.find((col) => col.x === Math.floor(p.x));
+			if (!c || c.spike || tried.has(c.x) || musicalRest(ctx.chart, p.time)) continue;
+			let lo = Infinity;
+			let hi = -Infinity;
+			for (const way of ways)
+				for (const q of way)
+					if (Math.abs(q.x - (c.x + 0.5)) < box.w + 0.35) {
+						lo = Math.min(lo, q.y - box.h);
+						hi = Math.max(hi, q.y + box.h);
+					}
+			if (!isFinite(lo)) continue;
+			const bottom = p.y - box.h;
+			const head = p.y + box.h;
+			let side: 1 | -1;
+			let surface: number;
+			if (head < lo - 0.2) {
+				// (below the ways with the orb: the floor up to just under it, a spike on it)
+				side = 1;
+				surface = Math.max(c.low, Math.floor(bottom * 2) / 2);
+				if (lo - surface < 1.05 || bottom - surface > 0.45 || surface > c.high - 2) continue;
+			} else if (bottom > hi + 0.2) {
+				side = -1;
+				surface = Math.min(c.high, Math.ceil(head * 2) / 2);
+				if (surface - hi < 1.05 || surface - head > 0.45 || surface < c.low + 2) continue;
+			} else continue;
+			tried.add(c.x);
+			const old = { low: c.low, high: c.high, spike: c.spike, small: c.small };
+			if (side > 0) c.low = surface;
+			else c.high = surface;
+			c.spike = side;
+			c.small = false;
+			build();
+			if (needs(orb) && !verify(settled)) {
+				used(ctx, `${mode}-orb-needed`);
+				return true;
+			}
+			Object.assign(c, old);
+			build();
+		}
+		return false;
 	}
 	// Orbs the way doesn't touch do nothing: they go
 	const touched = simulate(world, entry, section.end, events).used;

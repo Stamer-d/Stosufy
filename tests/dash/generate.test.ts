@@ -245,11 +245,13 @@ test('harder: less room for each click (the median over all songs), never less t
 	for (const difficulty of DIFFICULTIES) {
 		const ground: number[] = [];
 		const every: number[] = [];
+		// (two levels of each song: one level's median moves with which pieces it happened to get)
 		for (const name of Object.keys(SONGS))
-			for (const c of report(await level(name, difficulty)).clicks) {
-				every.push(c.early + c.late);
-				if (c.mode === 'cube' || c.mode === 'robot') ground.push(c.early + c.late);
-			}
+			for (const seed of ['tests', 'room'])
+				for (const c of report(await level(name, difficulty, seed)).clicks) {
+					every.push(c.early + c.late);
+					if (c.mode === 'cube' || c.mode === 'robot') ground.push(c.early + c.late);
+				}
 		jumps.push(median(ground));
 		all.push(median(every));
 	}

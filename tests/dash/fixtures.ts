@@ -12,11 +12,19 @@ export interface SongOptions {
 	/** calm: a note on most beats; intense: eighths, streams, finishes; mixed: calm, then intense */
 	style: 'calm' | 'intense' | 'mixed';
 	kiai?: [number, number][];
+	/** Where the mapper's sliders go faster (from, to, how much) */
+	sv?: [number, number, number][];
+	/** Where the song is louder still (at the same tempo and notes): from, to, how loud (1.1) */
+	louder?: [number, number, number?][];
 	breaks?: [number, number][];
 	/** A slider every so many notes (0: none) */
 	sliders?: number;
-	/** Another BPM from a time on (ms) */
-	change?: { at: number; bpm: number };
+	/**
+	 * Another BPM from a time on (ms). The map's timing point for it may be set elsewhere than
+	 * where the song changes (`mapAt`, on the new grid), or its beats a few ms off the song's
+	 * (`shift`, the notes after it snapped to them with them)
+	 */
+	change?: { at: number; bpm: number; mapAt?: number; shift?: number };
 	title?: string;
 }
 
@@ -57,9 +65,13 @@ export function makeOsu(options: SongOptions) {
 		'',
 		'[TimingPoints]',
 		`${offset},${beat},4,2,0,70,1,0`,
-		...(change ? [`${change.at},${60000 / change.bpm},4,2,0,70,1,0`] : [])
+		...(change
+			? [`${(change.mapAt ?? change.at) + (change.shift ?? 0)},${60000 / change.bpm},4,2,0,70,1,0`]
+			: [])
 	];
 	for (const [a, b] of kiai) lines.push(`${a},-100,4,2,0,80,0,1`, `${b},-100,4,2,0,70,0,0`);
+	for (const [a, b, by] of options.sv ?? [])
+		lines.push(`${a + 1},${-100 / by},4,2,0,70,0,0`, `${b + 1},-100,4,2,0,70,0,0`);
 	lines.push('', '[HitObjects]');
 
 	const intenseAt = (t: number) =>
@@ -69,6 +81,9 @@ export function makeOsu(options: SongOptions) {
 	let x = 256;
 	let y = 192;
 	let count = 0;
+	/** A note's time in the map (after the change, off as far as its timing point is) */
+	const when = (t: number) =>
+		Math.round(t + (change && t >= change.at - 1 ? (change.shift ?? 0) : 0));
 	let base = offset;
 	for (let t = offset; t < end - 1500;) {
 		if (change && t >= change.at && base !== change.at) {
@@ -87,12 +102,10 @@ export function makeOsu(options: SongOptions) {
 			const slider = options.sliders && count % options.sliders === options.sliders - 1;
 			if (slider)
 				lines.push(
-					`${Math.round(x)},${Math.round(y)},${Math.round(t)},${2 | combo},${sound},B|${Math.round(x + 80)}:${Math.round(y)},1,140`
+					`${Math.round(x)},${Math.round(y)},${when(t)},${2 | combo},${sound},B|${Math.round(x + 80)}:${Math.round(y)},1,140`
 				);
 			else
-				lines.push(
-					`${Math.round(x)},${Math.round(y)},${Math.round(t)},${1 | combo},${sound},0:0:0:0:`
-				);
+				lines.push(`${Math.round(x)},${Math.round(y)},${when(t)},${1 | combo},${sound},0:0:0:0:`);
 			count++;
 			if (slider) {
 				t += beat * 2;
@@ -104,7 +117,7 @@ export function makeOsu(options: SongOptions) {
 		else if (rnd() < 0.12) {
 			for (let k = 1; k < 4 && t + (beat / 4) * k < end - 1500; k++)
 				lines.push(
-					`${Math.round(x + k * 20)},${Math.round(y)},${Math.round(t + (beat / 4) * k)},1,0,0:0:0:0:`
+					`${Math.round(x + k * 20)},${Math.round(y)},${when(t + (beat / 4) * k)},1,0,0:0:0:0:`
 				);
 			t += beat;
 		} else t += beat / 2;
@@ -139,22 +152,34 @@ export function makeAudio(options: SongOptions) {
 	const rate = 22050;
 	const length = Math.floor(options.length * rate);
 	const data = new Float32Array(length);
-	const beat = 60000 / options.bpm;
 	const offset = options.offset ?? 1000;
 	const end = options.length * 1000;
 	const rnd = numbers(7);
 	const kicks: number[] = [];
 	const hats: number[] = [];
-	for (let k = 0; offset + (k * beat) / 2 < end - 500; k++) {
-		const t = offset + (k * beat) / 2;
+	// (half beats: on the song's tempo, and its other one from where it changes)
+	const halves: { t: number; kick: boolean }[] = [];
+	const change = options.change;
+	let kick = true;
+	for (let t = offset, beat = 60000 / options.bpm; t < end - 500; t += beat / 2) {
+		if (change && t >= change.at - 1 && beat !== 60000 / change.bpm) {
+			t = change.at;
+			beat = 60000 / change.bpm;
+			kick = true;
+		}
+		halves.push({ t, kick });
+		kick = !kick;
+	}
+	for (const { t, kick } of halves) {
 		const quiet = (options.breaks ?? []).some(([a, b]) => t > a && t < b);
 		const intense =
 			options.style === 'intense' ||
 			(options.style === 'mixed' && t > end / 2) ||
 			(options.kiai ?? []).some(([a, b]) => t >= a && t < b);
-		const gain = quiet ? 0.03 : intense ? 0.8 : 0.4;
+		const louder = (options.louder ?? []).find(([a, b]) => t >= a && t < b);
+		const gain = quiet ? 0.03 : louder ? (louder[2] ?? 1.1) : intense ? 0.8 : 0.4;
 		const start = Math.floor((t / 1000) * rate);
-		if (k % 2 === 0) {
+		if (kick) {
 			kicks.push(t);
 			for (let i = 0; i < rate * 0.15 && start + i < length; i++)
 				data[start + i] +=
