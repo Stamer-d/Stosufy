@@ -51,7 +51,7 @@ import { alignTiming } from './timing';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.6-blocks';
+export const GENERATOR_VERSION = 'gd-3.7-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -282,6 +282,34 @@ function runnerClicks(chart: DashChart, notes: DashNote[], sec: Section, preset:
 	const air = ((2 * cube.jump) / cube.gravity) * (sec.mini ? 0.8 : 1) * 1000;
 	const least = preset.level === 0 ? air + 60 : preset.level === 1 ? air * 0.5 : 0;
 	return drumClicks(chart, notes, preset, sec.start, sec.end, least);
+}
+
+/** How long the ball of a part takes from the floor to the ceiling (ms) */
+function ballCross(world: World, sec: Section) {
+	const from = startState(world, sec.start + 20);
+	if (from.mode !== 'ball') return 0;
+	const press = sec.start + 60;
+	const trace: { x: number; y: number; time: number }[] = [];
+	simulate(
+		world,
+		from,
+		sec.start + 2000,
+		[
+			{ time: press, down: true },
+			{ time: press + 90, down: false }
+		],
+		{
+			trace
+		}
+	);
+	const startY = trace.find((p) => p.time >= press)?.y ?? from.y;
+	const across = trace.find(
+		(p) => p.time > press + 50 && Math.abs(p.y - startY) > (sec.ceil! - sec.floor) * 0.6
+	);
+	const landed = trace.find(
+		(p, k) => across && p.time > across.time && k > 0 && Math.abs(p.y - trace[k - 1].y) < 1e-6
+	);
+	return landed ? landed.time - press : 450;
 }
 
 /** Notes at least `gap` (s) apart, the stronger one of two close ones */
@@ -914,6 +942,11 @@ function planParts(
 	});
 	// How much the hard levels lean on the quick parts where it's intense (0 on easy and normal)
 	const quick = Math.max(0, (preset.level - 1) / 3);
+	/**
+	 * The small cube and robot only where a press may be off by little (from hard on): their
+	 * jumps are short, and with normal's room for a press nothing fits under one (they were empty)
+	 */
+	const smallRunnerToo = (m: Mode) => (m !== 'cube' && m !== 'robot') || preset.level >= 2;
 	/** The small wave isn't at the top speeds (see generateLevel): not where it's that fast */
 	const smallWaveToo = (p: Pace) => speedIndexOf(preset, p) <= (preset.level >= 4 ? 3 : 2);
 
@@ -947,7 +980,9 @@ function planParts(
 			!resting &&
 			before.mode !== 'ball' &&
 			(before.mode !== 'wave' || smallWaveToo(partedPace[i])) &&
-			rng() < preset.mini * 0.4;
+			rng() < preset.mini * 0.4 &&
+			// (after the roll: the same numbers come after it either way)
+			smallRunnerToo(before.mode);
 		if (resize) mode = before.mode;
 		else if (i > 0) {
 			const kinds = (preset.modes as Mode[]).filter((m) => !resting || m === 'cube');
@@ -985,7 +1020,8 @@ function planParts(
 				mode !== 'ball' &&
 				!resting &&
 				(mode !== 'wave' || smallWaveToo(partedPace[i])) &&
-				rng() < miniChance;
+				rng() < miniChance &&
+				smallRunnerToo(mode);
 		parts.push({
 			start: from,
 			end: to,
@@ -1119,6 +1155,17 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	const portals: Portal[] = [];
 	for (const sec of world.sections) {
 		state = simulate(world, state, sec.start + STEP, plan);
+		// The button let go at the part's start (a jump of the part before may go over the portal,
+		// held): the flying parts' builders play their own presses from there, and one held on
+		// would be another way than the one played
+		if (state.held && sec.mode !== 'cube' && sec.mode !== 'robot') {
+			const k = plan.findIndex((e) => !e.down && e.time > sec.start - 1);
+			if (k >= 0) {
+				plan[k] = { ...plan[k], time: sec.start - 0.5 };
+				plan.sort((a, b) => a.time - b.time);
+				state = simulate(world, startState(world, start), sec.start + STEP, plan);
+			}
+		}
 		// Builders start their musical parts in normal gravity. Make that level-design
 		// decision an explicit visible portal, never an implicit mode/section side effect (and
 		// only where it's upside down: a portal that turns nothing is only in the way)
@@ -1151,6 +1198,8 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 			state = buildShip(ctx, sec, drumClicks(chart, inside, preset, sec.start, sec.end), state);
 		else {
 			// The UFO and swing click often, the ball and spider like the cube
+			// (the ball's presses a crossing apart and as much as a press may come early: one while
+			// it's still crossing does nothing, and then a press a bit early wouldn't either)
 			const gap =
 				sec.mode === 'ufo' || sec.mode === 'swing'
 					? Math.max(preset.gap, 0.22)
@@ -1163,10 +1212,25 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 				sec.mode === 'ship' || sec.mode === 'swing'
 					? []
 					: blocks
-						? drumClicks(chart, inside, preset, sec.start, sec.end, gap * 1000)
+						? drumClicks(
+								chart,
+								inside,
+								preset,
+								sec.start,
+								sec.end,
+								Math.max(
+									gap * 1000,
+									sec.mode === 'ball' ? ballCross(world, sec) + preset.tolerance + 40 : 0
+								)
+							)
 						: chooseClicks(chart, inside, gap, preset.cost * 0.9, preset.idle);
 			state = buildFlight(ctx, sec, inside, theirs, state);
 		}
+		// (a press a builder put right at its part's end, or after it, would be held into the next
+		// part: the robot there jumped on and on. It goes)
+		const earlier = new Set(entryPlan);
+		for (let k = plan.length - 1; k >= 0; k--)
+			if (!earlier.has(plan[k]) && plan[k].down && plan[k].time >= sec.end - 1) plan.splice(k, 1);
 		const constructed = world.hazards.items.filter((h) => !oldHazards.has(h));
 		plan.sort((a, b) => a.time - b.time);
 		state = repair(world, plan, entry, sec);

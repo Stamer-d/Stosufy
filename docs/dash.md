@@ -868,3 +868,55 @@ eng, einseitig flach).
 
 Die neuen Grafiken aus 0.6.86 (das Sprite-Sheet mit transparentem Hintergrund) sind in 0.6.87
 wieder entfernt: Sprites, Ausschneide-Skript und Renderer sind auf dem Stand von 0.6.85.
+
+## 19. 0.6.88: Leere Stellen: gemessen an Songs wie echte Maps
+
+Rückmeldung: Levels sind teils so gebaut, dass nichts oder sehr wenig da ist und man gefühlt nichts
+drücken muss. Die bisherigen Testsongs waren zu gleichmäßig (jeder Takt gleich, immer mit Audio).
+`tests/dash/emptiness.ts` baut Songs wie echte Maps (Synkopen, Triolen, leere Takte, lange
+Slider, leises Intro, Build-up, Drop, Break; mit und ohne lesbares Audio) und misst, welche
+Klicks wirklich nötig sind (ohne sie: tot), die längste Strecke ohne nötigen Klick und wie oft
+ein Wechsel zur falschen Zeit bei Spider und Ball folgenlos bleibt.
+
+Gefunden und behoben:
+
+- **Komplett leere Mini-Cube-Teile** (11 s und 15 s ohne Klick und Hindernis): Der Abstand der
+  Spikes zu Absprung und Landung war für den großen Cube bemessen; beim Mini-Cube passte damit
+  kein Spike unter einen Sprung. Der Abstand richtet sich jetzt nach der Hitbox, und Mini-Cube und
+  Mini-Robot gibt es erst ab Hard (mit Normals Spielraum für einen Klick passt unter einen
+  Mini-Sprung trotzdem kaum etwas).
+- **Robot, der 9 s ununterbrochen springt**: Der Ship-Builder drückte im letzten Schritt seines
+  Teils, genau an der Grenze; die Taste blieb in den nächsten Teil hinein gedrückt. Ein Druck eines
+  Builders am oder nach dem Ende seines Teils wird verworfen; ein Flugteil beginnt losgelassen.
+- **Ball fast leer** (z. B. 11 Klicks, 2 nötig, 1 Hindernis): (a) Die Klicks kamen schneller als
+  der Ball von Boden zu Decke braucht; jetzt mindestens seine gemessene Flugzeit plus die
+  Toleranz plus 40 ms auseinander, und Klicks in der Luft entfallen (ab Insane die Hälfte als
+  Orb-Klick). (b) Die blauen Pads saßen nach den Treppen nicht mehr auf der Fläche; das brach die
+  Regeln, und die Reparatur entfernte alle Spikes des Teils. Pads gehen jetzt mit der Fläche
+  mit, und die Reparatur nimmt erst regelwidrige Pads, dann einzelne Spikes. (c) Keine dichten
+  Gravity-Portale mehr für den Ball (sein Klick dreht schon).
+- **Jeder Klick nötig, auch bei UFO, Ball und Spider**: Wo ein Klick ausgelassen werden kann, setzt
+  der Builder einen Spike dort, wo der Weg ohne ihn entlangfährt und kein gespielter Weg (pünktlich,
+  früh, spät, alle Varianten) hinkommt, geprüft mit allen Varianten; eine Spalte darf jetzt oben
+  und unten einen Spike haben. Die Wege werden dafür mit der aktuellen Geometrie neu gespielt.
+- **Spider-Teil ganz ohne Blöcke**: Treppen, an deren Stufen eine Variante immer wieder lief,
+  ließen die Reparatur den Teil Stück für Stück leeren. Scheitert es nach den Treppen 10-mal, wird
+  der Teil wieder flach gebaut.
+- **Spider und Ball: beide Seiten gefährlich**: Spikes auf Boden und Decke überall, wo kein
+  gespielter Weg entlangfährt (die Lücken sind die Landestellen). Ein Wechsel zur falschen Zeit und
+  danach nichts drücken überlebte vorher in 28 % der Fälle, jetzt in 16 %.
+- **Unregelmäßige Strophen**: Das Zwei-Takt-Muster der Klicks fand dort kaum Stellen, die in jedem
+  Takt stark sind. Danach füllt `rhythm.ts` jede Lücke, die länger ist als 6 (Easy), 3 (Normal),
+  2,5 (Hard) oder 2 Beats (Insane, Extreme), mit der stärksten gehörten Note nahe ihrer Mitte.
+
+Gemessen (vier Songs × Normal/Hard/Extreme × zwei Seeds × mit/ohne Audio = 48 Level):
+
+|                                    | vorher                    | jetzt       |
+| ---------------------------------- | ------------------------- | ----------- |
+| längste Strecke ohne nötigen Klick | bis 32 Beats (11 s)       | ≤ 9,8 Beats |
+| Level mit Lücke > 8 Beats          | 8 (nach ersten Fixes)     | 3           |
+| unnötige Klicks                    | 2,2 % (bis 16 % je Level) | 0,8 %       |
+
+40 weitere Level (Easy bis Extreme): alle durchspielbar. Der Test zum Klick-Spielraum verlangt
+Extreme < 77 % von Hard (statt 75 %: Extreme liegt an der Grenze eines Sprungs über einen Spike).
+`GENERATOR_VERSION` ist `gd-3.7-blocks`.

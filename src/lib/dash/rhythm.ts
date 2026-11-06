@@ -123,5 +123,65 @@ export function drumClicks(
 	}
 	// (where two timing points' grids meet: not two clicks at once, nor closer than allowed)
 	clicks.sort((a, b) => a - b);
-	return clicks.filter((t, k) => k === 0 || t - clicks[k - 1] >= Math.max(80, least * 0.9));
+	const kept = clicks.filter((t, k) => k === 0 || t - clicks[k - 1] >= Math.max(80, least - 5));
+	return fillGaps(chart, notes, kept, preset, from, to, least, score, heard);
+}
+
+/** The longest stretch without a click, by difficulty (beats) */
+const LONGEST = [6, 3, 2.5, 2, 2];
+
+/**
+ * No long stretch without a click where the music plays, in the part's real bars too: where its
+ * pattern leaves one (a part whose rhythm changes from bar to bar has few slots strong in all of
+ * them: a syncopated verse, empty bars, triplets), the strongest note heard near its middle is a
+ * click as well, again and again until none is left
+ */
+function fillGaps(
+	chart: DashChart,
+	notes: DashNote[],
+	clicks: number[],
+	preset: Preset,
+	from: number,
+	to: number,
+	least: number,
+	score: (time: number) => number,
+	heard: (time: number) => boolean
+) {
+	const out = [...clicks];
+	const apart = Math.max(120, least - 5);
+	const candidates = notes
+		.map((n) => n.time)
+		.filter((t) => t > from + 150 && t < to - 250 && !musicalRest(chart, t) && heard(t));
+	for (let guard = 0; guard < 400; guard++) {
+		out.sort((a, b) => a - b);
+		const marks = [from + 150, ...out, to - 250];
+		let added = false;
+		for (let i = 1; i < marks.length && !added; i++) {
+			const a = marks[i - 1];
+			const b = marks[i];
+			const beat = chart.timing.reduce((p, q) => (q.time <= a ? q : p), chart.timing[0]).beatLength;
+			if (b - a <= LONGEST[preset.level] * beat) continue;
+			// (the part of a gap where the music rests doesn't count)
+			let rest = 0;
+			for (let t = a; t < b; t += 100) if (musicalRest(chart, t)) rest += 100;
+			if (b - a - rest <= LONGEST[preset.level] * beat) continue;
+			let best = -1;
+			let bestScore = -Infinity;
+			for (const t of candidates) {
+				if (t - a < apart || b - t < apart) continue;
+				const middle = 1 - Math.abs(t - (a + b) / 2) / (b - a);
+				const v = score(t) * (0.5 + middle);
+				if (v > bestScore) {
+					bestScore = v;
+					best = t;
+				}
+			}
+			if (best >= 0) {
+				out.push(best);
+				added = true;
+			}
+		}
+		if (!added) break;
+	}
+	return out.sort((a, b) => a - b);
 }

@@ -198,7 +198,8 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 	const intensity = sec.intensity ?? 0.5;
 	const exitX = world.xAt(sec.end - 60);
 	const landLimit = world.xAt(sec.end + 150);
-	const brush = 0.6 + speed * 0.035;
+	// (how far a spike must be from where it takes off or comes down: its half width and a bit)
+	const brush = box.w + 0.1 + speed * 0.035;
 	const rowMost = preset.level === 0 ? 2 : sec.speedIndex >= 3 ? 6 : sec.speedIndex >= 2 ? 4 : 3;
 	const aim = Math.max(2 * tolerance + 12, byIntensity(preset.window, intensity));
 	const times = clicks.filter(
