@@ -51,7 +51,7 @@ import { alignTiming } from './timing';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.4-blocks';
+export const GENERATOR_VERSION = 'gd-3.6-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -578,12 +578,25 @@ export function musicalChanges(chart: DashChart, start: number, end: number): Mu
 export type Pace = 0 | 1 | 2;
 
 /** The speed of a pace on a difficulty */
-function speedIndexOf(preset: Preset, pace: Pace) {
-	return pace === 2
-		? preset.speeds[1]
-		: pace === 0
-			? Math.max(0, preset.speeds[0] - 1)
-			: preset.speeds[0];
+function speedIndexOf(
+	preset: Preset,
+	pace: Pace,
+	/** What the music is like there: how intense, its beats a minute, how much it rests */
+	feel?: { energy: number; bpm: number; rest: number }
+) {
+	let index =
+		pace === 2
+			? preset.speeds[1]
+			: pace === 0
+				? Math.max(0, preset.speeds[0] - 1)
+				: preset.speeds[0];
+	if (feel && preset.level >= 2) {
+		// (on the fast difficulties too: a very calm part or a rest at 1x, a slow song a step
+		// slower all through)
+		if (pace === 0 && (feel.energy <= 0.45 || feel.rest >= 0.5)) index = Math.max(1, index - 1);
+		if (feel.bpm < 100) index = Math.max(1, index - 1);
+	}
+	return index;
 }
 
 /**
@@ -625,7 +638,14 @@ export function paces(
 			(varied && p.energy >= 1.05 && p.energy >= song!.low + (song!.high - song!.low) * 0.7)
 		)
 			return 2;
-		if (level >= 1 && (p.energy <= 0.6 || p.tempo <= 0.9)) return 0;
+		if (
+			level >= 1 &&
+			(p.energy <= 0.6 ||
+				p.tempo <= 0.9 ||
+				// (calm for this song: its lowest quarter, where its parts differ)
+				(varied && p.energy <= 0.9 && p.energy <= song!.low + (song!.high - song!.low) * 0.25))
+		)
+			return 0;
 		return 1;
 	});
 	const pace: Pace[] = [];
@@ -670,6 +690,10 @@ interface Part {
 	intensity: number;
 	/** How fast it goes */
 	pace: Pace;
+	/** It starts where the music changes (a drop, the kiai, a new tempo): new colours there */
+	change: boolean;
+	/** How much of it the music rests */
+	rest: number;
 }
 
 /**
@@ -971,7 +995,9 @@ function planParts(
 			energy,
 			drive,
 			intensity: partedIntensity[i],
-			pace: partedPace[i]
+			pace: partedPace[i],
+			change: f.change || f.kiai !== (parted[i - 1]?.kiai ?? f.kiai),
+			rest: f.rest
 		});
 	});
 	// The end comes on the cube
@@ -984,7 +1010,8 @@ function planParts(
 				start: at,
 				mode: 'cube',
 				mini: false,
-				intensity: last.pace === 2 ? 0.72 : 0.4
+				intensity: last.pace === 2 ? 0.72 : 0.4,
+				change: false
 			});
 			last.end = at;
 		}
@@ -1041,7 +1068,11 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	parts.forEach((part, index) => {
 		// Its pace (see `paces`: faster in the kiai, at a drop and a higher tempo, slower where
 		// it's calm; changing only where the music does)
-		const speedIndex = speedIndexOf(preset, part.pace);
+		const speedIndex = speedIndexOf(preset, part.pace, {
+			energy: part.energy,
+			bpm: 60000 / beatAt(chart.timing, (part.start + part.end) / 2).point.beatLength,
+			rest: part.rest
+		});
 		// (the small wave, twice as steep, not at the top speeds: there it's the big one, the speed
 		// stays the music's)
 		if (part.mode === 'wave' && part.mini && speedIndex > (preset.level >= 4 ? 3 : 2))
@@ -1049,7 +1080,9 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		const speed = SPEEDS[speedIndex];
 		world.segments.push({ time: part.start, x, speed });
 		const x1 = x + ((part.end - part.start) / 1000) * speed;
-		palette = (palette + 1 + Math.floor(rng() * 3)) % 8;
+		// (new colours where the music changes, not at every part: one level, not many small ones)
+		const turn = Math.floor(rng() * 3);
+		if (part.change) palette = (palette + 1 + turn) % 8;
 		world.sections.push({
 			index,
 			mode: part.mode,

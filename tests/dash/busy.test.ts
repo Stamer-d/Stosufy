@@ -53,19 +53,51 @@ test('on extreme the kind changes every few bars in the kiai, never the same par
 test('on extreme gravity turns on the bars and accents of the kiai, and pads take beats', async () => {
 	let portals = 0;
 	let pads = 0;
-	for (const seed of ['a', 'b']) {
+	// (four levels: which kinds of parts a kiai gets, and so its pads, is up to each one)
+	for (const seed of ['a', 'b', 'c', 'd']) {
 		const w = (await level('extreme', seed)).world;
 		const there = (x: number) => w.timeAt(x) >= KIAI[0] && w.timeAt(x) < KIAI[1];
 		portals += w.gravityPortals.items.filter((g) => there(g.x)).length;
 		pads += w.pads.items.filter((p) => there(p.x)).length;
 	}
-	// (two kiai of 45 s: about one turn every two bars, a pad now and then)
-	assert.ok(portals >= 30, `${portals} gravity portals`);
-	assert.ok(pads >= 4, `${pads} pads`);
+	// (four kiai of 45 s: about one turn every two bars, a pad now and then)
+	assert.ok(portals >= 50, `${portals} gravity portals`);
+	assert.ok(pads >= 8, `${pads} pads`);
 });
 
 test('the calmer difficulties keep their longer parts', async () => {
 	const l = await level('normal', 'a');
 	const parts = inKiai(l);
 	assert.ok(parts.length <= 5, parts.map((s) => s.mode).join(' '));
+});
+
+test('a change of part is no break: something to do right after it and right before the next', async () => {
+	const heads: number[] = [];
+	const tails: number[] = [];
+	for (const seed of ['a', 'b', 'c', 'd']) {
+		const l = await level('extreme', seed);
+		const w = l.world;
+		const events = [
+			...l.plan.filter((e) => e.down).map((e) => e.time),
+			...w.pads.items.map((p) => w.timeAt(p.x))
+		].sort((a, b) => a - b);
+		for (const s of inKiai(l).slice(1, -1)) {
+			const own = events.filter((t) => t >= s.start && t < s.end);
+			heads.push((own[0] ?? s.end) - s.start);
+			tails.push(s.end - (own[own.length - 1] ?? s.start));
+		}
+	}
+	const median = (list: number[]) => [...list].sort((a, b) => a - b)[list.length >> 1];
+	// (a beat is 345 ms: the first press on about the next beat, the last about a beat before)
+	assert.ok(median(heads) <= 600, `after a portal: ${median(heads)} ms`);
+	assert.ok(median(tails) <= 750, `before the next: ${median(tails)} ms`);
+});
+
+test('the colours change where the music does, not at every part', async () => {
+	for (const seed of ['a', 'b']) {
+		const parts = inKiai(await level('extreme', seed));
+		const turns = parts.slice(1).filter((s, i) => s.palette !== parts[i].palette).length;
+		// (the kiai of this song is the same all through)
+		assert.ok(turns <= 1, `${seed}: ${parts.map((s) => s.palette).join(' ')}`);
+	}
 });

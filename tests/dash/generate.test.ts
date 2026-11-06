@@ -142,7 +142,8 @@ test('harder: faster and more presses, with broader mode variety across the song
 		// (hard and insane have the same speeds; the small wave is slower on purpose)
 		for (let i = 1; i < speeds.length; i++)
 			assert.ok(speeds[i] >= speeds[i - 1] - 1, `${name}: ${speeds.map((s) => s.toFixed(1))}`);
-		assert.ok(speeds[4] > speeds[0] + 4);
+		// (a slow song is a step slower on the fast difficulties too: 2x, not 3x)
+		assert.ok(speeds[4] > speeds[0] + (SONGS[name].bpm < 100 ? 2 : 4), `${name}: ${speeds}`);
 		// (presses a second, all but the ship's: it's held, not clicked)
 		const presses = levels.map(
 			(l) =>
@@ -476,9 +477,12 @@ test('the wave keeps room: no small wave at the top speed, corridors of a few bl
 test('ship and spider parts have orbs that must be used', async () => {
 	let ship = 0;
 	let spider = 0;
+	// (both levels of each song: which kinds of parts it gets is up to each one)
 	for (const name of Object.keys(SONGS))
-		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
-			const l = await level(name, difficulty);
+		for (const [difficulty, seed] of (['hard', 'insane', 'extreme'] as const).flatMap((d) =>
+			['tests', 'room'].map((s) => [d, s] as const)
+		)) {
+			const l = await level(name, difficulty, seed);
 			const w = l.world;
 			const used = simulate(w, startState(w, l.start), l.end, l.plan).used;
 			for (const o of w.orbs.items) {

@@ -36,8 +36,8 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	const turns: number[] = [];
 	for (const note of notes) {
 		if (
-			note.time < section.start + 400 ||
-			note.time > section.end - 500 ||
+			note.time < section.start + 200 ||
+			note.time > section.end - 300 ||
 			musicalRest(ctx.chart, note.time)
 		)
 			continue;
@@ -218,7 +218,7 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 
 	// The corridor: even, or flat above or below, changing at musical phrase boundaries
 	const first = turns[0];
-	const walls: Walls = { xs: [], lo: [], hi: [], x0: first - 3, x1: world.xAt(section.end - 350) };
+	const walls: Walls = { xs: [], lo: [], hi: [], x0: first - 3, x1: world.xAt(section.end - 150) };
 	const extra = new Map<number, number>();
 	const pathAt = (px: number) => {
 		for (let k = 1; k < points.length; k++)

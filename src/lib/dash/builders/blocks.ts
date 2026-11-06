@@ -196,12 +196,13 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 	const tolerance = preset.tolerance;
 	const speed = sec.speed;
 	const intensity = sec.intensity ?? 0.5;
-	const exitX = world.xAt(sec.end - 150);
+	const exitX = world.xAt(sec.end - 60);
+	const landLimit = world.xAt(sec.end + 150);
 	const brush = 0.6 + speed * 0.035;
 	const rowMost = preset.level === 0 ? 2 : sec.speedIndex >= 3 ? 6 : sec.speedIndex >= 2 ? 4 : 3;
 	const aim = Math.max(2 * tolerance + 12, byIntensity(preset.window, intensity));
 	const times = clicks.filter(
-		(t) => t > sec.start + 300 && t < sec.end - 350 && !musicalRest(ctx.chart, t)
+		(t) => t > sec.start + 150 && t < sec.end - 250 && !musicalRest(ctx.chart, t)
 	);
 	const ends = new Map(ctx.chart.notes.map((n) => [n.time, n.end]));
 	const cube = cubeAt(sec.speedIndex);
@@ -389,7 +390,10 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 			const ok =
 				(block.upside
 					? upside(kit, block)
-					: (block.leaps ?? []).every((l, k) => jump(kit, l, k === 0))) && kit.landX + 1.5 <= exitX;
+					: (block.leaps ?? []).every((l, k) => jump(kit, l, k === 0))) &&
+				// (the last jump may go over the next part's portal: it comes down in that part, as
+				// people jump into a portal; what it jumps over stays in this one)
+				kit.landX <= landLimit;
 			// The click after it: the first once it's down
 			let next = kit.at;
 			while (next < times.length && times[next] < kit.landTime - LAND) next++;

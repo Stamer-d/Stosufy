@@ -307,13 +307,13 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 	const beats: number[] = [];
 	for (let i = 0; i < ctx.chart.timing.length; i++) {
 		const point = ctx.chart.timing[i];
-		const until = Math.min(sec.end - 300, ctx.chart.timing[i + 1]?.time ?? Infinity);
-		const first = Math.max(0, Math.ceil((sec.start + 300 - point.time) / point.beatLength));
+		const until = Math.min(sec.end - 150, ctx.chart.timing[i + 1]?.time ?? Infinity);
+		const first = Math.max(0, Math.ceil((sec.start + 150 - point.time) / point.beatLength));
 		for (let t = point.time + first * point.beatLength; t < until; t += point.beatLength)
 			beats.push(t);
 	}
 	beats.sort((a, b) => a - b);
-	const endX = world.xAt(sec.end - 300);
+	const endX = world.xAt(sec.end - 150);
 	if (beats.length < 3) return simulate(world, entry, sec.end, plan);
 
 	/** The walls: each column's floor and ceiling */

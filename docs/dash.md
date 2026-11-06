@@ -794,3 +794,89 @@ Gemessen (Kiai, Ereignisse = Portale + Abschnittswechsel + Orbs + Pads):
 
 Grenzen: Nur mit synthetischen Songs gemessen. Die Geschwindigkeit wechselt innerhalb eines
 Drops noch nicht.
+
+## 17. 0.6.86: Übergänge ohne Leerlauf, ein Level statt vieler Parts, Geschwindigkeit nach dem Song
+
+Rückmeldung zu 0.6.85: Manche Parts sind zu leer, zwischen jedem Moduswechsel passiert kurz
+nichts, alles fühlt sich wie eigene Parts an; auf Extreme nur 3× und 4×.
+
+Gemessen (Extreme, Mediane je Modus): Nach jedem Portal 0,4–0,6 s ohne Klick, davor 0,8–1,3 s;
+der Spider mit 0,9 Klicks/s und Lücken bis 3,2 s (ein Part ganz ohne Klick). Ursachen: große
+Sicherheitsabstände der Builder zum Abschnittsanfang und -ende (Flugteile 300 ms Struktur, Klicks
+erst ab 250 ms und bis 700 ms vor Ende; Cube/Robot ab 300 ms, Landung 150 ms vor Ende); die
+dichten Gravity-Portale ließen den Spider quer fallen (im Fall kann er nicht klicken); jeder
+Abschnitt bekam eine neue Farbpalette.
+
+Änderungen:
+
+- Abstände etwa gedrittelt: Flugteile bauen ab 150 ms nach dem Portal bis 150 ms vor dem nächsten,
+  Klicks ab 120 ms; Cube/Robot ab 150 ms, und der letzte Sprung darf über das nächste Portal gehen
+  (er landet im neuen Abschnitt, die Hindernisse bleiben im eigenen); Wave und Ship entsprechend.
+- Der Spider bekommt keine dichten Portale mehr (sein Klick dreht die Schwerkraft schon); seine
+  blauen Pads bleiben.
+- Neue Farben nur, wo die Musik wechselt (Drop, Kiai, Tempo, Breakdown), nicht bei jedem
+  Phrasenwechsel.
+- Geschwindigkeit: ruhig ist auch, was im untersten Viertel der Energie-Spanne des Songs liegt
+  (wie intensiv im obersten Drittel); ab Hard geht ein sehr ruhiger Teil oder eine Pause auf 1×,
+  und ein Song unter 100 BPM eine Stufe langsamer. Extreme auf den Testsongs: 90 BPM 2×; gemischt
+  2× / Break 1× / Kiai 4×; mit Build-up 2× / Build-up 3× / Drop 4×.
+
+| Extreme | vorher (Kopf / Ende / Klicks pro s) | jetzt               |
+| ------- | ----------------------------------- | ------------------- |
+| Cube    | 453 / 888 ms / 1,89                 | 345 / 600 ms / 2,06 |
+| Robot   | 469 / 893 ms / 2,16                 | 400 / 703 ms / 2,32 |
+| Ball    | 469 / 937 ms / 1,73                 | 469 / 690 ms / 1,83 |
+| Spider  | 600 / 1341 ms / 0,89                | 800 / 469 ms / 1,13 |
+| UFO     | 469 / 800 ms / 1,78                 | 800 / 468 ms / 1,72 |
+
+Tests: Übergänge (Median ≤ 600 ms nach dem Portal, ≤ 750 ms davor), Farben im Kiai; der
+Pad/Portal-Test zählt über vier Seeds (welche Modi ein Kiai bekommt, ist Zufall); ein Song unter
+100 BPM muss auf Extreme nur 2 statt 4 Blöcke/s schneller sein als auf Easy; der Build-up muss
+langsamer sein als der Drop (nicht mehr: nicht schneller als das ruhige Intro).
+`GENERATOR_VERSION` ist `gd-3.5-blocks`.
+
+Grenzen: Der Spider bleibt der Modus mit den wenigsten Klicks.
+
+## 18. 0.6.86: Neue Grafiken
+
+Ein neues Sprite-Sheet (8 × 9 Zellen, transparenter Hintergrund, mit einer Bild-KI gemacht) ersetzt
+das alte. `scripts/dash-sprites.py` schneidet es neu: Jede zusammenhängende Form gehört zu der
+Zelle, in der ihr Mittelpunkt liegt (die Bild-KI hält kein gleichmäßiges Raster ein), und jedes
+Sprite bekommt in `sprites.webp` einen eigenen Platz von 176 × 176 px (so überlappt keins ein
+anderes). Kein Magenta-Hintergrund mehr: pinke Objekte bleiben pink.
+
+Neu im Sheet und im Renderer: Dash- und Spider-Orb, rotes und blaues Pad, Robot-, Gravity-
+(normal/kopfüber), Größen- (mini/normal) und Speed-Portale (0,5× bis 4×), Robot, Spider und Swing
+als Sprites (vorher von Hand gezeichnet; die Zeichnungen bleiben, solange die Sprites laden),
+Deko (Säule, Rahmen, Lichtstrahl) für später. Die Portalfarben folgen der Farb-Logik des Genres:
+Ball rot, UFO orange (vorher orange und gelb). Die Spurfarben der acht Spieler-Würfel passen zu den
+neuen Würfeln.
+
+## 19. 0.6.86: Bausteine für die Flugteile
+
+Bisher hatten nur Cube/Robot (44) und Ship (12) eine Bibliothek fester Bausteine; UFO, Ball,
+Spider und Swing waren ein Tunnel um den Flugweg (pro Abschnitt höchstens „Säulen“ oder „offen“).
+Jetzt wählt `flight.ts` für jede Zwei-Takt-Phrase einen Baustein, wie die Cube-Bausteine: nach
+Gewicht, Schwierigkeit, Intensität und Frische (nicht dasselbe wie gerade eben), und wo der
+Rhythmus sich wiederholt, denselben wieder (Motiv).
+
+| Baustein | Modi                     | Ab     | Was es ist                                                                                                               |
+| -------- | ------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Tunnel   | alle                     | Easy   | der bisherige Tunnel um den Weg                                                                                          |
+| Offen    | UFO                      | Easy   | nur Boden, Decke und ihre Spikes                                                                                         |
+| Rohre    | UFO, Swing               | Normal | auf jedem Beat ein Tor, die Lücke um den Weg, dazwischen offen                                                           |
+| Slalom   | UFO, Swing, Ball, Spider | Normal | auf den Beats Säulen von der Seite mit mehr Platz (Ball/Spider: von der Seite, auf der sie nicht sind), dazwischen offen |
+| Zähne    | UFO, Ball, Spider        | Hard   | Spikes auf Boden und Decke überall, wo kein Weg (pünktlich, früh, spät) sie berührt: man landet in den Lücken            |
+| Enge     | UFO                      | Hard   | der Tunnel halb so weit vom Weg                                                                                          |
+| Sägen    | UFO, Swing               | Hard   | Sägen auf jedem gehörten Akzent und Beat, halb in der Wand                                                               |
+| Orbs     | UFO                      | Hard   | ein Orb auf jedem Klick (rot auf harten Akzenten, pink/schwarz wo es hoch ist), jedes nötig                              |
+
+Die Bausteine formen nur die Blöcke um den schon geprüften Weg (er ändert sich nicht); danach wird
+wie bisher jede Variante gespielt (pünktlich, früh, spät, jeder Klick einzeln), und was im Weg
+ist, geht. Nach den Treppen von Ball und Spider werden die Bausteine neu aufgelegt.
+
+40 Level (vier Songs, Easy bis Extreme, andere Seeds): alle durchspielbar. Der Test der Ship- und
+Spider-Orbs zählt jetzt über beide Seeds der Testsongs. `GENERATOR_VERSION` ist `gd-3.6-blocks`.
+
+Grenzen: Die Wave hat noch keine eigenen Bausteine (ihr Korridor wechselt schon zwischen weit,
+eng, einseitig flach).

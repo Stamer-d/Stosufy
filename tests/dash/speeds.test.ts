@@ -185,6 +185,7 @@ test('the drop after a build-up is faster, not the build-up with its stream', as
 			`${difficulty}: no part starts at the drop: ${shown}`
 		);
 		assert.ok(speedAt(l, 51000) > speedAt(l, 50000), `${difficulty}: ${shown}`);
-		assert.ok(speedAt(l, 45000) <= speedAt(l, 30000), `${difficulty}: the build-up: ${shown}`);
+		// (the build-up may be faster than the calm before it, not as fast as the drop)
+		assert.ok(speedAt(l, 45000) < speedAt(l, 51000), `${difficulty}: the build-up: ${shown}`);
 	}
 });

@@ -26,6 +26,7 @@ import {
 import {
 	byIntensity,
 	clamp,
+	freshness,
 	gravityIn,
 	jittered,
 	legalAround,
@@ -45,7 +46,30 @@ interface Column {
 	spike: 0 | 1 | -1;
 	/** A small spike (in a tight tunnel: only what slides along the surface touches it) */
 	small?: boolean;
+	/** Where the ways through it are: their lowest bottom and highest top */
+	lo: number;
+	hi: number;
 }
+
+/**
+ * What a phrase of a flying part is built as (the part changes them phrase by phrase, the same
+ * again where the rhythm repeats): a tunnel around the way; open; pipes (a gate on each beat, the
+ * gap around the way, open between); a slalom (pillars on the beats, from one side, the other
+ * side open); teeth (spikes on the surfaces wherever the way doesn't touch them: land in the
+ * gaps); a squeeze (the tunnel close around the way); saws (on the accents, by the way); orbs
+ * (the UFO: an orb on every press, each one needed)
+ */
+type Piece = 'tunnel' | 'open' | 'pipes' | 'slalom' | 'teeth' | 'squeeze' | 'saws' | 'orbs';
+const PIECES: { id: Piece; modes: string[]; level: number; weight: number }[] = [
+	{ id: 'tunnel', modes: ['ufo', 'ball', 'spider', 'swing', 'ship'], level: 0, weight: 1 },
+	{ id: 'open', modes: ['ufo'], level: 0, weight: 0.4 },
+	{ id: 'pipes', modes: ['ufo', 'swing'], level: 1, weight: 1.2 },
+	{ id: 'slalom', modes: ['ufo', 'ball', 'spider', 'swing'], level: 1, weight: 1.1 },
+	{ id: 'teeth', modes: ['ufo', 'ball', 'spider'], level: 2, weight: 0.9 },
+	{ id: 'squeeze', modes: ['ufo'], level: 2, weight: 0.7 },
+	{ id: 'saws', modes: ['ufo', 'swing'], level: 2, weight: 0.8 },
+	{ id: 'orbs', modes: ['ufo'], level: 2, weight: 0.8 }
+];
 
 /** The times the swing turns around on: its part's notes and the beats' halves */
 function onTheMusic(ctx: Context, section: Section, notes: DashNote[]) {
@@ -157,8 +181,9 @@ export function buildFlight(
 	const speed = section.speed;
 	const tolerance = preset.tolerance;
 	const box = hitbox(mode, section.mini);
-	const startX = world.xAt(section.start + 300);
-	const endX = world.xAt(section.end - 300);
+	// (right from the portal on to just before the next: no empty stretch at a change of part)
+	const startX = world.xAt(section.start + 150);
+	const endX = world.xAt(section.end - 150);
 
 	// How hard: room around the way, spikes, breathers
 	const intensity = section.intensity ?? 0.5;
@@ -174,7 +199,10 @@ export function buildFlight(
 	// (not right at a click: pressed a moment before or after the portal would go another way)
 	// In the intense parts of the hardest levels on every bar and the song's strong accents, two
 	// beats apart at least, and twice as many
-	const busy = preset.level >= 3 && intensity >= 0.72;
+	// (not the spider's: its press turns gravity already, a portal only takes presses away while
+	// it falls across)
+	const fierce = preset.level >= 3 && intensity >= 0.72;
+	const busy = fierce && mode !== 'spider';
 	if (
 		preset.level >= 1 &&
 		gravityIn(ctx, mode) &&
@@ -208,7 +236,7 @@ export function buildFlight(
 		for (const t of downbeats.sort((p, q) => p - q)) {
 			if (count >= preset.level * (busy ? 2 : 1)) break;
 			const x = world.xAt(t);
-			if (x < startX + 4 || x > endX - 6) continue;
+			if (x < startX + 2 || x > endX - 3) continue;
 			if (t - last < (busy ? Math.max(1100, beatOf(t) * 2) : 2400)) continue;
 			const pos = musicalPosition(ctx.chart, t + 1);
 			if ((!busy && pos.bar % 2 !== 0) || musicalRest(ctx.chart, t) || rng() < (busy ? 0.1 : 0.25))
@@ -242,6 +270,40 @@ export function buildFlight(
 			turned.add(portal);
 		}
 	};
+
+	// --- What each phrase is built as -----------------------------------------------------
+	const pieceOf = new Map<string, Piece>();
+	{
+		const rhythms = new Map(composePhrases(ctx.chart, clicks).map((p) => [p.key, p.rhythm]));
+		const fits = PIECES.filter((p) => p.modes.includes(mode) && p.level <= preset.level);
+		for (let t = section.start; t < section.end; t += 250) {
+			const key = musicalPosition(ctx.chart, t).key;
+			if (pieceOf.has(key)) continue;
+			if (musicalRest(ctx.chart, t + 500) || fits.length < 2) {
+				pieceOf.set(key, 'tunnel');
+				continue;
+			}
+			const motif = `flight:${mode}:${section.mini ? 1 : 0}:${rhythms.get(key) ?? ''}`;
+			const remembered = ctx.motifs.get(motif)?.[0];
+			const piece = shuffleByWeight(
+				rng,
+				fits.map((p) => ({
+					item: p.id,
+					weight:
+						p.weight *
+						freshness(ctx, `${mode}-${p.id}`) *
+						(remembered === p.id ? 5 : 1) *
+						// (the harder pieces where it's intense)
+						(p.level >= 2 ? 0.5 + intensity : 1)
+				}))
+			)[0];
+			pieceOf.set(key, piece);
+			used(ctx, `${mode}-${piece}`);
+			if (!ctx.motifs.has(motif)) ctx.motifs.set(motif, [piece]);
+		}
+	}
+	const pieceAt = (time: number) =>
+		pieceOf.get(musicalPosition(ctx.chart, time).key) ?? ('tunnel' as Piece);
 
 	// --- The way through ---------------------------------------------------------------
 	let events: InputEvent[] = [];
@@ -339,8 +401,8 @@ export function buildFlight(
 		const times = clicks.filter(
 			// (not right at the end: a click a bit off would land in the next part's first obstacle)
 			(t) =>
-				t > section.start + 250 &&
-				t < section.end - (mode === 'ball' || mode === 'spider' ? 700 : 450) &&
+				t > section.start + 120 &&
+				t < section.end - (mode === 'ball' || mode === 'spider' ? 350 : 250) &&
 				!musicalRest(ctx.chart, t) &&
 				!portalTimes.some((p) => Math.abs(p - t) < 160)
 		);
@@ -404,7 +466,7 @@ export function buildFlight(
 			// where it rolls instead of the press: it turns over on the beat by itself
 			if (
 				(mode === 'ball' || mode === 'spider') &&
-				busy &&
+				fierce &&
 				at.grounded &&
 				time - lastPad > 1500 &&
 				accentAt(ctx.chart, time) >= 0.6 &&
@@ -447,6 +509,26 @@ export function buildFlight(
 				if (mode === 'spider') continue;
 				// (green on an accent: it flips and jumps)
 				add(note && strongAt(note) ? 'green' : 'blue');
+			} else if (
+				mode === 'ufo' &&
+				pieceAt(time) === 'orbs' &&
+				time - lastOrb > 240 &&
+				at.y > floor + 1.4 &&
+				at.y < top - 1.4
+			) {
+				// (an orb on every press: up hard where it hits hard, down where it's high)
+				const middle = (floor + top) / 2;
+				const kind: OrbKind =
+					at.y > middle + 1.5
+						? preset.level >= 3
+							? 'black'
+							: 'pink'
+						: accentAt(ctx.chart, time) >= 0.6
+							? 'red'
+							: 'yellow';
+				add(kind);
+				placed++;
+				lastOrb = time;
 			} else if (note && preset.level >= 1 && placed < most && time - lastOrb > 1100) {
 				const orb = musicalOrb(note, previous, at.y);
 				if (orb) {
@@ -576,9 +658,9 @@ export function buildFlight(
 	const narrowest = close > 0.3 ? 1 : 2;
 	const anchors = new Set<number>([Math.ceil(startX)]);
 	for (const point of ctx.chart.timing) {
-		const from = Math.max(section.start + 450, point.time);
+		const from = Math.max(section.start + 200, point.time);
 		const until = Math.min(
-			section.end - 450,
+			section.end - 200,
 			ctx.chart.timing.find((p) => p.time > point.time)?.time ?? Infinity
 		);
 		const span = point.beatLength / division;
@@ -611,7 +693,8 @@ export function buildFlight(
 		const grid = close > 0.3 ? 2 : 1;
 		const low = clamp(Math.floor((lowest - margin) * grid) / grid, floor, floor + cap),
 			high = clamp(Math.ceil((highest + margin) * grid) / grid, top - cap, top);
-		for (let cell = x; cell < end; cell++) columns.push({ x: cell, low, high, spike: 0 });
+		for (let cell = x; cell < end; cell++)
+			columns.push({ x: cell, low, high, spike: 0, lo: lowest, hi: highest });
 	}
 
 	// Give the end of each two-bar phrase room (each four-bar one where it's built closer: a
@@ -707,6 +790,101 @@ export function buildFlight(
 		if ([...slalom.values()].some(Boolean)) used(ctx, 'ship-slalom');
 	}
 
+	// --- The phrases' pieces: their blocks -------------------------------------------------
+	// (where the beats are: a gate of pipes or a pillar of a slalom on each, a block or two wide)
+	const beatXs: number[] = [];
+	for (const point of ctx.chart.timing) {
+		const until = Math.min(
+			section.end - 200,
+			ctx.chart.timing.find((p) => p.time > point.time)?.time ?? Infinity
+		);
+		const from = Math.max(section.start + 200, point.time);
+		for (
+			let t = point.time + Math.ceil((from - point.time) / point.beatLength) * point.beatLength;
+			t < until;
+			t += point.beatLength
+		)
+			beatXs.push(world.xAt(t));
+	}
+	const gateWidth = speed >= 15 ? 2 : 1;
+	const onGate = (c: Column) => beatXs.some((bx) => c.x + 0.5 >= bx && c.x + 0.5 < bx + gateWidth);
+	/** Which side of a column the way rides along (the ball's and spider's): 1 floor, -1 ceiling */
+	const riding = (c: Column) => {
+		let floorSide = false;
+		let ceilingSide = false;
+		for (const p of runs[0] ?? [])
+			if (Math.abs(p.x - (c.x + 0.5)) < 0.6) {
+				if (p.y - box.h - c.low < 0.1) floorSide = true;
+				if (c.high - (p.y + box.h) < 0.1) ceilingSide = true;
+			}
+		return floorSide && !ceilingSide ? 1 : ceilingSide && !floorSide ? -1 : 0;
+	};
+	function applyPieces() {
+		const surfaces = mode === 'ball' || mode === 'spider';
+		for (const c of columns) {
+			const piece = pieceAt(world.timeAt(c.x + 0.5));
+			if (musicalRest(ctx.chart, world.timeAt(c.x + 0.5))) continue;
+			if (piece === 'open') {
+				c.low = floor;
+				c.high = top;
+			} else if (piece === 'pipes' && !onGate(c)) {
+				c.low = floor;
+				c.high = top;
+			} else if (piece === 'slalom' && surfaces) {
+				// (pillars from the side it isn't on, on the beats; between them only that side
+				// open: it rides along the other)
+				const side = riding(c);
+				if (!onGate(c) && side > 0) c.high = top;
+				else if (!onGate(c) && side < 0) c.low = floor;
+			} else if (piece === 'slalom') {
+				// (on the beats a pillar from the side with more room, up to the way; between them
+				// open)
+				if (!onGate(c)) {
+					c.low = floor;
+					c.high = top;
+				} else if (c.lo - floor >= top - c.hi) c.high = top;
+				else c.low = floor;
+			} else if (piece === 'squeeze') {
+				// (the tunnel close around the way, on the grid of half blocks)
+				const near = margin * 0.45;
+				c.low = clamp(Math.floor((c.lo - near) * 2) / 2, floor, top);
+				c.high = clamp(Math.ceil((c.hi + near) * 2) / 2, floor, top);
+			}
+		}
+	}
+	applyPieces();
+	for (const piece of new Set(columns.map((c) => pieceAt(world.timeAt(c.x + 0.5)))))
+		if (piece !== 'tunnel') used(ctx, `${mode}-${piece}-built`);
+
+	/**
+	 * Teeth: in their phrases, spikes on the floor and ceiling wherever no way (on time, early,
+	 * late) touches them or comes near: a press at the wrong time lands on one, the right one in a
+	 * gap between them
+	 */
+	function teeth() {
+		for (const c of columns) {
+			if (c.spike || pieceAt(world.timeAt(c.x + 0.5)) !== 'teeth') continue;
+			if (musicalRest(ctx.chart, world.timeAt(c.x + 0.5))) continue;
+			const near = (side: 1 | -1) =>
+				runs.some((trace) =>
+					trace.some(
+						(p) =>
+							Math.abs(p.x - (c.x + 0.5)) < box.w + 0.9 &&
+							(side > 0 ? p.y - box.h - c.low < 1.2 : c.high - (p.y + box.h) < 1.2)
+					)
+				);
+			const roomLow = c.lo - c.low;
+			const roomHigh = c.high - c.hi;
+			// (the side with more room first; the ball and spider need none: it's where they aren't)
+			const sides: (1 | -1)[] = roomLow >= roomHigh ? [1, -1] : [-1, 1];
+			for (const side of sides)
+				if (!near(side) && (side > 0 ? roomLow : roomHigh) > 1.05) {
+					c.spike = side;
+					break;
+				}
+		}
+	}
+
 	// Spikes on the surfaces where there's room, in little rows that start on the strong notes
 	// (the beats in between now and then)
 	const strong = new Set<number>();
@@ -762,6 +940,7 @@ export function buildFlight(
 	pickSpikes();
 	timingSpikes();
 	orbJumpSpikes();
+	teeth();
 
 	/**
 	 * The rules of a clean level, kept by what breaks them going (not every spike: one orb in a
@@ -980,18 +1159,29 @@ export function buildFlight(
 			simulate(world, entry, section.end, inputs, { trace });
 			runs.push(trace);
 		}
+		// (the phrases' pieces again on the stairs' surfaces)
+		applyPieces();
 		pickSpikes();
 		timingSpikes();
 		orbJumpSpikes();
+		teeth();
 		build();
 	}
 	const saws: Hazard[] = [];
-	if (style === 'open' || (close > 0.35 && mode !== 'spider' && mode !== 'swing'))
+	// (and in the phrases of saws: on every accent and beat that's heard, by the way)
+	const sawPhrases = [...pieceOf.values()].includes('saws');
+	if (style === 'open' || sawPhrases || (close > 0.35 && mode !== 'spider' && mode !== 'swing'))
 		for (const note of notes) {
 			const x = world.xAt(note.time);
-			if (!strongAt(note) || x < startX + 2 || x > endX - 2 || musicalRest(ctx.chart, note.time))
+			const phrase = pieceAt(note.time) === 'saws';
+			if (!phrase && sawPhrases && !(style === 'open' || close > 0.35)) continue;
+			const accented = phrase
+				? accentAt(ctx.chart, note.time) >= 0.45 ||
+					beatStrength(ctx.chart.timing, note.time) >= 0.65
+				: strongAt(note);
+			if (!accented || x < startX + 2 || x > endX - 2 || musicalRest(ctx.chart, note.time))
 				continue;
-			if (saws.some((saw) => Math.abs(saw.x - x) < 4)) continue;
+			if (saws.some((saw) => Math.abs(saw.x - x) < (phrase ? 2.5 : 4))) continue;
 			// In the larger room above or below the way there (off the floor's and ceiling's spikes)
 			let low = Infinity;
 			let high = -Infinity;
@@ -1178,8 +1368,8 @@ export function buildFlight(
 			let state = entry;
 			for (let k = 0; k < events.length; k++) {
 				const e = events[k];
-				if (!e.down || e.time < section.start + 250) continue;
-				if (e.time > section.end - (steered ? 1200 : 400)) continue;
+				if (!e.down || e.time < section.start + 120) continue;
+				if (e.time > section.end - (steered ? 1200 : 250)) continue;
 				if (steered) {
 					state = simulate(world, state, e.time, events);
 				} else {
