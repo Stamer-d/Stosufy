@@ -1074,7 +1074,7 @@ Tests: `tests/dash/surfaces.test.ts` prüft jetzt auch UFO (unter 17 % Lückenze
 (unter 7 %, mindestens 72 % der Drehungen nötig; der Teil fällt auf dem alten Stand durch) und
 verschiedene UFO-Höhen. `GENERATOR_VERSION` ist `gd-3.9-blocks`.
 
-## 23. Neue Grafiken: Block-Stile, Spike- und Säge-Skins, Deko, Portale
+## 23. 0.6.92: Neue Grafiken: Block-Stile, Spike- und Säge-Skins, Deko, Portale
 
 Drei neue Sprite-Sheets (mit ChatGPT erzeugt, im Stil des ersten):
 
