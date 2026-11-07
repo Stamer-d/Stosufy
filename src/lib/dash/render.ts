@@ -1,8 +1,10 @@
 // Draws the Dash mode: the level around the player, the player, its effects and the bar
-// of how far it got. The player, its vehicles, spikes, saws, orbs, pads, portals and
-// checkpoints are sprites (sprites.webp, cut from the sprite sheet by
-// scripts/dash-sprites.py); blocks, the ground and the scenery are drawn here, in colours
-// that change with every part. Until the sprites have loaded, everything is drawn.
+// of how far it got. The player, its vehicles, blocks, spikes, saws, orbs, pads, portals,
+// speed signs, checkpoints and the things in the background are sprites (sprites.webp, cut
+// from the sprite sheets by scripts/dash-sprites.py); each part has a look (LOOKS: a style of
+// blocks tinted in its colours, its spikes and saws), the kiai its own spikes and saws. The
+// portals' particles, the spider's and robot's legs, the ground and the scenery are drawn
+// here. Until the sprites have loaded, everything is drawn.
 
 import { wallAt, hitbox, type Mode, type PlayerState, type Section, type Solid } from './physics';
 import type { Level } from './generate';
@@ -24,6 +26,72 @@ function sprites() {
 
 /** How many blocks high the view is */
 const VIEW = 11;
+
+/**
+ * The looks a part can have: its blocks (a style of the tile sheet, tinted in the part's colours;
+ * none: the drawn tile), its spikes (big, small; tinted: grey ones in the part's light) and its
+ * saws (small, big). Each part takes one by its colours (they change where the music does), the
+ * kiai its own spikes and saws: flames and red saws
+ */
+interface Look {
+	tiles: string | null;
+	spike: [SpriteName, SpriteName];
+	tintSpike?: boolean;
+	saw: [SpriteName, SpriteName];
+	/** What stands in the background (far, dim) */
+	props: SpriteName[];
+}
+const LOOKS: Look[] = [
+	{
+		tiles: null,
+		spike: ['spike', 'spikeSmall'],
+		saw: ['saw', 'sawBig'],
+		props: ['decoCog', 'decoAntenna', 'decoLamp', 'decoSign']
+	},
+	{
+		tiles: 'tech',
+		spike: ['techSpike', 'techSpike'],
+		tintSpike: true,
+		saw: ['sawGear', 'sawGear'],
+		props: ['decoAntenna', 'decoSpeaker', 'decoCog', 'decoPipe']
+	},
+	{
+		tiles: 'brick',
+		spike: ['spikeThorn', 'spikeThornSmall'],
+		saw: ['sawMace', 'sawMace'],
+		props: ['decoLamp', 'decoMushroom', 'decoSign', 'decoLamp']
+	},
+	{
+		tiles: 'ice',
+		spike: ['spikeCrystal', 'spikeCrystalSmall'],
+		saw: ['sawCrystal', 'sawCrystal'],
+		props: ['decoCloud', 'decoLamp', 'decoMushroom', 'decoCogSmall']
+	},
+	{
+		tiles: 'metal',
+		spike: ['spikeSteel', 'spikeSteelSmall'],
+		saw: ['sawStar', 'sawHook'],
+		props: ['decoPipe', 'decoCog', 'decoCogSmall', 'decoAntenna']
+	},
+	{
+		tiles: 'grid',
+		spike: ['gridSpike', 'gridSpike'],
+		tintSpike: true,
+		saw: ['sawEnergy', 'sawEnergy'],
+		props: ['decoSpeaker', 'decoNote', 'decoSign', 'decoCubes']
+	},
+	{
+		tiles: 'carved',
+		spike: ['carvedSpike', 'carvedSpike'],
+		tintSpike: true,
+		saw: ['sawEye', 'sawEye'],
+		props: ['decoMushroom', 'decoLamp', 'decoCubes', 'decoSign']
+	}
+];
+const KIAI_SPIKES: [SpriteName, SpriteName] = ['spikeFlame', 'spikeFlameSmall'];
+const KIAI_SAWS: [SpriteName, SpriteName] = ['sawRed', 'sawRed'];
+/** What floats in the sky, far behind */
+const SKY: SpriteName[] = ['decoNote', 'decoSparkle', 'decoCloud', 'decoCubes'];
 
 export interface Palette {
 	top: string;
@@ -92,7 +160,7 @@ interface Particle {
 	max: number;
 	size: number;
 	color: string;
-	kind: 'square' | 'ring' | 'glow';
+	kind: 'square' | 'ring' | 'glow' | 'shock';
 	gravity: number;
 	spin: number;
 }
@@ -161,6 +229,13 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	let lastMode: Mode | null = null;
 	let lastKiai = false;
 	let zoom = 0;
+	/** Which look each part has: from the level's name (the same level, the same looks) */
+	let lookLevel: Level | null = null;
+	let lookSeed = 0;
+	const lookOf = (section: Section) =>
+		LOOKS[
+			(lookSeed + section.palette * 5 + Math.floor(section.palette / LOOKS.length)) % LOOKS.length
+		];
 	/**
 	 * The beatmap's background: the level's palettes from its colours, and the picture itself
 	 * soft and dim behind the level (null: the usual palettes, no picture)
@@ -233,6 +308,40 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		return true;
 	}
 
+	/**
+	 * A grey sprite in a colour (multiplied, its own shading kept), made once per size and colour
+	 * (in coarse steps, so a fade between two palettes doesn't make one every frame)
+	 */
+	const tintCache = new Map<string, HTMLCanvasElement>();
+	function tinted(name: SpriteName, color: string, w: number, h: number) {
+		const image = sprites();
+		if (!image) return null;
+		const step = (v: number) => Math.min(255, Math.round(v / 20) * 20);
+		const c = `#${hex(color)
+			.map((v) => step(v).toString(16).padStart(2, '0'))
+			.join('')}`;
+		const pw = Math.max(8, 2 ** Math.ceil(Math.log2(Math.max(1, w))));
+		const ph = Math.max(8, Math.round((pw * h) / Math.max(1, w)));
+		const key = `${name}:${c}:${pw}:${ph}`;
+		const cached = tintCache.get(key);
+		if (cached) return cached;
+		if (tintCache.size > 160) tintCache.clear();
+		const out = document.createElement('canvas');
+		out.width = pw;
+		out.height = ph;
+		const t = out.getContext('2d')!;
+		const [fx, fy, fw, fh] = SPRITES[name];
+		t.drawImage(image, fx, fy, fw, fh, 0, 0, pw, ph);
+		t.globalCompositeOperation = 'multiply';
+		t.fillStyle = c;
+		t.fillRect(0, 0, pw, ph);
+		// (its own shape again: the colour only where it is)
+		t.globalCompositeOperation = 'destination-in';
+		t.drawImage(image, fx, fy, fw, fh, 0, 0, pw, ph);
+		tintCache.set(key, out);
+		return out;
+	}
+
 	function spawn(p: Partial<Particle> & { x: number; y: number }) {
 		particles.push({
 			vx: 0,
@@ -273,6 +382,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			spawn({ x, y, kind: 'glow', max: 0.35, size: 2.2, color: icon.primary });
 		} else if (name === 'orb' || name === 'pad') {
 			spawn({ x, y, kind: 'ring', max: 0.35, size: 1.6, color: '#fff3a0' });
+			spawn({ x, y, kind: 'shock', max: 0.3, size: 1.5, color: '#ffffff' });
 		} else if (name === 'gravity') {
 			spawn({
 				x,
@@ -526,8 +636,32 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	}
 
 	/** Hills far away behind the level, and in the kiai beams of light on the beat */
-	function scenery(p: Palette, floor: number, pulse: number, kiai: boolean) {
+	function scenery(
+		p: Palette,
+		floor: number,
+		pulse: number,
+		kiai: boolean,
+		look: Look = LOOKS[0],
+		time = 0
+	) {
 		const base = sy(floor);
+		// Far in the sky, drifting slowly: notes, sparkles, clouds (dim)
+		if (sprites()) {
+			const spacing = 8;
+			const offset = camX * 0.12;
+			const first = Math.floor(offset / spacing) - 1;
+			ctx.globalAlpha = 0.22 + pulse * 0.08;
+			for (let k = first; k < first + width / scale / spacing + 3; k++) {
+				const n = noise(k * 4.7 + 9);
+				if (n < 0.35) continue;
+				const name = SKY[Math.floor(noise(k * 2.3) * SKY.length)];
+				const bob = Math.sin(time / 900 + k) * scale * 0.25;
+				const cx = (k * spacing - offset + n * 4) * scale;
+				const cy = height * (0.12 + noise(k * 6.1) * 0.35) + bob;
+				sprite(name, cx, cy, scale * (0.8 + n * 0.8));
+			}
+			ctx.globalAlpha = 1;
+		}
 		const layers = [
 			{ speed: 0.25, cell: 7, high: 4.2, color: mix(p.bottom, p.top, 0.35), alpha: 0.55 },
 			{ speed: 0.5, cell: 4.5, high: 2.6, color: mix(p.bottom, '#000000', 0.25), alpha: 0.7 }
@@ -562,6 +696,25 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.globalAlpha = layer.alpha;
 			ctx.fillStyle = layer.color;
 			ctx.fill();
+			ctx.globalAlpha = 1;
+		}
+		// On the far hills, things of the part's look: small, dim, well behind the level (nothing
+		// spiky: nothing there may look like something in the way)
+		if (sprites() && base > 0 && base < height + scale * 4) {
+			const spacing = 6.5;
+			const offset = camX * 0.3;
+			const first = Math.floor(offset / spacing) - 1;
+			ctx.globalAlpha = 0.28;
+			for (let k = first; k < first + width / scale / spacing + 3; k++) {
+				const n = noise(k * 8.3 + 4);
+				if (n < 0.4) continue;
+				const name = look.props[Math.floor(noise(k * 1.9 + 7) * look.props.length)];
+				const [, , fw, fh] = SPRITES[name];
+				const w = scale * (0.7 + n * 0.5);
+				const h = Math.min((w * fh) / fw, scale * 1.7);
+				const cx = (k * spacing - offset + n * 2) * scale;
+				sprite(name, cx, base - scale * (2.2 + n * 0.8) - h / 2, (h * fw) / fh, h);
+			}
 			ctx.globalAlpha = 1;
 		}
 	}
@@ -678,7 +831,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		y1: number,
 		p: Palette,
 		pulse: number,
-		style: number
+		style: number,
+		look: Look = LOOKS[0],
+		/** Whether a block's side is open there: nothing else (no block, floor or ceiling) on it */
+		open: (x: number, y: number) => boolean = () => true
 	) {
 		const left = sx(x0);
 		const right = sx(x1);
@@ -686,6 +842,11 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const bottom = sy(y0);
 		if (right - left <= 0 || bottom - top <= 0) return;
 		const image = tile(p);
+		// (a style of the tile sheet in the part's colours: its tops, undersides, slabs and pillars)
+		const themed = look.tiles && sprites() ? look.tiles : null;
+		const tint = mix(mix(p.ground, p.accent, 0.25), p.bottom, 0.3);
+		const slab = y1 - y0 < 0.99;
+		const pillar = !slab && x1 - x0 <= 1.01 && y1 - y0 >= 1.99;
 		ctx.save();
 		ctx.beginPath();
 		ctx.rect(left, top, right - left, bottom - top);
@@ -697,6 +858,19 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			if (ty > height || ty + scale < 0) continue;
 			for (let x = fromX; x < toX; x++) {
 				const tx = sx(x);
+				if (themed) {
+					let part = 'Block';
+					if (slab) part = 'Slab';
+					else if (pillar) part = 'Pillar';
+					else if (y + 1 >= y1 - 1e-6 && open(x + 0.5, y1 + 0.5)) part = 'Top';
+					else if (y <= y0 + 1e-6 && open(x + 0.5, y0 - 0.5)) part = 'Bottom';
+					const high = slab ? (y1 - y0) * scale : scale;
+					const look = tinted(`${themed}${part}` as SpriteName, tint, scale, high);
+					if (look) {
+						ctx.drawImage(look, tx, slab ? sy(y1) : ty, scale + 0.6, high + 0.6);
+						continue;
+					}
+				}
 				ctx.drawImage(image, tx, ty, scale + 0.6, scale + 0.6);
 				// Some blocks light up on the beat
 				const n = noise(x * 7.3 + y * 13.1);
@@ -708,7 +882,15 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 		ctx.restore();
 		// Floating platforms: chains holding them up
-		if (style === 1) {
+		if (style === 1 && sprites()) {
+			for (let x = Math.ceil(x0) + 0.5; x < x1; x += 3) {
+				if (x < camX - 1 || x > camX + width / scale + 1) continue;
+				const [, , fw, fh] = SPRITES.decoChain;
+				const w = scale * 0.32;
+				const h = (w * fh) / fw;
+				for (let k = 0; k < 3; k++) sprite('decoChain', sx(x), sy(y1) - h * (k + 0.5), w, h);
+			}
+		} else if (style === 1) {
 			ctx.strokeStyle = rgba('#ffffff', 0.25);
 			ctx.lineWidth = Math.max(1, scale * 0.05);
 			for (let x = Math.ceil(x0) + 0.5; x < x1; x += 3) {
@@ -803,15 +985,40 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.stroke();
 	}
 
-	function spike(x: number, y: number, dir: 1 | -1, small: boolean, p: Palette, pulse: number) {
+	function spike(
+		x: number,
+		y: number,
+		dir: 1 | -1,
+		small: boolean,
+		p: Palette,
+		pulse: number,
+		look: [SpriteName, SpriteName] = ['spike', 'spikeSmall'],
+		tint = false
+	) {
 		const h = (small ? 0.5 : 1) * dir;
 		const w = small ? 0.42 : 0.5;
 		ctx.save();
 		ctx.translate(sx(x), sy(y));
 		ctx.scale(1, dir);
-		const drawn = small
-			? sprite('spikeSmall', 0, -scale * 0.28, scale * 0.9, scale * 0.58)
-			: sprite('spike', 0, -scale * 0.51, scale * 1.04, scale * 1.04);
+		let drawn: boolean;
+		let [name, sw, sh, oy] = small
+			? [look[1], scale * 0.9, scale * 0.58, -scale * 0.28]
+			: [look[0], scale * 1.04, scale * 1.04, -scale * 0.51];
+		if (name !== 'spike' && name !== 'spikeSmall') {
+			// (the other looks keep their shape: as wide as the spike, at most a bit higher, standing
+			// on the surface)
+			const [, , fw, fh] = SPRITES[name];
+			const most = sh * 1.15;
+			sh = Math.min((sw * fh) / fw, most);
+			sw = (sh * fw) / fh;
+			oy = -sh / 2 + scale * 0.01;
+		}
+		if (tint) {
+			// (a grey one of the tile sheet, in the part's light)
+			const image = tinted(name, mix(p.accent, '#ffffff', 0.25), sw, sh);
+			if (image) ctx.drawImage(image, -sw / 2, oy - sh / 2, sw, sh);
+			drawn = !!image;
+		} else drawn = sprite(name, 0, oy, sw, sh);
 		ctx.restore();
 		if (drawn) {
 			// It lights up on the beat
@@ -856,7 +1063,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		p: Palette,
 		pulse: number,
 		time: number,
-		floating = false
+		floating = false,
+		look: [SpriteName, SpriteName] = ['saw', 'sawBig']
 	) {
 		const r = radius * scale;
 		ctx.save();
@@ -873,7 +1081,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillStyle = halo;
 		ctx.fillRect(-r * 1.6, -r * 1.6, r * 3.2, floating ? r * 3.2 : r * 1.6);
 		ctx.rotate((time / 1000) * 5);
-		if (sprite(radius >= 1 ? 'sawBig' : 'saw', 0, 0, r * 2.15, r * 2.15)) {
+		if (sprite(radius >= 1 ? look[1] : look[0], 0, 0, r * 2.15, r * 2.15)) {
 			ctx.restore();
 			return;
 		}
@@ -926,7 +1134,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			red: ['#ff3b3b', '#ffc2c2'],
 			green: ['#4dff6a', '#d4ffd9'],
 			black: ['#1b1b24', '#8a8aa0'],
-			dash: ['#ff4fd8', '#ffd0ef'],
+			dash: ['#4dff6a', '#d4ffd9'],
 			spider: ['#b14dff', '#ecd6ff']
 		};
 		const [main, light] = colors[kind] ?? colors.yellow;
@@ -940,9 +1148,14 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillRect(cx - r * 2.4, cy - r * 2.4, r * 4.8, r * 4.8);
 		const look = ORB_SPRITES[kind];
 		if (look) {
+			ctx.save();
 			ctx.globalAlpha = used ? 0.35 : 1;
-			const drawn = sprite(look, cx, cy, r * 2.9);
-			ctx.globalAlpha = 1;
+			ctx.translate(cx, cy);
+			// (a dash orb's arrow the way it dashes; a spider orb turning)
+			if (kind === 'dash') ctx.rotate(-Math.atan(dir * 0.45));
+			if (kind === 'spider') ctx.rotate(Math.sin(time / 300) * 0.15);
+			const drawn = sprite(look, 0, 0, r * (kind === 'dash' || kind === 'spider' ? 2.5 : 2.9));
+			ctx.restore();
 			if (drawn) return;
 		}
 		ctx.beginPath();
@@ -1054,10 +1267,16 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		red: 'orbRed',
 		blue: 'orbBlue',
 		green: 'orbGreen',
-		black: 'orbBlack'
+		black: 'orbBlack',
+		dash: 'orbDash',
+		spider: 'orbSpider'
 	};
-	/** (The sheet has no red and blue pads: those are drawn) */
-	const PAD_SPRITES: Record<string, SpriteName> = { yellow: 'padYellow', pink: 'padPink' };
+	const PAD_SPRITES: Record<string, SpriteName> = {
+		yellow: 'padYellow',
+		pink: 'padPink',
+		red: 'padRed',
+		blue: 'padBlue'
+	};
 	const PORTAL_SPRITES: Partial<Record<Mode, SpriteName>> = {
 		cube: 'portalCube',
 		ship: 'portalShip',
@@ -1065,7 +1284,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		wave: 'portalWave',
 		ufo: 'portalUfo',
 		swing: 'portalSwing',
-		spider: 'portalSpider'
+		spider: 'portalSpider',
+		robot: 'portalRobot'
 	};
 
 	const PORTAL_COLORS: Record<Mode, string> = {
@@ -1110,15 +1330,29 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				ctx.lineWidth = scale * lw;
 				ctx.stroke();
 			}
-		// Sparks drawn in
-		for (let k = 0; k < 6; k++) {
-			const f = (((time / 700 + k / 6) % 1) + 1) % 1;
-			const a = k * 1.7 + 0.3;
-			const d = (1 - f) * 1.6;
-			ctx.fillStyle = rgba(color, f);
-			const px = cx + Math.cos(a) * d * scale * 0.6;
-			const py = cy + Math.sin(a) * d * scale * 1.1;
-			ctx.fillRect(px - scale * 0.06, py - scale * 0.06, scale * 0.12, scale * 0.12);
+		// Its particles (drawn here, not in the picture): squares drawn in toward the ring,
+		// turning as they go, some white; and a few rising through it
+		for (let k = 0; k < 14; k++) {
+			const f = (((time / (620 + (k % 4) * 90) + k / 14) % 1) + 1) % 1;
+			const a = k * 2.39 + time / 2400;
+			const d = (1 - f) * 1.7 + 0.25;
+			const px = cx + Math.cos(a) * d * scale * 0.62;
+			const py = cy + Math.sin(a) * d * scale * 1.15;
+			const size = scale * (0.07 + (k % 3) * 0.035) * (0.6 + f * 0.6);
+			ctx.save();
+			ctx.translate(px, py);
+			ctx.rotate(f * 4 + k);
+			ctx.fillStyle = rgba(k % 4 ? color : '#ffffff', Math.sin(f * Math.PI) * 0.95);
+			ctx.fillRect(-size / 2, -size / 2, size, size);
+			ctx.restore();
+		}
+		for (let k = 0; k < 4; k++) {
+			const f = (((time / 1100 + k / 4) % 1) + 1) % 1;
+			const px = cx + Math.sin(k * 1.9 + time / 500) * rx * 0.6;
+			const py = cy + ry * (0.9 - f * 1.8);
+			const size = scale * 0.06;
+			ctx.fillStyle = rgba('#ffffff', Math.sin(f * Math.PI) * 0.7);
+			ctx.fillRect(px - size / 2, py - size / 2, size, size);
 		}
 		// Its name (in its colour), and how it's played the first time it comes
 		ctx.textAlign = 'center';
@@ -1140,7 +1374,9 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	/** A gravity portal: yellow turns it upside down, blue back; arrows the way it then falls */
 	function gravityPortal(x: number, y: number, gravity: 1 | -1, time: number) {
 		const color = gravity < 0 ? '#ffe14d' : '#3ad7ff';
-		portal(x, y, color, time, '');
+		portal(x, y, color, time, '', gravity < 0 ? 'portalGravityUp' : 'portalGravityDown');
+		// (the picture has its arrows; drawn while it loads)
+		if (sprites()) return;
 		const cx = sx(x);
 		ctx.lineJoin = 'round';
 		ctx.lineCap = 'round';
@@ -1162,9 +1398,32 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 	}
 
-	function speedPortal(x: number, y: number, index: number) {
+	function speedPortal(x: number, y: number, index: number, time = 0) {
 		const colors = ['#ffb347', '#5ad1ff', '#5dff8b', '#ff5ec4', '#ff4040'];
 		const color = colors[index] ?? '#ffffff';
+		const look = `speed${Math.max(0, Math.min(4, index))}` as SpriteName;
+		if (sprites()) {
+			const cx = sx(x);
+			const cy = sy(y);
+			const halo = ctx.createRadialGradient(cx, cy, scale * 0.2, cx, cy, scale * 1.4);
+			halo.addColorStop(0, rgba(color, 0.35));
+			halo.addColorStop(1, rgba(color, 0));
+			ctx.fillStyle = halo;
+			ctx.fillRect(cx - scale * 1.4, cy - scale * 1.4, scale * 2.8, scale * 2.8);
+			// (a little forward and back on the beat of its own)
+			const nudge = Math.sin(time / 160) * scale * 0.05 * (index === 0 ? -1 : 1);
+			sprite(look, cx + nudge, cy, scale * 1.7);
+			// Streaks the way it pushes
+			for (let k = 0; k < 5; k++) {
+				const f = (((time / 450 + k / 5) % 1) + 1) % 1;
+				const dir = index === 0 ? -1 : 1;
+				const px = cx + dir * (f - 0.5) * scale * 2.2;
+				const py = cy + (k - 2) * scale * 0.22;
+				ctx.fillStyle = rgba(color, Math.sin(f * Math.PI) * 0.8);
+				ctx.fillRect(px - scale * 0.15, py - scale * 0.025, scale * 0.3, scale * 0.05);
+			}
+			return;
+		}
 		const arrows = index === 0 ? 1 : index;
 		const cx = sx(x);
 		const cy = sy(y);
@@ -1325,6 +1584,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.lineWidth = s * 0.055;
 			ctx.stroke();
 		}
+		// The body from the sprites (its legs above, drawn: they walk); drawn while it loads
+		if (sprite('spiderBody', 0, -s * 0.02, s * 0.95)) return;
 		rider(icon, -s * 0.02, -s * 0.3, 0.48);
 		const body = ctx.createLinearGradient(0, -s * 0.28, 0, s * 0.22);
 		body.addColorStop(0, '#3d4290');
@@ -1461,6 +1722,8 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			ctx.fillStyle = '#ffb347';
 			ctx.fill();
 		}
+		// The body from the sprites (its legs above, drawn: they walk); drawn while it loads
+		if (sprite('robotBody', 0, -s * 0.1, s * 0.9)) return;
 		rider(icon, 0, -s * 0.12, 0.7);
 	}
 
@@ -1709,7 +1972,13 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			const alpha = 1 - f;
 			const x = sx(p.x);
 			const y = sy(p.y);
-			if (p.kind === 'ring') {
+			if (p.kind === 'shock') {
+				// (the burst from the sprites, growing and fading)
+				ctx.globalAlpha = alpha;
+				const size = p.size * scale * (0.5 + ease(f));
+				sprite('fxShock', x, y, size, size);
+				ctx.globalAlpha = 1;
+			} else if (p.kind === 'ring') {
 				ctx.beginPath();
 				ctx.arc(x, y, p.size * scale * ease(f), 0, Math.PI * 2);
 				ctx.strokeStyle = rgba(p.color, alpha * 0.9);
@@ -1797,6 +2066,12 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const world = level.world;
 		const section = world.sectionAt(state.time);
 		if (lastMode !== state.mode) lastMode = state.mode;
+		if (lookLevel !== level) {
+			lookLevel = level;
+			lookSeed = 0;
+			for (const ch of `${level.title}:${level.version}`)
+				lookSeed = (lookSeed * 31 + ch.charCodeAt(0)) % 9973;
+		}
 		// The drop: a flash and a kick of the camera
 		if (section.kiai && !lastKiai && !frame.waiting && time > level.start + 500) {
 			flash = 1;
@@ -1830,7 +2105,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		if (shaking) ctx.translate((Math.random() - 0.5) * shaking, (Math.random() - 0.5) * shaking);
 		background(p, pulse, section.kiai);
 		decorations(p, time, pulse, section.kiai);
-		scenery(p, section.floor, pulse, section.kiai);
+		scenery(p, section.floor, pulse, section.kiai, lookOf(section), time);
 		// Collision surfaces stay at their actual world heights throughout camera transitions.
 		if (section.ceil !== null) ground(p, section.ceil, -1, pulse, camX);
 		ground(p, section.floor, 1, pulse, camX);
@@ -1846,8 +2121,17 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 
 		// Blocks
 		const solids = world.solids.near(left, right);
+		/** Nothing at a point: no block, nor below the floor or above the ceiling */
+		const open = (x: number, y: number) => {
+			const sec = world.sectionAt(world.timeAt(x));
+			if (y < sec.floor || (sec.ceil !== null && y > sec.ceil)) return false;
+			return !solids.some((o) => x > o.x0 && x < o.x1 && y > o.y0 && y < o.y1);
+		};
 		outlines(solids, section, p, pulse, true);
-		for (const s of solids) solid(s.x0, s.x1, s.y0, s.y1, p, pulse, s.style);
+		for (const s of solids) {
+			const sec = world.sectionAt(world.timeAt((s.x0 + s.x1) / 2));
+			solid(s.x0, s.x1, s.y0, s.y1, p, pulse, s.style, lookOf(sec), open);
+		}
 		outlines(solids, section, p, pulse, false);
 
 		// Spikes and saws (their outlines glow together)
@@ -1868,7 +2152,18 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.lineWidth = Math.max(2, scale * 0.18);
 		ctx.stroke();
 		for (const h of spikes) {
-			spike(h.x, h.y, h.dir, h.kind === 'small', p, pulse);
+			const sec = world.sectionAt(world.timeAt(h.x));
+			const look = lookOf(sec);
+			spike(
+				h.x,
+				h.y,
+				h.dir,
+				h.kind === 'small',
+				p,
+				pulse,
+				sec.kiai ? KIAI_SPIKES : look.spike,
+				!sec.kiai && !!look.tintSpike
+			);
 		}
 		for (const h of world.hazards.near(left, right)) {
 			if (h.kind !== 'saw') continue;
@@ -1876,7 +2171,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			const onSurface =
 				Math.abs(h.y - sec.floor) < 0.01 ||
 				world.solids.near(h.x, h.x).some((s) => Math.abs(s.y1 - h.y) < 0.01);
-			saw(h.x, h.y, h.size, p, pulse, time, !onSurface);
+			saw(h.x, h.y, h.size, p, pulse, time, !onSurface, sec.kiai ? KIAI_SAWS : lookOf(sec).saw);
 		}
 
 		// Pads, orbs, portals
@@ -1927,10 +2222,11 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 					Math.max(1.6, portalItem.y),
 					portalItem.mini ? '#ff6ad5' : '#5dff8b',
 					time,
-					label
+					label,
+					portalItem.mini ? 'portalMini' : 'portalBig'
 				);
 			} else if (!level.portals.some((p) => p.x === portalItem.x && p.kind !== 'speed')) {
-				speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1);
+				speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1, time);
 			}
 		}
 		for (const g of world.gravityPortals.near(left, right)) {

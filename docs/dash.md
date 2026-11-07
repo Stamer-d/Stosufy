@@ -1073,3 +1073,44 @@ alle durchspielbar, unnötige Klicks 0,9 % (vorher 0,8 %).
 Tests: `tests/dash/surfaces.test.ts` prüft jetzt auch UFO (unter 17 % Lückenzeit) und Swing
 (unter 7 %, mindestens 72 % der Drehungen nötig; der Teil fällt auf dem alten Stand durch) und
 verschiedene UFO-Höhen. `GENERATOR_VERSION` ist `gd-3.9-blocks`.
+
+## 23. Neue Grafiken: Block-Stile, Spike- und Säge-Skins, Deko, Portale
+
+Drei neue Sprite-Sheets (mit ChatGPT erzeugt, im Stil des ersten):
+
+- `scripts/dash-sprite-sheet-objects.webp`: Tempo-Schilder (0,5× bis 4×), rotes und blaues Pad,
+  Dash- und Spider-Orb, Schockwelle, je vier Spike-Skins (Kristall, Dorn, Stahl, Flamme, groß und
+  klein), acht Sägen, Deko (Kette, Zahnräder, Lampe, Lautsprecher, Note, Schild, Pilz, Rohr,
+  Antenne, Würfel, Funkeln, Wolke, …).
+- `scripts/dash-sprite-sheet-tiles.webp`: sechs Block-Stile in Grau (Tech, Ziegel, Eis, Metall,
+  Gitter, Ornament), je Block, Oberseite, Unterseite, Ecke, Platte, Säule, Spike, Deko.
+- `scripts/dash-sprite-sheet-portals.webp`: alle Portale ohne eingebackene Partikel (Modus,
+  Robot, Gravitation hoch/runter, klein/groß) und die Körper von Spider und Robot ohne Beine.
+
+`scripts/dash-sprites.py` schneidet jetzt mehrere Sheets (mit Rasterlinien oder gleichmäßigem
+Raster), nimmt den Hintergrund aus dem ganzen Sheet, entfernt Teile, die aus Nachbarzellen
+hineinragen, und Pixelreste, behält bei Portalen nur den Ring, verkleinert auf höchstens 168 px
+und packt alles eng in einen Atlas (1024 × 2584, 132 Sprites; ungenutzte Felder des ersten Sheets
+fallen weg). Ship- und Spider-Portal werden weiter aus dem Wave-Portal umgefärbt.
+
+Im Spiel (`render.ts`):
+
+- **Ein Look pro Teil** (`LOOKS`): der Block-Stil (grau, im Spiel in die Farben des Teils
+  eingefärbt; Oberseiten, Unterseiten, Platten und Säulen je nachdem, was frei liegt), die
+  passenden Spikes und Sägen und die Deko im Hintergrund; oder das bisherige gezeichnete. Der Look
+  hängt an der Farbwelt des Teils (wechselt also, wo die Musik wechselt) und am Level (dasselbe
+  Level sieht immer gleich aus). Im Kiai Flammen-Spikes und rote Sägen.
+- Spikes anderer Looks behalten ihre Form (so breit wie der Spike, auf der Fläche stehend); die
+  Hitboxen sind unverändert.
+- **Portale** aus dem neuen Sheet; ihre Partikel zeichnet das Spiel (Quadrate, die sich zum Ring
+  drehen und hineinziehen, dazu aufsteigende Funken). Gravitations- und Größenportale,
+  Tempo-Schilder (mit Schlieren in Schubrichtung), rotes und blaues Pad, Dash- und Spider-Orb
+  haben jetzt Sprites; beim Auslösen eines Orbs oder Pads eine Schockwelle.
+- **Spider und Robot:** Körper aus dem Sheet, die Beine weiter im Code animiert (ein
+  Frame-Sheet aus einem Bildgenerator bleibt von Bild zu Bild selten gleich).
+- **Hintergrund:** Noten, Funkeln, Wolken und Würfel weit hinten am Himmel; auf den fernen Hügeln
+  Dinge des Looks (klein und blass, nichts Spitzes, damit nichts wie ein Hindernis aussieht).
+  Schwebende Plattformen hängen an Ketten aus dem Sheet.
+
+Geprüft mit Bildern aus einem Level (Extreme, Testsong mit Kiai): Block-Stile, Spikes, Portale
+und Partikel; alle Dash-Tests grün, `npm run check` und der Web-Build laufen.

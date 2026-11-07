@@ -1,8 +1,9 @@
-# Cuts the Dash sprite sheet (8 × 7 cells on a magenta background, made with an image AI)
-# into the sprites the Dash renderer draws: the background goes, the glow around the outlines
-# stays (as the colour it was before the magenta got into it), and every sprite's box is
-# written to src/lib/dash/sprites.ts.
-#   python scripts/dash-sprites.py <sheet.png|webp>
+# Cuts the Dash sprite sheets (made with an image AI, on a magenta background) into the sprites
+# the Dash renderer draws: the background goes, the glow around the outlines stays (as the colour
+# it was before the magenta got into it), the portals keep only their ring (no specks around
+# them: the game draws its own particles), and every sprite is packed into one atlas,
+# src/lib/dash/sprites.webp, with its box written to src/lib/dash/sprites.ts.
+#   python scripts/dash-sprites.py
 # Needs Pillow, numpy and scipy.
 
 import colorsys
@@ -17,18 +18,55 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT_IMAGE = ROOT / 'src/lib/dash/sprites.webp'
 OUT_MAP = ROOT / 'src/lib/dash/sprites.ts'
 
-# What is in which cell, row by row
-NAMES = [
+# The first sheet (8 × 7 cells with thin grid lines): what is in which cell, row by row (None:
+# not used, its portals have specks baked in: the portal sheet has them clean)
+FIRST = [
 	['icon0', 'icon1', 'icon2', 'icon3', 'icon4', 'icon5', 'icon6', 'icon7'],
 	['ship', 'ufo', 'ball', 'wave', 'swing', 'spider', None, None],
-	['tile', 'tileTop', 'tileCorner', 'slab', 'chain', 'slopeUp', 'slopeDown', 'tileOutline'],
-	['spike', 'spikeSmall', 'spikeDown', 'spikes3', 'saw', 'sawBig', 'sawHalf', 'thorns'],
+	[None] * 8,
+	['spike', 'spikeSmall', None, None, 'saw', 'sawBig', None, None],
 	['orbYellow', 'orbPink', 'orbRed', 'orbBlue', 'orbGreen', 'orbBlack', 'padYellow', 'padPink'],
-	['portalCube', 'portalShip', 'portalBall', 'portalWave', 'portalUfo', 'portalSwing',
-	 'portalSpider', 'speed'],
-	['fxRing', 'fxDebris', 'fxSparks', 'fxFlame', 'checkpoint', 'play', 'pause', 'bar'],
+	[None] * 8,
+	[None, None, None, None, 'checkpoint', None, None, None],
 ]
-# Sprites made from another one in a new colour (PORTAL_COLORS in render.ts)
+# The objects (8 × 6, no grid lines)
+OBJECTS = [
+	[None, None, None, None, None, 'speed0', 'speed1', 'speed2'],
+	['speed3', 'speed4', 'padRed', 'padBlue', 'orbDash', 'orbSpider', 'robot', 'fxShock'],
+	['spikeCrystal', 'spikeCrystalSmall', 'spikeThorn', 'spikeThornSmall',
+	 'spikeSteel', 'spikeSteelSmall', 'spikeFlame', 'spikeFlameSmall'],
+	['sawRed', 'sawStar', 'sawMace', 'sawGear', 'sawEye', 'sawCrystal', 'sawEnergy', 'sawHook'],
+	['decoChain', 'decoCog', 'decoCogSmall', 'decoCrystals', 'decoLamp', 'decoSpeaker',
+	 'decoNote', 'decoSign'],
+	['decoGrass', 'decoVines', 'decoMushroom', 'decoPipe', 'decoAntenna', 'decoCubes',
+	 'decoSparkle', 'decoCloud'],
+]
+# The block styles (8 × 6, grey: the game tints them): a style a row
+STYLES = ['tech', 'brick', 'ice', 'metal', 'grid', 'carved']
+TILES = [
+	[f'{s}{part}' for part in ['Block', 'Top', 'Bottom', 'Corner', 'Slab', 'Pillar', 'Spike', 'Deco']]
+	for s in STYLES
+]
+# The portals and the bodies of the spider and the robot (6 × 2)
+PORTALS = [
+	['portalCube', 'portalBall', 'portalWave', 'portalUfo', 'portalSwing', 'portalRobot'],
+	['portalGravityDown', 'portalGravityUp', 'portalMini', 'portalBig', 'spiderBody', 'robotBody'],
+]
+# (each: its file, what's in it, whether it has grid lines, whether its sprites glow)
+SHEETS = [
+	('scripts/dash-sprite-sheet.webp', FIRST, True, True),
+	('scripts/dash-sprite-sheet-objects.webp', OBJECTS, False, True),
+	('scripts/dash-sprite-sheet-tiles.webp', TILES, False, False),
+	('scripts/dash-sprite-sheet-portals.webp', PORTALS, False, True),
+]
+# The largest a sprite is kept (pixels): about what a block is on a big screen
+LARGEST = 168
+# The atlas's width, and the room between two sprites in it
+ATLAS_WIDTH = 1024
+GAP = 3
+
+# Sprites made from another one in a new colour (PORTAL_COLORS in render.ts): pink and purple
+# can't be told apart from the magenta background
 RECOLOR = {'portalShip': ('portalWave', '#ff4fd8'), 'portalSpider': ('portalWave', '#b14dff')}
 SOURCE_COLOR = {'portalWave': '#3ad7ff'}
 
@@ -69,8 +107,9 @@ def grid_lines(line, axis, count, size):
 	return centers
 
 
-def key(cell, bg):
-	"""Alpha and colour of a cell without its background"""
+def key(cell, bg, glow=True):
+	"""Alpha and colour of a cell without its background (without a glow: only the background's
+	own pixels and their neighbours are blended, all else is solid)"""
 	diff = cell - bg
 	# Far from the magenta, mostly by green (pinks are close in red and blue)
 	distance = np.sqrt(1.5 * diff[..., 1] ** 2 + 0.5 * diff[..., 0] ** 2 + 0.5 * diff[..., 2] ** 2)
@@ -84,7 +123,9 @@ def key(cell, bg):
 	outside = ndimage.binary_dilation(np.isin(labels, edge[edge > 0]), iterations=3) & ~dark
 	# Outside and along holes, the smallest alpha that explains the pixel as some colour over
 	# the magenta (the glow keeps its own colour); inside, all that isn't background is solid
-	blend = outside | ndimage.binary_dilation(background, iterations=2)
+	blend = ndimage.binary_dilation(background, iterations=2)
+	if glow:
+		blend |= outside
 	up = np.where(diff > 0, diff / np.maximum(255 - bg, 60), -diff / np.maximum(bg, 60))
 	alpha = np.clip(up.max(axis=-1), 0, 1)
 	alpha = np.where(blend, alpha, 1.0)
@@ -95,71 +136,123 @@ def key(cell, bg):
 	return alpha, color
 
 
-def main():
-	if len(sys.argv) < 2:
-		sys.exit(__doc__ or 'usage: python scripts/dash-sprites.py <sheet>')
-	sheet = np.asarray(Image.open(sys.argv[1]).convert('RGB')).astype(float)
+def cut(path, names, lines, glow):
+	"""The sprites of a sheet: name -> RGBA (floats, 0–255), each cut to what's seen of it"""
+	sheet = np.asarray(Image.open(ROOT / path).convert('RGB')).astype(float)
 	height, width, _ = sheet.shape
-	# The grid lines are a darker magenta
-	line = (np.abs(sheet[..., 0] - 190) < 30) & (sheet[..., 1] < 15) & (np.abs(sheet[..., 2] - 212) < 25)
-	xs = grid_lines(line, 0, len(NAMES[0]), width)
-	ys = grid_lines(line, 1, len(NAMES), height)
-	out = np.zeros((height, width, 4), dtype=np.uint8)
-	boxes = {}
-	for r, row in enumerate(NAMES):
+	if lines:
+		# The grid lines are a darker magenta
+		line = (np.abs(sheet[..., 0] - 190) < 30) & (sheet[..., 1] < 15) & (np.abs(sheet[..., 2] - 212) < 25)
+		xs = grid_lines(line, 0, len(names[0]), width)
+		ys = grid_lines(line, 1, len(names), height)
+		inset = (4, 3)
+	else:
+		xs = [round(width * k / len(names[0])) for k in range(len(names[0]) + 1)]
+		ys = [round(height * k / len(names)) for k in range(len(names) + 1)]
+		inset = (2, 2)
+	# The background: the sheet's magenta (not a cell's border, which a big tile nearly fills)
+	magenta = (sheet[..., 0] > 180) & (sheet[..., 1] < 90) & (sheet[..., 2] > 180)
+	bg = np.median(sheet[magenta], axis=0)
+	out = {}
+	for r, row in enumerate(names):
 		for c, name in enumerate(row):
 			if not name:
 				continue
-			x0, x1 = xs[c] + 4, xs[c + 1] - 3
-			y0, y1 = ys[r] + 4, ys[r + 1] - 3
+			x0, x1 = xs[c] + inset[0], xs[c + 1] - inset[1]
+			y0, y1 = ys[r] + inset[0], ys[r + 1] - inset[1]
 			cell = sheet[y0:y1, x0:x1]
-			border = np.concatenate([cell[0], cell[-1], cell[:, 0], cell[:, -1]])
-			bg = np.median(border, axis=0)
-			alpha, color = key(cell, bg)
+			alpha, color = key(cell, bg, glow)
+			if name.startswith('portal'):
+				# Only the ring and what touches it (specks around it go)
+				labels, count = ndimage.label(ndimage.binary_dilation(alpha > 0.25, iterations=2))
+				if count > 1:
+					sizes = ndimage.sum(np.ones_like(alpha), labels, range(1, count + 1))
+					alpha = np.where(labels == 1 + int(np.argmax(sizes)), alpha, 0)
+			# What reaches in from a neighbouring cell (an edge of the sprite next to it) goes:
+			# small pieces touching the cell's border
+			# (and specks: tiny pieces, and the faint haze away from every real piece)
+			labels, count = ndimage.label(ndimage.binary_dilation(alpha > 0.25, iterations=1))
+			if count:
+				sizes = ndimage.sum(np.ones_like(alpha), labels, range(1, count + 1))
+				border = set(np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])))
+				kept = [
+					k for k in range(1, count + 1)
+					if sizes[k - 1] >= sizes.max() * (0.3 if k in border else 0.02)
+				]
+				near = ndimage.binary_dilation(np.isin(labels, kept), iterations=4)
+				alpha = np.where(near, alpha, 0)
 			seen = np.argwhere(alpha > 0.06)
 			if not len(seen):
+				print(f'{path}: nothing in the cell of {name}', file=sys.stderr)
 				continue
 			(top, left), (bottom, right) = seen.min(0), seen.max(0) + 1
-			out[y0:y1, x0:x1, :3] = color.round().astype(np.uint8)
-			out[y0:y1, x0:x1, 3] = (alpha * 255).round().astype(np.uint8)
-			boxes[name] = (x0 + int(left), y0 + int(top), int(right - left), int(bottom - top))
-	# Magenta on magenta can't be told apart: those portals are the cyan one in their colour
-	cell_of = {name: (r, c) for r, row in enumerate(NAMES) for c, name in enumerate(row) if name}
+			rgba = np.dstack([color, alpha[..., None] * 255])[top:bottom, left:right]
+			out[name] = rgba
+	return out
+
+
+def recolor(rgba, source, target):
+	"""A sprite with its hue turned from one colour to another"""
+	turn = np.radians((hue(target) - hue(source)) * 360)
+	rgb = np.clip(rgba[..., :3] @ hue_rotation(turn).T, 0, 255)
+	return np.dstack([rgb, rgba[..., 3:]])
+
+
+def shrink(rgba):
+	"""At most LARGEST pixels each way (with its alpha premultiplied, so no dark fringes)"""
+	h, w = rgba.shape[:2]
+	f = LARGEST / max(h, w)
+	image = Image.fromarray(rgba.round().astype(np.uint8), 'RGBA')
+	if f >= 1:
+		return image
+	size = (max(1, round(w * f)), max(1, round(h * f)))
+	return image.convert('RGBa').resize(size, Image.LANCZOS).convert('RGBA')
+
+
+def main():
+	sprites = {}
+	for path, names, lines, glow in SHEETS:
+		sprites.update(cut(path, names, lines, glow))
 	for name, (source, target) in RECOLOR.items():
-		if source not in boxes:
-			continue
-		x, y, w, h = boxes[source]
-		sr, sc = cell_of[source]
-		tr, tc = cell_of[name]
-		tx, ty = x - xs[sc] + xs[tc], y - ys[sr] + ys[tr]
-		turn = np.radians((hue(target) - hue(SOURCE_COLOR[source])) * 360)
-		rgb = out[y : y + h, x : x + w, :3].astype(float) @ hue_rotation(turn).T
-		out[ys[tr] : ys[tr + 1], xs[tc] : xs[tc + 1]] = 0
-		out[ty : ty + h, tx : tx + w, :3] = np.clip(rgb, 0, 255).round().astype(np.uint8)
-		out[ty : ty + h, tx : tx + w, 3] = out[y : y + h, x : x + w, 3]
-		boxes[name] = (tx, ty, w, h)
-	# Only the sprites' boxes keep anything (the rest is cleared)
-	keep = np.zeros((height, width), dtype=bool)
-	for x, y, w, h in boxes.values():
-		keep[y : y + h, x : x + w] = True
-	out[~keep] = 0
-	Image.fromarray(out).save(OUT_IMAGE, quality=92, alpha_quality=100, method=6)
+		if source in sprites:
+			sprites[name] = recolor(sprites[source], SOURCE_COLOR[source], target)
+	images = {name: shrink(rgba) for name, rgba in sprites.items()}
+	# Packed in shelves, the tallest first
+	order = sorted(images, key=lambda n: -images[n].size[1])
+	boxes = {}
+	x = y = shelf = 0
+	for name in order:
+		w, h = images[name].size
+		if x + w + GAP > ATLAS_WIDTH:
+			x, y, shelf = 0, y + shelf + GAP, 0
+		boxes[name] = (x + GAP, y + GAP, w, h)
+		x += w + GAP
+		shelf = max(shelf, h)
+	height = y + shelf + GAP * 2
+	atlas = Image.new('RGBA', (ATLAS_WIDTH, height), (0, 0, 0, 0))
+	for name, (bx, by, _, _) in boxes.items():
+		atlas.paste(images[name], (bx, by))
+	atlas.save(OUT_IMAGE, quality=92, alpha_quality=100, method=6)
+	# (in the order of the sheets, as they're named there)
+	named = [n for _, names, _, _ in SHEETS for row in names for n in row if n and n in boxes]
+	named += [n for n in RECOLOR if n in boxes]
 	lines = [
-		'// Made by scripts/dash-sprites.py from the sprite sheet: where each sprite is in',
+		'// Made by scripts/dash-sprites.py from the sprite sheets: where each sprite is in',
 		'// sprites.webp (x, y, width, height). Not to be edited by hand.',
 		'',
 		'export const SPRITES = {',
-		*[f'\t{name}: [{x}, {y}, {w}, {h}],' for name, (x, y, w, h) in boxes.items()],
+		# (as prettier writes it: no comma after the last)
+		',\n'.join(f'\t{name}: [{", ".join(str(v) for v in boxes[name])}]' for name in named),
 		'} as const satisfies Record<string, readonly [number, number, number, number]>;',
 		'',
 		'export type SpriteName = keyof typeof SPRITES;',
 		'',
 		'/** How big sprites.webp is */',
-		f'export const ATLAS = [{width}, {height}] as const;',
+		f'export const ATLAS = [{ATLAS_WIDTH}, {height}] as const;',
 		'',
 	]
 	OUT_MAP.write_text('\n'.join(lines), encoding='utf-8')
-	print(f'{len(boxes)} sprites -> {OUT_IMAGE.relative_to(ROOT)}, {OUT_MAP.relative_to(ROOT)}')
+	print(f'{len(boxes)} sprites -> {OUT_IMAGE.relative_to(ROOT)} ({ATLAS_WIDTH}×{height}), {OUT_MAP.relative_to(ROOT)}')
 
 
 if __name__ == '__main__':
