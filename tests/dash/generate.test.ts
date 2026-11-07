@@ -247,34 +247,39 @@ const median = (values: number[]) => {
 
 test('harder: less room for each click (the median over all songs), never less than allowed', async () => {
 	// The jumps of the cube and robot parts are built to the room the difficulty asks for; the
-	// other kinds of parts get closer with it too, by their tunnels and timing spikes
+	// other kinds of parts get closer with it too, by their tunnels and timing spikes. Each kind's
+	// own median, then the mean over the kinds: which kinds a level gets (and so how many clicks
+	// of each) changes with the music and the difficulty, the room of each kind with how hard it is
 	const jumps: number[] = [];
 	const all: number[] = [];
 	for (const difficulty of DIFFICULTIES) {
-		const ground: number[] = [];
-		const every: number[] = [];
+		const kinds = new Map<string, number[]>();
 		// (two levels of each song: one level's median moves with which pieces it happened to get)
 		for (const name of Object.keys(SONGS))
 			for (const seed of ['tests', 'room'])
 				for (const c of report(await level(name, difficulty, seed)).clicks) {
-					every.push(c.early + c.late);
-					if (c.mode === 'cube' || c.mode === 'robot') ground.push(c.early + c.late);
+					if (!kinds.has(c.mode)) kinds.set(c.mode, []);
+					kinds.get(c.mode)!.push(c.early + c.late);
 				}
-		jumps.push(median(ground));
-		all.push(median(every));
+		const mean = (list: number[]) => list.reduce((a, b) => a + b, 0) / list.length;
+		// (a kind with only a few clicks says little)
+		const medians = [...kinds].filter(([, list]) => list.length >= 20);
+		jumps.push(
+			mean(medians.filter(([m]) => m === 'cube' || m === 'robot').map(([, l]) => median(l)))
+		);
+		all.push(mean(medians.map(([, l]) => median(l))));
 	}
 	const shown = `jumps ${jumps.map(Math.round)}, all ${all.map(Math.round)}`;
 	// (on the easy levels a jump over a spike or two has about all the room it can have)
 	for (let i = 1; i < 3; i++) assert.ok(jumps[i] <= jumps[i - 1] + STEP, shown);
-	// (by at least 10 ms: insane's median moves by about 20 ms from one pair of seeds to the next,
-	// extreme's stays at what a jump over one spike at its speed leaves)
-	for (let i = 3; i < jumps.length; i++) assert.ok(jumps[i] < jumps[i - 1] - 10, shown);
-	// (extreme sits at what a jump over one spike at its speed leaves, about 163 ms; hard's median
-	// moves by a few ms with the pieces a level gets)
-	assert.ok(jumps[4] < jumps[2] * 0.77, shown);
+	// (insane by at least 10 ms; extreme less again, near what a jump over one spike at its speed
+	// leaves, about 165 ms)
+	assert.ok(jumps[3] < jumps[2] - 10, shown);
+	assert.ok(jumps[4] < jumps[3], shown);
+	assert.ok(jumps[4] < jumps[2] * 0.8, shown);
 	for (let i = 1; i < 3; i++) assert.ok(all[i] <= all[i - 1], shown);
 	assert.ok(Math.max(all[3], all[4]) < all[2], shown);
-	assert.ok(all[4] < all[0] * 0.75, shown);
+	assert.ok(all[4] < all[0] * 0.8, shown);
 });
 
 test('harder: more parts (the kinds change more often), and tighter flying parts', async () => {

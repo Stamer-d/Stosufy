@@ -19,7 +19,9 @@ export function drumClicks(
 	from: number,
 	to: number,
 	/** The least time between two clicks (ms): a jump, where nothing else takes a click */
-	least = 0
+	least = 0,
+	/** The longest stretch without a click (beats): the difficulty's when not given */
+	idle = LONGEST[preset.level]
 ): number[] {
 	const sound = chart.sound;
 	// (half beats; quarter beats from insane on)
@@ -124,7 +126,7 @@ export function drumClicks(
 	// (where two timing points' grids meet: not two clicks at once, nor closer than allowed)
 	clicks.sort((a, b) => a - b);
 	const kept = clicks.filter((t, k) => k === 0 || t - clicks[k - 1] >= Math.max(80, least - 5));
-	return fillGaps(chart, notes, kept, preset, from, to, least, score, heard);
+	return fillGaps(chart, notes, kept, idle, from, to, least, score, heard);
 }
 
 /** The longest stretch without a click, by difficulty (beats) */
@@ -140,7 +142,7 @@ function fillGaps(
 	chart: DashChart,
 	notes: DashNote[],
 	clicks: number[],
-	preset: Preset,
+	longest: number,
 	from: number,
 	to: number,
 	least: number,
@@ -160,11 +162,11 @@ function fillGaps(
 			const a = marks[i - 1];
 			const b = marks[i];
 			const beat = chart.timing.reduce((p, q) => (q.time <= a ? q : p), chart.timing[0]).beatLength;
-			if (b - a <= LONGEST[preset.level] * beat) continue;
+			if (b - a <= longest * beat) continue;
 			// (the part of a gap where the music rests doesn't count)
 			let rest = 0;
 			for (let t = a; t < b; t += 100) if (musicalRest(chart, t)) rest += 100;
-			if (b - a - rest <= LONGEST[preset.level] * beat) continue;
+			if (b - a - rest <= longest * beat) continue;
 			let best = -1;
 			let bestScore = -Infinity;
 			for (const t of candidates) {

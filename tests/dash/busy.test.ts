@@ -52,16 +52,27 @@ test('on extreme the kind changes every few bars in the kiai, never the same par
 
 test('on extreme gravity turns on the bars and accents of the kiai, and pads take beats', async () => {
 	let portals = 0;
+	let flying = 0;
 	let pads = 0;
-	// (four levels: which kinds of parts a kiai gets, and so its pads, is up to each one)
+	// (four levels: which kinds of parts a kiai gets, and so its portals and pads, is up to each)
 	for (const seed of ['a', 'b', 'c', 'd']) {
-		const w = (await level('extreme', seed)).world;
+		const l = await level('extreme', seed);
+		const w = l.world;
 		const there = (x: number) => w.timeAt(x) >= KIAI[0] && w.timeAt(x) < KIAI[1];
-		portals += w.gravityPortals.items.filter((g) => there(g.x)).length;
+		// (the portals of the flying parts: the ball and spider have none, their presses turn
+		// gravity; the cube and robot only now and then)
+		const turned = (s: (typeof w.sections)[number]) =>
+			['ship', 'ufo', 'wave', 'swing'].includes(s.mode);
+		portals += w.gravityPortals.items.filter(
+			(g) => there(g.x) && !g.sectionEntry && turned(w.sectionAt(w.timeAt(g.x)))
+		).length;
+		for (const s of inKiai(l))
+			if (turned(s)) flying += (Math.min(s.end, KIAI[1]) - Math.max(s.start, KIAI[0])) / 1000;
 		pads += w.pads.items.filter((p) => there(p.x)).length;
 	}
-	// (four kiai of 45 s: about one turn every two bars, a pad now and then)
-	assert.ok(portals >= 50, `${portals} gravity portals`);
+	// (about one turn every two bars there: a bar is 1.38 s; a pad now and then)
+	assert.ok(flying > 20, `${flying} s of flying parts`);
+	assert.ok(portals >= flying / 2.76, `${portals} gravity portals in ${flying.toFixed(0)} s`);
 	assert.ok(pads >= 8, `${pads} pads`);
 });
 

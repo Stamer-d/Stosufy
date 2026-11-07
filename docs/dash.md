@@ -939,3 +939,81 @@ Banner; `backgroundUrls`) und gibt ihn dem Renderer (`setTheme`):
   bisherigen Paletten.
 
 Tests: `tests/dash/theme.test.ts`.
+
+## 21. Spider und Ball durchgehend klicken, mehr Moduswechsel passend zum Song
+
+Rückmeldung: wenig Variation; bei Spider und Ball gibt es Strecken, auf denen man nichts tun muss
+(die sollen ganz raus, man will viel drücken); Moduswechsel öfter, wo es zum Song passt, gerade
+auf Extreme schwer und passend zur Musik.
+
+Gemessen mit den Songs aus `tests/dash/emptiness.ts` (Hard/Insane/Extreme, zwei Seeds, mit
+Audio): Spider und Ball hatten nur 0,8–1,1 nötige Klicks pro Sekunde (Cube 1,6) und verbrachten
+rund 40 % ihrer Zeit in Lücken von mehr als zwei Beats ohne nötigen Klick. Ursachen:
+
+- **Ball:** Klicks mindestens eine Boden-zu-Decke-Flugzeit (+ Toleranz + 40 ms) auseinander.
+  Bei einem 8 Blöcke hohen Raum sind das ~480 ms, bei 174 BPM also nur jeder zweite Beat. Die
+  Funktion, die die Flugzeit maß, fiel zudem auf ihren Ersatzwert 450 ms zurück.
+- **Spider:** Gravity-Portale ließen ihn quer fallen (in der Luft zählt kein Klick), Orb-Sprünge
+  ließen bis zu drei Klicks ausfallen, blaue Pads ersetzten Klicks, und wurde ein Pad später als
+  unnötig entfernt, fehlte der Klick ganz.
+- **Fehler in `uselessPortals`:** Die Schwerkraft wurde zwei Physikschritte vor dem Portal
+  geprüft. Lag dazwischen noch ein Klick (die letzte Drehung eines Swing direkt an der Grenze),
+  galt das Eingangsportal des nächsten Teils als wirkungslos und wurde entfernt. Der Ball-Teil
+  danach lief dann gespiegelt, und keiner seiner Klicks war mehr nötig (6 Beats ohne Aufgabe).
+  Jetzt zählt, ob das Portal beim Durchfliegen etwas dreht (mit und ohne Portal verglichen).
+
+Änderungen:
+
+- **Ball-Höhe nach Tempo** (`partCeiling`, ab Hard): so hoch, wie es ein Umschalten auf jedem
+  Beat erlaubt (Flugzeit + Toleranz + 20 ms ≤ Beat), 5 bis 8 Blöcke, manchmal einen niedriger.
+  Die Flugzeit wird jetzt in einem eigenen kleinen Teil gemessen (`ballCross`, zwischengespeichert).
+- **Spider-Höhe** ab Hard zufällig 7–9 Blöcke (eigener Zufallsstrom je Teil, damit der Rest des
+  Levels gleich bleibt).
+- **Spider auch auf halben Beats:** mindestens 0,3 / 0,26 / 0,2 / 0,17 / 0,15 s zwischen Klicks
+  (Easy bis Extreme, vorher immer 0,26 s).
+- **Keine Lücken:** `drumClicks` füllt bei Ball und Spider jede Lücke über 2 / 1,5 / 1,25 / 1
+  Beats (Normal bis Extreme; sonst 3 / 2,5 / 2 / 2).
+- **Keine Gravity-Portale** im Spider und ab Hard im Ball (ihre Klicks drehen die Schwerkraft
+  schon), **keine blauen Pads** mehr statt eines Klicks, **Orb-Sprünge des Spiders** nur, wo die
+  Musik währenddessen höchstens einen Klick hat.
+- **Treppen** passen zwischen die schnellen Klicks: kleinerer Abstand zu Absprung und Landung
+  (Spider 0,4, Ball 0,8 Blöcke plus Toleranzweg), Mindestabstand Boden–Decke 3 Blöcke.
+- **Moduswechsel passend zum Song** (`planParts`): An jeder Zwei-Takt-Grenze (vier Takte, wo zwei
+  unter 2,6 s sind) misst `songTurn`, wie sehr sich der Song dreht: anderer Rhythmus (andere
+  Sechzehntel), dichter oder lichter, lauter oder leiser als die zwei Takte davor. Dreht er sich
+  genug und wird dort angeschlagen, kommt ein neuer Modus: auf Extreme überall (Schwelle 0,45, in
+  ruhigen Teilen 0,5), auf Insane in normalen und intensiven Teilen (0,55), auf Hard nur in
+  intensiven (0,65). Spätestens nach einer Phrase wechselt er ohnehin: Extreme intensiv ~4,5 s,
+  normal ~7,5 s; Insane 6 / 10 s; Hard intensiv ~9 s (neu; vorher nur Insane und Extreme intensiv).
+- **Ab Insane nie zweimal derselbe Modus** hintereinander (außer zum Ausruhen); ein Größenwechsel
+  desselben Modus bleibt möglich.
+- Die Swing-Fenster werden nach dem letzten Portal-Durchgang noch einmal geprüft.
+
+Gemessen (vier Songs × Hard/Insane/Extreme × zwei Seeds, mit Audio):
+
+|                                        | vorher             | jetzt              |
+| -------------------------------------- | ------------------ | ------------------ |
+| Ball: nötige Klicks/s (Hard/Ins./Ext.) | 1,13 / 0,96 / 0,84 | 1,88 / 1,73 / 1,72 |
+| Ball: Zeit in Lücken > 2 Beats         | 45 / 39 / 39 %     | 5 / 8 / 2 %        |
+| Spider: nötige Klicks/s                | 1,46 / 1,06 / 1,06 | 1,82 / 2,13 / 2,23 |
+| Spider: Zeit in Lücken > 2 Beats       | 22 / 41 / 40 %     | 15 / 8 / 8 %       |
+| längste Lücke Ball / Spider (Extreme)  | 4,2 / 5,0 Beats    | 2,0 / 3,0 Beats    |
+| Moduswechsel pro Minute                | 4,6 / 6,7 / 9,0    | 5,7 / 7,0 / 11,2   |
+
+`tests/dash/emptiness.ts` (48 Level, Normal/Hard/Extreme, mit und ohne Audio): alle
+durchspielbar, unnötige Klicks weiter 0,8 %, ein Wechsel zur falschen Zeit bei Spider und Ball
+bleibt in 13 % statt 16 % der Fälle folgenlos. Die längsten Lücken (bis 9,8 Beats) liegen wie
+vorher in Cube- und UFO-Teilen auf Normal.
+
+Die Zeitfenster pro Klick sind je Modus gleich oder enger als vorher (Extreme: Ball 304 → 292 ms,
+Spider 192 → 163, UFO 288 → 271). Der Test „harder: less room for each click“ nahm bisher den
+Median über alle Cube/Robot-Klicks aller Songs; der hing daran, welcher Song zufällig viele
+Cube-Teile bekam (vorher 109 Robot-Klicks im schnellen Song). Er vergleicht jetzt den Median je
+Modus, gemittelt über die Modi (besteht auch auf dem alten Stand). Der Gravity-Test im Kiai zählt
+die Portale der Flugteile (Ship, UFO, Wave, Swing) pro Sekunde, weil Ball und Spider keine mehr
+haben.
+
+Neue Tests: `tests/dash/surfaces.test.ts` (keine Lücke über 4 Beats und unter 12 % der Zeit über
+2 Beats bei Ball und Spider ab Hard, so oft geklickt wie der Cube, keine Gravity-Portale darin,
+Ball-Höhe nach Tempo, verschiedene Spider-Höhen, keine Klicks in Breaks). Auf dem alten Stand
+schlagen die ersten vier fehl. `GENERATOR_VERSION` ist `gd-3.8-blocks`.

@@ -51,7 +51,7 @@ import { alignTiming } from './timing';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.7-blocks';
+export const GENERATOR_VERSION = 'gd-3.8-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -284,32 +284,83 @@ function runnerClicks(chart: DashChart, notes: DashNote[], sec: Section, preset:
 	return drumClicks(chart, notes, preset, sec.start, sec.end, least);
 }
 
-/** How long the ball of a part takes from the floor to the ceiling (ms) */
-function ballCross(world: World, sec: Section) {
-	const from = startState(world, sec.start + 20);
-	if (from.mode !== 'ball') return 0;
-	const press = sec.start + 60;
+/** The least time between two spider presses (s), by difficulty */
+const SPIDER_GAP = [0.3, 0.26, 0.2, 0.17, 0.15];
+/** The longest a ball or spider part goes without a press where the music plays (beats) */
+const SURFACE_LONGEST = [6, 2, 1.5, 1.25, 1];
+
+/** How long the ball takes from the floor to the ceiling (ms), by its room, size and speed */
+const CROSSES = new Map<string, number>();
+export function ballCross(ceil: number, mini: boolean, speedIndex: number) {
+	const key = `${ceil}:${mini}:${speedIndex}`;
+	const known = CROSSES.get(key);
+	if (known !== undefined) return known;
+	// (measured in a part of its own: on the floor, pressed once, until it's still on the ceiling)
+	const world = new World();
+	const speed = SPEEDS[speedIndex];
+	world.segments.push({ time: 0, x: 0, speed }, { time: 4000, x: speed * 4, speed });
+	world.sections.push({
+		index: 0,
+		mode: 'ball',
+		mini,
+		start: 0,
+		end: 4000,
+		x0: 0,
+		x1: speed * 4,
+		speed,
+		speedIndex,
+		floor: 0,
+		ceil,
+		palette: 0,
+		kiai: false
+	});
+	const from = simulate(world, startState(world, 0), 1000, []);
 	const trace: { x: number; y: number; time: number }[] = [];
 	simulate(
 		world,
 		from,
-		sec.start + 2000,
+		3000,
 		[
-			{ time: press, down: true },
-			{ time: press + 90, down: false }
+			{ time: 1100, down: true },
+			{ time: 1180, down: false }
 		],
-		{
-			trace
-		}
-	);
-	const startY = trace.find((p) => p.time >= press)?.y ?? from.y;
-	const across = trace.find(
-		(p) => p.time > press + 50 && Math.abs(p.y - startY) > (sec.ceil! - sec.floor) * 0.6
+		{ trace }
 	);
 	const landed = trace.find(
-		(p, k) => across && p.time > across.time && k > 0 && Math.abs(p.y - trace[k - 1].y) < 1e-6
+		(p, k) =>
+			p.time > 1150 && k > 0 && Math.abs(p.y - trace[k - 1].y) < 1e-6 && Math.abs(p.y - from.y) > 1
 	);
-	return landed ? landed.time - press : 450;
+	const time = landed ? landed.time - 1100 : 450;
+	CROSSES.set(key, time);
+	return time;
+}
+
+/**
+ * How tall a ball or spider part is. The ball switches only on a surface, so the room it crosses
+ * sets how often it can be clicked: from hard on as tall as lets it switch on every beat (a press
+ * a bit early too), a bit lower now and then; the spider's (it's there at once) by chance, for
+ * variety
+ */
+function partCeiling(
+	mode: Exclude<Mode, 'cube' | 'robot'>,
+	mini: boolean,
+	speedIndex: number,
+	beat: number,
+	preset: Preset,
+	rng: Random
+) {
+	if (mode === 'ball' && preset.level >= 2) {
+		// (where not even the lowest lets it switch on every beat, it switches every other one)
+		let ceil = 5;
+		for (let h = 8; h > 5; h--)
+			if (ballCross(h, mini, speedIndex) + preset.tolerance + 20 <= beat) {
+				ceil = h;
+				break;
+			}
+		return ceil > 5 && rng() < 0.3 ? ceil - 1 : ceil;
+	}
+	if (mode === 'spider' && preset.level >= 2) return 7 + Math.floor(rng() * 3);
+	return BOUNDS[mode];
 }
 
 /** Notes at least `gap` (s) apart, the stronger one of two close ones */
@@ -702,6 +753,54 @@ export function paces(
 	return pace;
 }
 
+/**
+ * How long a part goes at most before the kind changes, by difficulty and pace (ms; 0: as long as
+ * the phrase grid's parts)
+ */
+const PHRASES: Record<number, Record<Pace, number>> = {
+	2: { 0: 0, 1: 0, 2: 9000 },
+	3: { 0: 0, 1: 10000, 2: 6000 },
+	4: { 0: 0, 1: 7500, 2: 4500 }
+};
+/** How much the song must turn (see songTurn) for a new kind there, by difficulty and pace */
+const TURNS: Record<number, Record<Pace, number>> = {
+	2: { 0: 0, 1: 0, 2: 0.65 },
+	3: { 0: 0, 1: 0.55, 2: 0.55 },
+	4: { 0: 0.5, 1: 0.45, 2: 0.45 }
+};
+
+/**
+ * How much the song turns at a moment (0–1): the stretch after it against the one before it, as
+ * long as each other: another rhythm (the notes on other sixteenths), busier or calmer, louder or
+ * softer. A place for a new kind of part.
+ */
+export function songTurn(chart: DashChart, time: number, span: number) {
+	const { point } = beatAt(chart.timing, time);
+	const sixteenth = point.beatLength / 4;
+	const slots = (from: number, to: number) => {
+		const set = new Set<number>();
+		for (const n of chart.notes)
+			if (n.time >= from && n.time < to) set.add(Math.round((n.time - from) / sixteenth));
+		return set;
+	};
+	const before = slots(time - span, time);
+	const after = slots(time, time + span);
+	let both = 0;
+	for (const k of before) if (after.has(k)) both++;
+	const all = before.size + after.size - both;
+	const rhythm = all ? 1 - both / all : 0;
+	const busy = Math.abs(Math.log((after.size + 1) / (before.size + 1))) / Math.log(2);
+	const sound = chart.sound;
+	const loud = sound
+		? Math.abs(
+				Math.log(
+					(loudness(sound, time, time + span) + 0.05) / (loudness(sound, time - span, time) + 0.05)
+				)
+			) / Math.log(1.6)
+		: 0;
+	return Math.min(1, Math.max(rhythm, busy, loud));
+}
+
 // --- The parts of the song ---------------------------------------------------------------
 
 interface Part {
@@ -899,32 +998,38 @@ function planParts(
 		if (p === 2) intensity[i] = Math.max(intensity[i], 0.72);
 		if (p === 0) intensity[i] = Math.min(intensity[i], 0.4);
 	});
-	// In the intense parts of the hardest levels the kinds change by phrase, as the song does
-	// there: every two or four bars (about 4.5 s on extreme, 6.5 s on insane), each cut on the bar
-	// line the song hits hardest near it (a bar either way, where it's clearly harder)
-	const phrase = preset.level >= 4 ? 4500 : preset.level >= 3 ? 6500 : 0;
+	// In the intense parts of the harder levels the kinds change by phrase, as the song does
+	// there: on the two-bar lines where the song turns (another rhythm, busier or calmer, louder
+	// or softer than the phrase before), and at the latest after a phrase or two (about 4.5 s on
+	// extreme, 6 s on insane, 9 s on hard; in the usual parts of insane and extreme a bit longer)
 	const parted: ((typeof features)[number] & { phrase: boolean })[] = [];
 	const partedIntensity: number[] = [];
 	const partedPace: Pace[] = [];
 	features.forEach((f, i) => {
 		const cuts = [f.from];
-		if (phrase && pace[i] === 2 && f.rest < 0.5) {
+		const target = PHRASES[preset.level]?.[pace[i]] ?? 0;
+		// (where the song turns: on extreme in all its parts, from insane on in its usual parts too,
+		// on hard only where it's intense; the harder, the less it needs to turn)
+		const turning = TURNS[preset.level]?.[pace[i]] ?? 0;
+		if ((target || turning) && f.rest < 0.5) {
 			const { point } = beatAt(timing, f.from + 1);
 			const bar = point.beatLength * point.meter;
-			let n = 2;
-			for (const m of [4, 8]) if (Math.abs(m * bar - phrase) < Math.abs(n * bar - phrase)) n = m;
-			while (n * bar < 2800 && n < 8) n *= 2;
-			const least = Math.max(2800, n * bar * 0.5);
-			for (let t = f.from + n * bar; t <= f.to - least; t += n * bar) {
-				let at = t;
-				for (const c of [t - bar, t + bar])
-					if (
-						c - cuts[cuts.length - 1] >= least &&
-						f.to - c >= least &&
-						accentAt(chart, c) > accentAt(chart, at) * 1.25
-					)
-						at = c;
-				if (at - cuts[cuts.length - 1] >= least) cuts.push(Math.round(at));
+			// (two bars, or four where two are that short)
+			let unit = 2;
+			while (unit * bar < 2600 && unit < 8) unit *= 2;
+			const span = unit * bar;
+			// (after one, two or four of those at the latest: the nearest to the phrase's length)
+			let due = target ? span : Infinity;
+			if (target)
+				for (const m of [2, 4])
+					if (Math.abs(m * span - target) < Math.abs(due - target)) due = m * span;
+			const least = Math.max(2600, span * 0.9);
+			for (let t = f.from + span; t <= f.to - least; t += span) {
+				const since = t - cuts[cuts.length - 1];
+				if (since < least - 1 || musicalRest(chart, t)) continue;
+				const turns =
+					!!turning && songTurn(chart, t, span) >= turning && accentAt(chart, t) >= 0.35;
+				if (since >= due - span * 0.25 || turns) cuts.push(Math.round(t));
 			}
 		}
 		cuts.forEach((from, k) => {
@@ -985,7 +1090,13 @@ function planParts(
 			smallRunnerToo(before.mode);
 		if (resize) mode = before.mode;
 		else if (i > 0) {
-			const kinds = (preset.modes as Mode[]).filter((m) => !resting || m === 'cube');
+			// (from insane on never the same kind twice in a row: a portal that changes nothing but
+			// the speed, where its parts change every few bars, would only be a seam)
+			const kinds = (preset.modes as Mode[]).filter(
+				(m) =>
+					(!resting || m === 'cube') &&
+					(preset.level < 3 || resting || !before || m !== before.mode)
+			);
 			const options = kinds.map((m) => {
 				let w = Math.max(0.05, fits[m]);
 				// Not the same kind again and again, and at a drop something new
@@ -1114,6 +1225,19 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		if (part.mode === 'wave' && part.mini && speedIndex > (preset.level >= 4 ? 3 : 2))
 			part.mini = false;
 		const speed = SPEEDS[speedIndex];
+		const beat = beatAt(chart.timing, (part.start + part.end) / 2).point.beatLength;
+		const ceil =
+			part.mode === 'cube' || part.mode === 'robot'
+				? null
+				: partCeiling(
+						part.mode,
+						part.mini,
+						speedIndex,
+						beat,
+						preset,
+						// (its own numbers: the rest of the level comes out the same either way)
+						random(hash(`${options.seed}:${options.difficulty}:ceil:${index}`))
+					);
 		world.segments.push({ time: part.start, x, speed });
 		const x1 = x + ((part.end - part.start) / 1000) * speed;
 		// (new colours where the music changes, not at every part: one level, not many small ones)
@@ -1130,7 +1254,7 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 			speed,
 			speedIndex,
 			floor: 0,
-			ceil: part.mode === 'cube' || part.mode === 'robot' ? null : BOUNDS[part.mode],
+			ceil,
 			palette,
 			kiai: part.kiai,
 			intensity: Math.round(part.intensity * 1000) / 1000
@@ -1197,17 +1321,20 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		else if (sec.mode === 'ship' && blocks)
 			state = buildShip(ctx, sec, drumClicks(chart, inside, preset, sec.start, sec.end), state);
 		else {
-			// The UFO and swing click often, the ball and spider like the cube
+			// The UFO and swing click often, the ball like the cube, the spider (it's on the other
+			// side at once) on the half beats too from hard on
 			// (the ball's presses a crossing apart and as much as a press may come early: one while
 			// it's still crossing does nothing, and then a press a bit early wouldn't either)
 			const gap =
 				sec.mode === 'ufo' || sec.mode === 'swing'
 					? Math.max(preset.gap, 0.22)
 					: sec.mode === 'spider'
-						? Math.max(preset.gap, 0.26)
+						? Math.max(preset.gap, SPIDER_GAP[preset.level])
 						: Math.max(preset.gap, 0.24);
+			const surfaces = sec.mode === 'ball' || sec.mode === 'spider';
 			// (on the drums, the part's two-bar pattern bar after bar, as the cube's: see rhythm.ts;
-			// the older way from the notes)
+			// the older way from the notes. The ball and spider never long without a press: they
+			// only roll along, there's nothing else to do)
 			const theirs =
 				sec.mode === 'ship' || sec.mode === 'swing'
 					? []
@@ -1220,8 +1347,11 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 								sec.end,
 								Math.max(
 									gap * 1000,
-									sec.mode === 'ball' ? ballCross(world, sec) + preset.tolerance + 40 : 0
-								)
+									sec.mode === 'ball'
+										? ballCross(sec.ceil!, sec.mini, sec.speedIndex) + preset.tolerance + 20
+										: 0
+								),
+								surfaces ? SURFACE_LONGEST[preset.level] : undefined
 							)
 						: chooseClicks(chart, inside, gap, preset.cost * 0.9, preset.idle);
 			state = buildFlight(ctx, sec, inside, theirs, state);
@@ -1296,8 +1426,11 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		const gates = uselessPortals(world, plan, start, end);
 		if (!orbs && !gates) break;
 	}
-	// (what the last round changed: a portal that turns nothing now only goes)
+	// (what the last round changed: a portal that turns nothing now only goes; and the swing's
+	// turns checked once more on what's left)
 	uselessPortals(world, plan, start, end, true);
+	widenSwingWindows(world, plan, start, end, preset.tolerance);
+	playThrough(world, plan, start, end);
 
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {
@@ -1414,7 +1547,14 @@ function uselessPortals(
 	for (const portal of [...world.gravityPortals.items].sort((a, b) => a.x - b.x)) {
 		s = simulate(world, s, Math.max(s.time, world.timeAt(portal.x) - STEP * 2), plan);
 		if (s.dead) break;
-		if (s.gravity !== portal.gravity) continue;
+		// (whether it turns anything where the player gets to it: a press in the last steps
+		// before it, the last turn of a swing, counts too)
+		const after = world.timeAt(portal.x) + STEP * 2;
+		const turning = simulate(world, s, after, plan).gravity;
+		world.gravityPortals.remove(portal);
+		const turns = simulate(world, s, after, plan).gravity !== turning;
+		world.gravityPortals.add(portal);
+		if (turns) continue;
 		if (portal.sectionEntry && !last) continue;
 		if (!last && !portal.sectionEntry) {
 			portal.gravity = portal.gravity > 0 ? -1 : 1;

@@ -19,7 +19,6 @@ import {
 	type InputEvent,
 	type Orb,
 	type OrbKind,
-	type Pad,
 	type PlayerState,
 	type Section,
 	type Solid
@@ -202,12 +201,14 @@ export function buildFlight(
 	// (not right at a click: pressed a moment before or after the portal would go another way)
 	// In the intense parts of the hardest levels on every bar and the song's strong accents, two
 	// beats apart at least, and twice as many
-	// (not the spider's: its press turns gravity already, a portal only takes presses away while
-	// it falls across)
+	// (not the spider's, nor the ball's from hard on: their presses turn gravity already, a portal
+	// only takes presses away while they fall across)
 	const fierce = preset.level >= 3 && intensity >= 0.72;
 	const busy = fierce && mode !== 'spider' && mode !== 'ball';
 	if (
 		preset.level >= 1 &&
+		mode !== 'spider' &&
+		(mode !== 'ball' || preset.level < 2) &&
 		gravityIn(ctx, mode) &&
 		(busy || rng() < preset.flips * (mode === 'swing' ? 0.7 : 1))
 	) {
@@ -311,8 +312,6 @@ export function buildFlight(
 	// --- The way through ---------------------------------------------------------------
 	let events: InputEvent[] = [];
 	const orbs: Orb[] = [];
-	/** The blue pads it put on the surface it rolls along */
-	const pads: Pad[] = [];
 	const shipOrbs: ShipOrb[] = [];
 	/** The spider's jumps on an orb (from the ground) */
 	const jumpOrbs: { time: number; x: number; y: number; gravity: 1 | -1; orb: Orb }[] = [];
@@ -438,7 +437,6 @@ export function buildFlight(
 		const most = Math.round(preset.orbs * (0.6 + intensity * 0.6));
 		let placed = 0;
 		let lastOrb = -Infinity;
-		let lastPad = -Infinity;
 		let previous: DashNote | null = null;
 		let airborneUntil = -Infinity;
 		let s = entry;
@@ -467,46 +465,27 @@ export function buildFlight(
 			let hold = mode === 'ufo' ? 70 : 90;
 			// (the notes while it's in the air after an orb jump go by)
 			if (time < airborneUntil) continue;
-			// On a hard accent in the intense parts of the hardest levels, now and then a blue pad
-			// where it rolls instead of the press: it turns over on the beat by itself
-			if (
-				(mode === 'ball' || mode === 'spider') &&
-				fierce &&
-				at.grounded &&
-				time - lastPad > 1500 &&
-				accentAt(ctx.chart, time) >= 0.6 &&
-				rng() < 0.45
-			) {
-				const x = Math.round((at.x + 0.5 + box.w) * 4) / 4;
-				pads.push(
-					world.pads.add({
-						id: world.id(),
-						kind: 'blue',
-						x,
-						y: at.gravity > 0 ? at.y - box.h : at.y + box.h,
-						dir: at.gravity,
-						x0: x - 0.5,
-						x1: x + 0.5
-					})
-				);
-				used(ctx, `${mode}-pad`);
-				lastPad = time;
-				s = at;
-				continue;
-			}
 			if (
 				mode === 'spider' &&
 				at.grounded &&
 				preset.level >= 1 &&
 				placed < most &&
-				time - lastOrb > 900 &&
+				time - lastOrb > 2000 &&
 				section.end - time > 1500 &&
-				rng() < 0.35 + intensity * 0.3
+				// (where the music leaves room for the jump: a click or none while it's in the air,
+				// not a row of them left out)
+				times.filter((t) => t > time && t < time + 660).length <= 1 &&
+				rng() < 0.2 + intensity * 0.2
 			) {
 				// An orb on the ground: a jump over spikes on its side, where switching sides
 				// would land it on a spike (the orb must be used)
 				const room = top - floor;
-				const red = !!note && strongAt(note) && room >= 6 && rng() < 0.4;
+				const red =
+					!!note &&
+					strongAt(note) &&
+					room >= 6 &&
+					times.filter((t) => t > time && t < time + 820).length <= 1 &&
+					rng() < 0.4;
 				add(red ? 'red' : 'yellow');
 				airborneUntil = time + (red ? 820 : 660);
 				jumpOrbs.push({ time, x: at.x, y: at.y, gravity: at.gravity, orb: orbs[orbs.length - 1] });
@@ -968,13 +947,10 @@ export function buildFlight(
 					c.spike = 0;
 					c.small = false;
 				}
-			// An orb in a block, or right at a spike: the orb goes; a pad off its surface too
+			// An orb in a block, or right at a spike: the orb goes
 			for (const orb of orbs)
 				if (world.orbs.items.includes(orb) && !legalAround(world, orb.x - 0.6, orb.x + 0.6))
 					world.orbs.remove(orb);
-			for (const pad of pads)
-				if (world.pads.items.includes(pad) && !legalAround(world, pad.x - 0.6, pad.x + 0.6))
-					world.pads.remove(pad);
 			build();
 		}
 		if (!legalAround(world, startX - 1, endX + 1)) {
@@ -1042,20 +1018,23 @@ export function buildFlight(
 			if (last && last.ceiling === ceiling) last.x1 = p.x;
 			else stays.push({ x0: p.x, x1: p.x, ceiling });
 		}
-		const gapMin = mode === 'spider' ? 3 : 3.5;
+		const gapMin = 3;
 		const most = preset.level >= 3 ? 3 : 2;
 		const reach = Math.min(4, Math.floor((top - floor - gapMin) / 2));
-		const margin = 1.2 + (speed * tolerance * 1.5) / 1000;
+		// (away from where a press a bit off gets there and leaves: the spider is there at once, so
+		// a step fits between its quick presses too; the ball crosses a while)
+		const margin = (mode === 'spider' ? 0.4 : 0.8) + (speed * tolerance * 1.5) / 1000;
 		let low = floor;
 		let high = top;
 		let changed = false;
 		for (const stay of stays) {
-			const from = stay.x0 + margin + (mode === 'ball' ? speed * 0.25 : 0);
+			const from = stay.x0 + margin + (mode === 'ball' ? speed * 0.2 : 0);
 			const to = stay.x1 - margin;
-			if (to - from < 2 || musicalRest(ctx.chart, world.timeAt((from + to) / 2))) continue;
+			if (Math.ceil(from) > Math.floor(to) || musicalRest(ctx.chart, world.timeAt((from + to) / 2)))
+				continue;
 			// (now and then the same height again: not every stay a step)
 			if (rng() < 0.25) continue;
-			const at = Math.round((from + to) / 2);
+			const at = clamp(Math.round((from + to) / 2), Math.ceil(from), Math.floor(to));
 			const energy = ctx.chart.sound
 				? loudness(ctx.chart.sound, world.timeAt(at) - 400, world.timeAt(at) + 400) - 0.5
 				: 0;
@@ -1171,7 +1150,6 @@ export function buildFlight(
 	const flat = {
 		columns: columns.map((c) => ({ ...c })),
 		runs: [...runs],
-		pads: pads.map((p) => p.y),
 		jumps: jumpOrbs.map((j) => j.y)
 	};
 	const stepped = stairs();
@@ -1184,11 +1162,6 @@ export function buildFlight(
 			if (!c) continue;
 			j.y = j.gravity > 0 ? c.low + box.h : c.high - box.h;
 			j.orb.y = j.y;
-		}
-		// (and the pads on the surfaces where they are now)
-		for (const pad of pads) {
-			const c = columns.find((col) => col.x === Math.floor(pad.x));
-			if (c) pad.y = pad.dir > 0 ? c.low : c.high;
 		}
 		runs.length = 0;
 		for (const inputs of variants) {
@@ -1372,7 +1345,6 @@ export function buildFlight(
 	// into it): taken out again, and the part flat as before them, not cleared bit by bit
 	if (stepped && settled >= 10) {
 		columns.forEach((c, i) => Object.assign(c, flat.columns[i]));
-		pads.forEach((p, i) => (p.y = flat.pads[i]));
 		jumpOrbs.forEach((j, i) => {
 			j.y = flat.jumps[i];
 			j.orb.y = j.y;
