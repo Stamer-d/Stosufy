@@ -26,6 +26,8 @@ function sprites() {
 
 /** How many blocks high the view is */
 const VIEW = 11;
+/** The far layer's resolution, next to the frame's */
+const FAR = 0.5;
 
 /**
  * The looks a part can have: its blocks (a style of the tile sheet, tinted in the part's colours;
@@ -208,8 +210,22 @@ const noise = (n: number) => {
 	return s - Math.floor(s);
 };
 
-export function createDashRenderer(canvas: HTMLCanvasElement) {
-	const ctx = canvas.getContext('2d')!;
+export function createDashRenderer(
+	canvas: HTMLCanvasElement,
+	/** adaptive: less sharp where frames come too slowly (on unless turned off) */
+	options: { adaptive?: boolean } = {}
+) {
+	// (opaque: every frame paints all of it, and the page needn't blend it with what's behind)
+	const main = canvas.getContext('2d', { alpha: false }) ?? canvas.getContext('2d')!;
+	/**
+	 * What's far behind (the sky, the beatmap's picture, the wall, gears, hills, the ground's
+	 * body) is soft anyway: it's drawn into this at half the resolution and stretched over the
+	 * frame once, so its big fills cost a quarter of the pixels
+	 */
+	const far = document.createElement('canvas');
+	const farCtx = far.getContext('2d', { alpha: false }) ?? far.getContext('2d')!;
+	/** What's being drawn into: the frame, or the far layer while that's drawn */
+	let ctx = main;
 	// (loading from now on, so they're there when the level starts)
 	sprites();
 	let width = 0;
@@ -278,9 +294,65 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		theme = { palettes, backdrop };
 	}
 
+	// --- How sharp: as sharp as the screen, less where frames come too slowly ---------------
+
+	/** The resolutions it may draw at, next to the screen's (the first one: the sharpest) */
+	const QUALITY = [1, 0.85, 0.7, 0.6, 0.5];
+	let quality = 0;
+	/** The last frames' intervals (ms), and when the resolution changed last */
+	const intervals: number[] = [];
+	let changedAt = 0;
+	/** When it last had to go down (going up again right after isn't worth it) */
+	let droppedAt = -Infinity;
+
+	/**
+	 * Watches how long frames take: where more than a quarter of the last 60 take longer than
+	 * 20 ms (under 50 a second), a step less sharp (down to half); where 4 s go by with all of
+	 * them under 14 ms, a step sharper again (not within 20 s of having had to go down)
+	 */
+	function pace(interval: number, now: number) {
+		if (options.adaptive === false) return;
+		// (a hitch, the page in the background: not the drawing's doing)
+		if (interval > 250 || document.hidden) {
+			intervals.length = 0;
+			return;
+		}
+		intervals.push(interval);
+		if (intervals.length > 240) intervals.shift();
+		if (now - changedAt < 1500 || intervals.length < 60) return;
+		const last = intervals.slice(-60);
+		const slow = last.filter((t) => t > 20).length;
+		if (slow > 15 && quality < QUALITY.length - 1) {
+			quality++;
+			changedAt = droppedAt = now;
+			intervals.length = 0;
+		} else if (
+			quality > 0 &&
+			now - changedAt > 4000 &&
+			now - droppedAt > 20000 &&
+			intervals.length >= 240 &&
+			intervals.every((t) => t < 14)
+		) {
+			quality--;
+			changedAt = now;
+			intervals.length = 0;
+		}
+	}
+
+	/**
+	 * How big the canvas is on the page (CSS pixels): told when it changes, not asked every
+	 * frame (asking can make the browser lay out the page again in the middle of a frame)
+	 */
+	let box: { width: number; height: number } | null = null;
+	if (typeof ResizeObserver !== 'undefined')
+		new ResizeObserver((entries) => {
+			const rect = entries[entries.length - 1].contentRect;
+			box = { width: rect.width, height: rect.height };
+		}).observe(canvas);
+
 	function resize() {
-		const ratio = Math.min(2, window.devicePixelRatio || 1);
-		const rect = canvas.getBoundingClientRect();
+		const ratio = Math.min(2, window.devicePixelRatio || 1) * QUALITY[quality];
+		const rect = box ?? (box = canvas.getBoundingClientRect());
 		const w = Math.max(1, Math.round(rect.width * ratio));
 		const h = Math.max(1, Math.round(rect.height * ratio));
 		if (canvas.width !== w || canvas.height !== h) {
@@ -325,7 +397,9 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const key = `${name}:${c}:${pw}:${ph}`;
 		const cached = tintCache.get(key);
 		if (cached) return cached;
-		if (tintCache.size > 160) tintCache.clear();
+		// (the oldest go when there are many: not all at once, which would make them all again)
+		if (tintCache.size > 160)
+			for (const old of [...tintCache.keys()].slice(0, 32)) tintCache.delete(old);
 		const out = document.createElement('canvas');
 		out.width = pw;
 		out.height = ph;
@@ -340,6 +414,61 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		t.drawImage(image, fx, fy, fw, fh, 0, 0, pw, ph);
 		tintCache.set(key, out);
 		return out;
+	}
+
+	/** The colour a part's grey tiles take, and its grey spikes */
+	const tileTint = (p: Palette) => mix(mix(p.ground, p.accent, 0.25), p.bottom, 0.3);
+	const spikeTint = (p: Palette) => mix(p.accent, '#ffffff', 0.25);
+
+	/**
+	 * Which sprite a spike is drawn as, how big (pixels) and where its middle is above the
+	 * surface: the drawn ones as always, the other looks in their own shape (as wide as the
+	 * spike, at most a bit higher, standing on the surface)
+	 */
+	function spikeBox(look: [SpriteName, SpriteName], small: boolean) {
+		let [name, sw, sh, oy] = small
+			? [look[1], scale * 0.9, scale * 0.58, -scale * 0.28]
+			: [look[0], scale * 1.04, scale * 1.04, -scale * 0.51];
+		if (name !== 'spike' && name !== 'spikeSmall') {
+			const [, , fw, fh] = SPRITES[name];
+			sh = Math.min((sw * fh) / fw, sh * 1.15);
+			sw = (sh * fw) / fh;
+			oy = -sh / 2 + scale * 0.01;
+		}
+		return [name, sw, sh, oy] as const;
+	}
+
+	/**
+	 * The tinted tiles and spikes of the level's parts, made ahead (a few a frame) so none is
+	 * first made the moment its part scrolls in
+	 */
+	let warm: (() => void)[] = [];
+	function warmUp(level: Level) {
+		warm = [];
+		const done = new Set<string>();
+		for (const section of level.world.sections) {
+			const look = lookOf(section);
+			const key = `${LOOKS.indexOf(look)}:${section.palette}`;
+			if (done.has(key)) continue;
+			done.add(key);
+			const p = paletteOf(section);
+			if (look.tiles)
+				for (const part of ['Block', 'Top', 'Bottom', 'Pillar', 'Slab'])
+					warm.push(() =>
+						tinted(
+							`${look.tiles}${part}` as SpriteName,
+							tileTint(p),
+							scale,
+							part === 'Slab' ? scale * 0.5 : scale
+						)
+					);
+			if (look.tintSpike && !section.kiai)
+				for (const small of [false, true])
+					warm.push(() => {
+						const [name, sw, sh] = spikeBox(look.spike, small);
+						tinted(name, spikeTint(p), sw, sh);
+					});
+		}
 	}
 
 	function spawn(p: Partial<Particle> & { x: number; y: number }) {
@@ -473,6 +602,12 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 	}
 
 	// --- Colours --------------------------------------------------------------------------
+
+	/** A part's own colours (not faded into the part before's) */
+	function paletteOf(section: Section): Palette {
+		const list = theme.palettes ?? PALETTES;
+		return list[section.palette % list.length];
+	}
 
 	function paletteAt(level: Level, time: number): Palette {
 		const sections = level.world.sections;
@@ -719,11 +854,23 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 	}
 
-	function ground(p: Palette, y: number, side: 1 | -1, pulse: number, scroll: number) {
+	function ground(
+		p: Palette,
+		y: number,
+		side: 1 | -1,
+		pulse: number,
+		scroll: number,
+		/** Its body (in the far layer) or its edge (sharp, in the frame) */
+		part: 'body' | 'edge'
+	) {
 		const line = sy(y);
 		const top = side === 1 ? line : 0;
 		const bottom = side === 1 ? height : line;
 		if (bottom - top <= 0) return;
+		if (part === 'edge') {
+			groundEdge(p, line, side, pulse);
+			return;
+		}
 		const gradient = ctx.createLinearGradient(0, line, 0, line + side * scale * 4);
 		gradient.addColorStop(0, mix(p.ground, '#000000', 0.12));
 		gradient.addColorStop(1, mix(p.ground, '#000000', 0.7));
@@ -741,6 +888,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				ctx.strokeRect(x + size * 0.12, ry, size * 0.76, size * 0.76);
 			}
 		}
+	}
+
+	/** The ground's edge: the bright line, and the light along it */
+	function groundEdge(p: Palette, line: number, side: 1 | -1, pulse: number) {
 		// The bright line on top
 		const lineGradient = ctx.createLinearGradient(0, 0, width, 0);
 		lineGradient.addColorStop(0, 'rgba(255,255,255,0)');
@@ -844,7 +995,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		const image = tile(p);
 		// (a style of the tile sheet in the part's colours: its tops, undersides, slabs and pillars)
 		const themed = look.tiles && sprites() ? look.tiles : null;
-		const tint = mix(mix(p.ground, p.accent, 0.25), p.bottom, 0.3);
+		const tint = tileTint(p);
 		const slab = y1 - y0 < 0.99;
 		const pillar = !slab && x1 - x0 <= 1.01 && y1 - y0 >= 1.99;
 		ctx.save();
@@ -1001,21 +1152,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		ctx.translate(sx(x), sy(y));
 		ctx.scale(1, dir);
 		let drawn: boolean;
-		let [name, sw, sh, oy] = small
-			? [look[1], scale * 0.9, scale * 0.58, -scale * 0.28]
-			: [look[0], scale * 1.04, scale * 1.04, -scale * 0.51];
-		if (name !== 'spike' && name !== 'spikeSmall') {
-			// (the other looks keep their shape: as wide as the spike, at most a bit higher, standing
-			// on the surface)
-			const [, , fw, fh] = SPRITES[name];
-			const most = sh * 1.15;
-			sh = Math.min((sw * fh) / fw, most);
-			sw = (sh * fw) / fh;
-			oy = -sh / 2 + scale * 0.01;
-		}
+		const [name, sw, sh, oy] = spikeBox(look, small);
 		if (tint) {
 			// (a grey one of the tile sheet, in the part's light)
-			const image = tinted(name, mix(p.accent, '#ffffff', 0.25), sw, sh);
+			const image = tinted(name, spikeTint(p), sw, sh);
 			if (image) ctx.drawImage(image, -sw / 2, oy - sh / 2, sw, sh);
 			drawn = !!image;
 		} else drawn = sprite(name, 0, oy, sw, sh);
@@ -2057,8 +2197,10 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 
 	function draw(frame: Frame) {
 		resize();
+		(globalThis as any).__phase?.('start', ctx);
 		const { level, state, time, icon } = frame;
 		const now = performance.now();
+		if (lastFrame) pace(now - lastFrame, now);
 		const dt = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 1 / 60;
 		lastFrame = now;
 		if (Math.abs(time - lastTime) > 1500) reset(state);
@@ -2071,6 +2213,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			lookSeed = 0;
 			for (const ch of `${level.title}:${level.version}`)
 				lookSeed = (lookSeed * 31 + ch.charCodeAt(0)) % 9973;
+			warmUp(level);
 		}
 		// The drop: a flash and a kick of the camera
 		if (section.kiai && !lastKiai && !frame.waiting && time > level.start + 500) {
@@ -2101,14 +2244,47 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		shake = Math.max(0, shake - dt * 3);
 
 		const p = paletteAt(level, state.time);
-		ctx.save();
-		if (shaking) ctx.translate((Math.random() - 0.5) * shaking, (Math.random() - 0.5) * shaking);
+		// What's far behind: at half the resolution where the frame has more pixels than the
+		// screen has points (drawn in the frame's own coordinates, then stretched over it once);
+		// elsewhere straight into the frame
+		const dense = width / (box?.width || width) >= 1.4;
+		if (dense) {
+			const fw = Math.max(1, Math.round(width * FAR));
+			const fh = Math.max(1, Math.round(height * FAR));
+			if (far.width !== fw || far.height !== fh) {
+				far.width = fw;
+				far.height = fh;
+			}
+			ctx = farCtx;
+			ctx.setTransform(fw / width, 0, 0, fh / height, 0, 0);
+		}
+		const shakeX = shaking ? (Math.random() - 0.5) * shaking : 0;
+		const shakeY = shaking ? (Math.random() - 0.5) * shaking : 0;
+		if (!dense) {
+			ctx.save();
+			ctx.translate(shakeX, shakeY);
+		}
 		background(p, pulse, section.kiai);
 		decorations(p, time, pulse, section.kiai);
 		scenery(p, section.floor, pulse, section.kiai, lookOf(section), time);
 		// Collision surfaces stay at their actual world heights throughout camera transitions.
-		if (section.ceil !== null) ground(p, section.ceil, -1, pulse, camX);
-		ground(p, section.floor, 1, pulse, camX);
+		if (section.ceil !== null) ground(p, section.ceil, -1, pulse, camX, 'body');
+		ground(p, section.floor, 1, pulse, camX, 'body');
+		if (dense) {
+			ctx = main;
+			ctx.save();
+			ctx.translate(shakeX, shakeY);
+			// (a little larger than the frame where it shakes: no edge shows; each pixel doubled,
+			// not smoothed: as sharp as the screen's own points, and far less work where the
+			// browser draws without a graphics card)
+			const bleed = shaking ? Math.ceil(shaking) : 0;
+			ctx.imageSmoothingEnabled = false;
+			ctx.drawImage(far, -bleed, -bleed, width + bleed * 2, height + bleed * 2);
+			ctx.imageSmoothingEnabled = true;
+		}
+		if (section.ceil !== null) ground(p, section.ceil, -1, pulse, camX, 'edge');
+		ground(p, section.floor, 1, pulse, camX, 'edge');
+		(globalThis as any).__phase?.('groundEdge', ctx);
 
 		const left = camX - 1;
 		const right = camX + width / scale + 1;
@@ -2130,9 +2306,11 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		outlines(solids, section, p, pulse, true);
 		for (const s of solids) {
 			const sec = world.sectionAt(world.timeAt((s.x0 + s.x1) / 2));
-			solid(s.x0, s.x1, s.y0, s.y1, p, pulse, s.style, lookOf(sec), open);
+			// (in its own part's colours: not made again in every shade while two of them fade)
+			solid(s.x0, s.x1, s.y0, s.y1, paletteOf(sec), pulse, s.style, lookOf(sec), open);
 		}
 		outlines(solids, section, p, pulse, false);
+		(globalThis as any).__phase?.('blocks', ctx);
 
 		// Spikes and saws (their outlines glow together)
 		const spikes = world.hazards.near(left, right).filter((h) => h.kind !== 'saw');
@@ -2159,7 +2337,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 				h.y,
 				h.dir,
 				h.kind === 'small',
-				p,
+				paletteOf(sec),
 				pulse,
 				sec.kiai ? KIAI_SPIKES : look.spike,
 				!sec.kiai && !!look.tintSpike
@@ -2175,6 +2353,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 
 		// Pads, orbs, portals
+		(globalThis as any).__phase?.('spikes+saws', ctx);
 		for (const pd of world.pads.near(left, right))
 			pad(pd.x, pd.y, pd.dir, pd.kind, state.used.includes(pd.id), pulse);
 		for (const o of world.orbs.near(left, right))
@@ -2236,6 +2415,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 		}
 
 		// The end
+		(globalThis as any).__phase?.('pads/orbs/portals', ctx);
 		if (level.xEnd < right) {
 			const ex = level.xEnd;
 			const g = ctx.createLinearGradient(sx(ex), 0, sx(ex + 4), 0);
@@ -2281,6 +2461,7 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			if (!(frame.waiting && Math.floor(now / 120) % 2)) drawPlayer(state, icon, dt, time);
 		}
 		drawParticles();
+		(globalThis as any).__phase?.('player', ctx);
 		ctx.restore();
 
 		if (flash > 0) {
@@ -2289,9 +2470,19 @@ export function createDashRenderer(canvas: HTMLCanvasElement) {
 			flash = Math.max(0, flash - dt * 4);
 		}
 		if (frame.hud) hud(frame);
+		// (a few of the tiles made ahead, while the sprites are there to make them from)
+		for (let k = 0; k < 3 && warm.length && sprites(); k++) warm.shift()!();
 	}
 
-	return { draw, event, reset, resize, setTheme };
+	return {
+		draw,
+		event,
+		reset,
+		resize,
+		setTheme,
+		/** How sharp it draws now, next to the screen (1: as sharp as the screen) */
+		quality: () => QUALITY[quality]
+	};
 }
 
 export type DashRenderer = ReturnType<typeof createDashRenderer>;

@@ -1114,3 +1114,50 @@ Im Spiel (`render.ts`):
 
 Geprüft mit Bildern aus einem Level (Extreme, Testsong mit Kiai): Block-Stile, Spikes, Portale
 und Partikel; alle Dash-Tests grün, `npm run check` und der Web-Build laufen.
+
+## 24. Mehr FPS: halbe Auflösung für Fernes, adaptive Auflösung, keine Ruckler beim Teilwechsel
+
+Rückmeldung: Bei manchen gibt es Verzögerung und FPS-Einbrüche.
+
+Gemessen mit einem Level (Extreme, Testsong mit Kiai), Bild für Bild fertig gezeichnet, in
+Chromium ohne Grafikkarte (wie WebKitGTK unter Linux oder ein Browser, der die GPU nicht nutzt):
+Die Spielschleife und das JavaScript des Renderers kosten unter 3 % der Zeit; es ist das
+Zeichnen der Pixel. Bei Pixel-Ratio 2 gingen über die Hälfte davon an den Hintergrund
+(Verlauf, Beatmap-Bild, Wand, Licht: mehrmals über den ganzen Bildschirm), weitere ~15 % an Boden,
+Hügel und Zahnräder.
+
+Änderungen (`render.ts`):
+
+- **Fernes in halber Auflösung**, wo das Bild mehr Pixel als der Bildschirm Punkte hat
+  (Pixel-Ratio ab 1,4): Hintergrund, Wand, Zahnräder, schwebende Quadrate, Hügel, Deko und der
+  Körper des Bodens werden in eine eigene Leinwand mit halber Auflösung gezeichnet und einmal
+  pro Frame verdoppelt aufs Bild gelegt (ohne Glättung: so scharf wie die Punkte des Bildschirms,
+  und in Software viel billiger). Was gespielt wird (Blöcke, Spikes, Kante des Bodens, Orbs,
+  Portale, Spieler) bleibt in voller Auflösung.
+- **Adaptive Auflösung:** Brauchen mehr als ein Viertel der letzten 60 Frames über 20 ms, wird
+  eine Stufe weniger scharf gezeichnet (100 / 85 / 70 / 60 / 50 %); nach 4 s mit allen Frames unter
+  14 ms wieder eine Stufe schärfer, aber nicht innerhalb von 20 s nach einem Absenken. Die
+  FPS-Anzeige (F) zeigt die Stufe, wenn sie abgesenkt ist.
+- **Undurchsichtige Leinwand** (`alpha: false`): Der Browser muss sie nicht mit der Seite
+  verrechnen.
+- **Keine Ruckler am Teilwechsel:** Blöcke und Spikes nehmen die Farben ihres eigenen Teils, statt
+  während des Überblendens für jede Zwischenfarbe neu eingefärbt zu werden. Die eingefärbten
+  Kacheln aller Teile des Levels werden vorab erzeugt (drei pro Frame), und der Zwischenspeicher
+  verwirft nur die ältesten statt alle.
+- **Kein Layout pro Frame:** Die Größe der Leinwand meldet ein `ResizeObserver`, statt sie jedes
+  Frame abzufragen.
+
+Gemessen (fertig gezeichnete Frames ohne Grafikkarte, mittlere Zeit pro Frame, Normal / Kiai):
+
+| Auflösung                  | vorher     | jetzt                         |
+| -------------------------- | ---------- | ----------------------------- |
+| 1920 × 1080, Pixel-Ratio 1 | 12 / 14 ms | 12 / 14 ms                    |
+| 1920 × 1080, Pixel-Ratio 2 | 44 / 49 ms | 24 / 28 ms                    |
+| 2560 × 1440 Pixel: FPS     | 52 / 40    | 59,5 / 57                     |
+| 3840 × 2160 Pixel: FPS     | 25 / 19    | 37 / 27                       |
+| 3840 × 2160, adaptiv: FPS  | –          | 52 / 59 (Auflösung 60 / 50 %) |
+
+Mit (emulierter) Grafikkarte liefen alter und neuer Stand bei 60 FPS; dort zählt die
+Pixelmenge auf schwachen integrierten Grafikchips, die jetzt ebenfalls kleiner ist. Die Eingabe
+war schon sauber gelöst (Zeitstempel der Eingabe, Rollback um bis zu 60 ms); FPS-Einbrüche
+fühlten sich als Verzögerung an.

@@ -128,6 +128,8 @@
 	let progressShown = $state(0);
 	/** Frames drawn a second (counted over half a second) */
 	let fps = $state(0);
+	/** How sharp the level is drawn now (lowered where frames come too slowly) */
+	let sharpness = $state(1);
 	/** The song list (↑ ↓ Enter in the menu) */
 	let songs = $state();
 
@@ -532,6 +534,7 @@
 			const now = performance.now();
 			if (now - since >= 500) {
 				fps = Math.round((frames * 1000) / (now - since));
+				sharpness = renderer?.quality() ?? 1;
 				frames = 0;
 				since = now;
 			}
@@ -625,9 +628,9 @@
 	{#if showFps}
 		<p
 			class="absolute top-12 left-3 z-10 px-2 py-0.5 rounded-md bg-black/45 text-xs font-bold tabular-nums text-white/75 pointer-events-none"
-			title="Frames per second (F)"
+			title="Frames per second (F); the resolution where it's lowered to keep them up"
 		>
-			{fps} FPS
+			{fps} FPS{#if sharpness < 1}&nbsp;· {Math.round(sharpness * 100)}%{/if}
 		</p>
 	{/if}
 
