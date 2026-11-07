@@ -124,6 +124,62 @@ test('from hard on the UFO and swing rarely go long without a press that is need
 	assert.ok(swing.needed >= 0.72, `swing ${(100 * swing.needed).toFixed(0)}% of turns needed`);
 });
 
+test('spider parts are built up: platforms on most of the way, not a bare floor and ceiling', async () => {
+	let columns = 0;
+	let bare = 0;
+	let empty = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const)
+			for (const seed of SEEDS) {
+				const { level: l, chart } = await level(name, difficulty, seed);
+				const w = l.world;
+				for (const s of w.sections) {
+					if (s.mode !== 'spider') continue;
+					for (let x = Math.ceil(s.x0 + 2); x < s.x1 - 2; x++) {
+						if (musicalRest(chart, w.timeAt(x))) continue;
+						columns++;
+						const block = w.solids.items.some((o) => o.x1 > x && o.x0 < x + 1);
+						if (!block) bare++;
+						if (!block && !w.hazards.near(x - 0.5, x + 1.5).length) empty++;
+					}
+				}
+			}
+	assert.ok(columns > 200, `${columns} spider columns`);
+	// (a column without a block of its own: only the part's floor and ceiling; it was 38%)
+	assert.ok(bare / columns < 0.3, `${((100 * bare) / columns).toFixed(0)}% without a block`);
+	// (nor a spike near: it was 14%)
+	assert.ok(empty / columns < 0.12, `${((100 * empty) / columns).toFixed(0)}% with nothing`);
+});
+
+test('wave parts zigzag evenly: most turns the same time apart, on the beat grid', async () => {
+	let turns = 0;
+	let even = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const)
+			for (const seed of SEEDS) {
+				const { level: l } = await level(name, difficulty, seed);
+				for (const s of l.world.sections) {
+					if (s.mode !== 'wave') continue;
+					// (every press and letting go is a turn; the gravity portals' turns aside)
+					const times = l.plan
+						.filter((e) => e.time > s.start + 300 && e.time < s.end - 400)
+						.map((e) => e.time);
+					const gaps = times.slice(1).map((t, i) => Math.round((t - times[i]) / 10) * 10);
+					if (gaps.length < 4) continue;
+					const counts = new Map<number, number>();
+					for (const g of gaps) counts.set(g, (counts.get(g) ?? 0) + 1);
+					turns += gaps.length;
+					// (the most common gap, and the ones twice or half as long: a climb's long stroke)
+					const most = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+					even += gaps.filter((g) =>
+						[most, most * 2, most / 2].some((m) => Math.abs(g - m) <= 15)
+					).length;
+				}
+			}
+	assert.ok(turns > 60, `${turns} turns`);
+	assert.ok(even / turns > 0.75, `${((100 * even) / turns).toFixed(0)}% even`);
+});
+
 test('the ball and spider are clicked about as often as the cube on the hard levels', async () => {
 	const rate = (modes: string[]) => {
 		let presses = 0;

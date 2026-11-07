@@ -51,7 +51,7 @@ import { alignTiming } from './timing';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.9-blocks';
+export const GENERATOR_VERSION = 'gd-3.10-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {

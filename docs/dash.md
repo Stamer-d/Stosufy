@@ -1161,3 +1161,46 @@ Mit (emulierter) Grafikkarte liefen alter und neuer Stand bei 60 FPS; dort zähl
 Pixelmenge auf schwachen integrierten Grafikchips, die jetzt ebenfalls kleiner ist. Die Eingabe
 war schon sauber gelöst (Zeitstempel der Eingabe, Rollback um bis zu 60 ms); FPS-Einbrüche
 fühlten sich als Verzögerung an.
+
+## 25. Wave wie von Hand gebaut, Spider mit Plattformen, präziserer Ball
+
+Rückmeldung: Die Wave-Teile sind viel komplizierter gebaut als in von Hand gebauten Levels; der
+Spider hat immer noch öfter ganz leere Stellen.
+
+**Wave** (`builders/wave.ts`, der Weg neu): Bisher drehte die Wave auf jeder Note (unregelmäßige
+Abstände), in einem Band, das über vier Takte auf- und abwanderte; die Reparaturen verbreiterten
+den Tunnel stellenweise. Das ergab gezackte Berge statt eines Zickzacks. Jetzt bekommt jede
+Phrase (zwei Takte) einen Rhythmus auf dem Beat-Raster: alle 2, 1, ½ oder ¼ Beats, je nachdem wie
+dicht die Musik dort ist (notfalls punktiert, ¾ oder 1½), und eine Figur: gleichmäßiger Zickzack,
+Steigen (zwei Einheiten hoch, eine runter), Sinken, oder Spam (die schnellsten Drehungen in einem
+engen geraden Tunnel); wo der Rhythmus sich wiederholt, dieselbe Figur (Motiv). Ein Zickzack fern
+der Raummitte steigt oder sinkt erst zu ihr. Der Tunnel ist in einer Phrase überall gleich breit:
+parallel zum Zickzack, oder gerade (oben und unten flach, oder nur auf einer Seite; nur um einen
+Zickzack, der an seinem Platz bleibt). Der Spieler-Test folgt jetzt der Linie, die er sieht (je
+Ecke ein eigener Versatz bis ½ Block, gedreht wird erst, wenn er merklich daneben ist); vorher
+addierten sich seine Fehler von Ecke zu Ecke auf, und der Tunnel wurde unnötig verbreitert. Muss
+doch verbreitert werden, dann die ganze Phrase gleichmäßig.
+
+**Spider** (`builders/flight.ts`): Spider-Teile hatten außer Boden und Decke keine Blöcke; die
+Stufen (Treppen) waren die einzige Struktur, und die wurden oft ganz zurückgenommen. Gemessen auf
+den Testsongs war in 38 % der Spalten kein Block (14 %: weder Block noch Spike in der Nähe).
+Gefunden: (a) scheiterte die Prüfung nach den Treppen zehnmal, wurde der ganze Teil flach, auch
+wenn es nur an Spikes lag; (b) nach den Treppen wurden die Phrasen-Bausteine (Slalom) noch einmal
+aufgelegt und öffneten Boden und Decke wieder, sodass die Spider anders landete; (c) ein Orb-Sprung
+zählte als Strecke an der Decke, und die nächste Stufe kam unter sie; (d) die Reparatur entfernte
+bei jedem Fehlschlag alle Spikes im Umkreis von drei Blöcken. Jetzt: jede Stufe wird beim Setzen
+mit allen Spielweisen geprüft und geht allein wieder, wenn eine scheitert; beim Spider fast auf
+jeder Strecke eine Stufe, bis drei Blöcke; die Bausteine nicht noch einmal; nur Strecken, auf denen
+er wirklich steht; die Reparatur nimmt beim Ball und Spider nur den Spike, an dem eine Spielweise
+starb. Ergebnis: 22 % der Spalten ohne Block, 9 % ohne Block und Spike.
+
+**Ball und Spider präziser:** Ab Hard wird außerdem jeder Klick um mehr als den Spielraum der
+Schwierigkeit zu früh und zu spät gespielt; kommt er durch, ein Spike, wo dieser Weg entlangrollt
+und kein erlaubter hinkommt (beim Ball landete ein früher Klick sonst einfach etwas früher auf
+derselben Fläche). Median-Spielraum je Klick (Hard / Insane / Extreme): Ball 212 / 308 / 296 →
+200 / 204 / 196 ms, Spider 238 / 238 / 175 → 238 / 229 / 171 ms.
+
+Tests (`tests/dash/surfaces.test.ts`): Wave-Teile gleichmäßig (über 75 % der Abstände zwischen
+Drehungen gleich oder doppelt/halb so lang; vorher 60 %), Spider-Teile aufgebaut (unter 30 %
+Spalten ohne Block, unter 12 % ganz leer); beide fallen auf dem alten Stand durch.
+`GENERATOR_VERSION` ist `gd-3.10-blocks`.

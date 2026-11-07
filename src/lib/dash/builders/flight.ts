@@ -39,6 +39,9 @@ import { beatStrength, type DashNote } from '../chart';
 import { accentAt, composePhrases, musicalPosition, musicalRest } from '../composition';
 import { hitAt, loudness } from '../audio';
 
+/** Where the player is, step by step */
+type Trace = { x: number; y: number; time: number }[];
+
 interface Column {
 	x: number;
 	low: number;
@@ -1026,31 +1029,54 @@ export function buildFlight(
 	function stairs() {
 		if ((mode !== 'spider' && mode !== 'ball') || preset.level < 1 || !columns.length) return false;
 		const middle = (floor + top) / 2;
-		// Where it is on which side (the ball's way across counts to the side it's going to)
+		// Where it is on which side (the ball's way across counts to the side it's going to; the
+		// spider only where it's on a surface: in the air, an orb's jump, it's on neither)
 		const stays: { x0: number; x1: number; ceiling: boolean }[] = [];
+		let air = false;
 		for (const p of runs[0]) {
 			if (p.x < startX || p.x > endX) continue;
+			if (mode === 'spider') {
+				const onFloor = p.y - box.h <= floor + 0.05;
+				const onCeiling = p.y + box.h >= top - 0.05;
+				if (!onFloor && !onCeiling) {
+					air = true;
+					continue;
+				}
+			}
 			const ceiling = p.y > middle;
 			const last = stays[stays.length - 1];
-			if (last && last.ceiling === ceiling) last.x1 = p.x;
+			if (last && last.ceiling === ceiling && !air) last.x1 = p.x;
 			else stays.push({ x0: p.x, x1: p.x, ceiling });
+			air = false;
 		}
+		const spider = mode === 'spider';
 		const gapMin = 3;
-		const most = preset.level >= 3 ? 3 : 2;
+		// (the spider's part is its platforms: a step on nearly every stay, up to three blocks)
+		const most = spider || preset.level >= 3 ? 3 : 2;
 		const reach = Math.min(4, Math.floor((top - floor - gapMin) / 2));
 		// (away from where a press a bit off gets there and leaves: the spider is there at once, so
-		// a step fits between its quick presses too; the ball crosses a while)
-		const margin = (mode === 'spider' ? 0.4 : 0.8) + (speed * tolerance * 1.5) / 1000;
+		// a step fits between its quick presses too; the ball crosses a while. Each step is played
+		// through every way at once and goes again if one crashes, so no more room than that)
+		const margin = spider
+			? 0.3 + (speed * tolerance) / 1000
+			: 0.8 + (speed * tolerance * 1.5) / 1000;
 		let low = floor;
 		let high = top;
 		let changed = false;
+		// (each step checked on the surfaces alone: the spikes come again after the stairs)
+		const spikes = columns.map((c) => ({ spike: c.spike, small: c.small, both: c.both }));
+		for (const c of columns) {
+			c.spike = 0;
+			c.small = false;
+			c.both = false;
+		}
 		for (const stay of stays) {
 			const from = stay.x0 + margin + (mode === 'ball' ? speed * 0.2 : 0);
 			const to = stay.x1 - margin;
 			if (Math.ceil(from) > Math.floor(to) || musicalRest(ctx.chart, world.timeAt((from + to) / 2)))
 				continue;
 			// (now and then the same height again: not every stay a step)
-			if (rng() < 0.25) continue;
+			if (rng() < (spider ? 0.1 : 0.25)) continue;
 			const at = clamp(Math.round((from + to) / 2), Math.ceil(from), Math.floor(to));
 			const energy = ctx.chart.sound
 				? loudness(ctx.chart.sound, world.timeAt(at) - 400, world.timeAt(at) + 400) - 0.5
@@ -1062,21 +1088,40 @@ export function buildFlight(
 				const next = clamp(now + by, lowest, highest);
 				return next !== now ? next : clamp(now - by, lowest, highest);
 			};
+			const before = columns.map((c) => [c.low, c.high]);
+			const orbsBefore = jumpOrbs.map((j) => j.y);
 			if (stay.ceiling) {
 				// On the ceiling: the floor moves
 				const next = move(low, floor, Math.min(floor + reach, high - gapMin), way * size);
 				if (next === low) continue;
-				low = next;
-				for (const c of columns) if (c.x >= at) c.low = low;
+				for (const c of columns) if (c.x >= at) c.low = next;
 			} else {
 				const next = move(high, Math.max(top - reach, low + gapMin), top, -way * size);
 				if (next === high) continue;
-				high = next;
-				for (const c of columns) if (c.x >= at) c.high = high;
+				for (const c of columns) if (c.x >= at) c.high = next;
 			}
+			// (the orbs on the ground on the surface where it is now)
+			for (const j of jumpOrbs) {
+				const c = columns.find((col) => col.x === Math.floor(j.x));
+				if (c) j.y = j.orb.y = j.gravity > 0 ? c.low + box.h : c.high - box.h;
+			}
+			build();
+			// Played every way it may be: where one crashes, this step goes again
+			if (verify(0)) {
+				columns.forEach((c, i) => ([c.low, c.high] = before[i]));
+				jumpOrbs.forEach((j, i) => (j.y = j.orb.y = orbsBefore[i]));
+				build();
+				continue;
+			}
+			if (stay.ceiling) low = columns.find((c) => c.x >= at)?.low ?? low;
+			else high = columns.find((c) => c.x >= at)?.high ?? high;
 			changed = true;
 		}
 		if (changed) used(ctx, `${mode}-stairs`);
+		else {
+			columns.forEach((c, i) => Object.assign(c, spikes[i]));
+			build();
+		}
 		return changed;
 	}
 
@@ -1186,8 +1231,10 @@ export function buildFlight(
 			simulate(world, entry, section.end, inputs, { trace });
 			runs.push(trace);
 		}
-		// (the phrases' pieces again on the stairs' surfaces)
-		applyPieces();
+		// (the phrases' pieces again on the stairs' surfaces; not the spider's: its steps were
+		// each played every way as they are, and a piece opening them again would change where
+		// it lands)
+		if (mode !== 'spider') applyPieces();
 		pickSpikes();
 		timingSpikes();
 		orbJumpSpikes();
@@ -1197,7 +1244,11 @@ export function buildFlight(
 	const saws: Hazard[] = [];
 	// (and in the phrases of saws: on every accent and beat that's heard, by the way)
 	const sawPhrases = [...pieceOf.values()].includes('saws');
-	if (style === 'open' || sawPhrases || (close > 0.35 && mode !== 'spider' && mode !== 'swing'))
+	if (
+		style === 'open' ||
+		sawPhrases ||
+		(close > 0.35 && mode !== 'spider' && mode !== 'swing' && mode !== 'ball')
+	)
 		for (const note of notes) {
 			const x = world.xAt(note.time);
 			const phrase = pieceAt(note.time) === 'saws';
@@ -1248,7 +1299,7 @@ export function buildFlight(
 
 	// --- Checked: on time, early and late; where it crashes, more room -------------------------
 	/** Played the ways it may be played (steered: flown again); where it crashes, if it does */
-	const verify = (attempt: number) => {
+	function verify(attempt: number) {
 		let failed: PlayerState | null = null;
 		if (!legalAround(world, startX - 1, endX + 1)) keepRules();
 		for (const inputs of steered ? [] : variants) {
@@ -1332,7 +1383,7 @@ export function buildFlight(
 			}
 		}
 		return failed;
-	};
+	}
 	/** The attempt whose way was played through (checked again the same way later) */
 	let settled = 0;
 	const repairAll = () => {
@@ -1343,6 +1394,30 @@ export function buildFlight(
 			for (const saw of saws.filter((s) => Math.abs(s.x - failed!.x) < 3)) {
 				world.hazards.remove(saw);
 				saws.splice(saws.indexOf(saw), 1);
+			}
+			// The ball and spider: only the spike it ran into goes, where it's one (not every spike
+			// around: those are the part)
+			if ((mode === 'ball' || mode === 'spider') && attempt < 30) {
+				const f = failed;
+				const hit = columns.filter((c) => {
+					if (!c.spike || Math.abs(c.x + 0.5 - f.x) > box.w + 0.75) return false;
+					const tall = c.small ? 0.5 : 1;
+					const up = c.spike === 1 || c.both;
+					const down = c.spike === -1 || c.both;
+					return (
+						(up && f.y - box.h < c.low + tall + 0.25) ||
+						(down && f.y + box.h > c.high - tall - 0.25)
+					);
+				});
+				if (hit.length) {
+					for (const c of hit) {
+						c.spike = 0;
+						c.small = false;
+						c.both = false;
+					}
+					build();
+					continue;
+				}
 			}
 			const near = columns.filter((c) => Math.abs(c.x + 0.5 - failed!.x) < 3);
 			if (!near.length) break;
@@ -1358,9 +1433,10 @@ export function buildFlight(
 		}
 	};
 	repairAll();
-	// Stairs that keep breaking the ways played (a press a bit off lands before a step and runs
-	// into it): taken out again, and the part flat as before them, not cleared bit by bit
-	if (stepped && settled >= 10) {
+	// Stairs that keep breaking the ways played: taken out again, and the part flat as before
+	// them, not cleared bit by bit (only where nothing else helped: each step was played every
+	// way already when it was set, it's the spikes on them that are mended)
+	if (stepped && settled >= 30) {
 		columns.forEach((c, i) => Object.assign(c, flat.columns[i]));
 		jumpOrbs.forEach((j, i) => {
 			j.y = flat.jumps[i];
@@ -1447,7 +1523,9 @@ export function buildFlight(
 	 * Every press of the UFO, ball and spider needed, one by one: where leaving one out still gets
 	 * through, a spike on a floor or ceiling that way rides along and no way played (on time, a bit
 	 * early or late) comes near; each one tried there alone, played with that press early, late and
-	 * on time (it must get through) and without it (it must crash). The first that does stays
+	 * on time (it must get through) and without it (it must crash). The first that does stays.
+	 * The ball's and spider's presses from hard on the same way a good deal off: they must crash
+	 * too (so a press has about the room the difficulty gives it, not a whole beat)
 	 */
 	function needEveryPress() {
 		if (preset.level < 1 || (mode !== 'ufo' && mode !== 'ball' && mode !== 'spider')) return;
@@ -1490,55 +1568,74 @@ export function buildFlight(
 			const until = Math.min(section.end - 150, (next?.time ?? e.time + 1200) + 500, e.time + 1600);
 			const without = events.filter((_, n) => n !== k && n !== release);
 			const from = before(e.time);
-			const ride: { x: number; y: number; time: number }[] = [];
-			if (simulate(world, from, until, without, { trace: ride }).dead) continue;
 			const moved = (shift: number) =>
 				events
 					.map((u, n) => (n === k || n === release ? { ...u, time: u.time + shift } : u))
 					.sort((p, q) => p.time - q.time);
-			// (columns looked at, and those a spike was tried on: only those count, so the look goes
-			// past the first columns after the press, where the ways played still are)
-			const tried = new Set<number>();
-			let attempts = 0;
-			const addedBefore = added;
-			for (const p of ride) {
-				if (p.time < e.time + (mode === 'ufo' ? 200 : 100) || attempts >= 8) continue;
-				if (musicalRest(ctx.chart, p.time)) continue;
-				const c = columns.find((col) => col.x === Math.floor(p.x));
-				if (!c || c.both || tried.has(c.x)) continue;
-				const side: 0 | 1 | -1 =
-					p.y - box.h - c.low < 0.08 ? 1 : c.high - (p.y + box.h) < 0.08 ? -1 : 0;
-				if (!side || c.spike === side) continue;
-				tried.add(c.x);
-				const clear = room(c, side);
-				// (a column with a spike on the other surface already gets one here too, full size)
-				const other = c.spike !== 0;
-				if (clear < (other ? 1.05 : 0.42)) continue;
-				attempts++;
-				const was = { spike: c.spike, small: c.small };
-				if (other) c.both = true;
-				else {
-					c.spike = side;
-					c.small = clear < 1.05;
+			/**
+			 * A spike where a wrong way (this press left out, or a good deal off) slides along a
+			 * surface and no way played comes near: kept where that way crashes on it and every way
+			 * the part may be played still gets through (true if one is)
+			 */
+			const spikeFor = (wrong: InputEvent[], ride: Trace, after: number) => {
+				// (columns looked at, and those a spike was tried on: only those count, so the look
+				// goes past the first columns after the press, where the ways played still are)
+				const tried = new Set<number>();
+				let attempts = 0;
+				for (const p of ride) {
+					if (p.time < after || attempts >= 8) continue;
+					if (musicalRest(ctx.chart, p.time)) continue;
+					const c = columns.find((col) => col.x === Math.floor(p.x));
+					if (!c || c.both || tried.has(c.x)) continue;
+					const side: 0 | 1 | -1 =
+						p.y - box.h - c.low < 0.08 ? 1 : c.high - (p.y + box.h) < 0.08 ? -1 : 0;
+					if (!side || c.spike === side) continue;
+					tried.add(c.x);
+					const clear = room(c, side);
+					// (a column with a spike on the other surface already gets one here too, full size)
+					const other = c.spike !== 0;
+					if (clear < (other ? 1.05 : 0.42)) continue;
+					attempts++;
+					const was = { spike: c.spike, small: c.small };
+					if (other) c.both = true;
+					else {
+						c.spike = side;
+						c.small = clear < 1.05;
+					}
+					build();
+					// (and every way the part is played: all presses early or late, each a bit off)
+					const fine =
+						simulate(world, from, until, wrong).dead &&
+						[0, -tolerance, -tolerance / 2, tolerance / 2, tolerance].every(
+							(shift) => !simulate(world, from, until, moved(shift)).dead
+						) &&
+						variants.every((v) => !simulate(world, from, until, v).dead);
+					if (fine) {
+						added++;
+						return true;
+					}
+					c.spike = was.spike;
+					c.small = was.small;
+					c.both = false;
+					build();
 				}
-				build();
-				// (and every way the part is played: all presses early or late, each a bit off)
-				const fine =
-					simulate(world, from, until, without).dead &&
-					[0, -tolerance, -tolerance / 2, tolerance / 2, tolerance].every(
-						(shift) => !simulate(world, from, until, moved(shift)).dead
-					) &&
-					variants.every((v) => !simulate(world, from, until, v).dead);
-				if (fine) {
-					added++;
-					break;
+				return false;
+			};
+			// The press a good deal off (more than the room the difficulty gives a click) mustn't
+			// get through either: the ball and spider from hard on (a press early lands on the same
+			// surface a little before and rolls on, one late a little after)
+			if ((mode === 'ball' || mode === 'spider') && preset.level >= 2) {
+				const off = Math.max(tolerance + 20, byIntensity(preset.window, intensity) / 2 + 15);
+				for (const shift of [-off, off]) {
+					const wrong = moved(shift);
+					const trace: Trace = [];
+					if (!simulate(world, from, until, wrong, { trace }).dead)
+						spikeFor(wrong, trace, e.time + shift + 60);
 				}
-				c.spike = was.spike;
-				c.small = was.small;
-				c.both = false;
-				build();
 			}
-			if (added > addedBefore) continue;
+			const ride: Trace = [];
+			if (simulate(world, from, until, without, { trace: ride }).dead) continue;
+			if (spikeFor(without, ride, e.time + (mode === 'ufo' ? 200 : 100))) continue;
 			// Where the way without it doesn't slide along anything but flies by below (or above)
 			// every way played (the UFO a hop lower): the floor there brought up to just under it,
 			// a spike on it, as for an orb that must be used
