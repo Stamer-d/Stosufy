@@ -1018,7 +1018,7 @@ Neue Tests: `tests/dash/surfaces.test.ts` (keine Lücke über 4 Beats und unter 
 Ball-Höhe nach Tempo, verschiedene Spider-Höhen, keine Klicks in Breaks). Auf dem alten Stand
 schlagen die ersten vier fehl. `GENERATOR_VERSION` ist `gd-3.8-blocks`.
 
-## 22. UFO und Swing durchgehend, Tempo pro Phrase, mehr Variation
+## 22. 0.6.91: UFO und Swing durchgehend, Tempo pro Phrase, mehr Variation
 
 Rückmeldung: UFO und Swing haben noch Lücken; die Geschwindigkeit soll sich öfter anpassen, wo
 es die Map verlangt; mehr Variation. (Der neue Spider kam gut an.)
