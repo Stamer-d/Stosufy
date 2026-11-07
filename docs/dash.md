@@ -1017,3 +1017,59 @@ Neue Tests: `tests/dash/surfaces.test.ts` (keine Lücke über 4 Beats und unter 
 2 Beats bei Ball und Spider ab Hard, so oft geklickt wie der Cube, keine Gravity-Portale darin,
 Ball-Höhe nach Tempo, verschiedene Spider-Höhen, keine Klicks in Breaks). Auf dem alten Stand
 schlagen die ersten vier fehl. `GENERATOR_VERSION` ist `gd-3.8-blocks`.
+
+## 22. UFO und Swing durchgehend, Tempo pro Phrase, mehr Variation
+
+Rückmeldung: UFO und Swing haben noch Lücken; die Geschwindigkeit soll sich öfter anpassen, wo
+es die Map verlangt; mehr Variation. (Der neue Spider kam gut an.)
+
+Gemessen wie in Abschnitt 21, jetzt auch für den Swing mit „Klick weglassen“ (bisher galt jede
+Swing-Drehung als nötig): der Swing machte ~5 Drehungen pro Sekunde, aber nur ~62 % davon waren
+nötig, weil er ohne eine Drehung an der (stachellosen) Tunnelwand entlangrutscht. Beim UFO kamen
+Lücken von bis zu 9,5 Beats.
+
+Änderungen:
+
+- **UFO:** mindestens 0,3 / 0,26 / 0,22 / 0,2 / 0,18 s zwischen Klicks (vorher immer 0,22) und
+  Lücken über 2 / 1,5 / 1,25 / 1 Beats gefüllt wie bei Ball und Spider. Würde ein Tap das UFO an
+  die Decke drücken, entfiel der Klick bisher; ab Hard steht dort jetzt ein schwarzer Orb (wirft es
+  auf dem Schlag nach unten). Die Blöcke bleiben mindestens 0,5 unter seinem Weg (Platz für einen
+  kleinen Spike). Wo ein ausgelassener Tap das UFO nur tiefer (höher) durch freie Luft fliegen
+  lässt, wird der Boden (die Decke) dort bis knapp an diesen Weg geholt, mit Spike drauf, sofern
+  kein gespielter Weg (pünktlich, früh, spät) dorthin kommt.
+- **Swing:** Spikes auf den Tunnelwänden (klein, wo weniger Platz ist), überall wo kein Weg
+  hinkommt, auch nicht der „Mensch reagiert 60 ms später“-Weg und die verwackelten Varianten;
+  was einen davon trifft, geht wieder. Eine ausgelassene Drehung endet im Spike.
+- **Tempo pro Phrase** (ab Hard): Jede Phrase eines Abschnitts bekommt ihre eigene Musik
+  (Energie, Slider-Velocity, Tempo, Kiai) und ihr eigenes Tempo; Stellen, an denen sich der Song
+  dreht (`songTurn`), zählen als Wechsel. Die Art des Teils wird ebenso nach der Phrase gewählt.
+- **Variation:** Raumhöhen ab Hard pro Teil: UFO 8–10, Ship und Swing 9–10 (Spider 7–9, Ball nach
+  Tempo); Sägen auf den Akzenten auch in Ball und Spider; der Spider öfter und schon ab Normal.
+- **Ball-Höhe:** Flugzeit + Toleranz + 20 ms ≤ 92 % des Beats (vorher 100 %): bei 128 BPM 7 statt
+  8 Blöcke. Mit 8 lag der Ball nur ~50 ms auf einer Seite; für einen Spike gegen einen
+  ausgelassenen Klick war kein Platz.
+
+Gemessen (vier Songs × Hard/Insane/Extreme × zwei Seeds, mit Audio):
+
+|                                 | vorher             | jetzt              |
+| ------------------------------- | ------------------ | ------------------ |
+| UFO: nötige Klicks/s            | 1,67 / 1,49 / 1,69 | 2,05 / 1,72 / 2,20 |
+| UFO: Zeit in Lücken > 2 Beats   | 27 / 23 / 16 %     | 10 / 17 / 10 %     |
+| UFO: längste Lücke              | 7 / 9,5 / 7 Beats  | 5 / 3,2 / 3,5      |
+| Swing: nötige Drehungen         | 63 / 62 / 61 %     | 79 / 78 / 80 %     |
+| Swing: Zeit in Lücken > 2 Beats | 12 / 17 / 17 %     | 1 / 5 / 5 %        |
+| Tempowechsel pro Minute         | 2,1 / 2,1 / 2,5    | 2,1 / 2,1 / 2,9    |
+
+Die Testsongs ändern sich innerhalb ihrer Teile kaum, daher kaum mehr Tempowechsel; auf einem
+Song, dessen Mapper die Slider alle vier Takte schneller macht, folgte das Tempo schon vorher
+jedem Wechsel (11 in 80 s). Ball und Spider bleiben wie in Abschnitt 21.
+
+Grenze beim UFO: Die geprüften Spielweisen (jeder Tap etwas früh oder spät) streuen beim UFO über
+bis zu vier Blöcke Höhe. Wo es gleichmäßig schwebt, bleibt ein ausgelassener Tap in diesem
+Bereich, und dort darf kein Hindernis hin; solche Taps bleiben unnötig (Insane 17 % Lückenzeit,
+einzelne Strecken bis ~10 Beats, z. B. Hard ohne Audio). `tests/dash/emptiness.ts` (48 Level):
+alle durchspielbar, unnötige Klicks 0,9 % (vorher 0,8 %).
+
+Tests: `tests/dash/surfaces.test.ts` prüft jetzt auch UFO (unter 17 % Lückenzeit) und Swing
+(unter 7 %, mindestens 72 % der Drehungen nötig; der Teil fällt auf dem alten Stand durch) und
+verschiedene UFO-Höhen. `GENERATOR_VERSION` ist `gd-3.9-blocks`.

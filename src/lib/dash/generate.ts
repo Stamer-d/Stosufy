@@ -51,7 +51,7 @@ import { alignTiming } from './timing';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.8-blocks';
+export const GENERATOR_VERSION = 'gd-3.9-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -286,7 +286,9 @@ function runnerClicks(chart: DashChart, notes: DashNote[], sec: Section, preset:
 
 /** The least time between two spider presses (s), by difficulty */
 const SPIDER_GAP = [0.3, 0.26, 0.2, 0.17, 0.15];
-/** The longest a ball or spider part goes without a press where the music plays (beats) */
+/** The least time between two UFO presses (s), by difficulty */
+const UFO_GAP = [0.3, 0.26, 0.22, 0.2, 0.18];
+/** The longest a ball, spider or UFO part goes without a press where the music plays (beats) */
 const SURFACE_LONGEST = [6, 2, 1.5, 1.25, 1];
 
 /** How long the ball takes from the floor to the ceiling (ms), by its room, size and speed */
@@ -336,10 +338,10 @@ export function ballCross(ceil: number, mini: boolean, speedIndex: number) {
 }
 
 /**
- * How tall a ball or spider part is. The ball switches only on a surface, so the room it crosses
+ * How tall a part with a ceiling is. The ball switches only on a surface, so the room it crosses
  * sets how often it can be clicked: from hard on as tall as lets it switch on every beat (a press
- * a bit early too), a bit lower now and then; the spider's (it's there at once) by chance, for
- * variety
+ * a bit early too), a bit lower now and then; the others' by chance from hard on, for variety
+ * (the spider 7–9 blocks, the UFO 8–10, the ship and swing 9–10)
  */
 function partCeiling(
 	mode: Exclude<Mode, 'cube' | 'robot'>,
@@ -353,13 +355,18 @@ function partCeiling(
 		// (where not even the lowest lets it switch on every beat, it switches every other one)
 		let ceil = 5;
 		for (let h = 8; h > 5; h--)
-			if (ballCross(h, mini, speedIndex) + preset.tolerance + 20 <= beat) {
+			// (and a moment on the other side: a spike there for a press left out)
+			if (ballCross(h, mini, speedIndex) + preset.tolerance + 20 <= beat * 0.92) {
 				ceil = h;
 				break;
 			}
 		return ceil > 5 && rng() < 0.3 ? ceil - 1 : ceil;
 	}
 	if (mode === 'spider' && preset.level >= 2) return 7 + Math.floor(rng() * 3);
+	// (the UFO, ship and swing too: a lower room now and then, a part of its own)
+	if (mode === 'ufo' && preset.level >= 2) return 8 + Math.floor(rng() * 3);
+	// (the ship's orbs throw it a few blocks: not in less than 9)
+	if ((mode === 'ship' || mode === 'swing') && preset.level >= 2) return 9 + Math.floor(rng() * 2);
 	return BOUNDS[mode];
 }
 
@@ -931,8 +938,7 @@ function planParts(
 	})();
 
 	// What each part's music is like
-	const features = bounds.slice(0, -1).map((from, i) => {
-		const to = bounds[i + 1];
+	const featureOf = (from: number, to: number) => {
 		const notes = chart.notes.filter((n) => n.time >= from && n.time < to);
 		const seconds = (to - from) / 1000;
 		const kiai = inKiai(chart, (from + to) / 2);
@@ -976,7 +982,8 @@ function planParts(
 			drop: !!change?.up && change.kind !== 'tempo',
 			rest
 		};
-	});
+	};
+	const features = bounds.slice(0, -1).map((from, i) => featureOf(from, bounds[i + 1]));
 	const intensity = intensities(features);
 	// (the song's calmer and more intense bars, by how long they last)
 	const bars = barEnergies(chart, start, end).filter(
@@ -1002,11 +1009,13 @@ function planParts(
 	// there: on the two-bar lines where the song turns (another rhythm, busier or calmer, louder
 	// or softer than the phrase before), and at the latest after a phrase or two (about 4.5 s on
 	// extreme, 6 s on insane, 9 s on hard; in the usual parts of insane and extreme a bit longer)
-	const parted: ((typeof features)[number] & { phrase: boolean })[] = [];
+	const parted: ((typeof features)[number] & { phrase: boolean; turn: boolean })[] = [];
 	const partedIntensity: number[] = [];
 	const partedPace: Pace[] = [];
 	features.forEach((f, i) => {
 		const cuts = [f.from];
+		/** The cuts where the song turns (not only a phrase's end) */
+		const turned = new Set<number>();
 		const target = PHRASES[preset.level]?.[pace[i]] ?? 0;
 		// (where the song turns: on extreme in all its parts, from insane on in its usual parts too,
 		// on hard only where it's intense; the harder, the less it needs to turn)
@@ -1029,22 +1038,47 @@ function planParts(
 				if (since < least - 1 || musicalRest(chart, t)) continue;
 				const turns =
 					!!turning && songTurn(chart, t, span) >= turning && accentAt(chart, t) >= 0.35;
-				if (since >= due - span * 0.25 || turns) cuts.push(Math.round(t));
+				if (since >= due - span * 0.25 || turns) {
+					cuts.push(Math.round(t));
+					if (turns) turned.add(Math.round(t));
+				}
 			}
 		}
 		cuts.forEach((from, k) => {
+			const to = cuts[k + 1] ?? f.to;
+			// (a phrase of it: its own music, the kind and speed may follow it)
 			parted.push({
-				...f,
+				...(cuts.length > 1 ? featureOf(from, to) : f),
 				from,
-				to: cuts[k + 1] ?? f.to,
+				to,
 				change: k === 0 && f.change,
 				drop: k === 0 && f.drop,
-				phrase: k > 0
+				phrase: k > 0,
+				turn: turned.has(from)
 			});
 			partedIntensity.push(intensity[i]);
 			partedPace.push(pace[i]);
 		});
 	});
+	// From hard on the speed follows the phrases too: each its own pace, from its own music (the
+	// mapper's sliders, the tempo, how busy and loud), changing where the song turns as well
+	if (preset.level >= 2 && parted.length > features.length) {
+		const again = paces(
+			parted.map((p) => ({ ...p, change: p.change || p.turn })),
+			preset.level,
+			sorted.length >= 8
+				? {
+						low: sorted[Math.floor(sorted.length * 0.2)],
+						high: sorted[Math.floor(sorted.length * 0.9)]
+					}
+				: undefined
+		);
+		again.forEach((p, i) => {
+			partedPace[i] = p;
+			if (p === 2) partedIntensity[i] = Math.max(partedIntensity[i], 0.72);
+			if (p === 0) partedIntensity[i] = Math.min(partedIntensity[i], 0.4);
+		});
+	}
 	// How much the hard levels lean on the quick parts where it's intense (0 on easy and normal)
 	const quick = Math.max(0, (preset.level - 1) / 3);
 	/**
@@ -1072,7 +1106,7 @@ function planParts(
 			ball: 0.6 + (streamy < 0.25 && energy > 0.7 ? 0.3 : 0) + hot * 0.3,
 			ufo: 0.55 + (streamy < 0.3 ? 0.2 : 0) + hot * 0.35,
 			swing: 0.45 + (kiai ? 0.4 : 0) + hot * 0.3,
-			spider: 0.3 + (streamy < 0.25 ? 0.15 : 0) + hot * 0.45
+			spider: 0.4 + (streamy < 0.25 ? 0.15 : 0) + hot * 0.45
 		};
 		let mode: Mode = 'cube';
 		// Now and then the same kind again, small (or big) now: a size portal
@@ -1322,19 +1356,21 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 			state = buildShip(ctx, sec, drumClicks(chart, inside, preset, sec.start, sec.end), state);
 		else {
 			// The UFO and swing click often, the ball like the cube, the spider (it's on the other
-			// side at once) on the half beats too from hard on
+			// side at once) on the half beats too from hard on, the UFO nearly as often
 			// (the ball's presses a crossing apart and as much as a press may come early: one while
 			// it's still crossing does nothing, and then a press a bit early wouldn't either)
 			const gap =
-				sec.mode === 'ufo' || sec.mode === 'swing'
+				sec.mode === 'swing'
 					? Math.max(preset.gap, 0.22)
-					: sec.mode === 'spider'
-						? Math.max(preset.gap, SPIDER_GAP[preset.level])
-						: Math.max(preset.gap, 0.24);
-			const surfaces = sec.mode === 'ball' || sec.mode === 'spider';
+					: sec.mode === 'ufo'
+						? Math.max(preset.gap, UFO_GAP[preset.level])
+						: sec.mode === 'spider'
+							? Math.max(preset.gap, SPIDER_GAP[preset.level])
+							: Math.max(preset.gap, 0.24);
+			const surfaces = sec.mode === 'ball' || sec.mode === 'spider' || sec.mode === 'ufo';
 			// (on the drums, the part's two-bar pattern bar after bar, as the cube's: see rhythm.ts;
-			// the older way from the notes. The ball and spider never long without a press: they
-			// only roll along, there's nothing else to do)
+			// the older way from the notes. The ball, spider and UFO never long without a press:
+			// they only roll along or sink, there's nothing else to do)
 			const theirs =
 				sec.mode === 'ship' || sec.mode === 'swing'
 					? []

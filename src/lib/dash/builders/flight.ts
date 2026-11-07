@@ -69,7 +69,7 @@ const PIECES: { id: Piece; modes: string[]; level: number; weight: number }[] = 
 	{ id: 'slalom', modes: ['ufo', 'ball', 'spider', 'swing'], level: 1, weight: 1.1 },
 	{ id: 'teeth', modes: ['ufo', 'ball', 'spider'], level: 2, weight: 0.9 },
 	{ id: 'squeeze', modes: ['ufo'], level: 2, weight: 0.7 },
-	{ id: 'saws', modes: ['ufo', 'swing'], level: 2, weight: 0.8 },
+	{ id: 'saws', modes: ['ufo', 'swing', 'ball', 'spider'], level: 2, weight: 0.8 },
 	{ id: 'orbs', modes: ['ufo'], level: 2, weight: 0.8 }
 ];
 
@@ -534,7 +534,22 @@ export function buildFlight(
 					({ placed, lastOrb } = was);
 					hold = 70;
 				}
-				if (!fresh.orb || pinned(at, time, hold)) continue;
+				if (!fresh.orb || pinned(at, time, hold)) {
+					// (from hard on a black orb there instead: it's thrown back down on the beat, and
+					// the click stays)
+					const room = at.gravity > 0 ? at.y - floor : top - at.y;
+					if (mode !== 'ufo' || preset.level < 2 || room < 3.5 || time - lastOrb < 400) continue;
+					fresh.orb = null;
+					add('black');
+					hold = 70;
+					if (pinned(at, time, hold)) {
+						world.orbs.remove(fresh.orb!);
+						orbs.pop();
+						continue;
+					}
+					placed++;
+					lastOrb = time;
+				}
 			}
 			events.push(...tap(time, hold));
 			previous = note ?? previous;
@@ -635,7 +650,9 @@ export function buildFlight(
 				: mode === 'ball' || mode === 'spider'
 					? 0.18
 					: mode === 'ufo'
-						? 0.85 * tight
+						? // (at least room for a small spike under where it sinks to: a press left out
+							// lands on one, not on a block to slide along)
+							Math.max(0.5, 0.85 * tight)
 						: 1.3 * tight;
 	const cap =
 		mode === 'spider' ? 0 : mode === 'ball' ? Math.floor((top - floor) / 2) - 1 : top - floor;
@@ -1360,7 +1377,71 @@ export function buildFlight(
 		repairAll();
 	}
 	noResting();
+	swingWalls();
 	needEveryPress();
+
+	/**
+	 * The swing's walls dangerous: spikes on them (small ones where there's less room) wherever no
+	 * way it's flown comes near: on the music, each turn a bit off, and as a person flies it. A turn
+	 * left out runs into one, not along the wall. What one of those ways runs into goes again.
+	 */
+	function swingWalls() {
+		if (mode !== 'swing' || preset.level < 1) return;
+		const flown = [events, ...jittered(events, tolerance * 0.75, section.index)];
+		const person = flyShip(
+			ctx,
+			entry,
+			section.end,
+			(x) => {
+				const c = columns.find((col) => col.x === Math.floor(x));
+				if (!c) return follow(x);
+				return (c.low + (c.spike === 1 ? 1 : 0) + c.high - (c.spike === -1 ? 1 : 0)) / 2;
+			},
+			[],
+			60
+		);
+		flown.push(person.events);
+		const ways = flown.map((inputs) => {
+			const trace: { x: number; y: number; time: number }[] = [];
+			simulate(world, entry, section.end, inputs, { trace });
+			return trace;
+		});
+		const room = (c: Column, side: 1 | -1) => {
+			let near = Infinity;
+			for (const way of ways)
+				for (const p of way)
+					if (Math.abs(p.x - (c.x + 0.5)) < box.w + 0.5)
+						near = Math.min(near, side > 0 ? p.y - box.h - c.low : c.high - (p.y + box.h));
+			return near;
+		};
+		const need = preset.level >= 2 ? 0.55 : 0.9;
+		const put: Column[] = [];
+		for (const c of columns) {
+			if (c.spike || c.x < startX + 2 || musicalRest(ctx.chart, world.timeAt(c.x + 0.5))) continue;
+			const low = room(c, 1);
+			const high = room(c, -1);
+			if (low < need && high < need) continue;
+			c.spike = low >= need && (high < need || low <= high) ? 1 : -1;
+			c.both = low >= need && high >= need;
+			c.small = Math.min(c.both ? Math.min(low, high) : Math.max(low, high)) < 1.05;
+			put.push(c);
+		}
+		if (!put.length) return;
+		build();
+		for (let attempt = 0; attempt < 40; attempt++) {
+			const failed = verify(settled);
+			if (!failed) break;
+			const near = put.filter((c) => c.spike && Math.abs(c.x + 0.5 - failed.x) < 3);
+			if (!near.length) break;
+			for (const c of near) {
+				c.spike = 0;
+				c.small = false;
+				c.both = false;
+			}
+			build();
+		}
+		if (put.some((c) => c.spike)) used(ctx, 'swing-walls');
+	}
 
 	/**
 	 * Every press of the UFO, ball and spider needed, one by one: where leaving one out still gets
@@ -1398,6 +1479,8 @@ export function buildFlight(
 		const before = (time: number) =>
 			states[Math.max(0, Math.min(states.length - 1, Math.floor((time - 400 - entry.time) / 250)))];
 		let added = 0;
+		/** The columns whose floor or ceiling was brought up to a way without its press */
+		const raised = new Map<Column, { low: number; high: number }>();
 		for (let k = 0; k < events.length; k++) {
 			const e = events[k];
 			if (!e.down || e.time < section.start + 120 || e.time > section.end - 250) continue;
@@ -1417,6 +1500,7 @@ export function buildFlight(
 			// past the first columns after the press, where the ways played still are)
 			const tried = new Set<number>();
 			let attempts = 0;
+			const addedBefore = added;
 			for (const p of ride) {
 				if (p.time < e.time + (mode === 'ufo' ? 200 : 100) || attempts >= 8) continue;
 				if (musicalRest(ctx.chart, p.time)) continue;
@@ -1454,6 +1538,64 @@ export function buildFlight(
 				c.both = false;
 				build();
 			}
+			if (added > addedBefore) continue;
+			// Where the way without it doesn't slide along anything but flies by below (or above)
+			// every way played (the UFO a hop lower): the floor there brought up to just under it,
+			// a spike on it, as for an orb that must be used
+			if (mode !== 'ufo') continue;
+			const lows = new Set<number>();
+			let raises = 0;
+			for (const p of ride) {
+				if (p.time < e.time + 150 || raises >= 6) continue;
+				if (p.time > e.time + 1200) break;
+				if (musicalRest(ctx.chart, p.time)) continue;
+				const c = columns.find((col) => col.x === Math.floor(p.x));
+				if (!c || c.spike || lows.has(c.x)) continue;
+				let lo = Infinity;
+				let hi = -Infinity;
+				for (const way of ways)
+					for (const q of way)
+						if (Math.abs(q.x - (c.x + 0.5)) < box.w + 0.35) {
+							lo = Math.min(lo, q.y - box.h);
+							hi = Math.max(hi, q.y + box.h);
+						}
+				if (!isFinite(lo)) continue;
+				const bottom = p.y - box.h;
+				const head = p.y + box.h;
+				let side: 1 | -1;
+				let surface: number;
+				if (head < lo - 0.2) {
+					side = 1;
+					surface = Math.max(c.low, Math.floor(bottom * 2) / 2);
+					if (lo - surface < 1.05 || bottom - surface > 0.45 || surface > c.high - 2) continue;
+				} else if (bottom > hi + 0.2) {
+					side = -1;
+					surface = Math.min(c.high, Math.ceil(head * 2) / 2);
+					if (surface - hi < 1.05 || surface - head > 0.45 || surface < c.low + 2) continue;
+				} else continue;
+				lows.add(c.x);
+				raises++;
+				const old = { low: c.low, high: c.high };
+				if (side > 0) c.low = surface;
+				else c.high = surface;
+				c.spike = side;
+				c.small = false;
+				build();
+				const fine =
+					simulate(world, from, until, without).dead &&
+					[0, -tolerance, -tolerance / 2, tolerance / 2, tolerance].every(
+						(shift) => !simulate(world, from, until, moved(shift)).dead
+					) &&
+					variants.every((v) => !simulate(world, from, until, v).dead);
+				if (fine) {
+					if (!raised.has(c)) raised.set(c, old);
+					added++;
+					break;
+				}
+				Object.assign(c, old);
+				c.spike = 0;
+				build();
+			}
 		}
 		if (!added) return;
 		used(ctx, `${mode}-every-press`);
@@ -1467,6 +1609,9 @@ export function buildFlight(
 				c.spike = 0;
 				c.small = false;
 				c.both = false;
+				// (and its surface where it was)
+				const old = raised.get(c);
+				if (old) Object.assign(c, old);
 			}
 			build();
 		}

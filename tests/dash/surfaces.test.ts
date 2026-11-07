@@ -1,7 +1,8 @@
 // The ball and spider parts are clicked all through: from hard on there's no stretch where the
 // music plays and nothing needs doing (the presses there are needed: without one it crashes),
-// and they're clicked about as often as the cube. Their gravity turns by their presses, not by
-// portals, and the ball's room is as tall as lets it switch on the beat.
+// and they're clicked about as often as the cube; the UFO and swing rarely go long without one
+// either. The ball's and spider's gravity turns by their presses, not by portals, and the ball's
+// room is as tall as lets it switch on the beat.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -52,24 +53,38 @@ function needed(l: Level) {
 
 const SEEDS = ['a', 'b', 'c'];
 
-test('from hard on the ball and spider never go long without a press that is needed', async () => {
+const neededOf = new Map<Level, number[]>();
+
+/**
+ * The stretches of a kind of part with nothing to do, on hard, insane and extreme: how much of
+ * its time is in stretches of more than two beats without a needed press (where the music
+ * plays), the longest of them (beats), and how many of its presses are needed
+ */
+async function idleOf(modes: string[]) {
 	let time = 0;
 	let idle = 0;
+	let worst = 0;
+	let worstAt = '';
 	let parts = 0;
-	const worst: string[] = [];
+	let presses = 0;
+	let needs = 0;
 	for (const name of Object.keys(SONGS))
 		for (const difficulty of ['hard', 'insane', 'extreme'] as const)
 			for (const seed of SEEDS) {
 				const { level: l, beat, chart } = await level(name, difficulty, seed);
 				const w = l.world;
-				const need = needed(l);
+				if (!neededOf.has(l)) neededOf.set(l, needed(l));
+				const need = neededOf.get(l)!;
 				for (const sec of w.sections) {
-					if (sec.mode !== 'ball' && sec.mode !== 'spider') continue;
+					if (!modes.includes(sec.mode)) continue;
 					parts++;
+					const inside = (t: number) => t > sec.start && t < sec.end;
+					presses += l.plan.filter((e) => e.down && inside(e.time)).length;
+					needs += need.filter(inside).length;
 					const pads = w.pads.items.map((p) => w.timeAt(p.x));
 					const marks = [
 						sec.start,
-						...[...need, ...pads].filter((t) => t > sec.start && t < sec.end).sort((a, b) => a - b),
+						...[...need, ...pads].filter(inside).sort((a, b) => a - b),
 						sec.end
 					];
 					for (let i = 1; i < marks.length; i++) {
@@ -79,20 +94,34 @@ test('from hard on the ball and spider never go long without a press that is nee
 						const gap = marks[i] - marks[i - 1] - rest;
 						time += gap;
 						// (a stretch of more than two beats with nothing to do)
-						if (gap > beat * 2.05) {
-							idle += gap;
-							worst.push(`${name} ${difficulty} ${seed} ${sec.mode}@${Math.round(marks[i - 1])}`);
+						if (gap > beat * 2.05) idle += gap;
+						if (gap / beat > worst) {
+							worst = gap / beat;
+							worstAt = `${name} ${difficulty} ${seed} ${sec.mode}@${Math.round(marks[i - 1])}`;
 						}
-						assert.ok(
-							gap <= beat * 4.05,
-							`${name} ${difficulty} ${seed}: ${sec.mode} ${Math.round(marks[i - 1])}–${Math.round(marks[i])} ms with nothing to do`
-						);
 					}
 				}
 			}
-	assert.ok(parts >= 8, `${parts} ball and spider parts`);
-	// (an orb jump, a pad, the way into a part: now and then two beats or so; not more)
-	assert.ok(idle / time < 0.12, `${((100 * idle) / time).toFixed(0)}% idle: ${worst.slice(0, 6)}`);
+	return { parts, idle: idle / time, worst, worstAt, needed: needs / Math.max(1, presses) };
+}
+
+test('from hard on the ball and spider never go long without a press that is needed', async () => {
+	const r = await idleOf(['ball', 'spider']);
+	assert.ok(r.parts >= 8, `${r.parts} ball and spider parts`);
+	// (an orb jump, the way into a part: now and then two beats or so; not more)
+	assert.ok(r.worst <= 4.05, `${r.worst.toFixed(1)} beats with nothing to do: ${r.worstAt}`);
+	assert.ok(r.idle < 0.12, `${(100 * r.idle).toFixed(0)}% idle`);
+});
+
+test('from hard on the UFO and swing rarely go long without a press that is needed', async () => {
+	// (a hop left out: the UFO a bit lower, where its ways a bit early or late go too, so not
+	// every one can be made needed; a turn left out runs the swing into its walls' spikes)
+	const ufo = await idleOf(['ufo']);
+	const swing = await idleOf(['swing']);
+	assert.ok(ufo.parts >= 6 && swing.parts >= 6, `${ufo.parts} UFO, ${swing.parts} swing parts`);
+	assert.ok(ufo.idle < 0.17, `UFO ${(100 * ufo.idle).toFixed(0)}% idle (${ufo.worstAt})`);
+	assert.ok(swing.idle < 0.07, `swing ${(100 * swing.idle).toFixed(0)}% idle (${swing.worstAt})`);
+	assert.ok(swing.needed >= 0.72, `swing ${(100 * swing.needed).toFixed(0)}% of turns needed`);
 });
 
 test('the ball and spider are clicked about as often as the cube on the hard levels', async () => {
@@ -131,7 +160,7 @@ test('from hard on the ball and spider turn gravity by their presses, not by por
 		}
 });
 
-test('the ball part is as tall as lets it switch on the beat, the spider part of varied heights', async () => {
+test('the ball part is as tall as lets it switch on the beat, the spider and UFO parts of varied heights', async () => {
 	const spider = new Set<number>();
 	for (const name of Object.keys(SONGS))
 		for (const seed of SEEDS) {
@@ -139,12 +168,20 @@ test('the ball part is as tall as lets it switch on the beat, the spider part of
 			for (const sec of l.world.sections) {
 				if (sec.mode === 'spider') spider.add(sec.ceil!);
 				if (sec.mode !== 'ball') continue;
-				// (128 BPM: a beat of 469 ms takes the tallest room, 8, now and then 7; 174 BPM: 345 ms, 5)
+				// (128 BPM: a beat of 469 ms takes a room of 7, now and then 6; 174 BPM: 345 ms, 5)
 				if (name === 'fast') assert.equal(sec.ceil, 5);
-				else assert.ok(sec.ceil! >= 7 && sec.ceil! <= 8, `${sec.ceil}`);
+				else assert.ok(sec.ceil! >= 6 && sec.ceil! <= 7, `${sec.ceil}`);
 			}
 		}
 	assert.ok(spider.size >= 2, `spider heights ${[...spider]}`);
+	// (the UFO's rooms of different heights too, from hard on)
+	const ufo = new Set<number>();
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const)
+			for (const seed of SEEDS)
+				for (const sec of (await level(name, difficulty, seed)).level.world.sections)
+					if (sec.mode === 'ufo') ufo.add(sec.ceil!);
+	assert.ok(ufo.size >= 2, `UFO heights ${[...ufo]}`);
 });
 
 test('musicalRest is still respected: no clicks are forced into the beatmap breaks', async () => {

@@ -114,7 +114,7 @@ export const PRESETS: Record<Difficulty, Preset> = {
 		parts: [9000, 24000],
 		flips: 0.5,
 		orbs: 2,
-		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave']
+		modes: ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'spider']
 	},
 	// (what extreme was before: fast, tight, and every kind of part and trick)
 	hard: {
