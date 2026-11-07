@@ -940,7 +940,7 @@ Banner; `backgroundUrls`) und gibt ihn dem Renderer (`setTheme`):
 
 Tests: `tests/dash/theme.test.ts`.
 
-## 21. Spider und Ball durchgehend klicken, mehr Moduswechsel passend zum Song
+## 21. 0.6.90: Spider und Ball durchgehend klicken, mehr Moduswechsel passend zum Song
 
 Rückmeldung: wenig Variation; bei Spider und Ball gibt es Strecken, auf denen man nichts tun muss
 (die sollen ganz raus, man will viel drücken); Moduswechsel öfter, wo es zum Song passt, gerade
