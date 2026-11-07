@@ -1115,7 +1115,7 @@ Im Spiel (`render.ts`):
 Geprüft mit Bildern aus einem Level (Extreme, Testsong mit Kiai): Block-Stile, Spikes, Portale
 und Partikel; alle Dash-Tests grün, `npm run check` und der Web-Build laufen.
 
-## 24. Mehr FPS: halbe Auflösung für Fernes, adaptive Auflösung, keine Ruckler beim Teilwechsel
+## 24. 0.6.93: Mehr FPS: halbe Auflösung für Fernes, adaptive Auflösung, keine Ruckler beim Teilwechsel
 
 Rückmeldung: Bei manchen gibt es Verzögerung und FPS-Einbrüche.
 
@@ -1162,7 +1162,7 @@ Pixelmenge auf schwachen integrierten Grafikchips, die jetzt ebenfalls kleiner i
 war schon sauber gelöst (Zeitstempel der Eingabe, Rollback um bis zu 60 ms); FPS-Einbrüche
 fühlten sich als Verzögerung an.
 
-## 25. Wave wie von Hand gebaut, Spider mit Plattformen, präziserer Ball
+## 25. 0.6.93: Wave wie von Hand gebaut, Spider mit Plattformen, präziserer Ball
 
 Rückmeldung: Die Wave-Teile sind viel komplizierter gebaut als in von Hand gebauten Levels; der
 Spider hat immer noch öfter ganz leere Stellen.
