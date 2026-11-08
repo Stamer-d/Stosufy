@@ -1204,3 +1204,24 @@ Tests (`tests/dash/surfaces.test.ts`): Wave-Teile gleichmäßig (über 75 % der 
 Drehungen gleich oder doppelt/halb so lang; vorher 60 %), Spider-Teile aufgebaut (unter 30 %
 Spalten ohne Block, unter 12 % ganz leer); beide fallen auf dem alten Stand durch.
 `GENERATOR_VERSION` ist `gd-3.10-blocks`.
+
+## 26. Weniger Zeichenbefehle pro Frame (4K, 240 Hz)
+
+Bei 4K auf einer starken Grafikkarte (Bericht: RTX 5080, ~100 statt 240 FPS) ist kaum die
+Füllrate das Limit, sondern die CPU-Seite des Canvas: jeder einzelne Befehl (`strokeRect`,
+`fillRect`, `save`/`restore`, Farbwechsel) wird im Browser einzeln aufgezeichnet und an die GPU
+geschickt. Darum werden gleichartige Formen jetzt zu einem Pfad gesammelt und mit einem Befehl
+gezeichnet:
+
+- **Wandraster im Hintergrund:** die Kacheln nach vier Helligkeitsstufen gruppiert, eine Füllung je
+  Stufe, ein Strich für alle Rahmen, einer für die im Takt aufleuchtenden (vorher je Kachel zwei bis
+  drei Befehle).
+- **Bodenquadrate:** ein Pfad, ein Strich.
+- **Schwebende Quadrate:** als gedrehte Eckpunkte berechnet, in vier Helligkeitsstufen gefüllt
+  statt `save`/`translate`/`rotate`/`fillRect`/`restore` je Quadrat.
+- **Partikel:** gedrehte Quadrate über `setTransform` aus der Grundmatrix, ohne `save`/`restore`.
+
+Gemessen bei 2560×1440 (Pixeldichte 1,5): `strokeRect` 83–119 → 0, `fillRect` ~100 → 17–33,
+`save`/`restore` ~50 → 15–24, Füllungen/Striche je Frame ~20–30. Das Bild bleibt gleich. Eine RTX
+5080 lässt sich hier nicht messen; im Spiel zeigt `F` die FPS und, wenn die Auflösung
+heruntergeregelt wurde, ihren Anteil.
