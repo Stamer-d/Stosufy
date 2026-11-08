@@ -687,44 +687,22 @@ export function createDashRenderer(
 			ctx.fillStyle = `rgba(255,255,255,${pulse * 0.06})`;
 			ctx.fillRect(0, 0, width, height);
 		}
-		// A big tiled wall far away, like the genre's backgrounds: its squares a little darker or
-		// lighter (in four shades, each shade one fill), their inner frames one stroke (the few that
-		// light up on the beat another)
+		// A big tiled wall far away, like the genre's backgrounds
 		const size = scale * 4;
 		const offset = (((camX * 0.1 * scale) % size) + size) % size;
 		const offsetY = (((camY * 0.1 * scale) % size) + size) % size;
 		const column0 = Math.floor((camX * 0.1 * scale) / size);
-		const shades: [number, number][][] = [[], [], [], []];
-		const lit: [number, number][] = [];
 		for (let c = -1; c < width / size + 2; c++) {
 			for (let r = -1; r < height / size + 2; r++) {
 				const x = c * size - offset;
 				const y = r * size + offsetY - size;
 				const n = noise((column0 + c) * 3.7 + r * 11.3);
-				shades[Math.min(3, Math.floor(n * 4))].push([x, y]);
-				if (n > 0.85) lit.push([x, y]);
+				ctx.fillStyle = `rgba(0,0,0,${0.05 + n * 0.08})`;
+				ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
+				ctx.strokeStyle = `rgba(255,255,255,${0.05 + (n > 0.85 ? pulse * 0.12 : 0)})`;
+				ctx.lineWidth = Math.max(1, scale * 0.05);
+				ctx.strokeRect(x + size * 0.18, y + size * 0.18, size * 0.64, size * 0.64);
 			}
-		}
-		ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-		ctx.lineWidth = Math.max(1, scale * 0.05);
-		ctx.beginPath();
-		for (const cells of shades)
-			for (const [x, y] of cells)
-				ctx.rect(x + size * 0.18, y + size * 0.18, size * 0.64, size * 0.64);
-		ctx.stroke();
-		shades.forEach((cells, k) => {
-			if (!cells.length) return;
-			ctx.beginPath();
-			for (const [x, y] of cells) ctx.rect(x + 2, y + 2, size - 4, size - 4);
-			ctx.fillStyle = `rgba(0,0,0,${0.05 + ((k + 0.5) / 4) * 0.08})`;
-			ctx.fill();
-		});
-		if (pulse > 0.01 && lit.length) {
-			ctx.beginPath();
-			for (const [x, y] of lit)
-				ctx.rect(x + size * 0.18, y + size * 0.18, size * 0.64, size * 0.64);
-			ctx.strokeStyle = `rgba(255,255,255,${pulse * 0.12})`;
-			ctx.stroke();
 		}
 		// Light from below, on the beat
 		const glow = ctx.createLinearGradient(0, height * 0.35, 0, height);
@@ -767,32 +745,20 @@ export function createDashRenderer(
 			ctx.stroke();
 			ctx.restore();
 		}
-		// Little squares floating up (turned, in four shades: each shade one fill)
-		const floating: [number, number, number, number][][] = [[], [], [], []];
+		// Little squares floating up
 		for (let k = 0; k < 26; k++) {
 			const n = noise(k * 3.3 + 1);
 			const life = ((time / 1000) * (0.08 + n * 0.08) + n) % 1;
 			const x = (((noise(k * 7.1) * width * 1.3 - camX * scale * 0.15) % width) + width) % width;
 			const y = height * (1 - life);
 			const sz = scale * (0.08 + n * 0.14);
-			const shade = Math.min(3, Math.floor(Math.sin(life * Math.PI) * 4));
-			floating[shade].push([x, y, sz / 2, life * 6 + k]);
+			ctx.fillStyle = rgba('#ffffff', 0.12 * Math.sin(life * Math.PI) + (kiai ? pulse * 0.1 : 0));
+			ctx.save();
+			ctx.translate(x, y);
+			ctx.rotate(life * 6 + k);
+			ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+			ctx.restore();
 		}
-		floating.forEach((list, shade) => {
-			if (!list.length) return;
-			ctx.beginPath();
-			for (const [x, y, h, a] of list) {
-				const c = Math.cos(a) * h;
-				const sn = Math.sin(a) * h;
-				ctx.moveTo(x - c + sn, y - sn - c);
-				ctx.lineTo(x + c + sn, y + sn - c);
-				ctx.lineTo(x + c - sn, y + sn + c);
-				ctx.lineTo(x - c - sn, y - sn + c);
-				ctx.closePath();
-			}
-			ctx.fillStyle = rgba('#ffffff', 0.12 * ((shade + 0.5) / 4) + (kiai ? pulse * 0.1 : 0));
-			ctx.fill();
-		});
 		// In the kiai, a ring from the middle on every strong beat
 		if (kiai && pulse > 0.05) {
 			const r = (1 - pulse) * Math.max(width, height) * 0.6;
@@ -915,16 +881,13 @@ export function createDashRenderer(
 		const offset = (((scroll * scale) % size) + size) % size;
 		ctx.strokeStyle = 'rgba(0,0,0,0.18)';
 		ctx.lineWidth = Math.max(1, scale * 0.06);
-		// (all of them one path, one stroke)
-		ctx.beginPath();
 		for (let x = -offset; x < width + size; x += size) {
 			for (let k = 0; k < 3; k++) {
 				const ry =
 					side === 1 ? line + k * size + size * 0.15 : line - (k + 1) * size + size * 0.85 - size;
-				ctx.rect(x + size * 0.12, ry, size * 0.76, size * 0.76);
+				ctx.strokeRect(x + size * 0.12, ry, size * 0.76, size * 0.76);
 			}
 		}
-		ctx.stroke();
 	}
 
 	/** The ground's edge: the bright line, and the light along it */
@@ -2144,7 +2107,6 @@ export function createDashRenderer(
 	}
 
 	function drawParticles() {
-		const base = ctx.getTransform();
 		for (const p of particles) {
 			const f = p.life / p.max;
 			const alpha = 1 - f;
@@ -2170,23 +2132,14 @@ export function createDashRenderer(
 				ctx.fillStyle = g;
 				ctx.fillRect(x - r, y - r, r * 2, r * 2);
 			} else {
-				// (turned by its own transform, put back once after all of them)
 				const s = p.size * scale * (1 - f * 0.5);
-				const a = p.spin * p.life;
-				const cos = Math.cos(a);
-				const sin = Math.sin(a);
-				ctx.setTransform(
-					base.a * cos + base.c * sin,
-					base.b * cos + base.d * sin,
-					base.c * cos - base.a * sin,
-					base.d * cos - base.b * sin,
-					base.a * x + base.c * y + base.e,
-					base.b * x + base.d * y + base.f
-				);
+				ctx.save();
+				ctx.translate(x, y);
+				ctx.rotate(p.spin * p.life);
 				ctx.globalAlpha = alpha;
 				ctx.fillStyle = p.color;
 				ctx.fillRect(-s / 2, -s / 2, s, s);
-				ctx.setTransform(base);
+				ctx.restore();
 			}
 		}
 		ctx.globalAlpha = 1;
