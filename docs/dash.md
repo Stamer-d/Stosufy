@@ -1205,7 +1205,7 @@ Drehungen gleich oder doppelt/halb so lang; vorher 60 %), Spider-Teile aufgebaut
 Spalten ohne Block, unter 12 % ganz leer); beide fallen auf dem alten Stand durch.
 `GENERATOR_VERSION` ist `gd-3.10-blocks`.
 
-## 26. Weniger Zeichenbefehle pro Frame (4K, 240 Hz)
+## 26. 0.6.94: Weniger Zeichenbefehle pro Frame (4K, 240 Hz)
 
 Bei 4K auf einer starken Grafikkarte (Bericht: RTX 5080, ~100 statt 240 FPS) ist kaum die
 Füllrate das Limit, sondern die CPU-Seite des Canvas: jeder einzelne Befehl (`strokeRect`,
