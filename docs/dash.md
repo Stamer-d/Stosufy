@@ -1205,7 +1205,7 @@ Drehungen gleich oder doppelt/halb so lang; vorher 60 %), Spider-Teile aufgebaut
 Spalten ohne Block, unter 12 % ganz leer); beide fallen auf dem alten Stand durch.
 `GENERATOR_VERSION` ist `gd-3.10-blocks`.
 
-## 26. 0.6.94: Weniger Zeichenbefehle pro Frame – wieder zurückgenommen
+## 26. 0.6.94: Weniger Zeichenbefehle pro Frame – in 0.6.95 zurückgenommen
 
 0.6.94 hat gleichartige Formen (Wandraster, Bodenquadrate, schwebende Quadrate) zu großen Pfaden
 mit vielen Rechtecken bzw. gedrehten Vierecken gesammelt und mit einem `fill`/`stroke` gezeichnet.
