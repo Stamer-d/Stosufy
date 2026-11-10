@@ -1217,3 +1217,85 @@ wieder auf dem Stand von 0.6.93.
 
 Merke: Im Canvas nicht „Befehle sparen“, indem viele Rechtecke in einen Pfad wandern – einzelne
 Rechteck- und Bildbefehle sind der schnelle Fall.
+
+## 27. 0.6.96: Sync am Klang des Songs, sample-genaue Wiedergabe, Bauten über dem Weg, neues Menü
+
+Rückmeldung: Songs sind teilweise nicht richtig zur Map gesynct; die Level fühlen sich teilweise
+nicht wie von Hand gebaute an; das Dash-Menü ist schlecht zu bedienen.
+
+### 27.1 Sync: zwei Ursachen, beide gemessen
+
+Gemessen an neun echten Beatmaps mit ihrem Audio (von einem öffentlichen Mirror, nur zum Messen,
+nicht im Repo), dekodiert wie im Browser:
+
+- **Die Noten der Map liegen neben dem Klang, je Song anders.** Die Energie des Songs steigt nicht
+  zur Notenzeit, sondern 11 bis 54 ms danach (einmal 9 ms davor): FREEDOM DiVE +25, No title +27,
+  Blue Zenith +27, My Love +30, The Big Black +11, Harumachi Clover +16, Sound Chimera +38,
+  ch3rry +54, ch3rry 1.1x −9 ms. Eine Map ist für osu!s eigene Audio-Ausgabe getimt; derselbe
+  File kommt aus einem anderen Decoder früher oder später heraus. Das Level lief also je Song
+  10–55 ms vor der Musik.
+- **Der Browser springt im Song ungenau.** Gemessen in Chromium (der Song über ein
+  `<audio>`-Element, der abgespielte Ton aufgenommen und gegen den dekodierten Song gelegt): Nach
+  jedem Setzen von `currentTime` liegt der Ton bei MP3 mit fester Bitrate 20–50 ms daneben (ein
+  MP3-Frame), bei variabler Bitrate mehrere hundert ms (gemessen −444 ms). Ab Songanfang ohne
+  Sprung stimmt es. Betroffen war jeder Neustart ab einem Checkpoint und jedes Level, das nicht
+  bei 0 beginnt (Intro länger als 2,6 s).
+
+Änderungen:
+
+- **Versatz je Song** (`timing.ts: songOffset`, `audio.ts`): Die Audioanalyse liefert zusätzlich
+  den Energieanstieg in ~1-ms-Schritten. Gesucht wird die Verschiebung (−90 bis +90 ms), bei der
+  die Noten der Map am besten auf diesen Anstiegen liegen; ist das klar (Spitze ≥ 1,35 × Mittel,
+  mindestens 24 Noten), wird die ganze Map (Noten, Timing-Punkte, Kiai, Breaks) um diesen Wert
+  verschoben, bevor das Level gebaut wird. Der Detektor selbst liest einen exakt gesetzten Schlag
+  2 ms spät (mit erzeugtem Audio gemessen); das ist abgezogen. Ohne lesbares Audio bleibt die Map.
+- **Sample-genaue Wiedergabe** (`player.ts`, `DashView.svelte`): Während ein Level läuft, spielt
+  Dash den dekodierten Song selbst über Web Audio (`AudioBufferSourceNode`, durch Equalizer und
+  Lautstärke der App). Start, Neustart und Checkpoint beginnen damit auf das Sample genau, und die
+  Songzeit ist die Uhr des Audio-Kontexts minus Ausgabeverzögerung. Das `<audio>`-Element läuft
+  stumm mit, damit der Rest der App (Warteschlange, Songende, Hitsounds) weiterläuft; die
+  Hitsounds folgen der genauen Zeit. Zurück im Menü übernimmt das Element wieder. Bei Half Time
+  und Double Time (Tempo geändert, Tonhöhe gehalten) und bei Songs, deren Audio nicht gelesen
+  werden kann, bleibt es beim Element wie bisher.
+- Das Menü zeigt unten, ob das Level am Klang ausgerichtet ist und um wie viel.
+
+### 27.2 Level
+
+- **Bauten über dem Weg** (`builders/canopy.ts`): Cube- und Robot-Teile bestanden aus Boden,
+  Blöcken und Spikes unter freiem Himmel. Jetzt bekommt jede Zwei-Takt-Phrase eine von vier
+  Formen über dem Weg: nichts, eine durchgehende Decke, eine Decke mit hängenden Spikes oder
+  einzelne schwebende Blöcke. Gebaut wird nur, wo kein gespielter Weg hinkommt: mindestens einen
+  Block (Robot: zwei) über dem höchsten Punkt des geplanten Wegs in den zwei Spalten davor und
+  danach, nicht über Kopfüber-Strecken, Portalen und Orbs. Danach wird pünktlich und mit allen
+  Klicks um ±75 % der Toleranz gespielt; scheitert das, geht der Aufbau des Teils wieder.
+- **Breaks der Map sind keine Pausen mehr, wenn der Song weiterspielt.** Ein Break heißt nur,
+  dass der Mapper dort nichts gesetzt hat. Bisher blieb so ein Teil leer (gemessen: 15 s Cube
+  ohne Klick und Hindernis in „My Love“, bei laufender Musik). Jetzt gilt ein Break nur als
+  Pause, wenn der Song dort leise ist (Lautstärke unter 0,3 des Songs); ohne Audio wie bisher.
+- `GENERATOR_VERSION` ist `gd-3.11-blocks`.
+
+### 27.3 Menü
+
+`DashMenu.svelte` ersetzt die zwei schwebenden Karten: links die Songliste über die ganze Höhe
+(mit Bestwert-Balken je Song), rechts das Level mit Cover, Schwierigkeit (fünf große Felder mit
+Farbe und Beschreibung), einem Streifen der Teile entlang des Songs (Farbe je Modus, Drops
+kräftiger), Länge, Klicks, Teile, Höchsttempo, Bestwert-Balken für Normal und Practice, darunter
+Icon-Wahl, Normal/Practice-Umschalter, „Watch“ und der Play-Knopf in der Farbe der
+Schwierigkeit. „Parts“, „Sound“ und „Leave“ stehen beschriftet oben rechts. Das Pausenmenü hat
+beschriftete Knöpfe mit ihren Tasten und einen Fortschrittsbalken mit Bestwert-Marke. Die
+FPS-Anzeige erscheint nur noch im Level.
+
+### 27.4 Geprüft und Grenzen
+
+- Tests: `tests/dash/timing.test.ts` (Versatz −30, 0, +45 ms wird auf ±4 ms gefunden und
+  angewendet), `tests/dash/canopy.test.ts` (Bauten vorhanden, nichts davon am Weg, Level
+  durchspielbar; Break mit und ohne Musik).
+- Im Browser mit einem Test-Harness geprüft (echter Renderer, echte Songs, App-Stores
+  nachgebildet): Menü, Pausenmenü, Start/Neustart/Fortsetzen über den dekodierten Song.
+- **Nicht in der echten App gespielt** (Tauri und osu!-Login fehlen hier), und ob der Sync
+  stimmt, habe ich gemessen, nicht gehört.
+- Gemessen ist in Chromium (WebView2 unter Windows). Auf macOS und Linux (WebKit) dekodiert das
+  System; dort gleicht der gemessene Versatz dasselbe aus, das Springen des `<audio>`-Elements
+  habe ich dort nicht gemessen.
+- Der dekodierte Song bleibt im Speicher, solange Dash sein Level zeigt (etwa 20 MB pro Minute).
+- Gestreamte Songs ohne lesbares Audio: weder Versatz noch genaue Wiedergabe.

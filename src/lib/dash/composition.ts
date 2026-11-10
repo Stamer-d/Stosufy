@@ -51,10 +51,12 @@ export function accentAt(chart: DashChart, time: number) {
 
 /** Rest is a level-design decision from real data, never a random empty column. */
 export function musicalRest(chart: DashChart, time: number) {
-	return (
-		chart.breaks.some((b) => time >= b.start && time < b.end) ||
-		(!!chart.sound && loudness(chart.sound, time - 150, time + 150) < 0.05)
-	);
+	const inBreak = chart.breaks.some((b) => time >= b.start && time < b.end);
+	if (!chart.sound) return inBreak;
+	// (a mapper's break is only where they stopped mapping: where the song plays on through it,
+	// loud enough, the level does too)
+	const loud = loudness(chart.sound, time - 150, time + 150);
+	return loud < (inBreak ? 0.3 : 0.05);
 }
 
 /** A phrase program for the actual selected clicks, not a library of prebuilt levels. */

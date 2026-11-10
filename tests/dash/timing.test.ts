@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseChart } from '../../src/lib/dash/chart';
 import { hearSong } from '../../src/lib/dash/audio';
-import { alignTiming } from '../../src/lib/dash/timing';
+import { alignTiming, songOffset } from '../../src/lib/dash/timing';
 import { makeAudio, makeOsu, type SongOptions } from './fixtures';
 
 /** 128 BPM, 170 from bar 24 on (where the song changes) */
@@ -63,5 +63,25 @@ test('beats a few ms beside the song go onto its beats, with the notes', async (
 
 test('without the song, the map stays as it is', () => {
 	const chart = parseChart(makeOsu(song({ mapAt: AT - 4 * NEW })))!;
+	assert.equal(alignTiming(chart), chart);
+});
+
+test("a map whose notes are all a bit beside the song's sound is moved onto it", async () => {
+	for (const off of [-30, 0, 45]) {
+		// (the song's beats at 1000 ms; the map says `off` ms earlier)
+		const options: SongOptions = { bpm: 128, length: 60, style: 'intense' };
+		const chart = parseChart(makeOsu({ ...options, offset: 1000 - off }))!;
+		chart.sound = await hearSong(makeAudio({ ...options, offset: 1000 }).buffer);
+		const found = songOffset(chart.sound, chart.notes);
+		assert.ok(Math.abs(found - off) <= 4, `${off} ms off: found ${found}`);
+		const after = alignTiming(chart);
+		assert.ok(Math.abs(after.timing[0].time - 1000) <= 4, `${after.timing[0].time}`);
+		assert.ok(Math.abs(after.notes[0].time - (chart.notes[0].time + off)) <= 4);
+	}
+});
+
+test("without the song's sound, or with too few notes to tell, the map stays", () => {
+	const chart = parseChart(makeOsu({ bpm: 128, length: 60, style: 'intense' }))!;
+	assert.equal(songOffset(null, chart.notes), 0);
 	assert.equal(alignTiming(chart), chart);
 });

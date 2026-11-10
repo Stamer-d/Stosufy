@@ -8,55 +8,26 @@
 	import { get } from 'svelte/store';
 	import Titlebar from '../Titlebar.svelte';
 	import { currentSong, songQueue, setPlaybackLock } from '#lib/stores/audio.ts';
-	import { heardTime } from '#lib/stores/equalizer.ts';
+	import { heardTime, silence, tellHeardTime } from '#lib/stores/equalizer.ts';
+	import { songLevel } from '#lib/stores/mixer.ts';
+	import { BufferSong } from '#lib/dash/player.ts';
 	import { keybindsPaused } from '#lib/stores/keybinds.ts';
 	import { userSettings } from '#lib/stores/user.ts';
 	import { isPreviewing } from '#lib/stores/stream.ts';
 	import { beatmapContent } from '#lib/hitsounds/player.ts';
 	import { chosenMapId, difficulties } from '#lib/gameplay/play.ts';
-	import DashSongs from './DashSongs.svelte';
+	import DashMenu from './DashMenu.svelte';
 	import DashSoundMenu from './DashSoundMenu.svelte';
-	import DashModesMenu from './DashModesMenu.svelte';
 	import { allowedModes, dashModes, modesMark } from '#lib/dash/modes.ts';
 	import { dashOpen } from '#lib/dash/store.ts';
 	import { makeLevel } from '#lib/dash/level.ts';
-	import { hearAudio } from '#lib/dash/audio.ts';
-	import { DIFFICULTIES } from '#lib/dash/generate.ts';
+	import { decodedAudio, hearAudio } from '#lib/dash/audio.ts';
 	import { DashGame, RESPAWN, bestKey, bestOfSet, saveBest } from '#lib/dash/game.ts';
-	import { createDashRenderer, ICONS, spritesUrl } from '#lib/dash/render.ts';
+	import { createDashRenderer, ICONS } from '#lib/dash/render.ts';
 	import { backgroundUrls } from '#lib/stores/data.ts';
-	import { ATLAS, SPRITES } from '#lib/dash/sprites.ts';
 	import { playDashSound } from '#lib/dash/sound.ts';
 	import { dashSounds } from '#lib/dash/sounds.ts';
 	import { SongClock } from '#lib/dash/clock.ts';
-
-	const DIFFICULTY_INFO = {
-		easy: {
-			label: 'Easy',
-			color: 'bg-sky-400 text-sky-950',
-			about: 'Slow and roomy: cube, ship, ball and UFO'
-		},
-		normal: {
-			label: 'Normal',
-			color: 'bg-lime-400 text-lime-950',
-			about: 'Every basic part, a bit faster in the chorus'
-		},
-		hard: {
-			label: 'Hard',
-			color: 'bg-amber-400 text-amber-950',
-			about: 'Fast and busy: every kind of part, orb chains, small parts'
-		},
-		insane: {
-			label: 'Insane',
-			color: 'bg-rose-400 text-rose-950',
-			about: 'Tight timing, narrow tunnels and the top speeds in the drops'
-		},
-		extreme: {
-			label: 'Extreme',
-			color: 'bg-fuchsia-500 text-white',
-			about: 'Demon level: very little room per click, 2–3 block tunnels, short parts'
-		}
-	};
 
 	const stored = (key, fallback) => {
 		try {
@@ -204,6 +175,11 @@
 			// What's heard in the song (its hits, its loud parts) goes into the level too
 			const sound = await hearAudio(`${current.id}:${id}`, audio);
 			if (cancelled) return;
+			// (the decoded song itself plays the level, exact to the sample: see player.ts)
+			const decoded = decodedAudio(`${current.id}:${id}`);
+			handBack();
+			exact = decoded && audio ? { audio, song: new BufferSong(decoded) } : null;
+			exactReady = !!exact;
 			try {
 				const level = await makeLevel(content, {
 					difficulty: chosen,
@@ -239,10 +215,30 @@
 		clock.delay = $dashSounds.delay ?? 0;
 	});
 
+	/**
+	 * The decoded song, played in the audio element's place while a level runs (the element goes
+	 * on silently, so the rest of the app follows along): null where the song couldn't be read
+	 * @type {{ audio: HTMLAudioElement, song: BufferSong } | null}
+	 */
+	let exact = null;
+	/** Whether this level's song is read (for the menu) */
+	let exactReady = $state(false);
+	/** Whether the decoded song is what's heard now */
+	let exactOn = false;
+
+	/** Whether the decoded song can play this audio now (not with a speed mod that keeps the pitch) */
+	const exactFor = (audio) =>
+		!!exact && exact.audio === audio && (audio.playbackRate === 1 || !audio.preservesPitch);
+
+	/** Where the song is as it's heard (ms) */
+	function rawTime(audio) {
+		return exactOn && exact?.audio === audio ? exact.song.time() : heardTime(audio);
+	}
+
 	function songTime() {
 		const audio = $songQueue.audio;
 		if (!audio) return 0;
-		return clock.read(heardTime(audio), performance.now(), audio.paused, audio.playbackRate || 1);
+		return clock.read(rawTime(audio), performance.now(), audio.paused, audio.playbackRate || 1);
 	}
 
 	/** The song time an input event happened at (not when it's handled) */
@@ -250,7 +246,7 @@
 		const audio = $songQueue.audio;
 		if (!audio) return 0;
 		const now = performance.now();
-		return clock.at(event.timeStamp, heardTime(audio), now, audio.paused, audio.playbackRate || 1);
+		return clock.at(event.timeStamp, rawTime(audio), now, audio.paused, audio.playbackRate || 1);
 	}
 
 	function seekAndPlay(ms) {
@@ -259,7 +255,57 @@
 		audio.currentTime = Math.max(0, ms / 1000);
 		clock.jumped();
 		audio.play().catch(() => {});
+		if (!exactFor(audio)) return void handBack(false);
+		const song = exact.song;
+		const begin = () => {
+			if (!song.start(ms, audio.playbackRate || 1, songLevel(audio))) return false;
+			exactOn = true;
+			silence(audio, true);
+			tellHeardTime(audio, () => song.time());
+			clock.jumped();
+			return true;
+		};
+		// (the audio context may still have to wake up: the element plays until it has)
+		if (!begin())
+			BufferSong.ready().then((ok) => {
+				if (!ok || exact?.song !== song || exactOn || audio.paused || screen !== 'playing') return;
+				const at = audio.currentTime * 1000;
+				ms = at;
+				begin();
+			});
 	}
+
+	/** The song stops (a crash, a pause) */
+	function pauseSong() {
+		const audio = $songQueue.audio;
+		audio?.pause();
+		if (exactOn) exact?.song.pause();
+	}
+
+	/** The song goes on where it stopped */
+	function resumeSong() {
+		const audio = $songQueue.audio;
+		if (!audio) return;
+		audio.play().catch(() => {});
+		if (exactOn && exact?.audio === audio && !exact.song.resume(songLevel(audio))) handBack();
+		clock.jumped();
+	}
+
+	/** The audio element is heard again (out of the level): from where the decoded song is */
+	function handBack(seek = true) {
+		if (!exactOn || !exact) return;
+		exactOn = false;
+		const { audio, song } = exact;
+		const at = song.playing ? song.stop() : song.time();
+		song.stop();
+		tellHeardTime(audio, null);
+		silence(audio, false);
+		if (seek && $songQueue.audio === audio && isFinite(at) && at > 0) {
+			audio.currentTime = Math.min(at / 1000, (audio.duration || Infinity) - 0.05);
+			clock.jumped();
+		}
+	}
+	$effect(() => () => handBack());
 
 	// --- Playing ------------------------------------------------------------------------------
 
@@ -294,7 +340,7 @@
 
 	function pause() {
 		if (screen !== 'playing' || !game) return;
-		$songQueue.audio?.pause();
+		pauseSong();
 		// Dead: it starts again when it goes on
 		clearTimeout(respawnTimer);
 		screen = 'paused';
@@ -305,7 +351,7 @@
 		if (screen !== 'paused') return;
 		screen = 'playing';
 		if (game?.status === 'dead') respawn();
-		else $songQueue.audio?.play().catch(() => {});
+		else resumeSong();
 	}
 
 	function restart() {
@@ -374,6 +420,7 @@
 		release();
 		results = null;
 		if (stale) {
+			handBack();
 			screen = 'loading';
 			reload++;
 			return;
@@ -384,6 +431,7 @@
 			renderer?.reset(game.state);
 		}
 		screen = game ? 'ready' : 'loading';
+		handBack();
 		$songQueue.audio?.play().catch(() => {});
 	}
 
@@ -558,7 +606,7 @@
 					renderer.event(name, g.state, ICONS[iconIndex]);
 					if (name === 'death') {
 						playDashSound('death');
-						audio?.pause();
+						pauseSong();
 						release();
 						const key = bestKey(levelKey, difficulty, modesMark($dashModes));
 						if (!g.auto) best = saveBest(key, Math.floor(g.progress), g.practice, g.attempt);
@@ -604,13 +652,6 @@
 	});
 
 	const pct = (value) => `${Math.floor(value)}%`;
-
-	/** An icon's picture out of the sprites, as a 32 px button's background */
-	function iconLook(icon) {
-		const [x, y, w, h] = SPRITES[icon.sprite];
-		const k = 32 / Math.max(w, h);
-		return `background: url(${spritesUrl}) ${-x * k}px ${-y * k}px / ${ATLAS[0] * k}px ${ATLAS[1] * k}px no-repeat`;
-	}
 </script>
 
 <svelte:window onkeydown={onKey} onkeyup={onKey} onpointerup={onPointer} onblur={release} />
@@ -625,7 +666,7 @@
 	<div class="relative z-10">
 		<Titlebar />
 	</div>
-	{#if showFps}
+	{#if showFps && (screen === 'playing' || screen === 'paused')}
 		<p
 			class="absolute top-12 left-3 z-10 px-2 py-0.5 rounded-md bg-black/45 text-xs font-bold tabular-nums text-white/75 pointer-events-none"
 			title="Frames per second (F); the resolution where it's lowered to keep them up"
@@ -704,205 +745,106 @@
 	{/if}
 
 	{#if screen === 'loading' || screen === 'error' || (screen === 'ready' && game)}
-		<div
-			class="absolute inset-0 flex flex-wrap items-center justify-center content-center gap-4 p-6 pt-16 bg-black/35 overflow-y-auto"
-			transition:fade={{ duration: 150 }}
-		>
-			<button
-				class="absolute top-14 right-4 grid place-items-center size-9 rounded-full bg-black/40 ring-1 ring-white/15 text-white/80 hover:text-white cursor-pointer"
-				title="Leave Dash (Esc)"
-				aria-label="Leave Dash"
-				onclick={exit}
-			>
-				<span class="icon-[mingcute--close-line] size-5"></span>
-			</button>
-			<DashSongs bind:this={songs} {difficulty} mark={modesMark($dashModes)} />
-			{#if screen === 'loading'}
-				<div
-					class="w-[min(30rem,100%)] h-[min(34rem,70vh)] grid place-items-center rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15"
-				>
-					<p class="flex items-center gap-3 text-lg font-semibold text-white/80">
-						<span class="icon-[mingcute--loading-line] size-6 animate-spin"></span>
-						Building the level…
-					</p>
-				</div>
-			{:else if screen === 'error'}
-				<div
-					class="w-[min(30rem,100%)] h-[min(34rem,70vh)] flex flex-col items-center justify-center gap-4 p-6 text-center rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15"
-				>
-					<span class="icon-[mingcute--music-2-line] size-10 text-white/40"></span>
-					<p class="text-white/80">{message}</p>
-					<p class="text-sm text-white/45">Choose a song on the left.</p>
-				</div>
-			{:else if game}
-				<div
-					class="w-[min(30rem,100%)] flex flex-col gap-5 p-6 rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15 shadow-2xl"
-					in:zoom={{ start: 0.96, duration: 200 }}
-				>
-					<div class="text-center">
-						<p class="text-xs font-black tracking-[0.2em] text-white/50">DASH</p>
-						<h2 class="mt-1 text-2xl font-black leading-tight line-clamp-2">{game.level.title}</h2>
-						<p class="text-sm text-white/60 truncate">
-							{game.level.artist} · {game.level.version} by {game.level.creator}
-						</p>
-					</div>
-
-					<div class="grid grid-cols-5 gap-1.5">
-						{#each DIFFICULTIES as d (d)}
-							<button
-								class="flex flex-col items-center gap-1 py-2 rounded-xl ring-1 cursor-pointer transition {difficulty ===
-								d
-									? 'ring-white/50 bg-white/10'
-									: 'ring-white/5 bg-white/[0.03] hover:bg-white/[0.08]'}"
-								aria-pressed={difficulty === d}
-								title={DIFFICULTY_INFO[d].about}
-								onclick={() => (difficulty = d)}
-							>
-								<span
-									class="px-1.5 rounded text-[11px] font-black {difficulty === d
-										? DIFFICULTY_INFO[d].color
-										: 'bg-white/10 text-white/60'}">{DIFFICULTY_INFO[d].label}</span
-								>
-							</button>
-						{/each}
-					</div>
-					<p class="-mt-3 text-center text-xs text-white/50">{DIFFICULTY_INFO[difficulty].about}</p>
-
-					<div class="flex items-center justify-between gap-3">
-						<div class="flex gap-1.5">
-							{#each ICONS as icon, i (i)}
-								<button
-									class="size-8 rounded-lg ring-2 cursor-pointer transition {iconIndex === i
-										? 'ring-white scale-110'
-										: 'ring-transparent opacity-70 hover:opacity-100'}"
-									style={iconLook(icon)}
-									aria-label="Icon {i + 1}"
-									onclick={() => (iconIndex = i)}
-								></button>
-							{/each}
-						</div>
-						<div class="flex items-center gap-2">
-							<button
-								class="flex items-center gap-2 h-8 px-3 rounded-full text-xs font-bold cursor-pointer transition {practice
-									? 'bg-emerald-400 text-emerald-950'
-									: 'bg-white/10 text-white/70 hover:text-white'}"
-								role="switch"
-								aria-checked={practice}
-								onclick={togglePractice}
-							>
-								<span class="icon-[mingcute--flag-2-line] size-4"></span>
-								Practice
-							</button>
-							{#if practice}
-								<button
-									class="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-bold cursor-pointer transition {autoCheckpoints
-										? 'bg-emerald-400/20 text-emerald-200 ring-1 ring-emerald-300/40'
-										: 'bg-white/10 text-white/60 hover:text-white'}"
-									role="switch"
-									aria-checked={autoCheckpoints}
-									title="Checkpoints on their own every few seconds. Your own: {keyName(
-										checkpointKeys().place
-									)} sets one, {keyName(checkpointKeys().remove)} removes the last"
-									onclick={() => (autoCheckpoints = !autoCheckpoints)}
-								>
-									Auto
-								</button>
-							{/if}
-							<DashModesMenu />
-							<DashSoundMenu />
-						</div>
-					</div>
-
-					<div class="grid grid-cols-2 gap-2 text-center">
-						<div class="py-2 rounded-xl bg-white/5">
-							<p class="text-[11px] font-bold text-white/45">NORMAL</p>
-							<p class="text-lg font-black">{pct(best.normal)}</p>
-						</div>
-						<div class="py-2 rounded-xl bg-white/5">
-							<p class="text-[11px] font-bold text-white/45">PRACTICE</p>
-							<p class="text-lg font-black text-emerald-300">{pct(best.practice)}</p>
-						</div>
-					</div>
-
-					<div class="flex gap-2">
-						<button
-							class="flex-1 h-12 rounded-full bg-white text-black text-lg font-black flex items-center justify-center gap-2 cursor-pointer hover:scale-[1.02] transition"
-							onclick={() => start(false)}
-						>
-							<span class="icon-[mingcute--play-fill] size-6"></span>
-							Play
-						</button>
-						<button
-							class="h-12 px-5 rounded-full bg-white/10 text-white/80 font-semibold flex items-center gap-2 cursor-pointer hover:bg-white/15 hover:text-white transition"
-							title="Watch it played perfectly"
-							onclick={() => start(true)}
-						>
-							<span class="icon-[mingcute--eye-line] size-5"></span>
-							Auto
-						</button>
-					</div>
-					<p class="-mt-2 text-center text-xs text-white/40">
-						The song starts over · {game.level.clicks} clicks · made from the beatmap
-					</p>
-				</div>
-			{/if}
-		</div>
+		<DashMenu
+			{screen}
+			{message}
+			{game}
+			{song}
+			bind:difficulty
+			bind:iconIndex
+			{practice}
+			bind:autoCheckpoints
+			{best}
+			exact={exactReady}
+			checkpointKeys={checkpointKeys()}
+			bind:songs
+			onplay={start}
+			onpractice={togglePractice}
+			onexit={exit}
+		/>
 	{:else if screen === 'paused' && game}
 		<div
-			class="absolute inset-0 grid place-items-center bg-black/55 backdrop-blur-sm"
+			class="absolute inset-0 grid place-items-center bg-black/60 backdrop-blur-sm"
 			transition:fade={{ duration: 120 }}
 		>
-			<div class="flex flex-col items-center gap-5" in:fly={{ y: 10, duration: 150 }}>
-				<p class="text-4xl font-black tracking-wide">Paused</p>
-				<p class="text-white/60 text-sm">{pct(game.progress)} · attempt {game.attempt}</p>
-				<div class="flex items-center gap-3">
-					<button
-						class="grid place-items-center size-16 rounded-full bg-white text-black cursor-pointer hover:scale-105 transition"
-						title="Resume (Esc)"
-						aria-label="Resume"
-						onclick={resume}
+			<div
+				class="w-[min(26rem,calc(100%-2rem))] flex flex-col gap-5 p-6 rounded-3xl bg-black/65 ring-1 ring-white/12 shadow-2xl"
+				in:fly={{ y: 10, duration: 150 }}
+			>
+				<div class="text-center">
+					<p class="text-3xl font-black tracking-wide">Paused</p>
+					<p class="mt-1 text-sm text-white/55 truncate">{game.level.title}</p>
+				</div>
+				<div>
+					<div class="flex justify-between text-xs font-bold mb-1.5 text-white/55">
+						<span>Attempt {game.attempt}</span>
+						<span class="tabular-nums text-white">{pct(game.progress)}</span>
+					</div>
+					<div class="relative h-3 rounded-full bg-white/10 overflow-hidden">
+						<div
+							class="h-full rounded-full {game.practice ? 'bg-emerald-400' : 'bg-white'}"
+							style="width: {game.progress}%"
+						></div>
+						<span
+							class="absolute inset-y-0 w-0.5 bg-amber-300"
+							style="left: {Math.min(100, game.practice ? best.practice : best.normal)}%"
+							title="Your best"
+						></span>
+					</div>
+				</div>
+				<button
+					class="h-13 py-3 rounded-full bg-white text-black text-lg font-black flex items-center justify-center gap-2 cursor-pointer hover:scale-[1.02] transition"
+					onclick={resume}
+				>
+					<span class="icon-[mingcute--play-fill] size-6"></span>
+					Resume
+					<kbd class="ml-1 px-1.5 py-0.5 rounded-md bg-black/10 text-[11px] font-bold font-sans"
+						>Esc</kbd
 					>
-						<span class="icon-[mingcute--play-fill] size-8"></span>
-					</button>
+				</button>
+				<div class="grid grid-cols-3 gap-2">
 					<button
-						class="grid place-items-center size-12 rounded-full bg-white/15 cursor-pointer hover:bg-white/25 transition"
-						title="Restart (R)"
-						aria-label="Restart"
+						class="flex flex-col items-center gap-1 py-3 rounded-2xl bg-white/8 text-sm font-semibold text-white/80 cursor-pointer hover:bg-white/15 hover:text-white transition"
 						onclick={restart}
 					>
 						<span class="icon-[mingcute--refresh-2-line] size-6"></span>
+						Restart <kbd class="font-sans text-[10px] text-white/40">R</kbd>
 					</button>
 					<button
-						class="grid place-items-center size-12 rounded-full cursor-pointer transition {practice
+						class="flex flex-col items-center gap-1 py-3 rounded-2xl text-sm font-semibold cursor-pointer transition {practice
 							? 'bg-emerald-400 text-emerald-950'
-							: 'bg-white/15 hover:bg-white/25'}"
-						title="Practice mode (P)"
-						aria-label="Practice mode"
+							: 'bg-white/8 text-white/80 hover:bg-white/15 hover:text-white'}"
 						aria-pressed={practice}
 						onclick={togglePractice}
 					>
 						<span class="icon-[mingcute--flag-2-line] size-6"></span>
-					</button>
-					{#if game.practice}
-						<button
-							class="grid place-items-center size-12 rounded-full bg-white/15 cursor-pointer hover:bg-white/25 transition disabled:opacity-40 disabled:cursor-default"
-							title="Remove the last checkpoint ({keyName(checkpointKeys().remove)})"
-							aria-label="Remove the last checkpoint"
-							disabled={!checkpointCount}
-							onclick={removeCheckpoint}
+						Practice
+						<kbd class="font-sans text-[10px] {practice ? 'text-emerald-900' : 'text-white/40'}"
+							>P</kbd
 						>
-							<span class="icon-[mingcute--delete-2-line] size-6"></span>
-						</button>
-					{/if}
+					</button>
 					<button
-						class="grid place-items-center size-12 rounded-full bg-white/15 cursor-pointer hover:bg-white/25 transition"
-						title="Back to the songs"
-						aria-label="Back to the songs"
+						class="flex flex-col items-center gap-1 py-3 rounded-2xl bg-white/8 text-sm font-semibold text-white/80 cursor-pointer hover:bg-white/15 hover:text-white transition"
 						onclick={toMenu}
 					>
 						<span class="icon-[mingcute--menu-line] size-6"></span>
+						Songs <span class="text-[10px] text-white/40">menu</span>
 					</button>
-					<DashSoundMenu up />
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					{#if game.practice}
+						<button
+							class="flex items-center gap-2 h-10 px-4 rounded-full bg-white/8 text-sm font-semibold text-white/75 cursor-pointer hover:bg-white/15 hover:text-white transition disabled:opacity-40 disabled:cursor-default"
+							disabled={!checkpointCount}
+							onclick={removeCheckpoint}
+						>
+							<span class="icon-[mingcute--delete-2-line] size-5"></span>
+							Remove last checkpoint ({checkpointCount})
+						</button>
+					{:else}
+						<span class="text-xs text-white/35">Hold to keep jumping</span>
+					{/if}
+					<DashSoundMenu up labelled />
 				</div>
 			</div>
 		</div>

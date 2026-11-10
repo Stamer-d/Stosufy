@@ -50,6 +50,36 @@ const fades = new WeakMap<HTMLMediaElement, GainNode>();
  */
 const volumes = new WeakMap<HTMLMediaElement, GainNode>();
 
+/** Each routed song's switch: silent while something else plays the song in its place */
+const hushes = new WeakMap<HTMLMediaElement, GainNode>();
+const silenced = new WeakSet<HTMLMediaElement>();
+/** A song whose time is told by something else for now (what plays it in its place) */
+let told: { audio: HTMLMediaElement; time: () => number } | null = null;
+
+/**
+ * Silences a song that goes on playing (or lets it be heard again): the Dash mode plays the
+ * decoded song itself, exact to the sample, and the element only keeps the app going along
+ */
+export function silence(audio: HTMLMediaElement, on: boolean) {
+	if (on) silenced.add(audio);
+	else silenced.delete(audio);
+	audio.muted = on;
+	const hush = hushes.get(audio);
+	if (hush && context) hush.gain.setTargetAtTime(on ? 0 : 1, context.currentTime, 0.01);
+}
+
+/** Lets something else tell where a song is as it's heard (ms), or the song itself again */
+export function tellHeardTime(audio: HTMLMediaElement, time: (() => number) | null) {
+	if (time) told = { audio, time };
+	else if (told?.audio === audio) told = null;
+}
+
+/** Where songs go into the graph (the equalizer, then the speakers) */
+export function playbackInput() {
+	playbackContext();
+	return input!;
+}
+
 /** A routed song's fade gain, or null if it plays straight (then fades step its volume) */
 export function fadeNode(audio: HTMLMediaElement | null | undefined) {
 	return (audio && fades.get(audio)) || null;
@@ -105,7 +135,10 @@ export async function attach(audio: HTMLMediaElement | null | undefined) {
 		audio.volume = 1;
 		const fade = ctx.createGain();
 		fade.gain.value = start.fade;
-		source.connect(volume).connect(fade).connect(input!);
+		const hush = ctx.createGain();
+		hush.gain.value = silenced.has(audio) ? 0 : 1;
+		source.connect(volume).connect(fade).connect(hush).connect(input!);
+		hushes.set(audio, hush);
 		volumes.set(audio, volume);
 		fades.set(audio, fade);
 		sources.set(audio, source);
@@ -121,7 +154,9 @@ export async function attach(audio: HTMLMediaElement | null | undefined) {
  * (and the whole song's data) alive for as long as the app runs
  */
 export function detach(audio: HTMLMediaElement) {
-	for (const node of [sources.get(audio), volumes.get(audio), fades.get(audio)]) node?.disconnect();
+	for (const node of [sources.get(audio), volumes.get(audio), fades.get(audio), hushes.get(audio)])
+		node?.disconnect();
+	hushes.delete(audio);
 	sources.delete(audio);
 	volumes.delete(audio);
 	fades.delete(audio);
@@ -175,6 +210,7 @@ export function outputDelay(ctx: BaseAudioContext | null | undefined) {
  * output delay; once it plays through the equalizer, the graph's delay comes on top.
  */
 export function heardTime(audio: HTMLMediaElement) {
+	if (told?.audio === audio) return told.time();
 	const routed = sources.has(audio) ? outputDelay(context) : 0;
 	return (audio.currentTime - routed) * 1000;
 }

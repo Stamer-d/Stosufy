@@ -94,6 +94,10 @@ test('generated ground-mode sections keep all their spikes supported after final
 					(h) =>
 						h.kind === 'saw' ||
 						h.dir === 1 ||
+						// (hanging under what's built over the way: see builders/canopy.ts)
+						l.world.solids.items.some(
+							(s) => s.style === 0 && Math.abs(s.y0 - h.y) < 1e-6 && s.x0 <= h.x && s.x1 >= h.x
+						) ||
 						// (hanging under a slab it's turned upside down under)
 						l.world.solids.items.some(
 							(s) =>

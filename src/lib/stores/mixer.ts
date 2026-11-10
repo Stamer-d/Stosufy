@@ -31,6 +31,9 @@ function levelOf(audio: HTMLAudioElement) {
 	return Math.min(1, Math.max(0, volumeSetting() * (normalize ? gain : 1)));
 }
 
+/** How loud a song plays now (the user's volume × its normalization), without its fade */
+export const songLevel = (audio: HTMLAudioElement) => levelOf(audio);
+
 function apply(audio: HTMLAudioElement) {
 	const fade = levels.get(audio)?.fade ?? 1;
 	// Routed songs fade on the audio thread (smooth even while the app is busy) and get the

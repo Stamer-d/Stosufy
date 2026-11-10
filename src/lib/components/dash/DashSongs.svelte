@@ -115,7 +115,7 @@
 </script>
 
 <div
-	class="w-[min(22rem,100%)] h-[min(34rem,70vh)] flex flex-col rounded-3xl bg-black/60 backdrop-blur-xl ring-1 ring-white/15 shadow-2xl overflow-hidden"
+	class="size-full flex flex-col rounded-3xl bg-black/55 backdrop-blur-xl ring-1 ring-white/12 shadow-2xl overflow-hidden"
 >
 	<div class="p-3 flex flex-col gap-2 border-b border-white/10">
 		<div class="flex items-center gap-1 p-1 rounded-xl bg-white/5">
@@ -203,16 +203,40 @@
 						title="Done"
 					></span>
 				{:else if progress > 0}
-					<span class="shrink-0 text-xs font-bold text-white/60">{Math.floor(progress)}%</span>
+					<span class="shrink-0 flex flex-col items-end gap-1" title="Your best at this difficulty">
+						<span class="text-xs font-bold tabular-nums text-white/60">{Math.floor(progress)}%</span
+						>
+						<span class="block w-10 h-1 rounded-full bg-white/10 overflow-hidden">
+							<span class="block h-full bg-white/60" style="width: {progress}%"></span>
+						</span>
+					</span>
 				{/if}
 				{#if current}
-					<span class="icon-[mingcute--volume-line] size-4 shrink-0 text-white/70"></span>
+					<span class="flex items-end gap-0.5 h-4 shrink-0" aria-label="Playing">
+						{#each [0, 1, 2] as k (k)}
+							<span class="bar w-0.5 rounded-full bg-white/80" style="animation-delay: {k * 0.18}s"
+							></span>
+						{/each}
+					</span>
 				{/if}
 			</button>
 		{/each}
 	</div>
-	<p class="px-3 py-1.5 text-[11px] text-white/35 border-t border-white/10">
-		<kbd class="font-sans">↑</kbd> <kbd class="font-sans">↓</kbd> choose ·
-		<kbd class="font-sans">Enter</kbd> take it, then play · <kbd class="font-sans">Esc</kbd> leaves Dash
-	</p>
 </div>
+
+<style>
+	.bar {
+		height: 100%;
+		transform-origin: bottom;
+		animation: bar 0.9s ease-in-out infinite;
+	}
+	@keyframes bar {
+		0%,
+		100% {
+			transform: scaleY(0.3);
+		}
+		50% {
+			transform: scaleY(1);
+		}
+	}
+</style>

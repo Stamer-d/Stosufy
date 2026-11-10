@@ -45,13 +45,14 @@ import { buildFlight } from './builders/flight';
 import { buildWave } from './builders/wave';
 import { buildBlocks } from './builders/blocks';
 import { buildShip } from './builders/ship';
+import { buildCanopy } from './builders/canopy';
 import { drumClicks } from './rhythm';
-import { alignTiming } from './timing';
+import { alignTiming, songOffset } from './timing';
 
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.10-blocks';
+export const GENERATOR_VERSION = 'gd-3.11-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -79,6 +80,11 @@ export interface Level {
 	difficulty: Difficulty;
 	/** For the results: how many presses it takes */
 	clicks: number;
+	/**
+	 * How much later than the beatmap says the level runs (ms): how far its notes were off the
+	 * sound as it's heard here (0 where that couldn't be told; missing on older level data)
+	 */
+	offset?: number;
 	/** How hard the bass hits, every `hop` ms (where the song could be heard): for the light */
 	kicks: { hop: number; values: Float32Array } | null;
 	title: string;
@@ -1227,6 +1233,7 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	const rng = random(hash(`${options.seed}:${options.difficulty}`));
 	const blocks = options.generator !== 'classic';
 	// (the map's timing points where the song has them: see timing.ts)
+	const offset = songOffset(chart.sound, chart.notes);
 	chart = alignTiming(chart);
 	const own = new Set(chart.notes);
 	chart = { ...chart, notes: withBeats(chart) };
@@ -1450,6 +1457,18 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 
 	playThrough(world, plan, start, end);
 	// Builders own the geometry. Do not scatter hazards into idle stretches afterwards.
+	// (over the cube's and robot's way: ceilings and overhangs, where no played way comes near)
+	if (blocks)
+		buildCanopy(
+			world,
+			plan,
+			chart,
+			start,
+			end,
+			`${options.seed}:${options.difficulty}`,
+			preset.level,
+			preset.tolerance
+		);
 
 	// Later filling/repair can change the approach state: check swing windows on the final world.
 	widenSwingWindows(world, plan, start, end, preset.tolerance);
@@ -1467,6 +1486,8 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	uselessPortals(world, plan, start, end, true);
 	widenSwingWindows(world, plan, start, end, preset.tolerance);
 	playThrough(world, plan, start, end);
+	// (a spike whose block went in that last round hangs on nothing)
+	removeUnsupportedSpikes(world);
 
 	const beats: { time: number; downbeat: boolean }[] = [];
 	for (let i = 0; i < chart.timing.length; i++) {
@@ -1487,6 +1508,7 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		beats,
 		kiai: chart.kiai,
 		difficulty: options.difficulty,
+		offset,
 		clicks: plan.filter((e) => e.down && !['ship', 'swing'].includes(world.sectionAt(e.time).mode))
 			.length,
 		kicks: chart.sound?.kicks ? { hop: chart.sound.hop, values: chart.sound.kicks } : null,

@@ -17,6 +17,12 @@ export interface SongSound {
 	hits?: Float32Array;
 	/** How hard the bass hits (the kick), 0–1 of its hard hits */
 	kicks?: Float32Array;
+	/**
+	 * How much louder the song gets, every `fineHop` ms (about 1): sharp enough to tell how far
+	 * the beatmap's notes are off the sound itself (see timing.ts)
+	 */
+	fine?: Float32Array;
+	fineHop?: number;
 }
 
 const HOP = 10;
@@ -71,6 +77,9 @@ export async function hearSong(buffer: AudioBuffer): Promise<SongSound> {
 	const highs = new Float32Array(frames);
 	const a1 = 1 - Math.exp((-2 * Math.PI * BASS) / rate);
 	const a2 = 1 - Math.exp((-2 * Math.PI * HIGH) / rate);
+	// (and the energy every ms or so, for where exactly the hits are)
+	const finePer = Math.max(1, Math.round(rate / 1000));
+	const fineEnergy = new Float32Array(Math.floor((frames * per) / finePer));
 	let low1 = 0;
 	let low2 = 0;
 	for (let i = 0; i < frames * per; i++) {
@@ -81,6 +90,8 @@ export async function hearSong(buffer: AudioBuffer): Promise<SongSound> {
 		low2 += a2 * (v - low2);
 		const frame = (i / per) | 0;
 		level[frame] += v * v;
+		const fineAt = (i / finePer) | 0;
+		if (fineAt < fineEnergy.length) fineEnergy[fineAt] += v * v;
 		bass[frame] += low1 * low1;
 		middle[frame] += (low2 - low1) ** 2;
 		highs[frame] += (v - low2) ** 2;
@@ -110,21 +121,63 @@ export async function hearSong(buffer: AudioBuffer): Promise<SongSound> {
 		hop: (per / rate) * 1000,
 		loud: loud.map((v) => Math.min(1, v / top)),
 		hits: normal(hits),
-		kicks: normal(kickRise)
+		kicks: normal(kickRise),
+		fine: fineRises(fineEnergy),
+		fineHop: (finePer / rate) * 1000
 	};
 }
 
+/** Over how many fine values the energy is summed before its rise is taken */
+const FINE_SPAN = 8;
+/**
+ * When the value `n` of `fine` is heard (ms): the rise is of the moment its newest ms comes into
+ * the sum
+ */
+export const fineTime = (sound: SongSound, n: number) => (n + FINE_SPAN + 0.5) * sound.fineHop!;
+
+/** How much louder (in log terms) each 8 ms are than the 8 ms one step before */
+function fineRises(energy: Float32Array) {
+	const n = energy.length - FINE_SPAN;
+	if (n <= 1) return new Float32Array(0);
+	const sums = new Float32Array(n);
+	let sum = 0;
+	for (let i = 0; i < FINE_SPAN; i++) sum += energy[i];
+	for (let i = 0; i < n; i++) {
+		sums[i] = sum;
+		sum += energy[i + FINE_SPAN] - energy[i];
+	}
+	const floor = percentile(sums, 0.97) * 1e-4;
+	const out = new Float32Array(n - 1);
+	let before = Math.log(sums[0] + floor);
+	for (let i = 1; i < n; i++) {
+		const now = Math.log(sums[i] + floor);
+		out[i - 1] = Math.max(0, now - before);
+		before = now;
+	}
+	return out;
+}
+
 const heard = new Map<string, Promise<SongSound | null>>();
+/** The decoded song heard last: the Dash mode plays it from there, exact to the sample */
+let decodedSong: { key: string; buffer: AudioBuffer } | null = null;
+
+/** The decoded audio of a song that was heard (only the last one is kept) */
+export function decodedAudio(key: string) {
+	return decodedSong?.key === key ? decodedSong.buffer : null;
+}
 
 /** Hears the song an audio element plays (null when its audio can't be read) */
 export function hearAudio(key: string, audio: HTMLAudioElement | null | undefined) {
 	if (!audio?.src || !audio.src.startsWith('blob:')) return Promise.resolve(null);
-	if (!heard.has(key)) {
+	if (!heard.has(key) || decodedSong?.key !== key) {
+		const before = heard.get(key);
 		const made = (async () => {
 			try {
 				const bytes = await (await fetch(audio.src)).arrayBuffer();
 				const decoded = await decodeAudio(new OfflineAudioContext(1, 1, 44100), bytes);
-				return await hearSong(decoded);
+				decodedSong = { key, buffer: decoded };
+				// (heard before, only its audio wasn't kept: the same level again)
+				return (await before) ?? (await hearSong(decoded));
 			} catch (error) {
 				console.warn('Could not hear the song for its Dash level', error);
 				return null;

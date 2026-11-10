@@ -6,7 +6,7 @@
 // song says clearly otherwise. Where it can't be heard, or it's not clear, the map's stay.
 
 import type { DashChart, DashNote, TimingPoint } from './chart';
-import type { SongSound } from './audio';
+import { fineTime, type SongSound } from './audio';
 
 /** How hard the song hits at a moment, read between its frames (a sharp read, unlike hitAt) */
 function hitNear(sound: SongSound, time: number) {
@@ -102,6 +102,70 @@ function changeAt(sound: SongSound, before: TimingPoint, point: TimingPoint, nex
 	return bestScore - own >= 0.6 ? steps[best] : point.time;
 }
 
+/** What the fine rises read for a hit that's exactly on time (ms; measured with made hits) */
+const HEARD_LATE = 2;
+
+/**
+ * How far the beatmap's notes are from the sound they're mapped to (ms, positive: the sound
+ * comes later), 0 where that isn't clear. A map is timed for osu!'s own audio; the same file
+ * comes out of another decoder up to some 50 ms earlier or later (measured on ranked maps: 15 to
+ * 55 ms late in the browser's), and a click is felt against what's heard.
+ */
+export function songOffset(sound: SongSound | null | undefined, notes: DashNote[]) {
+	const fine = sound?.fine;
+	if (!sound || !fine?.length || !sound.fineHop || notes.length < 24) return 0;
+	const hop = sound.fineHop;
+	const first = fineTime(sound, 0);
+	const RANGE = 90;
+	const scores: number[] = [];
+	for (let d = -RANGE; d <= RANGE; d++) {
+		let sum = 0;
+		let count = 0;
+		for (const note of notes) {
+			const k = Math.round((note.time + d - first) / hop);
+			if (k < 0 || k >= fine.length) continue;
+			sum += fine[k];
+			count++;
+		}
+		scores.push(count ? sum / count : 0);
+	}
+	// (over 5 ms: a hit isn't one sample)
+	const smooth = scores.map((_, i) => {
+		let sum = 0;
+		let count = 0;
+		for (let j = i - 2; j <= i + 2; j++)
+			if (j >= 0 && j < scores.length) {
+				sum += scores[j];
+				count++;
+			}
+		return sum / count;
+	});
+	let best = 0;
+	for (let i = 1; i < smooth.length; i++) if (smooth[i] > smooth[best]) best = i;
+	const mean = smooth.reduce((a, b) => a + b, 0) / smooth.length;
+	// (not clear, or at the edge of what was looked at: the map's own timing stays)
+	if (!(mean > 0) || smooth[best] / mean < 1.35 || best < 5 || best > smooth.length - 6) return 0;
+	const offset = best - RANGE - HEARD_LATE;
+	return Math.abs(offset) < 4 ? 0 : offset;
+}
+
+/** The chart, all of it that much later */
+function shifted(chart: DashChart, by: number): DashChart {
+	if (!by) return chart;
+	const span = <T extends { start: number; end: number }>(s: T) => ({
+		...s,
+		start: s.start + by,
+		end: s.end + by
+	});
+	return {
+		...chart,
+		notes: chart.notes.map((n) => ({ ...n, time: n.time + by, end: n.end + by })),
+		timing: chart.timing.map((p) => ({ ...p, time: p.time + by })),
+		kiai: chart.kiai.map(span),
+		breaks: chart.breaks.map(span)
+	};
+}
+
 /**
  * The chart with its timing points where the song has them: a new tempo where it's heard to
  * change, and beats a few ms off the rest of the song's moved onto the song's (with the notes on
@@ -110,6 +174,8 @@ function changeAt(sound: SongSound, before: TimingPoint, point: TimingPoint, nex
 export function alignTiming(chart: DashChart): DashChart {
 	const sound = chart.sound;
 	if (!sound?.hits || chart.timing.length === 0) return chart;
+	// (first all of it onto the sound as this decoder plays it)
+	chart = shifted(chart, songOffset(sound, chart.notes));
 	const end = sound.hits.length * sound.hop;
 	const timing = chart.timing.map((p) => ({ ...p }));
 	let notes = chart.notes;

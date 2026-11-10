@@ -4,6 +4,8 @@
 	import { fly } from 'svelte/transition';
 	import { ALL_MODES, dashModes } from '#lib/dash/modes.ts';
 
+	/** @type {{ labelled?: boolean }} */
+	let { labelled = false } = $props();
 	let open = $state(false);
 	let root = $state(null);
 
@@ -35,13 +37,16 @@
 
 <div class="relative" bind:this={root}>
 	<button
-		class="relative grid place-items-center size-10 rounded-full bg-white/10 text-white/80 hover:text-white hover:bg-white/15 cursor-pointer transition"
+		class="relative flex items-center justify-center gap-2 h-10 {labelled
+			? 'pl-3 pr-4'
+			: 'w-10'} rounded-full bg-white/10 text-sm font-semibold text-white/80 hover:text-white hover:bg-white/15 cursor-pointer transition"
 		title="Kinds of parts and gravity"
 		aria-label="Kinds of parts and gravity"
 		aria-expanded={open}
 		onclick={() => (open = !open)}
 	>
 		<span class="icon-[mingcute--settings-3-line] size-5"></span>
+		{#if labelled}Parts{/if}
 		{#if changed}
 			<span class="absolute top-1 right-1 size-2 rounded-full bg-amber-400"></span>
 		{/if}

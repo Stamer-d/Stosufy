@@ -6,8 +6,8 @@
 	import { playDashSound } from '#lib/dash/sound.ts';
 	import { userSettings, updateUserSettings } from '#lib/stores/user.ts';
 
-	/** @type {{ up?: boolean }} */
-	let { up = false } = $props();
+	/** @type {{ up?: boolean, labelled?: boolean }} */
+	let { up = false, labelled = false } = $props();
 	let open = $state(false);
 	let root = $state(null);
 	let hitsounds = $derived($userSettings.settings?.hitsounds ?? false);
@@ -26,13 +26,16 @@
 
 <div class="relative" bind:this={root}>
 	<button
-		class="grid place-items-center size-10 rounded-full bg-white/10 text-white/80 hover:text-white hover:bg-white/15 cursor-pointer transition"
+		class="flex items-center justify-center gap-2 h-10 {labelled
+			? 'pl-3 pr-4'
+			: 'w-10'} rounded-full bg-white/10 text-sm font-semibold text-white/80 hover:text-white hover:bg-white/15 cursor-pointer transition"
 		title="Sounds"
 		aria-label="Sounds"
 		aria-expanded={open}
 		onclick={() => (open = !open)}
 	>
 		<span class="icon-[mingcute--volume-line] size-5"></span>
+		{#if labelled}Sound{/if}
 	</button>
 	{#if open}
 		<div
@@ -99,7 +102,8 @@
 					}}
 				/>
 				<p class="pt-2 text-xs text-white/40">
-					Jumps feel late to the music (Bluetooth headphones)? Raise it until they're on the beat.
+					The level follows the song's sound by itself. Jumps still feel late (Bluetooth
+					headphones)? Raise it until they're on the beat.
 				</p>
 			</div>
 			<div class="pt-2 border-t border-white/10">
