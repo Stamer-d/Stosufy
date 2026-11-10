@@ -72,7 +72,9 @@ test('on extreme gravity turns on the bars and accents of the kiai, and pads tak
 	}
 	// (about one turn every two bars there: a bar is 1.38 s; a pad now and then)
 	assert.ok(flying > 20, `${flying} s of flying parts`);
-	assert.ok(portals >= flying / 2.76, `${portals} gravity portals in ${flying.toFixed(0)} s`);
+	// (a portal that would turn nothing where the way gets to it isn't put: a few less than one
+	// every two bars)
+	assert.ok(portals >= flying / 3.2, `${portals} gravity portals in ${flying.toFixed(0)} s`);
 	assert.ok(pads >= 8, `${pads} pads`);
 });
 

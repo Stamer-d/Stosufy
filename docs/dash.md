@@ -1299,3 +1299,81 @@ FPS-Anzeige erscheint nur noch im Level.
   habe ich dort nicht gemessen.
 - Der dekodierte Song bleibt im Speicher, solange Dash sein Level zeigt (etwa 20 MB pro Minute).
 - Gestreamte Songs ohne lesbares Audio: weder Versatz noch genaue Wiedergabe.
+
+## 28. 0.6.97: Ball, Spider, UFO und Swing neu gebaut, aus ihren Klicks auf der Musik
+
+Rückmeldung: Die anderen Modi (Ball, Spider usw.) fühlen sich nicht gut an, und öfter passt es
+gar nicht zum Song.
+
+### 28.1 Gemessen
+
+Je Modus an echten Maps mit Audio (`No title`, `My Love`, `Blue Zenith`; Normal und Hard): wo im
+Beat die Klicks liegen (auf dem Schlag, auf der Hälfte, auf dem Viertel, neben dem Raster) und ob
+dort eine Note der Map ist.
+
+- Cube, Robot, Ball, Spider und UFO klickten schon fast nur auf Schlag und Hälfte.
+- **Der Swing nicht:** 14–32 % seiner Drehungen lagen neben dem Raster, je nach Song nur 16–79 %
+  auf einer Note. Seine Drehungen kamen von einem Steuer-Modell („dreh, wenn du zu weit von der
+  Mitte bist“), nicht aus dem Song. Das sind rund fünf Eingaben pro Sekunde ohne Bezug zur Musik.
+- Bilder der Teile: Ball und Spider liefen durch einen flachen Schlauch mit verstreuten Spikes
+  auf beiden Seiten; welcher Spike zu welchem Klick gehört, war nicht zu sehen. UFO und Swing
+  schwebten in der Mitte eines 6–8 Blöcke hohen Tunnels, der Swing fast als gerade Linie.
+- Das Ship drückt zu 40–60 % neben dem Raster. Das ist Steuern durch Halten und bleibt so.
+
+### 28.2 Was geändert wurde (`builders/rooms.ts`, neu)
+
+**Ball und Spider: von Plattform zu Plattform.** Aus den Klicks (wie bisher auf dem Schlagzeug,
+`rhythm.ts`) wird der Weg gespielt. Jeder Klick verlässt eine Plattform, die kurz danach endet,
+und kommt auf einer an, die kurz davor begonnen hat, abwechselnd Boden- und Deckenseite:
+
+- Wie lang „kurz“ ist, ist das Zeitfenster der Schwierigkeit (mindestens das 1,2-Fache der
+  Toleranz je Seite); Klicks, zwischen denen dafür kein Platz wäre, entfallen.
+- Direkt hinter jeder Plattform stehen Spikes auf einer Stufe in ihrer Höhe (bis drei Blöcke),
+  danach Spikes auf dem blanken Boden bzw. der Decke bis zur nächsten Plattform dieser Seite.
+  Eine bloße Grube reichte nicht: gemessen fiel der Spider bei 3× über eine ein Block breite
+  Grube einfach auf die nächste Plattform (fünf Klicks in Folge unnötig).
+- Die Plattformen sind ein bis drei Blöcke dick, wie Treppen von einer zur nächsten.
+- Was sauber ist, ist der Weg; was Spikes hat, nicht. Der Grund für den Klick ist zu sehen: die
+  Plattform hört auf.
+
+**UFO und Swing: ein Weg nur aus Klicks auf dem Raster.** Gesucht wird (Strahlsuche über die
+Viertel des Beat-Rasters, 20 Wege gleichzeitig) die Folge von Klicks, die im Raum bleibt und am
+meisten auf den starken Stellen des Songs liegt: zuerst die Klicks des Schlagzeugmusters, dann
+gehörte Schläge und Hälften, Viertel nur ab Hard und nur mit Note, unbetonte Hälften nur, wenn der
+Weg sie braucht. Der Weg bleibt in einem Band, dessen Höhe von Phrase zu Phrase steigt und fällt
+(findet sich darin keiner, breiter, zuletzt der ganze Raum). Um den Weg (pünktlich, alle Klicks
+früh, alle spät, jeder einzeln um die Toleranz verschoben) wird der Tunnel in Stücken von zwei
+bis drei Blöcken gelegt, mit Spikes, wo Platz ist.
+
+- Auf Easy und Normal hüpft das UFO am Boden entlang (seine Klicks liegen zu weit auseinander,
+  um oben zu bleiben) und über die Spikes.
+- Gravity-Portale auf den Taktanfängen: jedes dreht den besten Weg bis dahin; eines, an dem der
+  fertige Weg schon richtig herum ankommt, entfällt.
+
+Beide Builder prüfen den Teil wie die übrigen (pünktlich, früh, spät, jeder Klick einzeln). Geht
+ein Teil so nicht auf, baut ihn der bisherige Builder (`flight.ts`); auf fünf Leveln aus echten
+Songs waren das 2 Ball-Teile. Mit „Classic“ im Parts-Menü bleibt alles beim alten Builder.
+
+### 28.3 Gemessen danach
+
+|                                        | vorher   | jetzt         |
+| -------------------------------------- | -------- | ------------- |
+| Swing: Drehungen neben dem Beat-Raster | 14–32 %  | 0 %           |
+| UFO: Klicks neben dem Raster           | 0 %      | 0 %           |
+| Ball/Spider: Klicks nötig (Testsong)   | siehe 21 | ≥ 90 % (Test) |
+
+Neun Level aus drei echten Songs (Easy bis Extreme): alle durchspielbar, jedes Klickfenster über
+der Toleranz (engstes 54 ms bei 24 ms Toleranz). `npm run test:dash`: 191 Tests grün, neu
+`tests/dash/rooms.test.ts`. `GENERATOR_VERSION` ist `gd-3.12-blocks`.
+
+### 28.4 Grenzen und geänderte Tests
+
+- **Nicht gespielt, nur gebaut, gemessen und im Renderer angesehen.** Ob sich die Modi jetzt gut
+  anfühlen, kann nur Spielen zeigen.
+- Der Tunnel von UFO und Swing ist weiter 5–6 Blöcke hoch: Ein einzelner um die Toleranz
+  verschobener Klick muss überleben, und beim Swing ändert der den Weg danach um etwa einen Block.
+- Spider-Teile haben keine Orbs mehr, Ball und Spider keine Sägen und Pads; Ship und Wave sind
+  unverändert.
+- Zwei bestehende Tests angepasst: „Orbs in Ship und Spider“ verlangt nur noch Ship-Orbs (und nur
+  einen: welche Teile ein Level bekommt, hat sich mit dem Zufallsstrom verschoben); der
+  Gravity-Test im Kiai verlangt ein Portal je 3,2 s statt 2,76 s Flugzeit (gemessen 28 in 79 s).

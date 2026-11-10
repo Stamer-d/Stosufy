@@ -46,13 +46,14 @@ import { buildWave } from './builders/wave';
 import { buildBlocks } from './builders/blocks';
 import { buildShip } from './builders/ship';
 import { buildCanopy } from './builders/canopy';
+import { buildPlatforms, buildTunnel, roomsDebug } from './builders/rooms';
 import { drumClicks } from './rhythm';
 import { alignTiming, songOffset } from './timing';
 
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.11-blocks';
+export const GENERATOR_VERSION = 'gd-3.12-blocks';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -1397,7 +1398,33 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 								surfaces ? SURFACE_LONGEST[preset.level] : undefined
 							)
 						: chooseClicks(chart, inside, gap, preset.cost * 0.9, preset.idle);
-			state = buildFlight(ctx, sec, inside, theirs, state);
+			// (built from their presses on the music: see builders/rooms.ts; where a part doesn't
+			// work out that way, and the older levels: the older builder)
+			const made = !blocks
+				? null
+				: sec.mode === 'ball' || sec.mode === 'spider'
+					? buildPlatforms(ctx, sec, theirs, state)
+					: sec.mode === 'ufo' || sec.mode === 'swing'
+						? buildTunnel(
+								ctx,
+								sec,
+								inside,
+								sec.mode === 'swing'
+									? drumClicks(
+											chart,
+											inside,
+											preset,
+											sec.start,
+											sec.end,
+											160,
+											SURFACE_LONGEST[preset.level]
+										)
+									: theirs,
+								state
+							)
+						: null;
+			roomsDebug(sec.mode, sec.index, made ? 'new' : 'OLD');
+			state = made ?? buildFlight(ctx, sec, inside, theirs, state);
 		}
 		// (a press a builder put right at its part's end, or after it, would be held into the next
 		// part: the robot there jumped on and on. It goes)
