@@ -2183,6 +2183,19 @@ export function createDashRenderer(
 		ctx.beginPath();
 		ctx.roundRect(x, y, Math.max(barH, (barW * frame.progress) / 100), barH, barH / 2);
 		ctx.fill();
+		// Where the song's drops are: a mark on the bar for each
+		const level = frame.level;
+		ctx.fillStyle = 'rgba(255,255,255,0.9)';
+		for (const k of level.kiai) {
+			if (k.start <= level.start + 1000 || k.start >= level.end) continue;
+			const at = x + (barW * level.world.xAt(k.start)) / level.xEnd;
+			ctx.beginPath();
+			ctx.moveTo(at - barH * 0.45, y - 4 - barH * 0.7);
+			ctx.lineTo(at + barH * 0.45, y - 4 - barH * 0.7);
+			ctx.lineTo(at, y - 4);
+			ctx.closePath();
+			ctx.fill();
+		}
 		ctx.font = `900 ${Math.round(barH * 1.9)}px Figtree Variable, sans-serif`;
 		ctx.textAlign = 'left';
 		ctx.lineWidth = barH * 0.35;

@@ -1377,3 +1377,25 @@ der Toleranz (engstes 54 ms bei 24 ms Toleranz). `npm run test:dash`: 191 Tests 
 - Zwei bestehende Tests angepasst: „Orbs in Ship und Spider“ verlangt nur noch Ship-Orbs (und nur
   einen: welche Teile ein Level bekommt, hat sich mit dem Zufallsstrom verschoben); der
   Gravity-Test im Kiai verlangt ein Portal je 3,2 s statt 2,76 s Flugzeit (gemessen 28 in 79 s).
+
+## 29. 0.6.98: Der Song im Level: Lyrics, Countdown vor dem Drop, Titel, Drop-Marken
+
+Der Renderer reagierte schon auf den Song (Licht auf Beat und Kicks, Blitz und Kamerastoß am
+Drop, Strahlen im Kiai). Neu ist, was vom Song selbst im Level zu sehen ist; am Levelbau ändert
+sich nichts (`GENERATOR_VERSION` bleibt, Bestwerte bleiben).
+
+- **Lyrics** (`DashView.svelte`): Hat der Song synchronisierte Lyrics (die App lädt sie von
+  LRCLIB, wie auf der Lyrics-Seite, mit Romaji und dem dort eingestellten Versatz), steht die
+  gerade gesungene Zeile oben im Level. Eine Zeile bleibt bis zur nächsten, höchstens 9 s. Lyrics
+  einer anderen Version des Songs (andere Länge) werden nicht gezeigt, weil sie nicht passen
+  würden.
+- **Countdown vor dem Drop:** Auf den drei Beats vor einem Kiai-Anfang erscheinen 3, 2, 1, am
+  Drop „GO!“. Ein Drop ist ein Kiai, das nicht direkt am Levelanfang und frühestens 4 s nach dem
+  vorigen beginnt.
+- **Titel am Anfang:** Im ersten Versuch stehen Titel und Interpret für drei Sekunden im Level.
+- **Drop-Marken:** Auf dem Fortschrittsbalken zeigt ein kleines Dreieck jeden Kiai-Anfang.
+- Lyrics und Countdown lassen sich im Sound-Menü abschalten („The song in the level“).
+
+Geprüft im Browser-Harness mit echten Songs (Lyrics dort nachgebildet): Titel, Zeile, Countdown
+und Marken erscheinen. Nicht in der echten App geprüft; dort hängt es zusätzlich davon ab, ob
+LRCLIB den Song kennt.

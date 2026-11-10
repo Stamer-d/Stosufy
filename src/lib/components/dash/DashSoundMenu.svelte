@@ -20,6 +20,11 @@
 		['complete', 'Level complete'],
 		['click', 'Click on every press']
 	];
+	/** @type {['lyrics' | 'countdown', string][]} */
+	const SONG = [
+		['lyrics', 'Lyrics as they are sung'],
+		['countdown', '3, 2, 1 before a drop']
+	];
 </script>
 
 <svelte:window onpointerdown={(e) => open && !root?.contains(e.target) && (open = false)} />
@@ -69,6 +74,34 @@
 							dashSounds.update((s) => ({ ...s, [key]: !s[key] }));
 							if ($dashSounds[key]) playDashSound(key, key === 'complete' ? 0.35 : 0.5);
 						}}
+					>
+						<span class="text-white/85">{label}</span>
+						<span
+							class="relative w-9 h-5 rounded-full transition {$dashSounds[key]
+								? 'bg-primary-400'
+								: 'bg-white/15'}"
+						>
+							<span
+								class="absolute top-0.5 size-4 rounded-full bg-white transition-all {$dashSounds[
+									key
+								]
+									? 'left-[18px]'
+									: 'left-0.5'}"
+							></span>
+						</span>
+					</button>
+				{/each}
+			</div>
+			<div class="pt-2 border-t border-white/10 flex flex-col">
+				<div class="text-xs mb-1 text-white/55">
+					<span class="font-bold uppercase tracking-wider">The song in the level</span>
+				</div>
+				{#each SONG as [key, label] (key)}
+					<button
+						class="flex items-center justify-between h-9 px-1 text-sm cursor-pointer"
+						role="switch"
+						aria-checked={$dashSounds[key]}
+						onclick={() => dashSounds.update((s) => ({ ...s, [key]: !s[key] }))}
 					>
 						<span class="text-white/85">{label}</span>
 						<span

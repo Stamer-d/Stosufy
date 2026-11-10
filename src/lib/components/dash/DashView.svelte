@@ -28,6 +28,7 @@
 	import { playDashSound } from '#lib/dash/sound.ts';
 	import { dashSounds } from '#lib/dash/sounds.ts';
 	import { SongClock } from '#lib/dash/clock.ts';
+	import { lineAt, lyrics, lyricsOffset, lyricsWanted, shownLyrics } from '#lib/stores/lyrics.ts';
 
 	const stored = (key, fallback) => {
 		try {
@@ -97,6 +98,90 @@
 	let best = $state({ normal: 0, practice: 0, attempts: 0 });
 	let results = $state(null);
 	let progressShown = $state(0);
+
+	// --- The song in the level: its lyrics, the countdown to its drops, its name at the start ---
+
+	/** The line being sung (its index among the synced lines; -1: none to show) */
+	let lyricIndex = $state(-1);
+	/** What the countdown to a drop shows now ('' nothing) */
+	let countdown = $state('');
+	/** The song's name shows (the first seconds of the first attempt) */
+	let intro = $state(false);
+
+	// (the lyrics are looked up while Dash is open and wants them)
+	$effect(() => {
+		if (!$dashSounds.lyrics) return;
+		lyricsWanted.update((n) => n + 1);
+		return () => lyricsWanted.update((n) => n - 1);
+	});
+	/** The synced lines of this song, if they're of this version of it */
+	let lyricLines = $derived(
+		$dashSounds.lyrics && $lyrics.status === 'found' && !$lyrics.lyrics?.otherVersion
+			? ($lyrics.lyrics?.lines ?? null)
+			: null
+	);
+	let lyricText = $derived(
+		lyricIndex >= 0
+			? (($shownLyrics.key === $lyrics.key ? $shownLyrics.lines?.[lyricIndex] : null) ??
+					lyricLines?.[lyricIndex]?.text ??
+					'')
+			: ''
+	);
+
+	/** The song's drops: the three beats before each, the drop, and when its "GO!" is over (ms) */
+	let drops = $derived.by(() => {
+		const level = game?.level;
+		if (!level) return [];
+		const out = [];
+		let before = -Infinity;
+		for (const k of level.kiai) {
+			// (a drop: not right at the start, and not right after the one before)
+			if (k.start > level.start + 3000 && k.start < level.end - 1000 && k.start - before > 4000) {
+				const beats = level.beats.filter((b) => b.time < k.start - 20).slice(-3);
+				if (beats.length === 3 && k.start - beats[0].time < 4000)
+					out.push({
+						marks: [beats[0].time, beats[1].time, beats[2].time, k.start],
+						end: k.start + Math.min(900, (k.start - beats[2].time) * 2)
+					});
+			}
+			before = k.end;
+		}
+		return out;
+	});
+
+	/** What of the song shows at a song time (set only when it changes) */
+	function showSong(time, playing) {
+		let line = -1;
+		if (playing && lyricLines) {
+			const at = time / 1000 + $lyricsOffset;
+			const index = lineAt(lyricLines, at);
+			// (a line stays until the next one, but not through a long stretch without singing)
+			if (index >= 0 && lyricLines[index].text.trim() && at - lyricLines[index].time < 9)
+				line = index;
+		}
+		if (line !== lyricIndex) lyricIndex = line;
+		let count = '';
+		if (playing && $dashSounds.countdown)
+			for (const drop of drops) {
+				if (time < drop.marks[0] || time >= drop.end) continue;
+				count =
+					time >= drop.marks[3]
+						? 'GO!'
+						: time >= drop.marks[2]
+							? '1'
+							: time >= drop.marks[1]
+								? '2'
+								: '3';
+			}
+		if (count !== countdown) countdown = count;
+		const first =
+			playing &&
+			!!game &&
+			game.attempt === 1 &&
+			time < game.level.start + 3200 &&
+			time > game.level.start + 150;
+		if (first !== intro) intro = first;
+	}
 	/** Frames drawn a second (counted over half a second) */
 	let fps = $state(0);
 	/** How sharp the level is drawn now (lowered where frames come too slowly) */
@@ -623,6 +708,7 @@
 			}
 			const progress = Math.floor(g.progress);
 			if (progress !== lastProgress) progressShown = lastProgress = progress;
+			showSong(time, screen === 'playing' && g.status === 'playing');
 			try {
 				renderer.draw({
 					level: g.level,
@@ -729,6 +815,44 @@
 				<span class="icon-[mingcute--pause-line] size-5"></span>
 			</button>
 		</div>
+		<!-- The song in the level: its name at the start, its lyrics, the countdown to a drop -->
+		{#if intro && game}
+			<div
+				class="absolute inset-x-0 top-[22%] flex flex-col items-center gap-1 px-6 text-center pointer-events-none"
+				in:fly={{ y: 12, duration: 350 }}
+				out:fade={{ duration: 500 }}
+			>
+				<p class="song-text text-4xl sm:text-5xl font-black leading-tight line-clamp-2">
+					{game.level.title}
+				</p>
+				<p class="song-text text-lg sm:text-xl font-bold text-white/80">{game.level.artist}</p>
+			</div>
+		{/if}
+		{#if lyricText && !intro && !countdown}
+			{#key lyricIndex}
+				<p
+					class="song-text absolute inset-x-0 top-[11%] mx-auto w-fit max-w-[80%] px-4 text-center text-2xl sm:text-3xl font-black leading-snug pointer-events-none"
+					in:fly={{ y: 10, duration: 180 }}
+					out:fade={{ duration: 120 }}
+				>
+					{lyricText}
+				</p>
+			{/key}
+		{/if}
+		{#if countdown}
+			{#key countdown}
+				<p
+					class="song-text absolute inset-x-0 top-[16%] text-center font-black pointer-events-none {countdown ===
+					'GO!'
+						? 'text-7xl sm:text-8xl text-yellow-300'
+						: 'text-6xl sm:text-7xl'}"
+					in:zoom={{ start: 1.7, duration: 220 }}
+					out:fade={{ duration: 100 }}
+				>
+					{countdown}
+				</p>
+			{/key}
+		{/if}
 		{#if game && game.attempt === 1 && progressShown < 3 && !game.auto}
 			<p
 				class="absolute bottom-[12%] left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/40 text-sm font-semibold text-white/85 pointer-events-none"
@@ -903,3 +1027,13 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	/* Text over the level: readable on any of its colours */
+	.song-text {
+		text-shadow:
+			0 0 2px rgba(0, 0, 0, 0.9),
+			0 2px 0 rgba(0, 0, 0, 0.75),
+			0 0 18px rgba(0, 0, 0, 0.55);
+	}
+</style>

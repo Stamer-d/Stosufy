@@ -1,5 +1,6 @@
-// The Dash mode's sound settings: how loud its own sounds are, which of them play, and how
-// much later the music is heard than played (kept on this device)
+// The Dash mode's sound settings: how loud its own sounds are, which of them play, how much
+// later the music is heard than played, and what of the song shows in the level (its lyrics,
+// the countdown to its drops); kept on this device
 
 import { writable } from 'svelte/store';
 
@@ -16,6 +17,10 @@ export interface DashSoundSettings {
 	 * headphones, some drivers. The level runs that much later, so it's on the beat again.
 	 */
 	delay: number;
+	/** The song's lyrics in the level, line by line as they're sung (where they're known) */
+	lyrics: boolean;
+	/** 3, 2, 1 on the beats before a drop */
+	countdown: boolean;
 }
 
 const KEY = 'stosufy-dash-sounds';
@@ -25,7 +30,9 @@ const DEFAULTS: DashSoundSettings = {
 	checkpoint: true,
 	complete: true,
 	click: false,
-	delay: 0
+	delay: 0,
+	lyrics: true,
+	countdown: true
 };
 
 function load(): DashSoundSettings {
