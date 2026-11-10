@@ -1399,3 +1399,33 @@ sich nichts (`GENERATOR_VERSION` bleibt, Bestwerte bleiben).
 Geprüft im Browser-Harness mit echten Songs (Lyrics dort nachgebildet): Titel, Zeile, Countdown
 und Marken erscheinen. Nicht in der echten App geprüft; dort hängt es zusätzlich davon ab, ob
 LRCLIB den Song kennt.
+
+## 30. 0.6.99: Zweites Licht auf den Snares, Anlauf vor dem Drop, Farbwechsel pro Takt
+
+Auftrag: nachsehen, was gebaute Level des Genres tun, damit es zum Song passt, und sich davon
+anregen lassen. Die Websuche dazu ergab fast nur inhaltsleere Seiten (zwei Fachseiten ließen sich
+nicht laden); die Techniken unten sind die im Genre üblichen, aus eigenem Wissen, nicht aus einer
+belegten Quelle, und allgemein umgesetzt, nicht einem bestimmten Level nachgebaut.
+
+Schon vorhanden waren: Licht auf Beat und Kicks, Blitz und Kamerastoß am Drop, Farbwechsel an
+musikalischen Wechseln, Modus- und Tempowechsel an Phrasen, Klicks auf dem Schlagzeug. Neu
+(`render.ts`, dazu `Level.snares` aus `generate.ts`):
+
+- **Zweites Licht auf den Snares.** Bisher reagierte alles auf dieselbe Spur (Beat und Kick).
+  Jetzt gibt es eine zweite: die gehörten Anschläge ohne den Bass (Snare, Clap, Hats; Anschlag
+  minus 1,2 × Kick). Darauf leuchten die Umrisse der Spikes auf und ein Lichtstreifen am oberen
+  und unteren Bildrand; der Rest der Szene bleibt auf dem Kick. Ohne lesbares Audio entfällt das.
+- **Anlauf vor dem Drop.** In den zwei Takten vor einem Drop wird das Bild von den Rändern her
+  dunkler und die Kamera fährt langsam näher (bis 4,5 %); am Drop löst der vorhandene Blitz das
+  auf.
+- **Farbwechsel pro Takt im Drop.** Im Kiai legt sich auf jedem Taktanfang eine Farbe über den
+  Hintergrund, abwechselnd die Akzentfarbe des Teils und Weiß, und klingt über den Takt ab.
+
+Der Levelbau ist unverändert (`GENERATOR_VERSION` bleibt). Geprüft im Browser-Harness an einem
+echten Song: Der Anlauf-Wert steigt vor dem Drop bei 54,7 s von 0,54 auf 0,78 und das Bild wird an
+den Rändern dunkler; 60 FPS wie vorher (Software-Rendering, 1440 × 900). Nicht geprüft: wie es
+sich beim Spielen anfühlt, und ob die Snare-Spur bei jedem Song sauber von der Kick-Spur trennt.
+
+Nicht gemacht: Objekte, die beim Hereinkommen einfahren oder einblenden. Im Genre ist das
+üblich, hier würde es das gemeinsame Zeichnen der Blöcke (Umrisse über mehrere Blöcke) aufbrechen
+und kostet Zeichenzeit, um die es in 0.6.93–0.6.95 schon ging.

@@ -88,6 +88,11 @@ export interface Level {
 	offset?: number;
 	/** How hard the bass hits, every `hop` ms (where the song could be heard): for the light */
 	kicks: { hop: number; values: Float32Array } | null;
+	/**
+	 * How hard the song hits where it isn't the bass (its snares, claps and hats), every `hop` ms:
+	 * for the level's second light (missing on older level data and where the song wasn't heard)
+	 */
+	snares?: { hop: number; values: Float32Array } | null;
 	title: string;
 	artist: string;
 	creator: string;
@@ -1539,6 +1544,15 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		clicks: plan.filter((e) => e.down && !['ship', 'swing'].includes(world.sectionAt(e.time).mode))
 			.length,
 		kicks: chart.sound?.kicks ? { hop: chart.sound.hop, values: chart.sound.kicks } : null,
+		snares:
+			chart.sound?.kicks && chart.sound.hits
+				? {
+						hop: chart.sound.hop,
+						values: chart.sound.hits.map((hit, n) =>
+							Math.max(0, hit - chart.sound!.kicks![n] * 1.2)
+						)
+					}
+				: null,
 		title: chart.title,
 		artist: chart.artist,
 		creator: chart.creator,

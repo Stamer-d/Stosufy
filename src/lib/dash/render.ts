@@ -658,6 +658,75 @@ export function createDashRenderer(
 		return Math.max(beat * 0.75, kick);
 	}
 
+	/** The song's hits that aren't the bass (snares, claps), fading faster than a kick's light */
+	function snarePulse(level: Level, time: number) {
+		const snares = level.snares;
+		if (!snares) return 0;
+		const n = Math.floor(time / snares.hop);
+		let most = 0;
+		for (let k = 0; k < 10 && n - k >= 0; k++) {
+			const v = snares.values[n - k];
+			if (v !== undefined) most = Math.max(most, v * Math.exp((-k * snares.hop) / 70));
+		}
+		return most;
+	}
+
+	/** The song's drops (where a kiai starts, not right at the start or after another) */
+	let dropLevel: Level | null = null;
+	let dropList: { time: number; beat: number }[] = [];
+	function dropsOf(level: Level) {
+		if (dropLevel === level) return dropList;
+		dropLevel = level;
+		dropList = [];
+		let before = -Infinity;
+		for (const k of level.kiai) {
+			if (k.start > level.start + 3000 && k.start < level.end - 1000 && k.start - before > 4000) {
+				const beats = level.beats.filter((b) => b.time < k.start - 20).slice(-2);
+				const beat = beats.length === 2 ? beats[1].time - beats[0].time : 500;
+				dropList.push({ time: k.start, beat });
+			}
+			before = k.end;
+		}
+		return dropList;
+	}
+
+	/**
+	 * How far into the run-up to a drop it is (0: none, to 1 right before it): the two bars before,
+	 * where levels made by hand close in and go dark before they burst
+	 */
+	function buildUp(level: Level, time: number) {
+		for (const drop of dropsOf(level)) {
+			const span = drop.beat * 8;
+			if (time < drop.time && time > drop.time - span) return 1 - (drop.time - time) / span;
+		}
+		return 0;
+	}
+
+	/** In a drop: which bar it is (even or odd) and how long since it began (ms); else null */
+	function barOf(level: Level, time: number) {
+		const beats = level.beats;
+		let low = 0;
+		let high = beats.length - 1;
+		if (!beats.length || time < beats[0].time) return null;
+		while (low < high) {
+			const mid = (low + high + 1) >> 1;
+			if (beats[mid].time <= time) low = mid;
+			else high = mid - 1;
+		}
+		let k = low;
+		let back = 0;
+		while (k > 0 && !beats[k].downbeat && back < 8) {
+			k--;
+			back++;
+		}
+		// (bars counted from the level's first beat: the same bar the same colour on every attempt)
+		let bars = 0;
+		for (let i = Math.max(0, k - 64); i <= k; i++) if (beats[i].downbeat) bars++;
+		return { odd: bars % 2 === 1, since: time - beats[k].time };
+	}
+	/** The colour a drop's bar washes the scene in, and how much (set per frame) */
+	let wash: { color: string; alpha: number } | null = null;
+
 	// --- The scene ------------------------------------------------------------------------
 
 	function background(p: Palette, pulse: number, kiai: boolean) {
@@ -685,6 +754,11 @@ export function createDashRenderer(
 		}
 		if (kiai && pulse > 0.02) {
 			ctx.fillStyle = `rgba(255,255,255,${pulse * 0.06})`;
+			ctx.fillRect(0, 0, width, height);
+		}
+		// In a drop each bar comes in another colour: a wash that hits on its first beat
+		if (wash) {
+			ctx.fillStyle = rgba(wash.color, wash.alpha);
 			ctx.fillRect(0, 0, width, height);
 		}
 		// A big tiled wall far away, like the genre's backgrounds
@@ -2238,7 +2312,17 @@ export function createDashRenderer(
 		lastKiai = section.kiai;
 		zoom = Math.max(0, zoom - dt * 2.5);
 		const pulse = musicPulse(level, time);
-		scale *= 1 + zoom * 0.05 + pulse * (section.kiai ? 0.012 : 0);
+		const snare = snarePulse(level, time);
+		// (the run-up to a drop: slowly closer and darker, then the drop bursts out of it)
+		const rising = frame.dead || frame.waiting ? 0 : buildUp(level, time);
+		scale *= 1 + zoom * 0.05 + pulse * (section.kiai ? 0.012 : 0) + rising * rising * 0.045;
+		const bar = section.kiai ? barOf(level, time) : null;
+		wash = bar
+			? {
+					color: bar.odd ? paletteAt(level, state.time).accent : '#ffffff',
+					alpha: 0.03 + 0.1 * Math.exp(-bar.since / 380)
+				}
+			: null;
 
 		// The camera; at the end it comes to a stop with the light ahead, and the player runs on
 		// into it
@@ -2336,10 +2420,11 @@ export function createDashRenderer(
 			ctx.lineTo(sx(h.x + sw), sy(h.y));
 		}
 		ctx.lineJoin = 'round';
-		ctx.strokeStyle = rgba(p.accent, 0.14 + pulse * 0.12);
-		ctx.lineWidth = Math.max(4, scale * 0.4);
+		// (the spikes light up on the snares, the rest of the scene on the kicks)
+		ctx.strokeStyle = rgba(p.accent, 0.14 + pulse * 0.12 + snare * 0.3);
+		ctx.lineWidth = Math.max(4, scale * (0.4 + snare * 0.25));
 		ctx.stroke();
-		ctx.strokeStyle = rgba(p.accent, 0.35 + pulse * 0.2);
+		ctx.strokeStyle = rgba(snare > 0.5 ? '#ffffff' : p.accent, 0.35 + pulse * 0.2 + snare * 0.3);
 		ctx.lineWidth = Math.max(2, scale * 0.18);
 		ctx.stroke();
 		for (const h of spikes) {
@@ -2477,6 +2562,35 @@ export function createDashRenderer(
 		(globalThis as any).__phase?.('player', ctx);
 		ctx.restore();
 
+		// The snares: light along the top and bottom edges
+		if (snare > 0.08) {
+			const tall = height * 0.09;
+			const upper = ctx.createLinearGradient(0, 0, 0, tall);
+			upper.addColorStop(0, rgba(p.accent, snare * 0.4));
+			upper.addColorStop(1, rgba(p.accent, 0));
+			ctx.fillStyle = upper;
+			ctx.fillRect(0, 0, width, tall);
+			const lower = ctx.createLinearGradient(0, height, 0, height - tall);
+			lower.addColorStop(0, rgba(p.accent, snare * 0.4));
+			lower.addColorStop(1, rgba(p.accent, 0));
+			ctx.fillStyle = lower;
+			ctx.fillRect(0, height - tall, width, tall);
+		}
+		// The run-up to a drop: dark from the edges in
+		if (rising > 0.02) {
+			const dark = ctx.createRadialGradient(
+				width / 2,
+				height / 2,
+				Math.min(width, height) * (0.5 - rising * 0.3),
+				width / 2,
+				height / 2,
+				Math.max(width, height) * 0.75
+			);
+			dark.addColorStop(0, 'rgba(0,0,0,0)');
+			dark.addColorStop(1, `rgba(0,0,0,${rising * 0.85})`);
+			ctx.fillStyle = dark;
+			ctx.fillRect(0, 0, width, height);
+		}
 		if (flash > 0) {
 			ctx.fillStyle = rgba(flashColor, flash * 0.35);
 			ctx.fillRect(0, 0, width, height);
