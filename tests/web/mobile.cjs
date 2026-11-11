@@ -553,12 +553,46 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     const title = (await p.locator('main ol > li').nth(4).locator('span.font-semibold').first().textContent()).trim();
     await drag(120, box.y + box.height / 2, 170, 0, 10, 16); await wait(500);
     expect((await count()) === n + 1, 'not added: ' + n + ' → ' + (await count()));
-    const last = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return s.songs[s.songs.length - 1].title; });
-    expect(last === title, 'added ' + last + ', not ' + title);
+    // (it comes next, before the playlist goes on; one more comes after it, not before)
+    const next = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return s.songs[s.index + 1].title; });
+    expect(next === title, 'next is ' + next + ', not ' + title);
     expect(await p.locator('text=Added to the queue').count(), 'no word of it');
     expect(path() === '/playlist/2', 'the swipe went somewhere: ' + path());
     // (the row back in place, nothing left behind it)
     expect(!(await p.locator('main ol > li').nth(4).evaluate((li) => [...li.children].some((c) => c.style.transform))), 'the row stayed moved');
+  });
+
+  await step('songs put in the queue play next, in the order they were added, before the playlist goes on; also with shuffle turned on and off', async () => {
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst();
+    const state = () => p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return { now: s.songs[s.index].title, next: s.songs.slice(s.index + 1, s.index + 4).map((x) => x.title), length: s.songs.length }; });
+    const add = async (n) => {
+      const title = (await p.locator('main ol > li').nth(n).locator('span.font-semibold').first().textContent()).trim();
+      await p.locator('main ol > li').nth(n).locator('button[aria-label^="More"]').click(); await wait(350);
+      await p.locator('.fixed.inset-0.z-40 button', { hasText: 'Add to queue' }).first().click(); await wait(600);
+      return title;
+    };
+    const before = await state();
+    const first = await add(8);
+    const second = await add(5);
+    let s = await state();
+    expect(s.next[0] === first && s.next[1] === second && s.next[2] === before.next[0], 'not next, in order, before the playlist: ' + JSON.stringify(s.next) + ' (added ' + first + ', ' + second + ')');
+    await p.locator('.dock [aria-hidden="false"] button[aria-label="Open the player"]').click(); await wait(600);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Shuffle"]'); await wait(500);
+    s = await state();
+    expect(s.now === before.now && s.next[0] === first && s.next[1] === second, 'shuffle on: ' + JSON.stringify(s));
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Shuffle"]'); await wait(500);
+    s = await state();
+    expect(s.now === before.now && s.next[0] === first && s.next[1] === second && s.next[2] === before.next[0] && s.length === before.length + 2, 'shuffle off: ' + JSON.stringify(s) + ' was ' + JSON.stringify(before));
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Next"]'); await wait(900);
+    s = await state();
+    expect(s.now === first && s.next[0] === second && s.next[1] === before.next[0], 'after next: ' + JSON.stringify(s));
+    // (shuffle off while a queued song plays: the playlist goes on where it was)
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Shuffle"]'); await wait(400);
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Shuffle"]'); await wait(500);
+    s = await state();
+    expect(s.now === first && s.next[0] === second && s.next[1] === before.next[0], 'shuffle off on a queued song: ' + JSON.stringify(s));
+    await p.click('.fixed.inset-0.z-30 button[aria-label="Close"]'); await wait(400);
   });
 
   await step('the Nightcore beat plays on with the screen locked (seconds ahead), called off on pause', async () => {

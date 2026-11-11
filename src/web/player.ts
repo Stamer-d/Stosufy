@@ -823,23 +823,40 @@ export function jumpTo(index: number) {
 	return load();
 }
 
+// Songs put in the queue by hand play before the playlist goes on (as in Spotify): right
+// after the song playing, in the order they were added. They're marked, so the next one added
+// comes after them, and so they aren't taken for songs of the playlist (the order to go back
+// to when shuffle is turned off doesn't have them).
+
+type Queued = MapSet & { queued?: boolean };
+const isQueued = (song: MapSet | undefined) => !!(song as Queued | undefined)?.queued;
+const asQueued = (song: MapSet) => ({ ...slim(song), queued: true }) as MapSet;
+/** The last song of the playlist that played (where it goes on after the queued ones) */
+let lastOfPlaylist: MapSet | null = null;
+queue.subscribe(({ songs, index }) => {
+	if (songs[index] && !isQueued(songs[index])) lastOfPlaylist = songs[index];
+});
+
 /** The song comes right after the one playing */
 export function playNext(song: MapSet) {
 	if (!current()) return play([song]);
 	queue.update(({ songs, index }) => ({
-		songs: [...songs.slice(0, index + 1), slim(song), ...songs.slice(index + 1)],
+		songs: [...songs.slice(0, index + 1), asQueued(song), ...songs.slice(index + 1)],
 		index
 	}));
-	ordered.push(slim(song));
 	save();
 	readNext();
 }
 
-/** The song comes at the end of the queue */
+/** The song comes after the one playing and the songs already put in the queue, before the
+ * playlist goes on */
 export function addToQueue(song: MapSet) {
 	if (!current()) return play([song]);
-	queue.update(({ songs, index }) => ({ songs: [...songs, slim(song)], index }));
-	ordered.push(slim(song));
+	queue.update(({ songs, index }) => {
+		let at = index + 1;
+		while (isQueued(songs[at])) at++;
+		return { songs: [...songs.slice(0, at), asQueued(song), ...songs.slice(at)], index };
+	});
 	save();
 	readNext();
 }
@@ -874,15 +891,25 @@ export function toggleShuffle() {
 	const song = current();
 	if (!song) return;
 	const { songs, index } = get(queue);
+	// (the songs put in the queue by hand stay next, in their order, either way)
+	const waiting = songs.slice(index + 1).filter(isQueued);
+	const same = (a: MapSet, b: MapSet) => a.id == b.id && a.beatmaps?.[0]?.id == b.beatmaps?.[0]?.id;
 	if (on) {
-		ordered = songs;
-		queue.set({ songs: [song, ...shuffled(songs.filter((_, i) => i !== index))], index: 0 });
+		ordered = songs.filter((other) => !isQueued(other));
+		const rest = songs.filter((other, i) => i !== index && !isQueued(other));
+		queue.set({ songs: [song, ...waiting, ...shuffled(rest)], index: 0 });
 	} else {
-		const back = ordered.length ? ordered : songs;
-		const at = back.findIndex(
-			(other) => other.id == song.id && other.beatmaps?.[0]?.id == song.beatmaps?.[0]?.id
-		);
-		queue.set({ songs: back, index: Math.max(at, 0) });
+		const back = (ordered.length ? ordered : songs).filter((other) => !isQueued(other));
+		// Where the playlist goes on: after the song playing, or (it was put in the queue by
+		// hand) after the last song of the playlist that played
+		const from = isQueued(song) ? lastOfPlaylist : song;
+		const at = from ? back.findIndex((other) => same(other, from!)) : -1;
+		const before = back.slice(0, at + 1);
+		const playing = isQueued(song) ? [song] : [];
+		queue.set({
+			songs: [...before, ...playing, ...waiting, ...back.slice(at + 1)],
+			index: Math.max(before.length + playing.length - 1, 0)
+		});
 	}
 	save();
 	readNext();

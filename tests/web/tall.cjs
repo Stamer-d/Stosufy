@@ -80,7 +80,7 @@ async function touchDrag(x0, y0, dx, dy = 0) {
   await step('playlist: row tap plays it', async () => { await p.locator('main ol > li').nth(4).locator('button').first().click(); await wait(600); expect(await nowTitle() === 'Song number 25', 'now ' + await nowTitle()); });
 
   await step('menu: play next', async () => { await menuFor(10); await menuItem('Play next'); const s = await playerState(); expect(s.songs[s.index + 1].title === 'Song number 31', 'next is ' + s.songs[s.index + 1].title); });
-  await step('menu: add to queue', async () => { await menuFor(11); await menuItem('Add to queue'); const s = await playerState(); expect(s.songs.at(-1).title === 'Song number 32', 'last is ' + s.songs.at(-1).title); });
+  await step('menu: add to queue', async () => { await menuFor(11); await menuItem('Add to queue'); const s = await playerState(); const queued = s.songs.slice(s.index + 1).filter((x) => x.queued).map((x) => x.title); expect(queued.at(-1) === 'Song number 32' && s.songs[s.index + queued.length].title === 'Song number 32', 'not next after the queued ones: ' + queued + ' / ' + s.songs[s.index + 1].title); });
   await step('menu: like', async () => { await menuFor(12); await menuItem('Add to Liked Songs'); expect(ops.some((o) => o.startsWith('fav:1032:true')), 'no fav op: ' + ops.slice(-3)); });
   await step('menu: unlike', async () => { await menuFor(12); await menuItem('Remove from Liked Songs'); expect(ops.some((o) => o.startsWith('fav:1032:false')), 'no unfav op'); });
   await step('menu: add to playlist (and already in it)', async () => {
