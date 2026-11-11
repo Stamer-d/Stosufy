@@ -11,7 +11,7 @@ import { get } from 'svelte/store';
 import { libraryByKey, librarySetSongs, librarySongs, mapDataStore } from './data';
 import { favourites } from './favourites';
 import { history, playCounts, songKey, type SongPlays } from './history';
-import { songBpm } from '../dj/library';
+import { songBpm } from '../songBpm';
 import { artistsOf, sameSong } from '../tracks';
 import type { MapSet } from '../types';
 

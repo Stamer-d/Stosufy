@@ -3,11 +3,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel } from '../../src/lib/dash/generate';
-import { allowedModes, modesMark } from '../../src/lib/dash/modes';
-import { bestKey, bestOfSet, saveBest } from '../../src/lib/dash/game';
-import { simulate, startState, type Mode } from '../../src/lib/dash/physics';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel } from '../../src/lib/addons/dash/generate';
+import { allowedModes, modesMark } from '../../src/lib/addons/dash/modes';
+import { bestKey, bestOfSet, saveBest } from '../../src/lib/addons/dash/game';
+import { simulate, startState, type Mode } from '../../src/lib/addons/dash/physics';
 import { makeOsu, makeSound } from './fixtures';
 
 const song = {

@@ -5,17 +5,17 @@ Stand: 31.10.2026, Branch `dash-rework` (Sicherungspunkt davor: Branch
 
 ## 1. Aufbau
 
-| Baustein             | Datei                                                   | Aufgabe                                                                        |
-| -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Audioanalyse         | `src/lib/dash/audio.ts`                                 | Lautstärke, Anschläge (Onsets) über Bass/Mitten/Höhen, Bass-Kicks; alle ~10 ms |
-| Beatmap lesen        | `src/lib/dash/chart.ts`                                 | Noten, BPM/Takt, Kiai, Pausen, Akzente des Mappers                             |
-| Levelgenerierung     | `src/lib/dash/generate.ts`, `build.ts`, `builders/*.ts` | Song → Abschnitte → Hindernisse; jedes Hindernis wird mit der Physik geprüft   |
-| Spielbarkeitsprüfung | `src/lib/dash/validate.ts` (neu)                        | Bericht: durchspielbar, Zeitfenster je Klick, Abstände, Sichtzeit              |
-| Physik und Kollision | `src/lib/dash/physics.ts`                               | fester Zeitschritt 240/s, Hitboxen, alle Spielmodi                             |
-| Spielablauf          | `src/lib/dash/game.ts`                                  | Versuche, Neustart, Practice, Autoplay, Eingaben mit Rollback                  |
-| Songuhr              | `src/lib/dash/clock.ts` (neu)                           | Songzeit zwischen den Audio-Updates, Audio-Verzögerung, Eingabe-Zeitstempel    |
-| Darstellung          | `src/lib/dash/render.ts`                                | Canvas, Kamera, Effekte, Licht auf Beat und Kicks                              |
-| Oberfläche           | `src/lib/components/dash/*.svelte`                      | Menü, Tasten/Maus, Sound-Einstellungen                                         |
+| Baustein             | Datei                                                          | Aufgabe                                                                        |
+| -------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Audioanalyse         | `src/lib/addons/dash/audio.ts`                                 | Lautstärke, Anschläge (Onsets) über Bass/Mitten/Höhen, Bass-Kicks; alle ~10 ms |
+| Beatmap lesen        | `src/lib/addons/dash/chart.ts`                                 | Noten, BPM/Takt, Kiai, Pausen, Akzente des Mappers                             |
+| Levelgenerierung     | `src/lib/addons/dash/generate.ts`, `build.ts`, `builders/*.ts` | Song → Abschnitte → Hindernisse; jedes Hindernis wird mit der Physik geprüft   |
+| Spielbarkeitsprüfung | `src/lib/addons/dash/validate.ts` (neu)                        | Bericht: durchspielbar, Zeitfenster je Klick, Abstände, Sichtzeit              |
+| Physik und Kollision | `src/lib/addons/dash/physics.ts`                               | fester Zeitschritt 240/s, Hitboxen, alle Spielmodi                             |
+| Spielablauf          | `src/lib/addons/dash/game.ts`                                  | Versuche, Neustart, Practice, Autoplay, Eingaben mit Rollback                  |
+| Songuhr              | `src/lib/addons/dash/clock.ts` (neu)                           | Songzeit zwischen den Audio-Updates, Audio-Verzögerung, Eingabe-Zeitstempel    |
+| Darstellung          | `src/lib/addons/dash/render.ts`                                | Canvas, Kamera, Effekte, Licht auf Beat und Kicks                              |
+| Oberfläche           | `src/lib/addons/dash/components/*.svelte`                      | Menü, Tasten/Maus, Sound-Einstellungen                                         |
 
 Die Level entstehen weiter aus Beatmap und Song: Abschnitte auf Phrasen und Kiai, Klicks auf die stärksten
 Noten. Der Zufall ist an den Song gebunden (Seed aus Song-ID und Map-ID), deshalb ergibt derselbe Song

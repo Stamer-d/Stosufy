@@ -14,7 +14,7 @@ import { loadTiming } from './mods';
 import { userSettings } from './user';
 import { heardTime } from './equalizer';
 import { isStreamed } from './stream';
-import { dashOpen } from '../dash/store';
+import { appHidden } from '../addons/store';
 import { parseKiai, parseTimingPoints, type KiaiSection, type TimingPoint } from '../osuFile';
 
 /** How sharply the pulse falls off after a beat; higher is snappier */
@@ -114,6 +114,9 @@ export function startBeatEffects() {
 	let kiai = 0;
 	let last = performance.now();
 	let written = '';
+	// (an add-on's view covers the whole app, like Dash: nothing of this would be seen)
+	let hidden = false;
+	appHidden.subscribe((value) => (hidden = value));
 
 	const frame = (now: number) => {
 		requestAnimationFrame(frame);
@@ -124,7 +127,7 @@ export function startBeatEffects() {
 		const enabled =
 			(get(userSettings).settings?.appearance?.beatEffects ?? true) &&
 			!reducedMotion.matches &&
-			!get(dashOpen);
+			!hidden;
 		let pulse = 0;
 		let inKiai = false;
 		const timing = enabled && audio && !audio.paused ? currentTiming() : null;

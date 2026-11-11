@@ -11,6 +11,7 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"test:dash": "node --experimental-transform-types --no-warnings --import ./tests/dash/register.mjs --test \"tests/dash/*.test.ts\"",
+		"test:addons": "tests/addons/run.sh",
 		"test:web": "tests/web/run.sh",
 		"test:web:webkit": "BROWSER=webkit tests/web/run.sh",
 		"build:web": "vite build --mode web && node -e \"require('fs').copyFileSync('build-web/404.html', 'build-web/index.html')\"",

@@ -14,7 +14,7 @@ import {
 	startState,
 	step,
 	type InputEvent
-} from '../../src/lib/dash/physics';
+} from '../../src/lib/addons/dash/physics';
 import { tap, world } from './worlds';
 
 /** Runs from the start with presses; where it was each step and what happened */

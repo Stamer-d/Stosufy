@@ -4,8 +4,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DashGame, ROLLBACK } from '../../src/lib/dash/game';
-import { SPEEDS, STEP, type InputEvent } from '../../src/lib/dash/physics';
+import { DashGame, ROLLBACK } from '../../src/lib/addons/dash/game';
+import { SPEEDS, STEP, type InputEvent } from '../../src/lib/addons/dash/physics';
 import { levelOf, tap, world } from './worlds';
 
 /** A few seconds of cube with spikes to jump, then a UFO part: the presses that get through */

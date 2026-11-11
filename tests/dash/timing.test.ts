@@ -4,9 +4,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
-import { hearSong } from '../../src/lib/dash/audio';
-import { alignTiming, songOffset } from '../../src/lib/dash/timing';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { hearSong } from '../../src/lib/addons/dash/audio';
+import { alignTiming, songOffset } from '../../src/lib/addons/dash/timing';
 import { makeAudio, makeOsu, type SongOptions } from './fixtures';
 
 /** 128 BPM, 170 from bar 24 on (where the song changes) */

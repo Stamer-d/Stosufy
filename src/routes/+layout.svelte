@@ -29,10 +29,8 @@
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import { playingLive } from '#lib/gameplay/play.ts';
 	import PlayOverlay from '#lib/components/PlayOverlay.svelte';
-	import DjView from '#lib/components/dj/DjView.svelte';
-	import { djOpen } from '#lib/dj/engine.ts';
-	import DashView from '#lib/components/dash/DashView.svelte';
-	import { dashOpen } from '#lib/dash/store.ts';
+	import { openOverlay } from '#lib/addons/overlay.ts';
+	import { activeOverlay, overlayViews, appHidden } from '#lib/addons/store.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
@@ -45,11 +43,10 @@
 	let scroller = $state();
 	const scrolled = new Map();
 	beforeNavigate(({ from, to }) => {
-		// Going somewhere leaves the focus and DJ modes (they'd cover the page)
+		// Going somewhere leaves the focus mode and the add-ons' views (they'd cover the page)
 		if (to?.url && from?.url?.pathname !== to.url.pathname) {
 			focusMode.set(false);
-			djOpen.set(false);
-			dashOpen.set(false);
+			openOverlay.set(null);
 		}
 		if (from?.url && scroller)
 			scrolled.set(from.url.pathname + from.url.search, scroller.scrollTop);
@@ -64,9 +61,10 @@
 		});
 	});
 
-	// While a full-screen view (playing, focus, DJ) covers the page, the page keeps where it
-	// was scrolled to: nothing behind it may move it, and it's put back when the view closes
-	let covered = $derived($playingLive || $focusMode || $djOpen || $dashOpen);
+	// While a full-screen view (playing, focus, an add-on's like the DJ mode) covers the page,
+	// the page keeps where it was scrolled to: nothing behind it may move it, and it's put back
+	// when the view closes
+	let covered = $derived($playingLive || $focusMode || !!$activeOverlay);
 	let keptScroll = null;
 	$effect(() => {
 		const el = scroller;
@@ -94,9 +92,9 @@
 	let showUI = $state(false);
 
 	let appearance = $derived({ ...DEFAULT_APPEARANCE, ...$userSettings.settings?.appearance });
-	// (not under the Dash mode: it covers the whole window, and the song's background video,
+	// (not under a view that covers the whole window, like Dash: the song's background video,
 	// blurred and pulsing with the beat, cost frames there for nothing)
-	let backgroundOn = $derived(appearance.background && !!$currentSong.song && !$dashOpen);
+	let backgroundOn = $derived(appearance.background && !!$currentSong.song && !$appHidden);
 	let panel = $derived(backgroundOn ? 'bg-panel/80' : 'bg-panel');
 
 	$effect(() => {
@@ -170,8 +168,11 @@
 			></div>
 		</div>
 	{/if}
-	<!-- Under the Dash mode the app isn't drawn at all (it stays laid out, scrolled where it was) -->
-	<div class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'} {$dashOpen ? 'invisible' : ''}">
+	<!-- Under a view that covers it all (Dash) the app isn't drawn at all (it stays laid out,
+	     scrolled where it was) -->
+	<div
+		class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'} {$appHidden ? 'invisible' : ''}"
+	>
 		<Titlebar />
 		{#if $offline}
 			<div
@@ -230,14 +231,12 @@
 	{#if $playingLive}
 		<PlayOverlay />
 	{/if}
-	{#if $djOpen}
-		<DjView />
-	{/if}
-	{#if $dashOpen}
-		<DashView />
-	{/if}
+	<!-- The open view of an add-on (the DJ mode, Dash), over the app -->
+	{#each $overlayViews as view (view.id)}
+		<view.component />
+	{/each}
 	<!-- Over the full-screen views (DJ, focus, playing) the friends panel floats on top -->
-	{#if $friendsPanelOpen && ($djOpen || $focusMode || $playingLive)}
+	{#if $friendsPanelOpen && (($activeOverlay && !$appHidden) || $focusMode || $playingLive)}
 		<div
 			class="fixed right-2 top-12 bottom-2 z-50 w-80 rounded-lg bg-secondary-100/95 backdrop-blur-2xl ring-1 ring-white/10 shadow-2xl overflow-hidden"
 			transition:fly={{ x: 24, duration: 200 }}

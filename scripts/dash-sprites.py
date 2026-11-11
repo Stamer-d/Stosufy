@@ -2,7 +2,7 @@
 # the Dash renderer draws: the background goes, the glow around the outlines stays (as the colour
 # it was before the magenta got into it), the portals keep only their ring (no specks around
 # them: the game draws its own particles), and every sprite is packed into one atlas,
-# src/lib/dash/sprites.webp, with its box written to src/lib/dash/sprites.ts.
+# src/lib/addons/dash/sprites.webp, with its box written to src/lib/addons/dash/sprites.ts.
 #   python scripts/dash-sprites.py
 # Needs Pillow, numpy and scipy.
 
@@ -15,8 +15,8 @@ from PIL import Image
 from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT_IMAGE = ROOT / 'src/lib/dash/sprites.webp'
-OUT_MAP = ROOT / 'src/lib/dash/sprites.ts'
+OUT_IMAGE = ROOT / 'src/lib/addons/dash/sprites.webp'
+OUT_MAP = ROOT / 'src/lib/addons/dash/sprites.ts'
 
 # The first sheet (8 × 7 cells with thin grid lines): what is in which cell, row by row (None:
 # not used, its portals have specks baked in: the portal sheet has them clean)

@@ -3,6 +3,7 @@ import { get, writable } from 'svelte/store';
 import { playlistLoadingStatus } from './playlist';
 import { setSongQueue } from './audio';
 import { mapDataStore } from './data';
+import { withLegacyAddons } from '../addons/legacy';
 import type {
 	AppearanceSettings,
 	HomeSettings,
@@ -63,8 +64,17 @@ async function initializeStores() {
 		const stored = await data.get<UserSettings>('user');
 		const songs = await data.get<StoredQueue['queue']>('queueSongs');
 		const position = await data.get<Omit<StoredQueue, 'queue'>>('queuePosition');
-		if (stored)
-			userSettings.set({ settings: stored.settings ?? {}, currentQueue: null, sync: stored.sync });
+		// Which add-ons are installed is always said from here on: those that were part of the
+		// app for settings saved before there were add-ons, none for a new user
+		userSettings.set(
+			stored
+				? {
+						settings: withLegacyAddons(stored.settings ?? {}),
+						currentQueue: null,
+						sync: stored.sync
+					}
+				: { settings: { addons: [] }, currentQueue: null }
+		);
 		// Saved before the queue was kept apart: it was part of the user data
 		const queue = songs ? { ...position, queue: songs } : (stored?.currentQueue ?? null);
 		savedQueue.set(queue);

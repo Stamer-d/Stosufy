@@ -6,11 +6,11 @@
 //   node --experimental-transform-types --no-warnings --import ./tests/dash/register.mjs tests/dash/emptiness.ts [difficulties] [heard,silent]
 // One level part by part (SHOW=<mode> lists that kind's presses, (x) where one isn't needed):
 //   node ... tests/dash/emptiness.ts x x dnb174:normal:q:heard
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel, type Difficulty, type Level } from '../../src/lib/dash/generate';
-import { simulate, startState, type PlayerState } from '../../src/lib/dash/physics';
-import { musicalRest } from '../../src/lib/dash/composition';
-import type { SongSound } from '../../src/lib/dash/audio';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel, type Difficulty, type Level } from '../../src/lib/addons/dash/generate';
+import { simulate, startState, type PlayerState } from '../../src/lib/addons/dash/physics';
+import { musicalRest } from '../../src/lib/addons/dash/composition';
+import type { SongSound } from '../../src/lib/addons/dash/audio';
 
 function numbers(seed: number) {
 	let s = seed || 1;

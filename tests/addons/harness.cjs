@@ -1,0 +1,118 @@
+// The desktop app in a browser: Tauri's calls mocked, the device's saved data put there
+// before the app starts, no network (or a mock of the Stosufy API, for the settings sync)
+const { chromium } = require('playwright');
+const BASE = 'http://127.0.0.1:5289';
+const API = 'https://api.stamer-d.de/v2/';
+const USER = { id: 1, username: 'tester', avatar_url: null };
+
+/** Runs in the page before the app: what the app asks Tauri for */
+function tauri(online) {
+	let next = 1;
+	window.__TAURI_INTERNALS__ = {
+		metadata: {
+			currentWindow: { label: 'main' },
+			currentWebview: { label: 'main', windowLabel: 'main' }
+		},
+		transformCallback: () => next++,
+		unregisterCallback() {},
+		convertFileSrc: (path) => 'asset://' + path,
+		async invoke(cmd) {
+			if (cmd === 'plugin:event|listen') return next++;
+			if (cmd.startsWith('plugin:path|')) return '/home/tester';
+			if (cmd === 'plugin:fs|exists') return false;
+			if (cmd === 'plugin:fs|read_dir') return [];
+			if (cmd === 'plugin:fs|mkdir') return null;
+			if (cmd.startsWith('plugin:fs|')) throw new Error('no file (mock)');
+			return null;
+		}
+	};
+	window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+	if (!online) Object.defineProperty(navigator, 'onLine', { get: () => false });
+}
+
+/**
+ * The app, started. `stored`: the user data saved on the device ({ settings }), none for a
+ * new user. `account`: the settings saved in the account ({ settings, updatedAt }, or null for
+ * none yet), with which the app starts online and syncs; without it the app starts offline.
+ * Returns the page, its errors, and what was saved to the account since (`sent`). `scale`: 2
+ * for sharp pictures of it.
+ */
+async function start(browser, { stored = null, account, scale = 1 } = {}) {
+	const online = account !== undefined;
+	const context = await browser.newContext({
+		viewport: { width: 1440, height: 900 },
+		deviceScaleFactor: scale
+	});
+	await context.addInitScript(tauri, online);
+	const sent = [];
+	let remote = account ?? null;
+	await context.route(/^https?:\/\/(?!127\.0\.0\.1)/, async (route) => {
+		const request = route.request();
+		if (!online || request.url() !== API) return route.abort();
+		const { query = '', variables = {} } = JSON.parse(request.postData() ?? '{}');
+		let data = null;
+		if (query.includes('getStosufyUser {'))
+			data = { getStosufyUser: { stosufyId: 1, osuProfile: USER } };
+		else if (query.includes('getStosufySettings')) data = { getStosufySettings: remote };
+		else if (query.includes('saveStosufySettings')) {
+			remote = { settings: variables.settings, updatedAt: (remote?.updatedAt ?? 0) + 1 };
+			sent.push(variables.settings);
+			data = { saveStosufySettings: remote.updatedAt };
+		}
+		await route.fulfill({
+			contentType: 'application/json',
+			headers: { 'access-control-allow-origin': '*' },
+			body: JSON.stringify(data ? { data } : { errors: [{ message: 'Not in the mock' }] })
+		});
+	});
+	const page = await context.newPage();
+	const errors = [];
+	page.on('pageerror', (error) => errors.push(String(error.stack || error)));
+	// (a page of the same origin first: the saved data has to be there before the app starts)
+	await page.goto(BASE + '/logo.png');
+	await page.evaluate(
+		async ({ stored, user }) => {
+			localStorage.setItem('stosufy-last-user', JSON.stringify(user));
+			const db = await new Promise((resolve, reject) => {
+				const request = indexedDB.open('stosufy', 1);
+				request.onupgradeneeded = () => request.result.createObjectStore('stores');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			const tx = db.transaction('stores', 'readwrite');
+			const keys = { access_token: 'token', refresh_token: 'refresh', sessionKey: '' };
+			tx.objectStore('stores').put(
+				{ ...keys, expiry_time: Date.now() + 1e9 },
+				'keyStore.json/store'
+			);
+			if (stored) tx.objectStore('stores').put(stored, 'userData.json/user');
+			await new Promise((resolve) => (tx.oncomplete = resolve));
+			db.close();
+		},
+		{ stored, user: USER }
+	);
+	await page.goto(BASE + '/');
+	await page.waitForURL('**/home', { timeout: 60000 });
+	await page.waitForSelector('button[aria-label="Add-ons"]', { timeout: 60000 });
+	return { page, context, errors, sent };
+}
+
+/** The settings saved on the device (the app saves a moment after a change) */
+async function saved(page) {
+	await page.waitForTimeout(1300);
+	return page.evaluate(async () => {
+		const db = await new Promise((resolve) => {
+			const request = indexedDB.open('stosufy', 1);
+			request.onsuccess = () => resolve(request.result);
+		});
+		return new Promise((resolve) => {
+			const request = db.transaction('stores').objectStore('stores').get('userData.json/user');
+			request.onsuccess = () => {
+				db.close();
+				resolve(request.result?.settings);
+			};
+		});
+	});
+}
+
+module.exports = { chromium, start, saved };

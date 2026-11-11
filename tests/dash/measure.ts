@@ -13,11 +13,11 @@ import {
 	step,
 	type InputEvent,
 	type Mode
-} from '../../src/lib/dash/physics';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel, DIFFICULTIES } from '../../src/lib/dash/generate';
-import { hearSong } from '../../src/lib/dash/audio';
-import { checkLevel } from '../../src/lib/dash/validate';
+} from '../../src/lib/addons/dash/physics';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel, DIFFICULTIES } from '../../src/lib/addons/dash/generate';
+import { hearSong } from '../../src/lib/addons/dash/audio';
+import { checkLevel } from '../../src/lib/addons/dash/validate';
 import { makeAudio, makeOsu, type SongOptions } from './fixtures';
 import { tap, world, type PartOptions } from './worlds';
 

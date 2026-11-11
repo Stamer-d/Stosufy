@@ -5,15 +5,20 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel, withBeats, type Difficulty, type Level } from '../../src/lib/dash/generate';
-import { PRESETS } from '../../src/lib/dash/build';
-import { BLOCKS } from '../../src/lib/dash/builders/blocks';
-import { SHIP_PIECES } from '../../src/lib/dash/builders/ship';
-import { drumClicks } from '../../src/lib/dash/rhythm';
-import { simulate, startState } from '../../src/lib/dash/physics';
-import { musicalRest } from '../../src/lib/dash/composition';
-import { allowedModes, modesMark } from '../../src/lib/dash/modes';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import {
+	generateLevel,
+	withBeats,
+	type Difficulty,
+	type Level
+} from '../../src/lib/addons/dash/generate';
+import { PRESETS } from '../../src/lib/addons/dash/build';
+import { BLOCKS } from '../../src/lib/addons/dash/builders/blocks';
+import { SHIP_PIECES } from '../../src/lib/addons/dash/builders/ship';
+import { drumClicks } from '../../src/lib/addons/dash/rhythm';
+import { simulate, startState } from '../../src/lib/addons/dash/physics';
+import { musicalRest } from '../../src/lib/addons/dash/composition';
+import { allowedModes, modesMark } from '../../src/lib/addons/dash/modes';
 import { makeOsu, type SongOptions } from './fixtures';
 
 const SONGS: Record<string, SongOptions> = {

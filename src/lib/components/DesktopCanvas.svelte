@@ -1,5 +1,5 @@
 <script>
-	import { WIDGETS, DEFAULT_WIDGETS } from '#lib/widgets.ts';
+	import { widgets as available, DEFAULT_WIDGETS } from '#lib/widgets.ts';
 	import { userSettings, updateHomeSettings } from '#lib/stores/user.ts';
 
 	/** @type {{ editing?: boolean }} */
@@ -184,7 +184,7 @@
 
 <div class="absolute inset-0" bind:clientWidth={width} bind:clientHeight={height}>
 	{#each widgets as widget (widget.uid)}
-		{@const definition = WIDGETS[widget.type]}
+		{@const definition = $available[widget.type]}
 		{#if definition}
 			{@const pos = position(widget)}
 			<div

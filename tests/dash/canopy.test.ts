@@ -4,12 +4,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel, type Difficulty } from '../../src/lib/dash/generate';
-import { hearSong } from '../../src/lib/dash/audio';
-import { musicalRest } from '../../src/lib/dash/composition';
-import { simulate, startState } from '../../src/lib/dash/physics';
-import { checkLevel } from '../../src/lib/dash/validate';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel, type Difficulty } from '../../src/lib/addons/dash/generate';
+import { hearSong } from '../../src/lib/addons/dash/audio';
+import { musicalRest } from '../../src/lib/addons/dash/composition';
+import { simulate, startState } from '../../src/lib/addons/dash/physics';
+import { checkLevel } from '../../src/lib/addons/dash/validate';
 import { makeAudio, makeOsu, makeSound, type SongOptions } from './fixtures';
 
 const SONG: SongOptions = { bpm: 128, length: 70, style: 'mixed', kiai: [[40000, 60000]] };

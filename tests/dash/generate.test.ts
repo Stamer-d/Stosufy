@@ -6,20 +6,20 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
+import { parseChart } from '../../src/lib/addons/dash/chart';
 import {
 	generateLevel,
 	intensities,
 	DIFFICULTIES,
 	type Difficulty,
 	type Level
-} from '../../src/lib/dash/generate';
-import { PRESETS } from '../../src/lib/dash/build';
-import { hearSong, type SongSound } from '../../src/lib/dash/audio';
-import { levelData, levelFromData } from '../../src/lib/dash/level';
-import { simulate, startState, STEP, wallAt } from '../../src/lib/dash/physics';
-import { checkLevel, type LevelReport } from '../../src/lib/dash/validate';
-import { musicalRest } from '../../src/lib/dash/composition';
+} from '../../src/lib/addons/dash/generate';
+import { PRESETS } from '../../src/lib/addons/dash/build';
+import { hearSong, type SongSound } from '../../src/lib/addons/dash/audio';
+import { levelData, levelFromData } from '../../src/lib/addons/dash/level';
+import { simulate, startState, STEP, wallAt } from '../../src/lib/addons/dash/physics';
+import { checkLevel, type LevelReport } from '../../src/lib/addons/dash/validate';
+import { musicalRest } from '../../src/lib/addons/dash/composition';
 import { makeAudio, makeOsu, makeSound, type SongOptions } from './fixtures';
 
 const SONGS: Record<string, SongOptions> = {

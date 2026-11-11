@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRunner } from '../../src/lib/dash/builders/runner';
-import { PRESETS, random } from '../../src/lib/dash/build';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel } from '../../src/lib/dash/generate';
+import { buildRunner } from '../../src/lib/addons/dash/builders/runner';
+import { PRESETS, random } from '../../src/lib/addons/dash/build';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel } from '../../src/lib/addons/dash/generate';
 import { makeOsu, makeSound } from './fixtures';
 import { world, levelOf, tap } from './worlds';
-import { simulate, startState, type InputEvent } from '../../src/lib/dash/physics';
-import { unsupportedSpikes, removeUnsupportedSpikes } from '../../src/lib/dash/geometry';
-import { DashGame } from '../../src/lib/dash/game';
+import { simulate, startState, type InputEvent } from '../../src/lib/addons/dash/physics';
+import { unsupportedSpikes, removeUnsupportedSpikes } from '../../src/lib/addons/dash/geometry';
+import { DashGame } from '../../src/lib/addons/dash/game';
 
 test('removing a distant support cannot leave a floating spike in the final world', () => {
 	const w = world();

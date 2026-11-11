@@ -10,7 +10,7 @@ import {
 	startState,
 	step,
 	quantizeVelocity
-} from '../../src/lib/dash/physics';
+} from '../../src/lib/addons/dash/physics';
 import { world } from './worlds';
 
 const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);

@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hsl, palettesFromPixels } from '../../src/lib/dash/theme';
+import { hsl, palettesFromPixels } from '../../src/lib/addons/dash/theme';
 
 /** Pixels (RGBA) of a picture: so many of each colour */
 function picture(...parts: [string, number][]) {

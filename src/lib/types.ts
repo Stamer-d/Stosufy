@@ -251,6 +251,8 @@ export interface Settings {
 	profilePlaylists?: Partial<Record<'favourite' | 'most_played' | 'best', number | string>>;
 	/** Keep playing similar songs when a queue ends (default on) */
 	autoplay?: boolean;
+	/** The installed add-ons, by id (see lib/addons); none said: from before add-ons, see legacy.ts */
+	addons?: string[];
 	/** Chosen sort order per playlist id */
 	playlistSort?: Record<string, import('./songSort').SongSort>;
 }

@@ -1,8 +1,8 @@
 // Small worlds for the Dash tests: parts of one kind on a flat floor, built by hand, and the
 // level around them that the game needs.
 
-import { SPEEDS, World, type InputEvent, type Mode } from '../../src/lib/dash/physics';
-import type { Level } from '../../src/lib/dash/generate';
+import { SPEEDS, World, type InputEvent, type Mode } from '../../src/lib/addons/dash/physics';
+import type { Level } from '../../src/lib/addons/dash/generate';
 
 export interface PartOptions {
 	mode?: Mode;

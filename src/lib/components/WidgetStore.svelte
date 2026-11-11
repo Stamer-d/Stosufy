@@ -1,7 +1,10 @@
 <script>
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
-	import { WIDGETS, WIDGET_FAMILIES, DEFAULT_WIDGETS } from '#lib/widgets.ts';
+	import { goto } from '$app/navigation';
+	import { widgets, WIDGET_FAMILIES, DEFAULT_WIDGETS } from '#lib/widgets.ts';
+	import { ADDONS } from '#lib/addons/registry.ts';
+	import { installedAddons } from '#lib/addons/store.ts';
 	import { userSettings, updateHomeSettings } from '#lib/stores/user.ts';
 	import { showToast } from '#lib/stores/toast.ts';
 
@@ -12,8 +15,10 @@
 
 	let placed = $derived($userSettings.settings?.home?.widgets ?? DEFAULT_WIDGETS);
 	let entries = $derived(
-		Object.entries(WIDGETS).filter(([, widget]) => family === 'all' || widget.family === family)
+		Object.entries($widgets).filter(([, widget]) => family === 'all' || widget.family === family)
 	);
+	/** Add-ons that would bring more widgets, but aren't installed */
+	let more = $derived(ADDONS.filter((addon) => addon.widgets && !$installedAddons.includes(addon)));
 
 	function add(type) {
 		// New widgets start near the middle, slightly offset so they don't stack exactly
@@ -24,7 +29,7 @@
 				{ uid: `${type}-${Date.now()}`, type, x: 0.3 + offset, y: 0.25 + offset }
 			]
 		});
-		showToast(`Added ${WIDGETS[type].name}`);
+		showToast(`Added ${$widgets[type].name}`);
 	}
 </script>
 
@@ -83,6 +88,32 @@
 				{/each}
 			</div>
 		</section>
+	{/each}
+
+	{#each more as addon (addon.id)}
+		<div class="mt-6 flex items-center gap-3 p-3 rounded-xl bg-white/[0.04] ring-1 ring-white/5">
+			<span
+				class="size-10 shrink-0 grid place-items-center rounded-lg text-white"
+				style="background: linear-gradient(135deg, {addon.colors[0]}, {addon.colors[1]})"
+			>
+				<span class="{addon.icon} size-5"></span>
+			</span>
+			<div class="min-w-0 flex-1">
+				<p class="font-semibold text-white">
+					{addon.widgets.count} more widgets with the {addon.name} add-on
+				</p>
+				<p class="text-xs text-secondary-600 truncate">{addon.widgets.summary}</p>
+			</div>
+			<button
+				class="h-8 px-3 rounded-full text-sm font-semibold bg-white/[0.08] hover:bg-white/[0.14] text-white cursor-pointer transition shrink-0"
+				onclick={() => {
+					open = false;
+					goto('/addons');
+				}}
+			>
+				Get it
+			</button>
+		</div>
 	{/each}
 
 	{#snippet footer()}

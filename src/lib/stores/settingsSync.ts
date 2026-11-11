@@ -7,6 +7,7 @@ import { get } from 'svelte/store';
 import * as api from '../api';
 import { keyStore } from './auth';
 import { user, userSettings, userSettingsLoaded } from './user';
+import { LEGACY_ADDONS } from '../addons/legacy';
 import type { Settings } from '../types';
 
 /** Settings that belong to the device, not the account */
@@ -75,12 +76,17 @@ export async function pullSettings() {
 			else delete (settings as any)[key];
 		}
 		lastSynced = JSON.stringify(shared(settings));
+		// Saved before there were add-ons (every device says which are installed since): what
+		// was part of the app stays installed, and the account is told so
+		const beforeAddons = !settings.addons;
+		if (beforeAddons) settings.addons = [...LEGACY_ADDONS];
 		userSettings.update((u) => ({
 			...u,
 			settings,
 			sync: { syncedAt: remote.updatedAt, dirty: false }
 		}));
 		ready = true;
+		if (beforeAddons) await save();
 	} catch (error) {
 		console.warn('Could not load the settings:', error);
 	}

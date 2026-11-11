@@ -6,7 +6,8 @@
 
 <p align="center">
 The music player for osu! players.<br />
-Every song from osu!'s beatmaps, with playlists, lyrics, gameplay, a DJ mode and Dash levels.
+Every song from osu!'s beatmaps, with playlists, lyrics and gameplay, and add-ons like a DJ mode
+and Dash levels.
 </p>
 
 <p align="center">
@@ -21,13 +22,22 @@ Every song from osu!'s beatmaps, with playlists, lyrics, gameplay, a DJ mode and
 - 📚 **Playlists and likes.** Share playlists with the community and save other people's.
 - 🎤 **Synced lyrics**, with romaji for Japanese songs, and a full-screen focus mode.
 - 🎯 **Gameplay.** Watch the map play along with the song, watch top replays or play it yourself.
+- 👥 **Friends.** See what your friends are listening to and listen together.
+
+### Add-ons
+
+The desktop app's extras are add-ons: install the ones you want in the app's add-on store (the
+button next to the focus mode, top left), and remove them again just as easily. Each one gets
+its button in the title bar.
+
 - 🎛️ **DJ mode.** Two decks, and smart mixes that blend songs on their phrases.
 - 🟩 **Dash.** Play the song as a one-button rhythm level made from its beatmap and what's heard in
   the song: cube, robot, ship, ball, UFO, wave, swing and spider parts on the beat (the cube, robot
   and ship built from 50 building blocks on the drums), with practice mode (checkpoints on their own
   or set yourself) and five difficulties, from easy to demon level.
-- 🧩 **Puzzles.** Put a song's background back together, with leaderboards and a daily puzzle.
-- 👥 **Friends.** See what your friends are listening to and listen together.
+- 🧩 **Puzzle.** Put a song's background back together, with leaderboards and a daily puzzle.
+- 🌍 **World center.** The weather with its radar, live lightning, storms, flights, earthquakes,
+  departures, the ISS and webcams on one live map, and widgets of them for the home screen.
 
 ## Install
 

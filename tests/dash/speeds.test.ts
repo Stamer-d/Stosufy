@@ -4,15 +4,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
+import { parseChart } from '../../src/lib/addons/dash/chart';
 import {
 	generateLevel,
 	musicalChanges,
 	paces,
 	type Difficulty,
 	type Level
-} from '../../src/lib/dash/generate';
-import { hearSong } from '../../src/lib/dash/audio';
+} from '../../src/lib/addons/dash/generate';
+import { hearSong } from '../../src/lib/addons/dash/audio';
 import { makeAudio, makeOsu, type SongOptions } from './fixtures';
 
 const SONGS: Record<string, SongOptions> = {

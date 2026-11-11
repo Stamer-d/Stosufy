@@ -4,15 +4,21 @@
 
 import { writable } from 'svelte/store';
 import type { Settings, User, UserSettings } from '../../lib/types';
+import { withLegacyAddons } from '../../lib/addons/legacy';
 
 const KEY = 'stosufy-web-settings';
 
+// (the add-ons are the desktop app's, but the settings are the account's: what they say about
+// them is kept, and said from the start, like on the desktop; see lib/addons/legacy.ts)
 function kept(): UserSettings {
 	try {
-		const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+		const text = localStorage.getItem(KEY);
+		if (!text) return { settings: { addons: [] }, currentQueue: null };
+		const saved = JSON.parse(text);
 		// (from before: the settings alone)
-		if (saved && !('settings' in saved)) return { settings: saved, currentQueue: null };
-		return { settings: {}, currentQueue: null, ...saved };
+		if (saved && !('settings' in saved))
+			return { settings: withLegacyAddons(saved), currentQueue: null };
+		return { currentQueue: null, ...saved, settings: withLegacyAddons(saved.settings ?? {}) };
 	} catch {
 		return { settings: {}, currentQueue: null };
 	}

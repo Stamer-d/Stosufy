@@ -5,10 +5,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel, type Level } from '../../src/lib/dash/generate';
-import { hearSong } from '../../src/lib/dash/audio';
-import { simulate, startState, type Mode } from '../../src/lib/dash/physics';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel, type Level } from '../../src/lib/addons/dash/generate';
+import { hearSong } from '../../src/lib/addons/dash/audio';
+import { simulate, startState, type Mode } from '../../src/lib/addons/dash/physics';
 import { makeAudio, makeOsu, type SongOptions } from './fixtures';
 
 const SONG: SongOptions = { bpm: 150, length: 70, style: 'mixed', kiai: [[40000, 60000]] };

@@ -1,11 +1,11 @@
 // Static-derived fixtures from the saved native instruction order, not production constants.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { flightStep, type FlightInput } from '../../src/lib/dash/native-flight';
-import { orbVelocity } from '../../src/lib/dash/native-orbs';
-import { padVelocity } from '../../src/lib/dash/native-pads';
-import { nativeRound } from '../../src/lib/dash/native-number';
-import { startState, step, STEP } from '../../src/lib/dash/physics';
+import { flightStep, type FlightInput } from '../../src/lib/addons/dash/native-flight';
+import { orbVelocity } from '../../src/lib/addons/dash/native-orbs';
+import { padVelocity } from '../../src/lib/addons/dash/native-pads';
+import { nativeRound } from '../../src/lib/addons/dash/native-number';
+import { startState, step, STEP } from '../../src/lib/addons/dash/physics';
 import { world } from './worlds';
 const base: FlightInput = {
 	vy: 0,

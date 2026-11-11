@@ -12,8 +12,8 @@
 	import { check } from '@tauri-apps/plugin-updater';
 	import { relaunch } from '@tauri-apps/plugin-process';
 	import { focusMode } from '#lib/stores/audio.ts';
-	import { djOpen } from '#lib/dj/engine.ts';
-	import { dashOpen } from '#lib/dash/store.ts';
+	import { openOverlay } from '#lib/addons/overlay.ts';
+	import { installedAddons, openAddon } from '#lib/addons/store.ts';
 	import { page } from '$app/state';
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 	import { logout } from '#lib/stores/account.ts';
@@ -23,29 +23,27 @@
 	// macOS has its own window buttons (top left, over the bar): room for them, no others
 	const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
 
-	/** Where a button leads, out of the focus and DJ modes (also to the page that's open) */
+	/**
+	 * Where a button leads, out of the focus mode and the add-ons' views (also to the page
+	 * that's open)
+	 */
 	function go(path) {
 		focusMode.set(false);
-		djOpen.set(false);
-		dashOpen.set(false);
+		openOverlay.set(null);
 		goto(path);
 	}
-	// The focus and DJ modes are one at a time
-	const toggleDj = () => {
-		focusMode.set(false);
-		dashOpen.set(false);
-		djOpen.update((on) => !on);
-	};
-	const toggleDash = () => {
-		focusMode.set(false);
-		djOpen.set(false);
-		dashOpen.update((on) => !on);
-	};
+	// The focus mode and the add-ons' views (the DJ mode, Dash) are one at a time
 	const toggleFocus = () => {
-		djOpen.set(false);
-		dashOpen.set(false);
+		openOverlay.set(null);
 		focusMode.update((on) => !on);
 	};
+	/** An installed add-on's button: its view over the app (and away again), or its page */
+	const toggleAddon = (addon) => {
+		focusMode.set(false);
+		openAddon(addon, { toggle: true });
+	};
+	const addonActive = (addon) =>
+		addon.overlay ? $openOverlay === addon.id : page.url.pathname === `/addons/${addon.id}`;
 	let updating = $state(false);
 	let updateModal = $state({
 		show: false,
@@ -154,52 +152,6 @@
 				<span class="icon-[mingcute--home-4-fill] size-[18px]"></span>
 			</button>
 			<button
-				title={$djOpen ? 'Leave DJ mode' : 'DJ mode'}
-				aria-label={$djOpen ? 'Leave DJ mode' : 'DJ mode'}
-				aria-pressed={$djOpen}
-				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {$djOpen
-					? 'text-primary-500'
-					: 'text-secondary-600 hover:text-white'}"
-				onclick={toggleDj}
-			>
-				<span class="icon-[mingcute--disc-line] size-[18px]"></span>
-			</button>
-			<button
-				title={$dashOpen ? 'Leave Dash' : 'Dash: play the song as a level'}
-				aria-label={$dashOpen ? 'Leave Dash' : 'Dash'}
-				aria-pressed={$dashOpen}
-				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {$dashOpen
-					? 'text-primary-500'
-					: 'text-secondary-600 hover:text-white'}"
-				onclick={toggleDash}
-			>
-				<span class="icon-[mingcute--box-3-line] size-[18px]"></span>
-			</button>
-			<button
-				title="World center"
-				aria-label="World center"
-				aria-pressed={page.url.pathname === '/world'}
-				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
-					.url.pathname === '/world'
-					? 'text-primary-500'
-					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => go('/world')}
-			>
-				<span class="icon-[mingcute--earth-2-line] size-[18px]"></span>
-			</button>
-			<button
-				title="Puzzle"
-				aria-label="Puzzle"
-				aria-pressed={page.url.pathname === '/puzzle'}
-				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
-					.url.pathname === '/puzzle'
-					? 'text-primary-500'
-					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => go('/puzzle')}
-			>
-				<span class="icon-[ri--puzzle-2-line] size-[18px]"></span>
-			</button>
-			<button
 				title={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-label={$focusMode ? 'Exit focus mode' : 'Focus mode'}
 				aria-pressed={$focusMode}
@@ -213,6 +165,33 @@
 						? 'icon-[mingcute--fullscreen-exit-line]'
 						: 'icon-[mingcute--fullscreen-line]'} size-[18px]"
 				></span>
+			</button>
+			{#each $installedAddons as addon (addon.id)}
+				{@const active = addonActive(addon)}
+				{@const label = active && addon.overlay ? `Leave ${addon.name}` : addon.name}
+				<button
+					title={active && addon.overlay ? label : `${addon.name}: ${addon.summary}`}
+					aria-label={label}
+					aria-pressed={active}
+					class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {active
+						? 'text-primary-500'
+						: 'text-secondary-600 hover:text-white'}"
+					onclick={() => toggleAddon(addon)}
+				>
+					<span class="{addon.icon} size-[18px]"></span>
+				</button>
+			{/each}
+			<button
+				title="Add-ons"
+				aria-label="Add-ons"
+				aria-pressed={page.url.pathname === '/addons'}
+				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
+					.url.pathname === '/addons'
+					? 'text-primary-500'
+					: 'text-secondary-600 hover:text-white'}"
+				onclick={() => go('/addons')}
+			>
+				<span class="icon-[mingcute--classify-add-2-line] size-[18px]"></span>
 			</button>
 		{/if}
 	</div>

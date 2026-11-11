@@ -1,0 +1,3 @@
+*.png
+# (written by the test's dev server)
+.svelte-kit

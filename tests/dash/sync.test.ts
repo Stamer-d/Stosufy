@@ -4,10 +4,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SongClock } from '../../src/lib/dash/clock';
-import { hearSong, hitAt, loudness } from '../../src/lib/dash/audio';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel } from '../../src/lib/dash/generate';
+import { SongClock } from '../../src/lib/addons/dash/clock';
+import { hearSong, hitAt, loudness } from '../../src/lib/addons/dash/audio';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel } from '../../src/lib/addons/dash/generate';
 import { makeAudio, makeOsu } from './fixtures';
 
 /**

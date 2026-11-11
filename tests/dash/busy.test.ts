@@ -4,10 +4,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel, type Difficulty, type Level } from '../../src/lib/dash/generate';
-import { hearSong } from '../../src/lib/dash/audio';
-import { simulate, startState } from '../../src/lib/dash/physics';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel, type Difficulty, type Level } from '../../src/lib/addons/dash/generate';
+import { hearSong } from '../../src/lib/addons/dash/audio';
+import { simulate, startState } from '../../src/lib/addons/dash/physics';
 import { makeAudio, makeOsu, type SongOptions } from './fixtures';
 
 /** 174 BPM, intense all through, the kiai from 30 s to 75 s (a bar is 1.38 s) */

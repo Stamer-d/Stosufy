@@ -6,11 +6,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChart, type DashChart } from '../../src/lib/dash/chart';
-import { generateLevel, type Difficulty, type Level } from '../../src/lib/dash/generate';
-import { hearSong } from '../../src/lib/dash/audio';
-import { musicalRest } from '../../src/lib/dash/composition';
-import { simulate, startState, type PlayerState } from '../../src/lib/dash/physics';
+import { parseChart, type DashChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel, type Difficulty, type Level } from '../../src/lib/addons/dash/generate';
+import { hearSong } from '../../src/lib/addons/dash/audio';
+import { musicalRest } from '../../src/lib/addons/dash/composition';
+import { simulate, startState, type PlayerState } from '../../src/lib/addons/dash/physics';
 import { makeAudio, makeOsu, type SongOptions } from './fixtures';
 
 const SONGS: Record<string, SongOptions> = {

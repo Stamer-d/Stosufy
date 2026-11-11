@@ -1,5 +1,9 @@
+// The widgets of the home screen: the app's own, and those of the installed add-ons
+
 import type { Component } from 'svelte';
+import { derived, type Readable } from 'svelte/store';
 import type { PlacedWidget } from './types';
+import { installedAddons } from './addons/store';
 import MacClock from './components/widgets/MacClock.svelte';
 import MacNowPlaying from './components/widgets/MacNowPlaying.svelte';
 import MacUpNext from './components/widgets/MacUpNext.svelte';
@@ -15,20 +19,8 @@ import MacLyrics from './components/widgets/MacLyrics.svelte';
 import MacSongInfo from './components/widgets/MacSongInfo.svelte';
 import MacOsuProfile from './components/widgets/MacOsuProfile.svelte';
 import MacFriends from './components/widgets/MacFriends.svelte';
-import MacWeather from './components/widgets/MacWeather.svelte';
 import MacNote from './components/widgets/MacNote.svelte';
 import MacCalendar from './components/widgets/MacCalendar.svelte';
-import MacRainRadar from './components/widgets/MacRainRadar.svelte';
-import MacStormPotential from './components/widgets/MacStormPotential.svelte';
-import MacWarnings from './components/widgets/MacWarnings.svelte';
-import MacFlightRadar from './components/widgets/MacFlightRadar.svelte';
-import MacLightning from './components/widgets/MacLightning.svelte';
-import MacQuakes from './components/widgets/MacQuakes.svelte';
-import MacAirQuality from './components/widgets/MacAirQuality.svelte';
-import MacIss from './components/widgets/MacIss.svelte';
-import MacDepartures from './components/widgets/MacDepartures.svelte';
-import MacAlerts from './components/widgets/MacAlerts.svelte';
-import MacWebcam from './components/widgets/MacWebcam.svelte';
 
 export type WidgetFamily = 'macos' | 'linux' | 'minimal';
 
@@ -38,10 +30,15 @@ export const WIDGET_FAMILIES: { id: WidgetFamily; label: string; description: st
 	{ id: 'minimal', label: 'Minimal', description: 'Just text on the wallpaper' }
 ];
 
-export const WIDGETS: Record<
-	string,
-	{ name: string; description: string; family: WidgetFamily; component: Component<any> }
-> = {
+export interface WidgetDefinition {
+	name: string;
+	description: string;
+	family: WidgetFamily;
+	component: Component<any>;
+}
+
+/** The app's own widgets */
+export const WIDGETS: Record<string, WidgetDefinition> = {
 	'mac-clock': {
 		name: 'Clock',
 		description: 'Analog clock',
@@ -96,12 +93,6 @@ export const WIDGETS: Record<
 		family: 'macos',
 		component: MacFriends
 	},
-	'mac-weather': {
-		name: 'Weather',
-		description: 'The weather in your city',
-		family: 'macos',
-		component: MacWeather
-	},
 	'mac-note': {
 		name: 'Note',
 		description: 'A sticky note to write on',
@@ -113,72 +104,6 @@ export const WIDGETS: Record<
 		description: 'This month, with today marked',
 		family: 'macos',
 		component: MacCalendar
-	},
-	'mac-rain-radar': {
-		name: 'Rain radar',
-		description: 'The radar of the last two hours around you, as a loop',
-		family: 'macos',
-		component: MacRainRadar
-	},
-	'mac-lightning': {
-		name: 'Lightning',
-		description: 'Live strikes around you, how many and how close',
-		family: 'macos',
-		component: MacLightning
-	},
-	'mac-storm-potential': {
-		name: 'Storm potential',
-		description: 'CAPE, lifted index, wind shear and gusts for the next 24 hours',
-		family: 'macos',
-		component: MacStormPotential
-	},
-	'mac-warnings': {
-		name: 'Weather warnings',
-		description: 'Warnings of the German weather service (DWD) where you are',
-		family: 'macos',
-		component: MacWarnings
-	},
-	'mac-flight-radar': {
-		name: 'Flight radar',
-		description: 'The planes around you, live; click one for its flight',
-		family: 'macos',
-		component: MacFlightRadar
-	},
-	'mac-quakes': {
-		name: 'Earthquakes',
-		description: 'The quakes of the last week around you, live',
-		family: 'macos',
-		component: MacQuakes
-	},
-	'mac-alerts': {
-		name: 'World alerts',
-		description: 'Tsunami warnings and the big disasters going on now',
-		family: 'macos',
-		component: MacAlerts
-	},
-	'mac-air': {
-		name: 'Air quality',
-		description: 'The air where you are: air quality index, dust, ozone, pollen and UV',
-		family: 'macos',
-		component: MacAirQuality
-	},
-	'mac-departures': {
-		name: 'Departures',
-		description: 'The next buses and trains of a stop, live with their delays',
-		family: 'macos',
-		component: MacDepartures
-	},
-	'mac-iss': {
-		name: 'ISS',
-		description: 'The space station over the world now, and when it flies over you',
-		family: 'macos',
-		component: MacIss
-	},
-	'mac-webcam': {
-		name: 'Webcam',
-		description: 'The live picture of a public webcam near you (or one you pick)',
-		family: 'macos',
-		component: MacWebcam
 	},
 	'linux-fetch': {
 		name: 'stosufetch',
@@ -225,3 +150,37 @@ export const DEFAULT_WIDGETS: PlacedWidget[] = [
 	{ uid: 'default-up-next', type: 'mac-up-next', x: 0.7, y: 1 },
 	{ uid: 'default-library', type: 'mac-library', x: 1, y: 1 }
 ];
+
+/** The widgets of the add-ons, once loaded (by add-on) */
+const addonWidgets = new Map<string, Record<string, WidgetDefinition>>();
+
+/**
+ * Every widget there is now: the app's own and those of the installed add-ons (theirs a
+ * moment later, when they're loaded). A placed widget that isn't in here isn't shown; it
+ * stays where it was put, for when its add-on is installed again.
+ */
+export const widgets: Readable<Record<string, WidgetDefinition>> = derived(
+	installedAddons,
+	($installed, set) => {
+		let current = true;
+		const publish = () => {
+			if (!current) return;
+			set(Object.assign({}, WIDGETS, ...$installed.map((addon) => addonWidgets.get(addon.id))));
+		};
+		publish();
+		for (const addon of $installed) {
+			if (!addon.widgets || addonWidgets.has(addon.id)) continue;
+			addon.widgets
+				.load()
+				.then((module) => {
+					addonWidgets.set(addon.id, module.default);
+					publish();
+				})
+				.catch((error) => console.error(`Could not load the widgets of ${addon.id}:`, error));
+		}
+		return () => {
+			current = false;
+		};
+	},
+	WIDGETS
+);

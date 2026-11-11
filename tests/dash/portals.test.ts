@@ -8,7 +8,7 @@ import {
 	quantizeVelocity,
 	cubeAt,
 	type Mode
-} from '../../src/lib/dash/physics';
+} from '../../src/lib/addons/dash/physics';
 import { world } from './worlds';
 
 for (const mode of ['cube', 'robot', 'ship', 'ball', 'ufo', 'wave', 'swing', 'spider'] as Mode[]) {
@@ -50,8 +50,8 @@ test('UFO does not manufacture a new press on a speed-only boundary', () => {
 	assert.ok(!step(w, s, 100).includes('jump'));
 });
 
-import { sectionPortals } from '../../src/lib/dash/portals';
-import { DashGame } from '../../src/lib/dash/game';
+import { sectionPortals } from '../../src/lib/addons/dash/portals';
+import { DashGame } from '../../src/lib/addons/dash/game';
 import { levelOf } from './worlds';
 
 test('portal cues use the actual activation plane, including both size directions', () => {

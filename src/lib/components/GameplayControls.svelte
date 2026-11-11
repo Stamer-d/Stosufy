@@ -19,7 +19,7 @@
 		PLAY_MODS
 	} from '#lib/gameplay/play.ts';
 
-	import { dashOpen } from '#lib/dash/store.ts';
+	import { installedAddons, openAddon } from '#lib/addons/store.ts';
 	import { focusMode } from '#lib/stores/audio.ts';
 
 	/** @type {{ up?: boolean }} up: the panel opens above the button (at the bottom of a view) */
@@ -103,12 +103,23 @@
 	$effect(() => {
 		if (open) tab = mode.kind === 'replay' ? 'replays' : mode.kind === 'live' ? 'play' : tab;
 	});
-	const TABS = [
+	// (and one for each installed add-on that plays the song its own way, like Dash)
+	let addonTabs = $derived($installedAddons.filter((addon) => addon.gameplayTab));
+	let TABS = $derived([
 		{ id: 'watch', label: 'Watch', icon: 'icon-[mingcute--magic-2-line]' },
 		{ id: 'play', label: 'Play', icon: 'icon-[mingcute--cursor-3-line]' },
 		{ id: 'replays', label: 'Replays', icon: 'icon-[mingcute--trophy-line]' },
-		{ id: 'dash', label: 'Dash', icon: 'icon-[mingcute--box-3-line]' }
-	];
+		...addonTabs.map((addon) => ({
+			id: `addon:${addon.id}`,
+			label: addon.gameplayTab.label,
+			icon: addon.icon
+		}))
+	]);
+	let addonTab = $derived(addonTabs.find((addon) => tab === `addon:${addon.id}`));
+	// (its add-on was removed while its tab was open)
+	$effect(() => {
+		if (!TABS.some((t) => t.id === tab)) tab = 'watch';
+	});
 
 	const MOD_NAMES = {
 		EZ: 'Easy',
@@ -220,7 +231,10 @@
 						{/each}
 					</div>
 				{/if}
-				<div class="grid grid-cols-4 gap-1 p-1 rounded-xl bg-black/25">
+				<div
+					class="grid gap-1 p-1 rounded-xl bg-black/25"
+					style="grid-template-columns: repeat({TABS.length}, minmax(0, 1fr))"
+				>
 					{#each TABS as t (t.id)}
 						<button
 							class="flex items-center justify-center gap-1.5 h-8 rounded-lg text-sm font-semibold cursor-pointer transition {tab ===
@@ -313,27 +327,24 @@
 						Play it yourself
 					</button>
 					<p class="mt-1.5 text-center text-xs text-white/40">The song starts over</p>
-				{:else if tab === 'dash'}
+				{:else if addonTab}
 					<div class="flex flex-col items-center text-center gap-3 py-3">
-						<span class="grid place-items-center size-14 rounded-2xl bg-lime-400/20 text-lime-200">
-							<span class="icon-[mingcute--box-3-line] size-7"></span>
+						<span class="grid place-items-center size-14 rounded-2xl {addonTab.gameplayTab.tint}">
+							<span class="{addonTab.icon} size-7"></span>
 						</span>
 						<div>
-							<p class="font-semibold">Dash</p>
-							<p class="text-sm text-white/55">
-								The song as a one-button rhythm level, made from this difficulty: jump, fly and flip
-								on the beat.
-							</p>
+							<p class="font-semibold">{addonTab.name}</p>
+							<p class="text-sm text-white/55">{addonTab.gameplayTab.description}</p>
 						</div>
 						<button
 							class="h-9 px-5 rounded-full text-sm font-semibold bg-white text-black hover:scale-[1.03] cursor-pointer transition"
 							onclick={() => {
 								open = false;
 								focusMode.set(false);
-								dashOpen.set(true);
+								openAddon(addonTab);
 							}}
 						>
-							Open Dash
+							{addonTab.gameplayTab.action}
 						</button>
 					</div>
 				{:else}

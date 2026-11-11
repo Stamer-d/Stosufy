@@ -5,12 +5,12 @@ import {
 	musicalPosition,
 	musicalRest,
 	orderPatterns
-} from '../../src/lib/dash/composition';
-import { parseChart } from '../../src/lib/dash/chart';
-import { generateLevel } from '../../src/lib/dash/generate';
-import { levelData } from '../../src/lib/dash/level';
-import { simulate, startState } from '../../src/lib/dash/physics';
-import { checkLevel } from '../../src/lib/dash/validate';
+} from '../../src/lib/addons/dash/composition';
+import { parseChart } from '../../src/lib/addons/dash/chart';
+import { generateLevel } from '../../src/lib/addons/dash/generate';
+import { levelData } from '../../src/lib/addons/dash/level';
+import { simulate, startState } from '../../src/lib/addons/dash/physics';
+import { checkLevel } from '../../src/lib/addons/dash/validate';
 import { makeOsu, makeSound } from './fixtures';
 
 const chart = () => parseChart(makeOsu({ bpm: 120, length: 40, style: 'mixed' }))!;

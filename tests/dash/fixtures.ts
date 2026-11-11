@@ -1,7 +1,7 @@
 // Beatmaps for the Dash tests, written on the spot: a song of some BPM and length, calm or
 // intense or both, with a kiai and a break where asked. Always the same for the same options.
 
-import type { SongSound } from '../../src/lib/dash/audio';
+import type { SongSound } from '../../src/lib/addons/dash/audio';
 
 export interface SongOptions {
 	bpm: number;

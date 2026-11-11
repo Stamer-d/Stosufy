@@ -1,9 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cubeAt, press, step, STEP, startState, type OrbKind } from '../../src/lib/dash/physics';
+import {
+	cubeAt,
+	press,
+	step,
+	STEP,
+	startState,
+	type OrbKind
+} from '../../src/lib/addons/dash/physics';
 import { world } from './worlds';
-import { robotStep } from '../../src/lib/dash/native-robot';
-import { orbVelocity } from '../../src/lib/dash/native-orbs';
+import { robotStep } from '../../src/lib/addons/dash/native-robot';
+import { orbVelocity } from '../../src/lib/addons/dash/native-orbs';
 
 const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-8, `${a} != ${b}`);
 test('REA Robot orb dispatch uses its own yellow and red factors', () => {
