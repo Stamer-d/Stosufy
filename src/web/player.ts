@@ -112,10 +112,13 @@ function startTurnedDown(error: { name?: string } | null) {
  * takes a while to get there, and tells its old place meanwhile) */
 let jumpingTo: number | null = null;
 let jumpedAt = 0;
+/** The element said it's done jumping (it may still tell its old place a moment after) */
+let jumpDone = false;
 function jumped(seconds: number) {
 	lastTime = seconds;
 	jumpingTo = seconds;
 	jumpedAt = performance.now();
+	jumpDone = false;
 }
 
 /**
@@ -143,7 +146,11 @@ function startAt(player: HTMLAudioElement, at: number, song: MapSet) {
 function wentRound(player: HTMLAudioElement) {
 	const now = player.currentTime;
 	if (jumpingTo != null) {
-		if (Math.abs(now - jumpingTo) > 2 && performance.now() - jumpedAt < 6000) return false;
+		// (there only once the element is done jumping and tells a place near where it was sent:
+		// while it jumps, Safari tells where it's going, then its old place until it's there.
+		// Taken for there too early, a jump ahead looked like the song going round: its end)
+		const there = jumpDone && !player.seeking && Math.abs(now - jumpingTo) <= 2;
+		if (!there && performance.now() - jumpedAt < 6000) return false;
 		jumpingTo = null;
 		lastTime = now;
 		return false;
@@ -259,6 +266,9 @@ function create() {
 	});
 	// (going round is a jump to the start: seen here right away, the time updates may come
 	// late with the screen locked)
+	player.addEventListener('seeked', () => {
+		if (mine()) jumpDone = true;
+	});
 	player.addEventListener('seeking', () => {
 		if (!mine() || seekedByHand || !wentRound(player)) return;
 		log('song went round: its end');
