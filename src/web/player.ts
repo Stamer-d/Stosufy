@@ -2,6 +2,9 @@
 // the lock screen, where its controls come from the Media Session), its sound through Web
 // Audio once that runs (audioGraph.ts: every song at the same loudness, crossfades; a second
 // element takes the next song for a crossfade).
+// With the screen locked a page may go on playing, but hardly start to: so the next song is
+// made ready in the second element while this one still plays, and takes over at its end
+// without a moment of silence in between (see "The next song, ahead of time").
 // The songs stream from the beatmap mirror, like the desktop app's streaming, or play from
 // the phone if they were downloaded. The queue, shuffle and repeat are kept for the next
 // start, where it goes on where it was.
@@ -19,7 +22,8 @@ import {
 	graphRunning,
 	fadeTo,
 	unfade,
-	crossfadeSeconds
+	crossfadeSeconds,
+	holdAudio
 } from './audioGraph';
 import { startLoudness, measure, applyNormalize } from './loudness';
 import { userSettings } from './shims/user';
@@ -95,6 +99,42 @@ let loaded: MapSet | null = null;
 let pausing = false;
 /** Tries to get a stream going again after it broke off, for the song now */
 let retries = 0;
+/** The phone didn't let a song start (the screen locked): it starts when the app is shown */
+let turnedDown = false;
+
+/** A start the phone turned down: said in the log, and made up for when the app is shown */
+function startTurnedDown(error: { name?: string } | null) {
+	log(`play() turned down: ${error?.name}`);
+	if (error?.name === 'NotAllowedError') turnedDown = true;
+}
+
+/** Where a jump the app made goes, until the song is there, and when it was made (a stream
+ * takes a while to get there, and tells its old place meanwhile) */
+let jumpingTo: number | null = null;
+let jumpedAt = 0;
+function jumped(seconds: number) {
+	lastTime = seconds;
+	jumpingTo = seconds;
+	jumpedAt = performance.now();
+}
+
+/**
+ * The song went back by itself (it loops: round to its start, its end), wherever it is by
+ * the time that's seen (with the screen locked the time updates may come late). A jump the
+ * app made itself isn't one: not judged until the song is where it was sent.
+ */
+function wentRound(player: HTMLAudioElement) {
+	const now = player.currentTime;
+	if (jumpingTo != null) {
+		if (Math.abs(now - jumpingTo) > 2 && performance.now() - jumpedAt < 6000) return false;
+		jumpingTo = null;
+		lastTime = now;
+		return false;
+	}
+	const round = lastTime > 5 && now < lastTime - 3;
+	lastTime = now;
+	return round;
+}
 
 /** Pauses, as the app (not the system) */
 function pauseHere(why: string) {
@@ -139,11 +179,14 @@ function create() {
 	player.addEventListener('play', () => {
 		if (!mine()) return;
 		playing.set(true);
+		turnedDown = false;
 		keepRunning();
+		holdAudio(true);
 	});
 	player.addEventListener('pause', () => {
 		if (!mine()) return;
 		playing.set(false);
+		holdAudio(false);
 		// (not the app: it says who, so the log shows why a song stopped by itself)
 		if (!pausing && !player.ended)
 			log(
@@ -167,8 +210,7 @@ function create() {
 		const duration = lengthOf(player);
 		time.set({ current: now, duration });
 		// (back at its start by itself: its end. Not by its length: Safari may get that wrong)
-		const wentRound = lastTime > 5 && now < 2 && now < lastTime - 3;
-		lastTime = now;
+		const round = wentRound(player);
 		// (or at its end by the length the Stosufy API knows: Safari, thinking the song longer
 		// than it is, may stand at the end of its sound, and with the screen locked nothing else
 		// notices then: the queue stood still)
@@ -184,16 +226,26 @@ function create() {
 		// (its sound through Web Audio, which iOS stopped: a call, Siri. On again)
 		if (isRouted(player) && !graphRunning()) keepRunning();
 		measure();
-		if (wentRound && !seekedByHand) {
+		if (round && !seekedByHand) {
 			log('song went round: its end');
 			songEnded();
 		} else if (atItsEnd && !seekedByHand) {
 			endedHere = true;
 			log('at its end (its known length)');
 			songEnded();
-		} else if (!seekedByHand) crossfadeIfDue(now, duration);
+		} else if (!seekedByHand) {
+			crossfadeIfDue(now, duration);
+			prepareIfDue(now, duration);
+		}
 		seekedByHand = false;
 		saveSoon();
+	});
+	// (going round is a jump to the start: seen here right away, the time updates may come
+	// late with the screen locked)
+	player.addEventListener('seeking', () => {
+		if (!mine() || seekedByHand || !wentRound(player)) return;
+		log('song went round: its end');
+		songEnded();
 	});
 	player.addEventListener('loadedmetadata', () => mine() && updatePosition());
 	// (a speed mod: the lock screen's position runs at its speed)
@@ -219,7 +271,7 @@ function create() {
 				lastTime = 0;
 				player.src = streamUrl(song);
 				player.currentTime = at;
-				player.play().catch((error) => log(`play() turned down: ${error?.name}`));
+				player.play().catch(startTurnedDown);
 			}, 1000 * retries);
 			return;
 		}
@@ -246,21 +298,19 @@ const SILENCE =
 let spareReady = false;
 
 /**
- * From a tap: the songs' Web Audio started (and the elements routed once it runs), and with
- * crossfades on, the spare element made ready to play by itself
+ * From a tap: the songs' Web Audio started (and the elements routed once it runs), and the
+ * spare element made ready to play by itself (the next song starts in it)
  */
 export function wakeAudio() {
 	const main = element();
-	if (crossfadeSeconds() > 0) {
-		spare ??= create();
-		if (!spareReady && !spare.src) {
-			spareReady = true;
-			spare.src = SILENCE;
-			spare.play().then(
-				() => spare?.src === SILENCE && spare.pause(),
-				() => (spareReady = false)
-			);
-		}
+	spare ??= create();
+	if (!spareReady && !spare.src) {
+		spareReady = true;
+		spare.src = SILENCE;
+		spare.play().then(
+			() => spare?.src === SILENCE && spare.pause(),
+			() => (spareReady = false)
+		);
 	}
 	wakeGraph([main, spare]);
 }
@@ -282,6 +332,10 @@ function load(at = 0) {
 	if (!song) return;
 	const player = element();
 	endCrossfade();
+	// (a song made ready for after this one isn't the one now; its downloaded audio is)
+	handing?.stop();
+	handing = null;
+	dropPrepared();
 	loaded = song;
 	previewOnly.set(false);
 	showInMediaSession(song);
@@ -290,6 +344,7 @@ function load(at = 0) {
 		if (objectUrl && objectUrl !== url) URL.revokeObjectURL(objectUrl);
 		objectUrl = own ? url : null;
 		lastTime = 0;
+		jumpingTo = null;
 		crossfading = false;
 		unfade(player);
 		startLoudness(player, key);
@@ -311,7 +366,7 @@ function load(at = 0) {
 		}
 		const format = formatOf(song);
 		log(`start ${song.title} (${own ? 'downloaded' : 'stream'}${format ? `, ${format}` : ''})`);
-		player.play().catch((error) => log(`play() turned down: ${error?.name}`));
+		player.play().catch(startTurnedDown);
 		save();
 		topUp();
 		readNext();
@@ -394,31 +449,7 @@ function crossfadeIfDue(now: number, duration: number) {
 				incoming.removeAttribute('src');
 				return;
 			}
-			// The next song is the one now
-			outgoing = main;
-			spare = main;
-			audio = incoming;
-			// (the song going out still plays from its downloaded audio: let go of it at the end)
-			outgoingUrl = objectUrl;
-			objectUrl = url.startsWith('blob:') ? url : null;
-			queue.set({ songs: get(queue).songs, index: at });
-			loaded = song;
-			lastTime = 0;
-			// (its own end can crossfade again)
-			crossfading = false;
-			retries = 0;
-			previewOnly.set(false);
-			audioElement.set(incoming);
-			startLoudness(incoming, key);
-			askDuration(song);
-			time.set({ current: 0, duration: songDuration(song, Number.NaN) });
-			showInMediaSession(song);
-			fadeTo(incoming, 1, seconds);
-			fadeTo(main, 0, seconds);
-			fadeTimer = setTimeout(endCrossfade, seconds * 1000 + 300);
-			save();
-			topUp();
-			readNext();
+			takeOver(incoming, main, at, song, url, seconds);
 		},
 		(error) => {
 			// (turned down: iOS, with the screen locked. The next song when this one ends then)
@@ -426,6 +457,210 @@ function crossfadeIfDue(now: number, duration: number) {
 			incoming.removeAttribute('src');
 		}
 	);
+}
+
+/** The song in the other element is the one now: `seconds` of both together (0: at once) */
+function takeOver(
+	incoming: HTMLAudioElement,
+	main: HTMLAudioElement,
+	at: number,
+	song: MapSet,
+	url: string,
+	seconds: number
+) {
+	outgoing = main;
+	spare = main;
+	audio = incoming;
+	// (the song going out still plays from its downloaded audio: let go of it at the end)
+	outgoingUrl = objectUrl;
+	objectUrl = url.startsWith('blob:') ? url : null;
+	queue.set({ songs: get(queue).songs, index: at });
+	loaded = song;
+	lastTime = 0;
+	jumpingTo = null;
+	endedHere = false;
+	// (its own end can crossfade again)
+	crossfading = false;
+	retries = 0;
+	previewOnly.set(false);
+	audioElement.set(incoming);
+	startLoudness(incoming, keyOf(song));
+	askDuration(song);
+	time.set({ current: 0, duration: songDuration(song, Number.NaN) });
+	showInMediaSession(song);
+	fadeTo(incoming, 1, seconds);
+	if (seconds > 0) {
+		fadeTo(main, 0, seconds);
+		fadeTimer = setTimeout(endCrossfade, seconds * 1000 + 300);
+	} else endCrossfade();
+	// (it began playing before it was the one: what a song does when it starts playing)
+	playing.set(!incoming.paused);
+	setupMediaSession();
+	updatePosition();
+	log(`playing ${song.title}`);
+	save();
+	topUp();
+	readNext();
+}
+
+// --- The next song, ahead of time -------------------------------------------------------------
+// With the screen locked, iOS lets a page that plays go on, and an element take over from one
+// that plays; what it doesn't do reliably is start a song after a moment in which nothing
+// played (a new song in the same element: the old one stops, the new one has to come from the
+// network first). So a few seconds before a song ends, the next one is started in the spare
+// element, silent (its sound goes through Web Audio), and stopped again once it plays: loaded.
+// At the song's end it starts at once and is the one, while the old one still played. Only
+// when the songs' sound goes through Web Audio (else the next song as before: in the same
+// element), and not with a crossfade (which takes the next song the same way, earlier).
+
+/** This long (s) before a song's end the next one is made ready */
+const PREPARE = 12;
+/** The next song, loading or loaded, in the spare element */
+let prepared: {
+	key: string;
+	song: MapSet;
+	url: string;
+	element: HTMLAudioElement;
+	loaded: boolean;
+	started: Promise<void>;
+} | null = null;
+/** A song that couldn't be made ready (not tried again: it starts at the end, as before) */
+let notPrepared: string | null = null;
+/** The song at its end hands over to the one made ready (until that one plays) */
+let handing: { stop: () => void } | null = null;
+
+function prepareIfDue(now: number, duration: number) {
+	if (crossfadeSeconds() > 0 || handing || crossfading) return;
+	if (!duration || now < duration - PREPARE) return;
+	const main = audio!;
+	if (!isRouted(main) || !spare || !isRouted(spare) || !graphRunning()) return;
+	const sleep = get(sleepTimer);
+	if (get(repeat) === 'one' || (sleep && 'endOfSong' in sleep)) return;
+	const at = upcomingIndex();
+	const song = at == null ? null : get(queue).songs[at];
+	const key = song ? keyOf(song) : null;
+	// (another song comes next now: put in the queue meanwhile, or the queue was reordered)
+	if (prepared && prepared.key !== key) dropPrepared();
+	if (!song || !key || prepared || notPrepared === key) return;
+	// (a downloaded song is read from the phone first: at one of the next time updates)
+	const url =
+		readAhead?.key === key ? readAhead.url : get(downloaded).has(key) ? null : streamUrl(song);
+	if (!url) {
+		readNext();
+		return;
+	}
+	if (readAhead?.key === key) readAhead = null;
+	const incoming = spare;
+	fadeTo(incoming, 0, 0);
+	incoming.src = url;
+	// (at the speed of the mod)
+	applyMod(incoming);
+	log(`next song made ready: ${song.title}`);
+	const mine: NonNullable<typeof prepared> = {
+		key,
+		song,
+		url,
+		element: incoming,
+		loaded: false,
+		started: incoming.play()
+	};
+	prepared = mine;
+	mine.started.then(
+		() => {
+			// (taking over already, or not wanted any more)
+			if (prepared !== mine) return;
+			incoming.pause();
+			incoming.currentTime = 0;
+			mine.loaded = true;
+			// (it began playing last: the lock screen's controls back to the song)
+			reclaimNowPlaying();
+		},
+		(error) => {
+			if (prepared !== mine) return;
+			log(`next song not made ready (${error?.name}): it starts at the end`);
+			notPrepared = key;
+			dropPrepared();
+		}
+	);
+}
+
+/** Lets go of the song made ready (another one comes next) */
+function dropPrepared() {
+	const gone = prepared;
+	prepared = null;
+	if (gone) release(gone.element, gone.key, gone.url);
+}
+
+/** The spare element empty again; a downloaded song's audio stays read ahead */
+function release(element: HTMLAudioElement, key: string, url: string) {
+	element.pause();
+	element.removeAttribute('src');
+	element.load();
+	unfade(element);
+	if (!url.startsWith('blob:')) return;
+	if (!readAhead) readAhead = { key, url };
+	else if (readAhead.url !== url) URL.revokeObjectURL(url);
+}
+
+/**
+ * At a song's end: the one made ready starts and is the one. False: none is (the next song
+ * starts in this element then, as before)
+ */
+function handOver() {
+	const ready = prepared;
+	if (!ready || crossfading) return false;
+	const at = upcomingIndex();
+	const main = audio;
+	if (
+		at == null ||
+		keyOf(get(queue).songs[at]) !== ready.key ||
+		!main ||
+		!isRouted(main) ||
+		!isRouted(ready.element) ||
+		!graphRunning()
+	) {
+		dropPrepared();
+		return false;
+	}
+	prepared = null;
+	const incoming = ready.element;
+	const was = current();
+	// (the song at its end goes quiet and plays on, round to its start, until the next sounds)
+	fadeTo(main, 0, 0.02);
+	log(`on to ${ready.song.title}${ready.loaded ? '' : ' (still loading)'}`);
+	let over = false;
+	const mine = (handing = { stop: () => (over = true) });
+	/** Not this way: the next song in this element, as before */
+	const instead = (why: string) => {
+		clearTimeout(late);
+		if (over) return;
+		over = true;
+		if (handing === mine) handing = null;
+		log(`the song made ready didn't start (${why}): in this element`);
+		release(incoming, ready.key, ready.url);
+		notPrepared = ready.key;
+		if (audio === main && current() === was) next();
+	};
+	const late = setTimeout(() => instead('took too long'), 8000);
+	(ready.loaded ? incoming.play() : ready.started).then(
+		() => {
+			clearTimeout(late);
+			// (another song was chosen meanwhile: that one plays)
+			if (over || handing !== mine || audio !== main || current() !== was) {
+				if (!over) release(incoming, ready.key, ready.url);
+				over = true;
+				return;
+			}
+			over = true;
+			handing = null;
+			const paused = main.paused;
+			takeOver(incoming, main, at, ready.song, ready.url, 0);
+			// (paused in that moment: the next song, paused at its start)
+			if (paused) pauseHere("paused at the song's end");
+		},
+		(error) => instead(error?.name ?? 'error')
+	);
+	return true;
 }
 
 let fadeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -472,15 +707,18 @@ export function toggle() {
 	wakeIfShown();
 	// After a start: the song of before, where it was
 	if (!loaded) return load(get(time).current);
-	if (player.paused) player.play().catch((error) => log(`play() turned down: ${error?.name}`));
+	if (player.paused) player.play().catch(startTurnedDown);
 	else pauseHere('tapped');
 }
 
 /** A song ended by itself: the next one (repeat one: it plays on, as it loops) */
 function songEnded() {
+	// (the next song is on its way: the one at its end plays on quietly until then)
+	if (handing) return;
 	if (get(sleepTimer) && 'endOfSong' in get(sleepTimer)!) {
 		sleepTimer.set(null);
 		pauseHere('sleep timer, at the end of the song');
+		jumped(0);
 		element().currentTime = 0;
 		return;
 	}
@@ -490,10 +728,11 @@ function songEnded() {
 	const after = playableAfter(songs, index);
 	if ((after < 0 || after >= songs.length) && get(repeat) !== 'all') {
 		pauseHere('end of the queue');
+		jumped(0);
 		element().currentTime = 0;
 		return;
 	}
-	next();
+	if (!handOver()) next();
 }
 
 /** Offline, only the downloaded songs play: the next one of those (-1: none) */
@@ -535,6 +774,7 @@ export function previous() {
 	// A bit into the song: back to its start, else the one before
 	if (element().currentTime > 3 || (index === 0 && get(repeat) !== 'all')) {
 		seekedByHand = true;
+		jumped(0);
 		element().currentTime = 0;
 		return;
 	}
@@ -543,6 +783,7 @@ export function previous() {
 		before = playableAfter(songs, index, -1);
 		if (before < 0) {
 			seekedByHand = true;
+			jumped(0);
 			element().currentTime = 0;
 			return;
 		}
@@ -570,7 +811,7 @@ export function seek(seconds: number) {
 		songEnded();
 		return;
 	}
-	lastTime = seconds;
+	jumped(seconds);
 	player.currentTime = seconds;
 	updatePosition();
 }
@@ -669,6 +910,16 @@ export function reclaimNowPlaying() {
 }
 if (typeof window !== 'undefined') whenRunning(() => setTimeout(reclaimNowPlaying, 50));
 
+// A song the phone didn't let start with the screen locked starts when the app is shown again
+if (typeof document !== 'undefined')
+	document.addEventListener('visibilitychange', () => {
+		if (document.hidden || !turnedDown) return;
+		turnedDown = false;
+		if (!audio || !loaded || !audio.paused || !audio.src) return;
+		log('the song that was turned down starts now');
+		audio.play().catch((error) => log(`play() turned down: ${error?.name}`));
+	});
+
 // The loudness setting (the account's) applies at once
 if (typeof window !== 'undefined') userSettings.subscribe(() => applyNormalize());
 
@@ -761,7 +1012,7 @@ if (typeof window !== 'undefined') {
 		lastTime = 0;
 		audio.src = get(previewOnly) ? previewUrl(song) : streamUrl(song);
 		audio.currentTime = at;
-		audio.play().catch((error) => log(`play() turned down: ${error?.name}`));
+		audio.play().catch(startTurnedDown);
 	}, 3000);
 }
 

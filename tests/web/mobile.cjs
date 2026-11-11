@@ -38,19 +38,51 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   // (when each hitsound is set to play, ahead of now; and how many are called off)
   await ctx.addInitScript(() => {
     const play = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function (...a) { window.__audio = this; (window.__elements ||= new Set()).add(this); return play.apply(this, a); };
+    HTMLMediaElement.prototype.play = function (...a) { (window.__played ||= []).push(this); (window.__elements ||= new Set()).add(this); return play.apply(this, a); };
+    // (the song's element: the one that began playing last and is heard. The next song is made
+    // ready in the other one, silent, and isn't the song until it takes over)
+    Object.defineProperty(window, '__audio', { get() {
+      const fade = (e) => (window.__routes || []).find((r) => r.element === e)?.gains[1]?.gain.value ?? 1;
+      const played = window.__played || [];
+      for (let i = played.length - 1; i >= 0; i--) { const e = played[i]; if (!e.paused && !e.src.startsWith('data:') && fade(e) > 0) return (window.__song = e); }
+      return window.__song || played[played.length - 1];
+    } });
+    // (where the song's hits are on the audio clock, as they go into the audio graph: heard by
+    // a worklet on each routed element, for how far the hitsounds are from them)
+    const hear = (context, source, element) => {
+      const code = `registerProcessor('onsets', class extends AudioWorkletProcessor {
+        constructor() { super(); this.quiet = 99999; }
+        process(inputs) {
+          const input = inputs[0]?.[0];
+          if (!input) return true;
+          for (let i = 0; i < input.length; i++) {
+            if (Math.abs(input[i]) > 0.4) { if (this.quiet > sampleRate * 0.1) this.port.postMessage((currentFrame + i) / sampleRate); this.quiet = 0; } else this.quiet++;
+          }
+          return true;
+        }
+      });`;
+      (context.__onsets ||= context.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))).then(() => {
+        const node = new AudioWorkletNode(context, 'onsets', { numberOfOutputs: 1 });
+        const silent = context.createGain(); silent.gain.value = 0;
+        source.connect(node).connect(silent).connect(context.destination);
+        node.port.onmessage = (event) => (window.__songHits ||= []).push({ at: event.data, element });
+      }).catch((error) => (window.__onsetsError = String(error)));
+    };
     // (the songs' sound through Web Audio: each element's level and fade, as routed)
     const route = AudioContext.prototype.createMediaElementSource;
     AudioContext.prototype.createMediaElementSource = function (element) {
       const source = route.call(this, element);
       window.__routing = { element, gains: [] };
       (window.__routes ||= []).push(window.__routing);
+      const routing = window.__routing;
+      // (after the app's own gains: only its first two are the element's level and fade)
+      setTimeout(() => { routing.gains.length = Math.min(routing.gains.length, 2); routing.done = true; hear(this, source, element); });
       return source;
     };
     const gain = AudioContext.prototype.createGain;
     AudioContext.prototype.createGain = function () {
       const node = gain.call(this);
-      if (window.__routing && window.__routing.gains.length < 2) window.__routing.gains.push(node);
+      if (window.__routing && !window.__routing.done && window.__routing.gains.length < 2) window.__routing.gains.push(node);
       return node;
     };
     // (Safari's audio session; the other engines have none)
@@ -778,6 +810,103 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     await drag(8, 400, 250, 0); await wait(900);
     expect(path() === '/library', "the app's swipe stopped working: " + path());
     expect(await p.evaluate(() => !localStorage.getItem('stosufy-web-native-back-2')), 'something kept');
+  });
+
+  const lock = () => p.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+  const unlock = () => p.evaluate(() => { delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+  const logged = () => p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-log') || '[]'));
+
+  await step('screen locked: the next song is made ready ahead and takes over at the end without a moment of silence; a song put in the queue meanwhile is the one', async () => {
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(1500);
+    const first = await p.evaluate(() => { window.__first = window.__audio; return window.__first.duration; });
+    expect(first > 10, 'duration ' + first);
+    // (how many songs sound, looked at every 20 ms: never none)
+    await p.evaluate(() => {
+      window.__sounding = [];
+      window.__watch = setInterval(() => window.__sounding.push([...window.__elements].filter((e) => !e.paused && e.src && !e.src.startsWith('data:')).length), 20);
+    });
+    await lock();
+    await p.evaluate(() => { window.__first.currentTime = window.__first.duration - 10; });
+    await wait(2000);
+    expect((await logged()).some((line) => /next song made ready/.test(line)), 'the next song is not made ready: ' + (await logged()).slice(-5).join(' | '));
+    expect(await p.evaluate(() => window.__audio === window.__first), 'the song made ready is taken for the one playing');
+    // another song put in the queue now: that one is made ready instead, and plays
+    await p.locator('main ol > li').nth(6).locator('button[aria-label^="More"]').click(); await wait(400);
+    await p.click('text=Play next'); await wait(1500);
+    const queued = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return s.songs[s.index + 1].title; });
+    const ready = (await logged()).filter((line) => /next song made ready/.test(line));
+    expect(ready.length >= 2 && ready[ready.length - 1].includes(queued), 'the queued song is not made ready: ' + ready.join(' | '));
+    await p.evaluate(() => { window.__first.currentTime = window.__first.duration - 1.2; });
+    await wait(3500);
+    const after = await p.evaluate(() => { clearInterval(window.__watch); return { other: window.__audio !== window.__first, oldPaused: window.__first.paused, at: window.__audio.currentTime, least: Math.min(...window.__sounding), fade: window.__routes.find((r) => r.element === window.__audio)?.gains[1].gain.value }; });
+    await unlock();
+    expect((await nowTitle()) === queued, 'playing ' + (await nowTitle()) + ', not the queued ' + queued);
+    expect(after.other && after.oldPaused, 'not taken over by the other element: ' + JSON.stringify(after));
+    expect(after.least >= 1, 'a moment without a song playing');
+    expect(after.fade === 1 && after.at > 0.5, 'the next song is not heard: ' + JSON.stringify(after));
+    expect((await logged()).some((line) => /\(hidden\) on to /.test(line)), 'no handover in the log');
+  });
+
+  await step('screen locked: the song made ready is turned down (as iOS may): the next song starts in the same element, as before', async () => {
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(1500);
+    const before = await nowTitle();
+    await p.evaluate(() => {
+      window.__main = window.__audio;
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (...a) {
+        if (this !== window.__main) return Promise.reject(new DOMException('not now', 'NotAllowedError'));
+        return play.apply(this, a);
+      };
+      window.__restorePlay = () => (HTMLMediaElement.prototype.play = play);
+    });
+    await lock();
+    await p.evaluate(() => { window.__main.currentTime = window.__main.duration - 4; });
+    await wait(6500);
+    const after = await p.evaluate(() => { window.__restorePlay(); return { same: window.__audio === window.__main, paused: window.__main.paused }; });
+    await unlock();
+    expect((await nowTitle()) !== before, 'still ' + before);
+    expect(after.same && !after.paused, 'the next song does not play in the same element: ' + JSON.stringify(after));
+    expect((await logged()).some((line) => /next song not made ready/.test(line)), 'not in the log');
+  });
+
+  await step("hitsounds: on the song's sound, to a few milliseconds (heard in the audio graph), while its element tells its place late and coarsely (as Safari)", async () => {
+    mock.beat = true;
+    await p.goto(BASE + '/settings'); await wait(1200);
+    const toggle = p.locator('button[role="switch"]:has-text("Play the hitsounds")');
+    if ((await toggle.getAttribute('aria-checked')) !== 'true') await toggle.click();
+    await wait(300);
+    await tab('Library'); await p.click('text=Gaming'); await wait(900);
+    // (the element says the song is 90 ms earlier than it is, each reading up to 40 ms off)
+    await p.evaluate(() => {
+      window.__songHits = []; window.__hitPending = [];
+      const own = (window.__ownTime = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime'));
+      Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', { configurable: true, get() { const t = own.get.call(this); return t > 0.2 ? t - 0.09 + (Math.random() - 0.5) * 0.08 : t; }, set(v) { own.set.call(this, v); } });
+    });
+    await playFirst(); await wait(9000);
+    // How far each of the song's hits (as it goes into the audio graph) is from its hitsound
+    const offs = await p.evaluate(() => {
+      const audio = window.__audio;
+      const hits = (window.__songHits || []).filter((hit) => hit.element === audio).map((hit) => hit.at);
+      const sounds = (window.__hitPending || []).filter((h) => !h.source.__stopped).map((h) => h.when);
+      return { error: window.__onsetsError, offs: hits.map((at) => ({ at, off: Math.min(...sounds.map((when) => Math.abs(when - at))) * 1000 * (sounds.length ? 1 : NaN) })), started: hits[0] };
+    });
+    const lines = await logged();
+    await p.evaluate(() => Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', window.__ownTime));
+    await p.goto(BASE + '/settings'); await wait(1000);
+    await p.locator('button[role="switch"]:has-text("Play the hitsounds")').click(); await wait(300);
+    await p.evaluate(() => localStorage.removeItem('stosufy-web-song-lag'));
+    mock.beat = false;
+    expect(!offs.error, 'no worklet: ' + offs.error);
+    expect(offs.offs.length >= 12, 'the song\'s hits are not heard: ' + offs.offs.length);
+    expect(lines.some((line) => /hitsounds: on the song's sound/.test(line)), 'the song is not heard for its place: ' + lines.slice(-6).join(' | '));
+    // (the first seconds go by the element, until the song's audio is decoded: what it was)
+    const early = offs.offs.filter((hit) => hit.at < offs.started + 1.2).map((hit) => hit.off);
+    const late = offs.offs.filter((hit) => hit.at > offs.started + 5).map((hit) => hit.off);
+    console.log('   hitsounds off the song\'s hits: by the element ' + early.map((off) => off.toFixed(1)).join(', ') + ' ms; heard ' + late.map((off) => off.toFixed(1)).join(', ') + ' ms');
+    expect(late.length >= 4, 'no hits late in the song: ' + late.length);
+    expect(Math.max(...late) < 4, 'heard, the hitsounds are off by ' + Math.max(...late).toFixed(1) + ' ms');
+    expect(Math.max(...early) > 40, 'by the element they were not off: the test tells nothing');
   });
 
   await step('no page errors', async () => expect(!errors.length, errors.slice(0, 3).join(' | ')));

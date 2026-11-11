@@ -9,6 +9,33 @@ const TONE = (() => {
   for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 3000), 44 + i * 2);
   return wav;
 })();
+// A 20 s song with a beat (22.05 kHz, 16 bit, mono): a hit every 500 ms from 0.5 s on (where
+// the mock's beatmaps have their notes), each a click and a burst of noise, another loudness
+// each; quieter hits in between, off the beat; a low tone under it all. To hear where it is.
+const BEAT = (() => {
+  const rate = 22050, seconds = 20, samples = rate * seconds;
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + samples * 2, 4); wav.write('WAVE', 8); wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(samples * 2, 40);
+  const sound = new Float32Array(samples);
+  let seed = 12345;
+  const random = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let i = 0; i < samples; i++) sound[i] = 0.02 * Math.sin((2 * Math.PI * 110 * i) / rate);
+  const hit = (at, level, length) => {
+    const from = Math.round(at * rate);
+    for (let i = 0; i < length * rate && from + i < samples; i++)
+      sound[from + i] += i < rate * 0.001 ? level : level * 0.8 * (random() * 2 - 1) * Math.exp(-i / (length * rate * 0.3));
+  };
+  for (let beat = 1; beat < 40; beat++) hit(beat * 0.5, 0.55 + 0.25 * random(), 0.03 + 0.03 * random());
+  for (let ghost = 0; ghost < 60; ghost++) {
+    const at = 0.3 + random() * 19.4;
+    const off = ((at % 0.5) + 0.5) % 0.5;
+    if (off > 0.09 && off < 0.41) hit(at, 0.1 + 0.1 * random(), 0.02);
+  }
+  for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(Math.max(-1, Math.min(1, sound[i])) * 32000), 44 + i * 2);
+  return wav;
+})();
 const N = Number(process.env.SONGS || 300);
 const colors = ['#e11d48', '#7c3aed', '#0ea5e9', '#16a34a', '#f59e0b', '#db2777', '#14b8a6', '#6366f1'];
 const LONG = process.env.LONG ? ' (TV Size) [feat. Someone With A Very Long Name] ~Extended Remix Version~' : '';
@@ -33,7 +60,9 @@ const state = {
   /** How long songs are, by difficulty (the duration API's answers) */
   durations: {},
   /** The .osu files have a spinner (2–6 s) */
-  spinner: false
+  spinner: false,
+  /** The songs' audio has a beat (else a tone) */
+  beat: false
 };
 async function setup(ctx, { lyrics = true } = {}) {
   await ctx.route(/^https?:\/\/(?!127\.0\.0\.1).*/, async (original) => {
@@ -135,7 +164,7 @@ async function setup(ctx, { lyrics = true } = {}) {
     }
     if (url.includes('catboy.best') || url.includes('b.ppy.sh') || url.includes('/stosufy/preview/')) {
       // (with ranges, as the mirror: the audio can be seeked)
-      const wav = TONE;
+      const wav = state.beat && url.includes('catboy.best') ? BEAT : TONE;
       const range = /bytes=(\d+)-(\d*)/.exec(req.headers()['range'] || '');
       if (range) {
         const from = Number(range[1]);

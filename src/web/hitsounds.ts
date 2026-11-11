@@ -4,7 +4,10 @@
 // 0.75×. The settings are the account's, the same as on the desktop.
 //
 // The samples are scheduled with Web Audio a moment ahead of where the song is, on a clock of
-// their own (evenly spaced) that's set anew when the song is off it by more than a little. In
+// their own (evenly spaced). Where the song is on that clock is heard (songClock.ts: the song's
+// sound goes through the same audio, and is compared with the song itself), to about a
+// millisecond; until it's heard (the song's audio is decoded first), and where it can't be, it's
+// what the song's element says, set right by how far that was off whenever it was heard. In
 // the background (screen locked) the phone runs the page's timers seldom: then they're
 // scheduled seconds ahead (Web Audio plays them on time by itself), topped up on each of the
 // song's time updates. The audio is a player's (iOS plays it on in the background then).
@@ -15,8 +18,9 @@ import { osuFile } from './osuFiles';
 import { log } from './log';
 import { songOffsetOf } from './songOffset';
 import { hitsoundMapId, learnHardest, hardest } from './difficulties';
-import { queue, audioElement, reclaimNowPlaying } from './player';
+import { queue, audioElement, reclaimNowPlaying, wakeAudio } from './player';
 import { songContext, isRouted } from './audioGraph';
+import { prepareReference, canHear, hearSong } from './songClock';
 import { parseHitsounds, type HitSample } from '../lib/hitsounds/chart';
 import { builtinSample, builtinExtra } from '../lib/hitsounds/builtin';
 import { bundledSamples, bundledSample } from '../lib/hitsounds/bundled';
@@ -41,6 +45,49 @@ const FAR_OFF = 150;
 const FAR_OFF_HIDDEN = 250;
 /** How much of a small difference the hitsounds' clock follows on each reading */
 const FOLLOW = 0.2;
+/** The song is listened to this often (ms): until it's heard, and then to stay on it */
+const LISTEN = 120;
+const LISTEN_KNOWN = 700;
+/** Not heard this many times in a row (a part without ups and downs): listened for seldom */
+const LISTEN_PATIENCE = 40;
+const LISTEN_SELDOM = 1500;
+/** How far (ms) from where the element says the song is it's listened for */
+const AROUND = 380;
+const AROUND_KNOWN = 45;
+/** Heard this far (ms) from the clock: the clock is set to it (less: it follows) */
+const SET = 3;
+
+/**
+ * How far (ms) the song as heard is from where its element says, on this phone with this
+ * speaker or these headphones: learned each time the song is heard, and used while it isn't.
+ * `stretched`: at another speed with its pitch kept (Double Time, Half Time): the phone
+ * stretches the sound, which takes its own time, and moves each beat a little: there the song
+ * can't be heard to the millisecond, only how far off the element is on the whole.
+ */
+const LAG_KEY = 'stosufy-web-song-lag';
+const lags = {
+	plain: (() => {
+		try {
+			return Number(localStorage.getItem(LAG_KEY)) || 0;
+		} catch {
+			return 0;
+		}
+	})(),
+	stretched: 0
+};
+let lagKept = lags.plain;
+function learnLag(sample: number, stretched: boolean) {
+	if (!(Math.abs(sample) < 500)) return;
+	const which = stretched ? 'stretched' : 'plain';
+	lags[which] += (sample - lags[which]) * (lags[which] ? (stretched ? 0.08 : 0.15) : 1);
+	if (stretched || Math.abs(lags.plain - lagKept) < 3) return;
+	lagKept = lags.plain;
+	try {
+		localStorage.setItem(LAG_KEY, String(Math.round(lags.plain)));
+	} catch {
+		// (learned again next time)
+	}
+}
 
 export const hitsoundStatus = writable<'off' | 'loading' | 'ready' | 'unavailable'>('off');
 
@@ -295,10 +342,22 @@ async function load() {
 // --- Playing ---------------------------------------------------------------------------
 
 let next = 0;
-/** The song's time (ms) at a moment of the hitsounds' clock, and its speed then */
-let anchor: { song: number; ctx: number; rate: number } | null = null;
+/** The song's time (ms) at a moment of the hitsounds' clock, and its speed then; `heard`: by
+ * the song's sound (exact), else by what its element says */
+let anchor: { song: number; ctx: number; rate: number; heard: boolean } | null = null;
 let restart = true;
-let scheduled: { source: AudioBufferSourceNode; at: number }[] = [];
+/** Scheduled anew at the next tick, the clock as it is (the screen locked or shown again:
+ * another stretch ahead) */
+let again = false;
+let scheduled: { source: AudioBufferSourceNode; at: number; index: number }[] = [];
+/** From when (the clock's time) what's heard is of the song as it plays now */
+let freshSince = 0;
+let listenedAt = 0;
+let unheard = 0;
+/** The offsets (ms) the hitsounds were last scheduled with */
+let scheduledOffset = 0;
+/** What the clock went by last, for the log (said once each time it changes) */
+let told = '';
 /** The next spinner whose spin isn't scheduled yet, and the spins scheduled (until they end) */
 let nextSpin = 0;
 let spins: { source: AudioBufferSourceNode; spinner: Spinner; end: number }[] = [];
@@ -367,50 +426,139 @@ function tick() {
 	const { volume, offset } = settings();
 	master!.gain.value = volume * LEVEL;
 	const rate = audio.playbackRate || 1;
-	// (positive offsets play the hitsounds later)
-	// (and the song's own offset on top: songOffset.ts)
-	const time = audio.currentTime * 1000 - offset - songOffsetOf(currentSong());
+	const song = currentSong();
+	// (positive offsets play the hitsounds later; the song's own offset on top: songOffset.ts)
+	const later = offset + songOffsetOf(song);
+	// The song's sound goes through this context too (audioGraph.ts): there it can be heard
+	// where it is. Played by the element itself it can't, and reaches the speaker without this
+	// context's delay: the hitsounds go as much earlier as this context takes to the speaker
+	const routed = isRouted(audio) && ctx === songContext();
+	const late = routed
+		? 0
+		: ((ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0) +
+			(ctx.baseLatency ?? 0);
+	// (its sound stretched: Double Time, Half Time)
+	const stretched =
+		rate !== 1 &&
+		((audio as HTMLAudioElement & { webkitPreservesPitch?: boolean }).webkitPreservesPitch ??
+			audio.preservesPitch) !== false;
+	const lag = routed ? lags[stretched ? 'stretched' : 'plain'] : 0;
+	// Where the song is by its element (and by how far that's been off when it was heard)
+	const time = audio.currentTime * 1000 + lag;
 	// Where the song should be by the hitsounds' clock. Far off (a seek, the song stalling, the
 	// audio put to sleep for a moment): all anew from here. A little off: the clock follows the
-	// song gently. Safari reads the song's place coarsely: setting everything anew on each
-	// reading that was a bit off shifted the hitsounds by its jitter, and a reading a bit late
-	// skipped the ones in between (slider ends, often)
+	// song gently, unless it's set by the song's sound (the element is the one that's off
+	// then). Safari reads the song's place coarsely: setting everything anew on each reading
+	// that was a bit off shifted the hitsounds by its jitter, and a reading a bit late skipped
+	// the ones in between (slider ends, often)
 	const expected = anchor
 		? anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * anchor.rate
 		: Number.NaN;
 	const drift = time - expected;
-	// The song's sound goes through this context too (audioGraph.ts): it reaches the speaker
-	// as late as the hitsounds. Played by the element itself it doesn't: the hitsounds go
-	// as much earlier as this context takes to the speaker
-	const late = isRouted(audio)
-		? 0
-		: ((ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0) +
-			(ctx.baseLatency ?? 0);
-	/** When a time of the song is on the hitsounds' clock */
-	const when = (songTime: number) => anchor!.ctx + (songTime - anchor!.song) / rate / 1000 - late;
 	const jumped = restart || !anchor || anchor.rate !== rate;
+	/** Scheduled anew from here: the hitsounds already played aren't played again */
+	let anew = false;
 	if (jumped || !(Math.abs(drift) <= (hidden ? FAR_OFF_HIDDEN : FAR_OFF))) {
+		anchor = { song: time, ctx: ctx.currentTime, rate, heard: false };
+		freshSince = ctx.currentTime + 0.03;
+		listenedAt = 0;
+		unheard = 0;
+		anew = true;
+		restart = false;
+	} else if (!anchor!.heard && Math.abs(drift) > 3) anchor!.song += drift * FOLLOW;
+
+	// The song's place by its sound, where it can be heard
+	if (routed && song) {
+		const clock = performance.now();
+		// (its audio is decoded once it plays: not for a song skipped right away)
+		if (audio.currentTime > 1.5) prepareReference(song, audio.src);
+		const every =
+			anchor!.heard || stretched
+				? LISTEN_KNOWN
+				: unheard > LISTEN_PATIENCE
+					? LISTEN_SELDOM
+					: LISTEN;
+		if (clock - listenedAt >= every && canHear(song, audio.src)) {
+			listenedAt = clock;
+			const guess = anchor!.song + (ctx.currentTime - anchor!.ctx) * 1000 * rate;
+			const found = hearSong(
+				audio,
+				song,
+				guess,
+				rate,
+				anchor!.heard ? AROUND_KNOWN : AROUND,
+				freshSince,
+				anchor!.heard
+			);
+			unheard = found ? 0 : unheard + 1;
+			if (found) {
+				const off = found.song - (anchor!.song + (found.ctx - anchor!.ctx) * 1000 * rate);
+				// (how far the element is off, for when the song can't be heard)
+				learnLag(
+					found.song - (audio.currentTime * 1000 + (found.ctx - ctx.currentTime) * 1000 * rate),
+					stretched
+				);
+				// (stretched: the clock stays the element's, evenly, set right by what was learned)
+				if (!stretched && (!anchor!.heard || Math.abs(off) > SET)) {
+					if (Math.abs(off) > SET) anew = true;
+					anchor = { song: found.song, ctx: found.ctx, rate, heard: true };
+				} else if (!stretched) anchor!.song += off * 0.3;
+			}
+		}
+	}
+	const by = anchor!.heard
+		? 'heard'
+		: !routed
+			? 'element, not routed'
+			: stretched
+				? 'element, stretched'
+				: 'element';
+	if (by !== told) {
+		told = by;
+		log(
+			by === 'heard'
+				? `hitsounds: on the song's sound (its element is ${Math.round(lag)} ms off)`
+				: `hitsounds: by the song's ${by}`
+		);
+	}
+	if (later !== scheduledOffset || again) {
+		scheduledOffset = later;
+		again = false;
+		anew = true;
+	}
+
+	/** When a time of the beatmap is on the hitsounds' clock */
+	const when = (mapTime: number) =>
+		anchor!.ctx + (mapTime + later - anchor!.song) / rate / 1000 - late;
+	/** Where the song is in the beatmap now */
+	const now = anchor!.song + (ctx.currentTime - anchor!.ctx) * 1000 * rate - later;
+	if (anew) {
 		// (only off the clock, not moved: a spin going on goes on, ending where it now should;
 		// started anew it was heard as a click)
+		const played = scheduled.reduce(
+			(most, hit) => (hit.at <= ctx.currentTime ? Math.max(most, hit.index + 1) : most),
+			0
+		);
 		stopScheduled(!jumped);
-		next = indexAt(chart.events, time);
-		anchor = { song: time, ctx: ctx.currentTime, rate };
+		next = indexAt(chart.events, now);
 		if (jumped) {
-			nextSpin = chart.spinners.findIndex((spinner) => spinner.end > time);
+			nextSpin = chart.spinners.findIndex((spinner) => spinner.end > now);
 			if (nextSpin < 0) nextSpin = chart.spinners.length;
-		} else
+		} else {
+			// (the clock was set a little: what just played isn't played once more)
+			next = Math.max(next, played);
 			for (const going of spins) {
 				going.end = Math.max(when(going.spinner.end), ctx.currentTime);
 				going.source.stop(going.end);
 			}
-		restart = false;
-	} else if (Math.abs(drift) > 3) anchor.song += drift * FOLLOW;
-	const now = anchor.song + (ctx.currentTime - anchor.ctx) * 1000 * rate;
+		}
+	}
 	const ahead = (hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD) * 1000 * rate;
 	const events = chart.events;
 	while (next < events.length && events[next].time <= now + ahead) {
-		const event = events[next++];
-		const at = anchor.ctx + (event.time - anchor.song) / rate / 1000 - late;
+		const index = next++;
+		const event = events[index];
+		const at = when(event.time);
 		if (at < ctx.currentTime - 0.03) continue;
 		for (const buffer of event.buffers) {
 			if (!buffer) continue;
@@ -420,7 +568,7 @@ function tick() {
 			gain.gain.value = event.volume;
 			source.connect(gain).connect(master!);
 			source.start(Math.max(at, ctx.currentTime));
-			scheduled.push({ source, at });
+			scheduled.push({ source, at, index });
 		}
 	}
 	// The spinners' spin: a loop from its start to its end, its pitch rising on the audio clock
@@ -574,6 +722,8 @@ if (typeof window !== 'undefined') {
 		if (settings().on) {
 			const ctx = audioContext();
 			if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+			// (the song's sound through the hitsounds' audio: there it's heard where it is)
+			if (get(audioElement)) wakeAudio();
 		}
 		if (currentMod() === 'NC') {
 			prepareBeats();
@@ -583,7 +733,7 @@ if (typeof window !== 'undefined') {
 	window.addEventListener('pointerdown', wake, true);
 	// To the background: the hitsounds scheduled seconds ahead from now on; back: a moment ahead
 	document.addEventListener('visibilitychange', () => {
-		restart = true;
+		again = true;
 		if (document.hidden) {
 			stopBeats?.tick();
 			if (settings().on) tick();

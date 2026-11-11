@@ -16,6 +16,8 @@ type Route = {
 	level: GainNode;
 	fade: GainNode;
 	meters: AnalyserNode[];
+	/** The song's sound as it goes into the graph, to hear where the song is (songClock.ts) */
+	tap: AnalyserNode;
 };
 
 let context: AudioContext | null = null;
@@ -27,7 +29,10 @@ const pending = new WeakMap<HTMLAudioElement, { level?: number; fade?: number }>
 export const normalizeOn = () => get(userSettings).settings?.normalize ?? true;
 /** Seconds the end of a song and the start of the next overlap (0: off) */
 export const crossfadeSeconds = () => Math.max(0, get(userSettings).settings?.crossfade ?? 0);
-const wanted = () => normalizeOn() || crossfadeSeconds() > 0;
+/** (the hitsounds too: only a song that goes through the hitsounds' audio can be heard there,
+ * and so be on their clock exactly: songClock.ts) */
+const wanted = () =>
+	normalizeOn() || crossfadeSeconds() > 0 || !!get(userSettings).settings?.hitsounds;
 
 /**
  * The page's one audio context: the songs' and the hitsounds' (the same clock and the same
@@ -111,7 +116,17 @@ function route(element: HTMLAudioElement) {
 			meter.connect(quiet);
 			return meter;
 		});
-		routes.set(element, { level, fade, meters });
+		// What's heard of the song, for its clock: the lower part of its sound (as its reference
+		// is decoded, see songClock.ts), the last two thirds of a second
+		const low = context.createBiquadFilter();
+		low.type = 'lowpass';
+		low.frequency.value = TAP_LOWPASS;
+		low.Q.value = 0.707;
+		const tap = context.createAnalyser();
+		tap.fftSize = 32768;
+		tap.smoothingTimeConstant = 0;
+		source.connect(low).connect(tap).connect(quiet);
+		routes.set(element, { level, fade, meters, tap });
 		log('song audio routed (loudness, crossfade)');
 	} catch (error) {
 		log(`song audio not routed: ${(error as Error)?.message}`);
@@ -119,6 +134,38 @@ function route(element: HTMLAudioElement) {
 }
 
 export const isRouted = (element: HTMLAudioElement | null) => !!element && routes.has(element);
+/** The song's sound as it goes into the graph (null: not routed) */
+export const tapOf = (element: HTMLAudioElement | null) =>
+	(element && routes.get(element)?.tap) || null;
+/** Above this (Hz) the tap doesn't listen */
+export const TAP_LOWPASS = 4000;
+
+/**
+ * A sound too quiet to hear, while the player plays: between two songs with the screen locked
+ * no song sounds for a moment, and a page that makes no sound there is put to sleep by iOS
+ * (the next song never started). With it the page's audio goes on through the change.
+ */
+let held: ConstantSourceNode | null = null;
+export function holdAudio(on: boolean) {
+	if (on && !held && context && context.state !== 'closed') {
+		try {
+			held = context.createConstantSource();
+			held.offset.value = 0.0001;
+			held.connect(context.destination);
+			held.start();
+		} catch {
+			held = null;
+		}
+	} else if (!on && held) {
+		try {
+			held.stop();
+			held.disconnect();
+		} catch {
+			// (already stopped)
+		}
+		held = null;
+	}
+}
 export const graphRunning = () => context?.state === 'running';
 
 /** The song's level (the loudness), gliding over `seconds` */

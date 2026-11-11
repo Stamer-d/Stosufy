@@ -188,6 +188,16 @@ export async function localUrl(song: MapSet): Promise<string | null> {
 	return blob.size ? URL.createObjectURL(blob) : null;
 }
 
+/** A song's kept audio as bytes (null: not kept) */
+export async function localAudio(song: MapSet): Promise<ArrayBuffer | null> {
+	const kept = await run<KeptAudio | Blob | undefined>(AUDIO, 'readonly', (store) =>
+		store.get(keyOf(song))
+	).catch(() => undefined);
+	if (!kept) return null;
+	const data = kept instanceof Blob ? await kept.arrayBuffer() : kept.data;
+	return data.byteLength ? data : null;
+}
+
 /** A song's audio as kept on the phone */
 interface KeptAudio {
 	data: ArrayBuffer;
