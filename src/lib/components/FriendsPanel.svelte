@@ -84,12 +84,18 @@
 					title={friend.online ? 'Online' : 'Offline'}
 				></span>
 			</span>
-			<span class="min-w-0 flex-1">
+			<!-- (room on its right for the profile button, while it shows) -->
+			<span
+				class="min-w-0 flex-1 transition-[padding] group-hover/friend:pr-8 group-focus-within/friend:pr-8"
+			>
 				<span class="flex items-center justify-between gap-2">
 					<span class="font-semibold truncate {friend.online ? '' : 'text-white/70'}">
 						{friend.username}
 					</span>
-					<span class="text-xs text-secondary-600 shrink-0">
+					<!-- (where the profile button shows on hover: hidden then) -->
+					<span
+						class="text-xs text-secondary-600 shrink-0 group-hover/friend:invisible group-focus-within/friend:invisible"
+					>
 						{#if listening}
 							<span class="icon-[mingcute--volume-line] size-3.5 text-green-500 align-[-2px]"
 							></span>
