@@ -84,11 +84,11 @@
 					title={friend.online ? 'Online' : 'Offline'}
 				></span>
 			</span>
-			<!-- (room on its right for the profile button, while it shows) -->
-			<span
-				class="min-w-0 flex-1 transition-[padding] group-hover/friend:pr-8 group-focus-within/friend:pr-8"
-			>
-				<span class="flex items-center justify-between gap-2">
+			<span class="min-w-0 flex-1">
+				<!-- (the lines beside the profile button: room for it, while it shows) -->
+				<span
+					class="flex items-center justify-between gap-2 transition-[padding] group-hover/friend:pr-8 group-focus-within/friend:pr-8"
+				>
 					<span class="font-semibold truncate {friend.online ? '' : 'text-white/70'}">
 						{friend.username}
 					</span>
@@ -105,7 +105,9 @@
 					</span>
 				</span>
 				<span
-					class="block text-sm truncate {friend.online ? 'text-white/80' : 'text-secondary-600'}"
+					class="block text-sm truncate transition-[padding] group-hover/friend:pr-8 group-focus-within/friend:pr-8 {friend.online
+						? 'text-white/80'
+						: 'text-secondary-600'}"
 				>
 					{#if playback}
 						{playback.title} · {playback.artist}
