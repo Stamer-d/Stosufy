@@ -1,5 +1,7 @@
 use tauri::Manager;
 
+mod ffmpeg;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -28,6 +30,14 @@ pub fn run() {
         .plugin(tauri_plugin_drpc::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_prevent_default::debug())
+        .manage(ffmpeg::FfmpegState::default())
+        .invoke_handler(tauri::generate_handler![
+            ffmpeg::ffmpeg_status,
+            ffmpeg::ffmpeg_install,
+            ffmpeg::ffmpeg_run,
+            ffmpeg::ffmpeg_probe,
+            ffmpeg::ffmpeg_cancel
+        ])
         .setup(|app| {
             // The login link (stosufynew://) opens the app. On Linux this needs the desktop's
             // tools (xdg-utils): without them the app still starts, just without the link
@@ -40,6 +50,12 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // (a conversion that's still running ends with the app)
+            if let tauri::RunEvent::Exit = event {
+                app.state::<ffmpeg::FfmpegState>().stop_all();
+            }
+        });
 }

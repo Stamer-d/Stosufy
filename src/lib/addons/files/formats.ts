@@ -146,8 +146,30 @@ function target(id: string, group: string): Target {
 	return { id, label: format.label, extension: format.extensions[0], group };
 }
 
-/** What a file of this format can be made into, by group, the most likely first */
-export function targetsFor(format: Format | null): Target[] {
+/** Formats a file of can be made smaller in (with a size limit) */
+const SHRINKABLE = new Set([
+	'jpg',
+	'png',
+	'webp',
+	'gif',
+	'mp3',
+	'ogg',
+	'opus',
+	'm4a',
+	'mp4',
+	'webm',
+	'mkv',
+	'mov',
+	'avi'
+]);
+
+/**
+ * What a file of this format can be made into, by group, the most likely first. With `shrink`
+ * (a size limit is set): its own format first, to make it smaller.
+ */
+export function targetsFor(format: Format | null, { shrink = false } = {}): Target[] {
+	if (shrink && format && SHRINKABLE.has(format.id))
+		return [target(format.id, 'Smaller'), ...targetsFor(format)];
 	const not = (id: string) => (other: string) => other !== id;
 	const own: Target[] = [];
 	switch (format?.kind) {

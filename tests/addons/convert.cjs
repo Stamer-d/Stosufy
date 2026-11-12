@@ -68,6 +68,9 @@ async function pick(at, target) {
 	zip.file('../escape.txt', 'kept inside');
 	const png = fs.readFileSync(path.join(root, 'static', 'logo.png'));
 	const clip = fs.readFileSync(path.join(__dirname, 'fixtures', 'clip.mp4'));
+	// (2 s of a tone, titled "Tone" by "Stosufy", with a cover)
+	const tagged = fs.readFileSync(path.join(__dirname, 'fixtures', 'tagged.mp3'));
+	const mp3 = (name) => ({ name, mimeType: 'audio/mpeg', buffer: tagged });
 	const text = (name, mimeType, body) => ({ name, mimeType, buffer: Buffer.from(body) });
 	// [file, target]
 	const FILES = [
@@ -121,6 +124,9 @@ async function pick(at, target) {
 			const buffer = from === 'png' ? png : from === 'wav' ? wav() : clip;
 			return [{ name, mimeType: '', buffer }, target];
 		}),
+		[mp3('tagged.mp3'), 'flac'],
+		[mp3('tagged-m4a.mp3'), 'm4a'],
+		[mp3('tagged-ogg.mp3'), 'ogg'],
 		[text('broken.json', 'application/json', '{"a": '), 'csv'],
 		[text('blob.bin', 'application/octet-stream', 'abc'), 'base64']
 	];
@@ -283,6 +289,21 @@ async function pick(at, target) {
 		asText('pack/escape.txt') === 'kept inside' && !written['/home/tester/Stosufy/escape.txt']
 	);
 	check('any file → Base64', asText('blob.txt') === 'YWJj\n');
+	const latin = (name) => file(name).toString('latin1');
+	check(
+		'MP3 → FLAC: its title, artist and cover kept',
+		/TITLE=Tone/i.test(latin('tagged.flac')) &&
+			/ARTIST=Stosufy/i.test(latin('tagged.flac')) &&
+			latin('tagged.flac').includes('image/jpeg')
+	);
+	check(
+		'MP3 → M4A: title and cover kept',
+		latin('tagged-m4a.m4a').includes('Tone') && latin('tagged-m4a.m4a').includes('covr')
+	);
+	check(
+		'MP3 → OGG: the title kept (OGG holds no cover)',
+		/TITLE=Tone/i.test(latin('tagged-ogg.ogg'))
+	);
 
 	// The same file again: a name of its own
 	await page.setInputFiles('input[aria-label="Choose files"]', [FILES[0][0]]);
@@ -352,6 +373,81 @@ async function pick(at, target) {
 
 	check('no errors', errors.length === 0, errors.join('\n'));
 	await page.context().close();
+
+	// --- A size limit -----------------------------------------------------------------------
+	{
+		const LIMIT = 150 * 1024;
+		const { page, errors } = await start(browser, {
+			stored: { settings: { addons: ['convert'] }, currentQueue: null },
+			writes: true,
+			allow: /^https:\/\/unpkg\.com\//
+		});
+		await page.evaluate(
+			(limit) =>
+				localStorage.setItem(
+					'stosufy-convert-options',
+					JSON.stringify({ quality: 'balanced', maxBytes: limit })
+				),
+			LIMIT
+		);
+		row = (name) => page.locator(`li[aria-label="${name}"]`).last();
+		await page.click('header button[aria-label="File converter"]');
+		await page.waitForURL('**/addons/convert');
+		// 20 s of noise (~860 KB): an MP3 of it at 192 kbit/s would be ~470 KB
+		const noise = Buffer.from(wav());
+		const long = Buffer.alloc(44 + 22050 * 2 * 20);
+		noise.copy(long, 0, 0, 44);
+		long.writeUInt32LE(36 + 22050 * 2 * 20, 4);
+		long.writeUInt32LE(22050 * 2 * 20, 40);
+		for (let i = 44; i < long.length; i += 2)
+			long.writeInt16LE(Math.round((Math.random() - 0.5) * 30000), i);
+		await page.setInputFiles('input[aria-label="Choose files"]', [
+			{ name: 'noise.wav', mimeType: 'audio/wav', buffer: long },
+			{ name: 'noise-flac.wav', mimeType: 'audio/wav', buffer: long },
+			{ name: 'big.png', mimeType: 'image/png', buffer: png },
+			{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: clip }
+		]);
+		await page.waitForSelector('li[aria-label="clip.mp4"]');
+		check(
+			'with a size limit: its own format first, to make it smaller',
+			(await offered(row('clip.mp4')))[0] === 'mp4' &&
+				/Smaller MP4/.test(await row('clip.mp4').locator('[data-target="mp4"]').innerText())
+		);
+		await pick(row('noise.wav'), 'mp3');
+		await pick(row('noise-flac.wav'), 'flac');
+		await pick(row('big.png'), 'png');
+		await pick(row('clip.mp4'), 'mp4');
+		await page.waitForFunction(
+			() =>
+				[...document.querySelectorAll('ul[aria-label="Files"] > li')].every((li) =>
+					['done', 'failed'].includes(li.dataset.status)
+				),
+			null,
+			{ timeout: 120000 }
+		);
+		const sizes = await page.evaluate(() =>
+			Object.fromEntries(
+				Object.entries(window.__written).map(([name, data]) => [name.split('/').pop(), data.length])
+			)
+		);
+		check(
+			'a 20 s WAV → MP3 under 150 KB (a lower bitrate)',
+			sizes['noise.mp3'] <= LIMIT && sizes['noise.mp3'] > 60 * 1024,
+			JSON.stringify(sizes)
+		);
+		check(
+			'a 638 KB PNG → a smaller PNG under 150 KB',
+			sizes['big.png'] <= LIMIT,
+			JSON.stringify(sizes)
+		);
+		check('a smaller MP4 under it', sizes['clip.mp4'] <= LIMIT, JSON.stringify(sizes));
+		check(
+			"FLAC can't be made smaller: it says so",
+			/FLAC can't be made smaller/.test(await row('noise-flac.wav').innerText())
+		);
+		check('no errors (size limit)', errors.length === 0, errors.join('\n'));
+		await page.context().close();
+	}
 	await browser.close();
 
 	console.log(`\n${results.filter(Boolean).length}/${results.length}`);

@@ -6,9 +6,11 @@ version = 4
 name = "Stosfy"
 version = "0.6.102"
 dependencies = [
+ "flate2",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",

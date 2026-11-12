@@ -3,8 +3,11 @@
 	// become, and it's converted and saved to ~/Stosufy/Converted (see jobs.ts).
 	import { onMount } from 'svelte';
 	import { fly, fade } from 'svelte/transition';
-	import { revealItemInDir } from '@tauri-apps/plugin-opener';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { installedAddons } from '#lib/addons/store.ts';
+	import { reveal as revealFile } from '../files/save.ts';
+	import { handOver, takeHandedOver } from '../files/handoff.ts';
+	import { nativeState, nativeFfmpeg, retryNative } from '../files/native.ts';
 	import {
 		jobs,
 		options,
@@ -13,9 +16,10 @@
 		convertAllTo,
 		retry,
 		chooseAgain,
+		stopJob,
 		removeJob,
 		clearJobs,
-		outputFolder,
+		converterFolder,
 		saveAllAsZip
 	} from './jobs.ts';
 
@@ -42,12 +46,22 @@
 		'Video → GIF',
 		'JSON → CSV'
 	];
-	/** @type {[import('./media.ts').Quality, string][]} */
+	/** @type {[import('../files/presets.ts').Quality, string][]} */
 	const QUALITIES = [
 		['small', 'Small files'],
 		['balanced', 'Balanced'],
 		['best', 'Best quality']
 	];
+	const MB = 1024 * 1024;
+	const LIMITS = [
+		[0, 'Any size'],
+		[8 * MB, 'Up to 8 MB'],
+		[10 * MB, 'Up to 10 MB (Discord)'],
+		[25 * MB, 'Up to 25 MB'],
+		[50 * MB, 'Up to 50 MB'],
+		[100 * MB, 'Up to 100 MB']
+	];
+	const EDITABLE = new Set(['image', 'audio', 'video']);
 
 	let input = $state();
 	let dragging = $state(0);
@@ -66,15 +80,20 @@
 		);
 	});
 
+	let canEdit = $derived($installedAddons.some((addon) => addon.id === 'edit'));
+
 	const soundOnly = (target) => target.group === 'Only the sound';
+	const smaller = (target) => target.group === 'Smaller';
 	const titleOf = (target) =>
 		soundOnly(target)
 			? `Only the sound, as ${target.label}`
-			: target.id === 'unzip'
-				? 'Unpack the files in it'
-				: target.id === 'base64'
-					? 'As Base64 text'
-					: `As ${target.label}`;
+			: smaller(target)
+				? `A smaller ${target.label}`
+				: target.id === 'unzip'
+					? 'Unpack the files in it'
+					: target.id === 'base64'
+						? 'As Base64 text'
+						: `As ${target.label}`;
 
 	function size(bytes) {
 		if (bytes < 1024) return `${bytes} B`;
@@ -94,7 +113,7 @@
 
 	async function reveal(path) {
 		try {
-			await revealItemInDir(path ?? (await outputFolder()));
+			await revealFile(path ?? (await converterFolder()));
 		} catch (error) {
 			console.error('Could not show the folder:', error);
 			showToast("Couldn't open the folder", 'icon-[mingcute--warning-line]');
@@ -117,8 +136,11 @@
 
 	const hasFiles = (event) => event.dataTransfer?.types?.includes('Files');
 
-	// Files pasted (copied in the file manager) are added too
 	onMount(() => {
+		// Files handed over (from the editor), and the fast FFmpeg got ready in the background
+		add(takeHandedOver('convert'));
+		void nativeFfmpeg();
+		// Files pasted (copied in the file manager) are added too
 		const paste = (event) => {
 			const target = event.target;
 			if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable]'))
@@ -144,8 +166,10 @@
 			>
 				{#if soundOnly(target)}
 					<span class="icon-[mingcute--music-2-line] size-3.5 opacity-70"></span>
+				{:else if smaller(target)}
+					<span class="icon-[mingcute--arrow-down-line] size-3.5 opacity-70"></span>
 				{/if}
-				{target.label}
+				{smaller(target) ? `Smaller ${target.label}` : target.label}
 			</button>
 		{/each}
 		{#if targets.length > QUICK}
@@ -215,8 +239,44 @@
 				<p class="mt-1.5 text-white/75">
 					Drop a file, click the format you want. It stays on your computer.
 				</p>
+				{#if $nativeState.status === 'downloading'}
+					<p class="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-200/90">
+						<span class="icon-[mingcute--flash-line] size-3.5"></span>
+						Getting the fast converter ready… {Math.round($nativeState.progress * 100)}%
+					</p>
+				{:else if $nativeState.status === 'failed'}
+					<p class="mt-2 flex items-center gap-1.5 text-xs text-white/60">
+						<span class="icon-[mingcute--warning-line] size-3.5"></span>
+						Sound and video convert slower: the fast converter couldn't be downloaded.
+						<button class="font-semibold underline cursor-pointer" onclick={retryNative}>
+							Try again
+						</button>
+					</p>
+				{/if}
 			</div>
-			<div class="flex items-center gap-2">
+			<div class="flex flex-wrap items-center gap-2">
+				<label
+					class="relative h-9 pl-3 pr-2 flex items-center gap-1.5 rounded-full text-sm cursor-pointer transition {$options.maxBytes
+						? 'bg-amber-300 text-black'
+						: 'bg-black/25 hover:bg-black/40'}"
+					title="Make every file smaller than this (sound, video, pictures)"
+				>
+					<span class="icon-[mingcute--arrow-down-line] size-4 opacity-70"></span>
+					<span class="font-semibold">
+						{LIMITS.find(([bytes]) => bytes === $options.maxBytes)?.[1] ??
+							`Up to ${size($options.maxBytes)}`}
+					</span>
+					<span class="icon-[mingcute--down-line] size-3.5 opacity-60"></span>
+					<select
+						class="absolute inset-0 opacity-0 cursor-pointer"
+						aria-label="Size limit"
+						bind:value={$options.maxBytes}
+					>
+						{#each LIMITS as [bytes, label] (bytes)}
+							<option value={bytes} class="bg-panel text-white">{label}</option>
+						{/each}
+					</select>
+				</label>
 				<label
 					class="relative h-9 pl-3 pr-2 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm cursor-pointer transition"
 					title="Smaller files or better quality (sound, video, JPG, WebP)"
@@ -331,7 +391,11 @@
 								)}
 							{:else if job.status === 'waiting' || job.status === 'working'}
 								<span class="font-semibold text-white/70">
-									{target && soundOnly(target) ? 'Sound to' : 'To'}
+									{target && soundOnly(target)
+										? 'Sound to'
+										: target && smaller(target)
+											? 'Smaller'
+											: 'To'}
 									{target?.label}
 								</span>
 								<div
@@ -395,15 +459,41 @@
 									Other format
 								</button>
 							{/if}
-							<button
-								class="size-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition disabled:invisible"
-								aria-label="Remove {job.file.name}"
-								disabled={job.status === 'working' || job.status === 'waiting'}
-								onclick={() => removeJob(job.id)}
-							>
-								<span class="icon-[mingcute--close-line] size-4"></span>
-							</button>
+							{#if canEdit && EDITABLE.has(job.kind) && job.status !== 'working' && job.status !== 'waiting'}
+								<button
+									class="size-8 grid place-items-center rounded-full text-white/50 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									aria-label="Edit {job.file.name}"
+									title="Edit it: cut, turn, fade, …"
+									onclick={() => handOver('edit', [job.file])}
+								>
+									<span class="icon-[mingcute--scissors-line] size-4"></span>
+								</button>
+							{/if}
+							{#if job.status === 'working' || job.status === 'waiting'}
+								<button
+									class="size-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									aria-label="Stop {job.file.name}"
+									title="Stop"
+									onclick={() => stopJob(job.id)}
+								>
+									<span class="icon-[mingcute--stop-circle-line] size-4"></span>
+								</button>
+							{:else}
+								<button
+									class="size-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									aria-label="Remove {job.file.name}"
+									onclick={() => removeJob(job.id)}
+								>
+									<span class="icon-[mingcute--close-line] size-4"></span>
+								</button>
+							{/if}
 						</div>
+						{#if job.status === 'done' && job.note}
+							<p class="basis-full pl-14 flex items-center gap-1.5 text-xs text-amber-200/90">
+								<span class="icon-[mingcute--information-line] size-3.5"></span>
+								{job.note}
+							</p>
+						{/if}
 					</li>
 				{/each}
 			</ul>

@@ -1,14 +1,21 @@
 // Pictures: read by the browser (PNG, JPG, WebP, GIF, BMP, ICO, SVG, AVIF; what it can't read
 // goes through FFmpeg first), drawn on a canvas and written as PNG, JPG or WebP by the browser,
-// as BMP, ICO and PDF here, as GIF and TIFF through FFmpeg.
+// as BMP, ICO and PDF here, as GIF and TIFF through FFmpeg. With a size limit: lower quality,
+// then smaller, until it fits.
 
-import { imageArgs, runFfmpeg } from './media';
+import { runFfmpegBytes } from './ffmpeg';
+import { imageArgs } from './presets';
+
+/** A picture to write: read from a file, or drawn (the editor's) */
+export type Picture = HTMLImageElement | HTMLCanvasElement;
 
 export interface ImageOptions {
 	/** The longest side at most (0: as it is) */
 	maxSize: number;
 	/** 0–1, for JPG and WebP */
 	quality: number;
+	/** At most this many bytes (0: no limit) */
+	maxBytes?: number;
 }
 
 async function loadImage(blob: Blob): Promise<HTMLImageElement> {
@@ -36,7 +43,7 @@ export async function readImage(file: Blob, extension: string): Promise<HTMLImag
 	} catch {
 		// read below
 	}
-	const png = await runFfmpeg(
+	const png = await runFfmpegBytes(
 		new Uint8Array(await file.arrayBuffer()),
 		extension,
 		imageArgs('png', 1),
@@ -45,10 +52,15 @@ export async function readImage(file: Blob, extension: string): Promise<HTMLImag
 	return loadImage(new Blob([png as BlobPart], { type: 'image/png' }));
 }
 
+function naturalSize(picture: Picture) {
+	return picture instanceof HTMLImageElement
+		? { width: picture.naturalWidth || 1024, height: picture.naturalHeight || 1024 }
+		: { width: picture.width, height: picture.height };
+}
+
 /** Its size, made smaller to fit `maxSize` (an SVG without one: 1024 on its longest side) */
-function sizeOf(image: HTMLImageElement, maxSize: number) {
-	let width = image.naturalWidth || 1024;
-	let height = image.naturalHeight || 1024;
+function sizeOf(picture: Picture, maxSize: number) {
+	let { width, height } = naturalSize(picture);
 	const longest = Math.max(width, height);
 	if (maxSize && longest > maxSize) {
 		width = Math.max(1, Math.round((width * maxSize) / longest));
@@ -57,7 +69,7 @@ function sizeOf(image: HTMLImageElement, maxSize: number) {
 	return { width, height };
 }
 
-function draw(image: HTMLImageElement, width: number, height: number, background?: string) {
+function draw(picture: Picture, width: number, height: number, background?: string) {
 	const canvas = document.createElement('canvas');
 	canvas.width = width;
 	canvas.height = height;
@@ -67,7 +79,7 @@ function draw(image: HTMLImageElement, width: number, height: number, background
 		context.fillRect(0, 0, width, height);
 	}
 	context.imageSmoothingQuality = 'high';
-	context.drawImage(image, 0, 0, width, height);
+	context.drawImage(picture, 0, 0, width, height);
 	return canvas;
 }
 
@@ -75,59 +87,100 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
 	return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality));
 }
 
-async function bytes(blob: Blob) {
+async function bytes(blob: Blob | null) {
+	if (!blob) throw new Error("Couldn't draw the picture");
 	return new Uint8Array(await blob.arrayBuffer());
 }
 
-/** The picture in `target`'s format */
+/** The picture in `target`'s format, `width` × `height` */
+async function encode(
+	picture: Picture,
+	width: number,
+	height: number,
+	target: string,
+	quality: number
+): Promise<Uint8Array> {
+	switch (target) {
+		case 'png':
+			return bytes(await toBlob(draw(picture, width, height), 'image/png'));
+		case 'jpg':
+			// (JPG has no transparency: white under it)
+			return bytes(await toBlob(draw(picture, width, height, '#fff'), 'image/jpeg', quality));
+		case 'webp': {
+			const canvas = draw(picture, width, height);
+			const blob = await toBlob(canvas, 'image/webp', quality);
+			// (Safari can't write WebP: it gives a PNG instead)
+			if (blob?.type === 'image/webp') return bytes(blob);
+			return throughFfmpeg(canvas, 'webp', quality);
+		}
+		case 'gif':
+		case 'tiff':
+			return throughFfmpeg(draw(picture, width, height), target, quality);
+		case 'bmp':
+			return encodeBmp(draw(picture, width, height, '#fff'));
+		case 'ico':
+			return encodeIco(draw(picture, width, height));
+		case 'pdf': {
+			const canvas = draw(picture, width, height, '#fff');
+			return pdfOfJpeg(await bytes(await toBlob(canvas, 'image/jpeg', quality)), width, height);
+		}
+	}
+	throw new Error(`Can't make ${target} pictures`);
+}
+
+/** Formats a lower quality makes smaller */
+const LOSSY = new Set(['jpg', 'webp', 'pdf']);
+
+/** A picture written in `target`'s format (within `maxBytes`, if it's given and can be) */
+export async function writeImage(
+	picture: Picture,
+	target: string,
+	options: ImageOptions
+): Promise<Uint8Array> {
+	let { width, height } = sizeOf(picture, options.maxSize);
+	const quality = target === 'pdf' ? Math.max(options.quality, 0.9) : options.quality;
+	let out = await encode(picture, width, height, target, quality);
+	const limit = options.maxBytes ?? 0;
+	if (!limit || out.length <= limit || target === 'ico') return out;
+	// Lower quality first (down to 0.4), halving the way
+	if (LOSSY.has(target)) {
+		let low = 0.4;
+		let high = quality;
+		let best: Uint8Array | null = null;
+		for (let step = 0; step < 6; step++) {
+			const middle = (low + high) / 2;
+			const tried = await encode(picture, width, height, target, middle);
+			if (tried.length <= limit) {
+				best = tried;
+				low = middle;
+			} else high = middle;
+		}
+		if (best) return best;
+		out = await encode(picture, width, height, target, 0.4);
+	}
+	// Then smaller, until it fits (or is tiny)
+	for (let step = 0; step < 8 && out.length > limit && Math.max(width, height) > 64; step++) {
+		const shrink = Math.min(0.9, Math.sqrt(limit / out.length) * 0.95);
+		width = Math.max(1, Math.round(width * shrink));
+		height = Math.max(1, Math.round(height * shrink));
+		out = await encode(picture, width, height, target, LOSSY.has(target) ? 0.6 : quality);
+	}
+	return out;
+}
+
+/** The picture in a file in `target`'s format */
 export async function convertImage(
 	file: Blob,
 	extension: string,
 	target: string,
 	options: ImageOptions
 ): Promise<Uint8Array> {
-	const image = await readImage(file, extension);
-	const { width, height } = sizeOf(image, options.maxSize);
-	switch (target) {
-		case 'png': {
-			const blob = await toBlob(draw(image, width, height), 'image/png');
-			if (!blob) throw new Error("Couldn't draw the picture");
-			return bytes(blob);
-		}
-		case 'jpg': {
-			// (JPG has no transparency: white under it)
-			const blob = await toBlob(draw(image, width, height, '#fff'), 'image/jpeg', options.quality);
-			if (!blob) throw new Error("Couldn't draw the picture");
-			return bytes(blob);
-		}
-		case 'webp': {
-			const canvas = draw(image, width, height);
-			const blob = await toBlob(canvas, 'image/webp', options.quality);
-			// (Safari can't write WebP: it gives a PNG instead)
-			if (blob?.type === 'image/webp') return bytes(blob);
-			return throughFfmpeg(canvas, 'webp', options.quality);
-		}
-		case 'gif':
-		case 'tiff':
-			return throughFfmpeg(draw(image, width, height), target, options.quality);
-		case 'bmp':
-			return encodeBmp(draw(image, width, height, '#fff'));
-		case 'ico':
-			return encodeIco(image);
-		case 'pdf': {
-			const canvas = draw(image, width, height, '#fff');
-			const jpeg = await toBlob(canvas, 'image/jpeg', Math.max(options.quality, 0.9));
-			if (!jpeg) throw new Error("Couldn't draw the picture");
-			return pdfOfJpeg(await bytes(jpeg), width, height);
-		}
-	}
-	throw new Error(`Can't make ${target} pictures`);
+	return writeImage(await readImage(file, extension), target, options);
 }
 
 async function throughFfmpeg(canvas: HTMLCanvasElement, target: string, quality: number) {
-	const png = await toBlob(canvas, 'image/png');
-	if (!png) throw new Error("Couldn't draw the picture");
-	return runFfmpeg(await bytes(png), 'png', imageArgs(target, quality), target);
+	const png = await bytes(await toBlob(canvas, 'image/png'));
+	return runFfmpegBytes(png, 'png', imageArgs(target, quality), target);
 }
 
 /** A 24-bit BMP (what every program opens) */
@@ -164,8 +217,8 @@ function encodeBmp(canvas: HTMLCanvasElement) {
 }
 
 /** An icon with the picture at the usual sizes up to 256 (each a PNG, square, centred) */
-async function encodeIco(image: HTMLImageElement) {
-	const longest = Math.max(image.naturalWidth || 256, image.naturalHeight || 256);
+async function encodeIco(image: HTMLCanvasElement) {
+	const longest = Math.max(image.width, image.height);
 	const sizes = [16, 24, 32, 48, 64, 128, 256].filter((size) => size <= Math.max(16, longest));
 	const pngs: Uint8Array[] = [];
 	for (const size of sizes) {
@@ -173,8 +226,8 @@ async function encodeIco(image: HTMLImageElement) {
 		canvas.width = canvas.height = size;
 		const context = canvas.getContext('2d')!;
 		const ratio = size / longest;
-		const w = (image.naturalWidth || longest) * ratio;
-		const h = (image.naturalHeight || longest) * ratio;
+		const w = image.width * ratio;
+		const h = image.height * ratio;
 		context.imageSmoothingQuality = 'high';
 		context.drawImage(image, (size - w) / 2, (size - h) / 2, w, h);
 		const blob = await toBlob(canvas, 'image/png');

@@ -3,20 +3,22 @@
 // stop anything.
 
 import { get, writable } from 'svelte/store';
-import * as path from '@tauri-apps/api/path';
-import { exists, mkdir, readFile, writeFile } from '@tauri-apps/plugin-fs';
+import { readFile } from '@tauri-apps/plugin-fs';
 import JSZip from 'jszip';
-import { detectFormat, kindOf, targetsFor, type Format, type Kind, type Target } from './formats';
+import {
+	detectFormat,
+	kindOf,
+	targetsFor,
+	type Format,
+	type Kind,
+	type Target
+} from '../files/formats';
+import { cancel, releaseWasm, release } from '../files/ffmpeg';
+import { outputFolder, saveFile, type SavedFile } from '../files/save';
 import { convertFile, type ConvertOptions } from './convert';
-import { releaseMedia } from './media';
 
 export type Status = 'ready' | 'waiting' | 'working' | 'done' | 'failed';
-
-export interface SavedFile {
-	name: string;
-	path: string;
-	size: number;
-}
+export type { SavedFile };
 
 export interface Job {
 	id: number;
@@ -31,12 +33,15 @@ export interface Job {
 	/** 0–1 while it's converted */
 	progress: number;
 	error?: string;
+	/** Something to know about what it was made into (not small enough, …) */
+	note?: string;
 	/** What it was made into, the last time */
 	saved: SavedFile[];
 	/** A picture of it (for pictures), an object URL */
 	preview?: string;
 }
 
+export const FOLDER = 'Converted';
 const OPTIONS_KEY = 'stosufy-convert-options';
 const TARGETS_KEY = 'stosufy-convert-targets';
 
@@ -57,9 +62,8 @@ function keep(key: string, value: unknown) {
 }
 
 export const options = writable<ConvertOptions>(
-	load(OPTIONS_KEY, { quality: 'balanced', imageSize: 0, videoHeight: 0 })
+	load(OPTIONS_KEY, { quality: 'balanced', imageSize: 0, videoHeight: 0, maxBytes: 0 })
 );
-options.subscribe((value) => keep(OPTIONS_KEY, value));
 
 /** The target last chosen for each format: offered first for the next file of it */
 const lastTargets: Record<string, string> = load(TARGETS_KEY, {});
@@ -68,12 +72,26 @@ export const jobs = writable<Job[]>([]);
 
 let nextId = 1;
 
-/** A format's targets, the last one chosen for it first */
+/** A format's targets (its own first with a size limit), else the last one chosen for it first */
 function ordered(format: Format | null) {
-	const targets = targetsFor(format);
+	const shrink = get(options).maxBytes > 0;
+	const targets = targetsFor(format, { shrink });
+	if (shrink && targets[0]?.group === 'Smaller') return targets;
 	const last = targets.findIndex((target) => target.id === lastTargets[format?.id ?? 'other']);
 	return last > 0 ? [targets[last], ...targets.filter((_, i) => i !== last)] : targets;
 }
+
+let limited = get(options).maxBytes > 0;
+options.subscribe((value) => {
+	keep(OPTIONS_KEY, value);
+	// (a size limit on or off: the files not converted yet offer their own format, or not)
+	if (limited !== value.maxBytes > 0) {
+		limited = value.maxBytes > 0;
+		jobs.update((all) =>
+			all.map((job) => (job.status === 'ready' ? { ...job, targets: ordered(job.format) } : job))
+		);
+	}
+});
 
 export function addFiles(files: Iterable<File>) {
 	const added: Job[] = [];
@@ -107,9 +125,11 @@ export function convertTo(id: number, target: string) {
 	const job = get(jobs).find((job) => job.id === id);
 	if (!job || job.status === 'working' || job.status === 'waiting') return;
 	if (!job.targets.some((option) => option.id === target)) return;
-	lastTargets[job.format?.id ?? 'other'] = target;
-	keep(TARGETS_KEY, lastTargets);
-	change(id, { target, status: 'waiting', progress: 0, error: undefined });
+	if (job.targets[0]?.group !== 'Smaller' || job.targets[0].id !== target) {
+		lastTargets[job.format?.id ?? 'other'] = target;
+		keep(TARGETS_KEY, lastTargets);
+	}
+	change(id, { target, status: 'waiting', progress: 0, error: undefined, note: undefined });
 	void run();
 }
 
@@ -130,13 +150,28 @@ export function retry(id: number) {
 export function chooseAgain(id: number) {
 	const job = get(jobs).find((job) => job.id === id);
 	if (!job || job.status === 'working' || job.status === 'waiting') return;
-	change(id, { status: 'ready', target: null, error: undefined, progress: 0 });
+	change(id, {
+		status: 'ready',
+		target: null,
+		error: undefined,
+		note: undefined,
+		progress: 0,
+		targets: ordered(job.format)
+	});
+}
+
+/** Stops it (converting) or takes it out of the waiting ones */
+export function stopJob(id: number) {
+	const job = get(jobs).find((job) => job.id === id);
+	if (job?.status === 'waiting') change(id, { status: 'ready', target: null });
+	else if (job?.status === 'working') void cancel(String(id));
 }
 
 export function removeJob(id: number) {
 	const job = get(jobs).find((job) => job.id === id);
 	if (!job || job.status === 'working' || job.status === 'waiting') return;
 	if (job.preview) URL.revokeObjectURL(job.preview);
+	void release(job.file);
 	jobs.update((all) => all.filter((other) => other.id !== id));
 }
 
@@ -161,7 +196,7 @@ async function run() {
 	} finally {
 		running = false;
 		// (FFmpeg's memory back, when there's nothing more for it)
-		void releaseMedia();
+		void releaseWasm();
 	}
 }
 
@@ -169,15 +204,22 @@ async function convertOne(job: Job) {
 	const target = job.targets.find((target) => target.id === job.target)!;
 	change(job.id, { status: 'working', progress: 0 });
 	try {
-		const outputs = await convertFile(job.file, job.format, target, get(options), (progress) =>
-			change(job.id, { progress })
+		const { outputs, note } = await convertFile(
+			job.file,
+			job.format,
+			target,
+			get(options),
+			(progress) => change(job.id, { progress }),
+			String(job.id)
 		);
 		const saved: SavedFile[] = [];
-		for (const output of outputs) {
-			saved.push({ ...(await save(output.name, output.data)), size: output.data.length });
-		}
-		change(job.id, { status: 'done', progress: 1, saved });
+		for (const output of outputs) saved.push(await saveFile(FOLDER, output.name, output.what));
+		change(job.id, { status: 'done', progress: 1, saved, note });
 	} catch (error) {
+		if ((error as Error)?.name === 'Cancelled') {
+			change(job.id, { status: 'ready', target: null, progress: 0 });
+			return;
+		}
 		console.warn(`Could not convert ${job.file.name}:`, error);
 		change(job.id, {
 			status: 'failed',
@@ -186,46 +228,7 @@ async function convertOne(job: Job) {
 	}
 }
 
-// --- Saving -----------------------------------------------------------------------------------
-
-let folder: Promise<string> | null = null;
-
-/** ~/Stosufy/Converted, made when it's first needed */
-export function outputFolder() {
-	folder ??= (async () => {
-		const dir = await path.join(await path.homeDir(), 'Stosufy', 'Converted');
-		await mkdir(dir, { recursive: true });
-		return dir;
-	})().catch((error) => {
-		folder = null;
-		throw error;
-	});
-	return folder;
-}
-
-/** Characters no system allows in a file's name */
-const clean = (part: string) => part.replace(/[<>:"|?*\u0000-\u001f]/g, '_').trim() || 'file';
-
-/** Saved in the folder, with " (2)" and so on where a file of that name is there already */
-async function save(name: string, data: Uint8Array) {
-	const parts = name.split('/').map(clean);
-	const file = parts.pop()!;
-	let dir = await outputFolder();
-	for (const part of parts) dir = await path.join(dir, part);
-	if (parts.length) await mkdir(dir, { recursive: true });
-	const dot = file.lastIndexOf('.');
-	const stem = dot > 0 ? file.slice(0, dot) : file;
-	const ext = dot > 0 ? file.slice(dot) : '';
-	let target = await path.join(dir, file);
-	for (let n = 2; await exists(target); n++) target = await path.join(dir, `${stem} (${n})${ext}`);
-	await writeFile(target, data);
-	return {
-		name: parts.length
-			? `${parts.join('/')}/${await path.basename(target)}`
-			: await path.basename(target),
-		path: target
-	};
-}
+export const converterFolder = () => outputFolder(FOLDER);
 
 /** What the files in the list were made into, together in one ZIP in the folder; its path */
 export async function saveAllAsZip() {
@@ -240,5 +243,5 @@ export async function saveAllAsZip() {
 	if (!names.size) throw new Error('Nothing converted yet');
 	const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
 	const data = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
-	return (await save(`Converted ${stamp}.zip`, data)).path;
+	return (await saveFile(FOLDER, `Converted ${stamp}.zip`, data)).path;
 }
