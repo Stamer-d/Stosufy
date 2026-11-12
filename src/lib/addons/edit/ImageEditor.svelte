@@ -7,6 +7,7 @@
 	import { readImage } from '../files/image.ts';
 	import { reveal } from '../files/save.ts';
 	import Formats from '../files/Formats.svelte';
+	import CopyButton from '../files/CopyButton.svelte';
 	import { freshImageEdit, oriented, outputSize, saveImage } from './image.ts';
 
 	/** @type {{ file: File }} */
@@ -349,6 +350,7 @@
 					<span class="icon-[mingcute--check-circle-fill] size-4"></span>
 					Saved: {saving.saved.name}
 				</button>
+				<CopyButton files={[saving.saved]} />
 				<span class="text-white/50">in Stosufy/Edited</span>
 			</div>
 		{:else if saving.status === 'failed'}

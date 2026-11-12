@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+mod clipboard;
 mod ffmpeg;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -31,12 +32,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_prevent_default::debug())
         .manage(ffmpeg::FfmpegState::default())
+        .manage(clipboard::ClipboardState::default())
         .invoke_handler(tauri::generate_handler![
             ffmpeg::ffmpeg_status,
             ffmpeg::ffmpeg_install,
             ffmpeg::ffmpeg_run,
             ffmpeg::ffmpeg_probe,
-            ffmpeg::ffmpeg_cancel
+            ffmpeg::ffmpeg_cancel,
+            clipboard::copy_files
         ])
         .setup(|app| {
             // The login link (stosufynew://) opens the app. On Linux this needs the desktop's

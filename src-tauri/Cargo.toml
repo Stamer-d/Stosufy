@@ -35,6 +35,7 @@ tauri-plugin-persisted-scope = "2"
 tauri-plugin-drpc = "*"
 tauri-plugin-process = "2"
 tauri-plugin-prevent-default = "6.0.1"
+clipboard-rs = { version = "0.3.5", default-features = false }
 
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }

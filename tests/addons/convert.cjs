@@ -305,6 +305,30 @@ async function pick(at, target) {
 		/TITLE=Tone/i.test(latin('tagged-ogg.ogg'))
 	);
 
+	// Copied: text as text, a picture as a picture, anything else as the file(s)
+	await page.click('button[aria-label="Copy data.yaml"]');
+	await page.waitForSelector('text=Copied as text');
+	check(
+		'"Copy" on a YAML: its text on the clipboard',
+		(await page.evaluate(() => navigator.clipboard.readText())) === asText('data.yaml')
+	);
+	await page.click('button[aria-label="Copy logo.jpg"]');
+	await page.waitForSelector('text=Copied as a picture');
+	const types = await page.evaluate(async () =>
+		(await navigator.clipboard.read()).flatMap((item) => item.types)
+	);
+	check('"Copy" on a JPG: a picture on the clipboard', types.includes('image/png'), types.join());
+	await page.click('button[aria-label="Copy tone.mp3"]');
+	await page.waitForFunction(() => window.__copied);
+	check(
+		'"Copy" on an MP3: the file itself',
+		JSON.stringify(await page.evaluate(() => window.__copied)) ===
+			JSON.stringify([`${DIR}/tone.mp3`])
+	);
+	await page.locator('li[aria-label="pack.zip"] button[aria-label^="Copy"]').click();
+	await page.waitForFunction(() => window.__copied?.length === 2);
+	check('"Copy" on an unpacked ZIP: both of its files', true);
+
 	// The same file again: a name of its own
 	await page.setInputFiles('input[aria-label="Choose files"]', [FILES[0][0]]);
 	const lastPng = FILES.findLast(([file]) => file.name.endsWith('.png'))[1];

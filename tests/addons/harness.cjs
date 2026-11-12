@@ -31,6 +31,7 @@ function tauri({ online, writes }) {
 			if (writes && cmd === 'plugin:fs|read_file' && written[args.path]) return written[args.path];
 			if (cmd === 'plugin:fs|exists') return !!(writes && written[args.path]);
 			if (cmd === 'plugin:opener|reveal_item_in_dir') return (window.__revealed = args.paths);
+			if (cmd === 'copy_files') return void (window.__copied = args.paths);
 			if (cmd === 'plugin:fs|read_dir') return [];
 			if (cmd === 'plugin:fs|mkdir') return null;
 			if (cmd.startsWith('plugin:fs|')) throw new Error('no file (mock)');
@@ -53,7 +54,8 @@ async function start(browser, { stored = null, account, scale = 1, writes = fals
 	const online = account !== undefined;
 	const context = await browser.newContext({
 		viewport: { width: 1440, height: 900 },
-		deviceScaleFactor: scale
+		deviceScaleFactor: scale,
+		permissions: ['clipboard-read', 'clipboard-write']
 	});
 	await context.addInitScript(tauri, { online, writes });
 	const sent = [];

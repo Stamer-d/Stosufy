@@ -139,6 +139,16 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		'saved: a 100×100 JPG',
 		JSON.stringify(await sizeOf('logo (edited).jpg', 'image/jpeg')) === '[100,100]'
 	);
+	await page.click('button[aria-label="Copy logo (edited).jpg"]');
+	await page.waitForSelector('text=Copied as a picture');
+	const copied = await page.evaluate(async () => {
+		const [item] = await navigator.clipboard.read();
+		const image = new Image();
+		image.src = URL.createObjectURL(await item.getType('image/png'));
+		await image.decode();
+		return [image.naturalWidth, image.naturalHeight];
+	});
+	check('"Copy": the edited picture on the clipboard', JSON.stringify(copied) === '[100,100]');
 
 	// --- Back to the converter ---------------------------------------------------------------
 	await page.click('button:has-text("Convert instead")');

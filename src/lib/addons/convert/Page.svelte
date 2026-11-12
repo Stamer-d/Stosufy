@@ -7,6 +7,7 @@
 	import { installedAddons } from '#lib/addons/store.ts';
 	import { reveal as revealFile } from '../files/save.ts';
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
+	import CopyButton from '../files/CopyButton.svelte';
 	import { nativeState, nativeFfmpeg, retryNative } from '../files/native.ts';
 	import {
 		jobs,
@@ -435,6 +436,7 @@
 										{size(job.saved.reduce((sum, file) => sum + file.size, 0))}
 									</span>
 								</button>
+								<CopyButton files={job.saved} />
 								<button
 									class="h-8 px-3 rounded-full font-semibold text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition"
 									onclick={() => chooseAgain(job.id)}

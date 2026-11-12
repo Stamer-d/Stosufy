@@ -8,6 +8,7 @@
 	import { cancel, probe, release } from '../files/ffmpeg.ts';
 	import { reveal } from '../files/save.ts';
 	import Formats from '../files/Formats.svelte';
+	import CopyButton from '../files/CopyButton.svelte';
 	import Timeline from './Timeline.svelte';
 	import { freshEdit, isEdited, lengthOf, saveMedia } from './media.ts';
 	import { clock, parseClock, waveform } from './waveform.ts';
@@ -415,6 +416,7 @@
 					<span class="icon-[mingcute--check-circle-fill] size-4"></span>
 					Saved: {saving.saved.name}
 				</button>
+				<CopyButton files={[saving.saved]} />
 				<span class="text-white/50">in Stosufy/Edited</span>
 			</div>
 		{:else if saving.status === 'failed'}
