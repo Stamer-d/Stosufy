@@ -16,8 +16,8 @@
 	import CropBox from './CropBox.svelte';
 	import Undo from './Undo.svelte';
 
-	/** @type {{ file: File }} */
-	let { file } = $props();
+	/** @type {{ file: File, dirty?: boolean }} */
+	let { file, dirty = $bindable(false) } = $props();
 
 	// (a file of its own each time: the page makes a new editor for another file)
 	// svelte-ignore state_referenced_locally
@@ -42,6 +42,11 @@
 		return () => window.removeEventListener('keydown', keys);
 	});
 	let saving = $state({ status: 'idle', saved: null, error: '' });
+	/** What it was when it was opened or last saved (to say when there's something to lose) */
+	let lastSaved = $state(JSON.stringify(freshImageEdit()));
+	$effect(() => {
+		dirty = JSON.stringify(edit) !== lastSaved;
+	});
 
 	// svelte-ignore state_referenced_locally
 	readImage(file, extensionOf(file.name))
@@ -51,13 +56,18 @@
 	// The turned and mirrored picture, to cut from
 	$effect(() => {
 		if (!image) return;
-		// (only the turn and the mirrors: not drawn again for each move of the part)
-		const canvas = oriented(image, {
-			...freshImageEdit(),
-			turns: edit.turns,
-			mirrorX: edit.mirrorX,
-			mirrorY: edit.mirrorY
-		});
+		// (only the turn and the mirrors: not drawn again for each move of the part; as big as
+		// it can be shown, not a camera's 6000 px)
+		const canvas = oriented(
+			image,
+			{
+				...freshImageEdit(),
+				turns: edit.turns,
+				mirrorX: edit.mirrorX,
+				mirrorY: edit.mirrorY
+			},
+			2048
+		);
 		let url = '';
 		let current = true;
 		canvas.toBlob((blob) => {
@@ -111,6 +121,7 @@
 		try {
 			const saved = await saveImage(file, image, $state.snapshot(edit), target);
 			saving = { status: 'done', saved, error: '' };
+			lastSaved = JSON.stringify($state.snapshot(edit));
 		} catch (error) {
 			console.warn('Could not save the picture:', error);
 			saving = { status: 'failed', saved: null, error: error?.message ?? String(error) };

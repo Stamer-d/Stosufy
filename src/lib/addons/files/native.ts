@@ -97,7 +97,8 @@ export async function nativeFfmpeg({ install = true } = {}): Promise<string | nu
 	if (!status?.supported) return null;
 	const state = get(nativeState).status;
 	if (state === 'ready') return workDir;
-	if (state === 'downloading') return (await installing) ? workDir : null;
+	// (being downloaded: waited for by what needs it, not by who only asks)
+	if (state === 'downloading') return install && (await installing) ? workDir : null;
 	if (!install || state === 'failed') return null;
 	return (await installNative()) ? workDir : null;
 }

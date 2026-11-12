@@ -5,7 +5,10 @@
 	// cut to a part of its picture, a frame of it saved as a picture, undone and redone, and
 	// saved in a format, as one file or a file for each part.
 	import { onDestroy, onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { keybindsPaused } from '#lib/stores/keybinds.ts';
+	import { currentSong, stopPlayback } from '#lib/stores/audio.ts';
 	import { detectFormat, editTargets, extensionOf } from '../files/formats.ts';
 	import { cancel, probe, release } from '../files/ffmpeg.ts';
 	import { reveal } from '../files/save.ts';
@@ -34,14 +37,28 @@
 	} from './media.ts';
 	import { clock, parseClock, waveform } from './waveform.ts';
 
-	/** @type {{ file: File, video: boolean }} */
-	let { file, video } = $props();
+	/**
+	 * @type {{
+	 *   file: File,
+	 *   video: boolean,
+	 *   dirty?: boolean,
+	 *   onkind?: (kind: 'audio') => void
+	 * }}
+	 */
+	let { file, video, dirty = $bindable(false), onkind } = $props();
 
 	// (a file of its own each time: the page makes a new editor for another file)
 	// svelte-ignore state_referenced_locally
 	const url = playable(file);
 	// svelte-ignore state_referenced_locally
-	const targets = editTargets(detectFormat(file));
+	const format = detectFormat(file);
+	const allTargets = editTargets(format);
+	/** Its formats; for a WebM or an MP4 with only sound in it, its sound's */
+	let targets = $derived(
+		!video && format?.kind === 'video'
+			? allTargets.filter((target) => target.group === 'Only the sound')
+			: allTargets
+	);
 	/** @type {['start' | 'end', string, string][]} */
 	const MARKS = [
 		['start', 'Start', 'I'],
@@ -66,39 +83,101 @@
 	/** @type {{ status: string, progress: number, saved: import('../files/save.ts').SavedFile[], error: string }} */
 	let saving = $state({ status: 'idle', progress: 0, saved: [], error: '' });
 	let frameSaved = $state(null);
+	/** It couldn't be read at all */
+	let failed = $state('');
+	/** The waveform's being read */
+	let reading = $state(false);
 	const id = `edit-${Math.random().toString(36).slice(2, 8)}`;
+	let gone = false;
 
-	const history = createHistory((value) => (edit = value));
+	const history = createHistory((value) => {
+		// (the part of the picture undone: it may not be in the shape chosen any more)
+		if (JSON.stringify(value.crop) !== JSON.stringify(edit.crop)) shape = 'free';
+		edit = value;
+	});
 	$effect(() => {
 		if (duration) history.changed($state.snapshot(edit));
 	});
 
 	function ready(seconds, width = 0, height = 0) {
-		if (!Number.isFinite(seconds) || seconds <= 0) return;
+		// (a recording that doesn't say how long it is, as the browser's own: FFmpeg reads it)
+		if (!Number.isFinite(seconds) || seconds <= 0) return void measure();
+		if (duration) return;
 		duration = seconds;
 		if (width && height) size = { width, height };
 		edit = freshEdit(seconds);
 		history.reset();
+		savedEdit();
+		reading = true;
+		void waveform(file, seconds, `${id}-wave`).then((found) => {
+			if (gone) return;
+			wave = found;
+			reading = false;
+		});
 	}
 
-	async function unplayableFile() {
-		unplayable = true;
+	/** How long it is (and its picture's size), read by FFmpeg */
+	async function measure() {
 		try {
 			const info = await probe(file, extensionOf(file.name));
+			if (!(info.duration > 0)) throw new Error("It doesn't say how long it is");
 			ready(info.duration, info.width, info.height);
 		} catch (error) {
 			console.warn('Could not read the file:', error);
+			if (!gone) failed = "This file couldn't be read: is it a song or a video?";
 		}
 	}
 
+	function unplayableFile() {
+		unplayable = true;
+		void measure();
+	}
+
+	function loaded() {
+		// (a WebM or an MP4 with only sound in it: edited as a song)
+		if (video && player && !player.videoWidth && !player.videoHeight && onkind) {
+			onkind('audio');
+			return;
+		}
+		ready(player.duration, player.videoWidth, player.videoHeight);
+	}
+
+	function started() {
+		playing = true;
+		// (not two things playing at once: the app's song stops)
+		if (get(currentSong).isPlaying) stopPlayback();
+		follow();
+	}
+
+	/** What it was when it was opened or last saved (to say when there's something to lose) */
+	let lastSaved = $state('');
+	const savedEdit = () => (lastSaved = JSON.stringify($state.snapshot(edit)));
+	$effect(() => {
+		dirty = !!duration && edited && JSON.stringify(edit) !== lastSaved;
+	});
+
+	// The app's shortcuts (Space: its song, …) not while editing: the editor's own
+	$effect(() => {
+		keybindsPaused.set(true);
+		return () => keybindsPaused.set(false);
+	});
+
 	onMount(() => {
-		waveform(file).then((found) => (wave = found));
 		const keys = (event) => {
 			if (history.key(event)) return;
 			const target = event.target;
-			if (target instanceof HTMLElement && target.closest('input, select, textarea')) return;
+			if (
+				target instanceof HTMLElement &&
+				target.closest('input, select, textarea, [role="menu"], [role="listbox"]')
+			)
+				return;
 			if (event.ctrlKey || event.metaKey || event.altKey) return;
-			if (event.key === ' ' && !(target instanceof HTMLButtonElement)) {
+			if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && duration) {
+				// (a tenth of a second; with Shift, a second)
+				event.preventDefault();
+				const by = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1);
+				seek(Math.min(duration, Math.max(0, time + by)));
+			} else if (event.key === ' ' && !(target instanceof HTMLButtonElement)) {
 				event.preventDefault();
 				toggle();
 			} else if (event.key === 'i' || event.key === 'I') setStart();
@@ -110,10 +189,15 @@
 	});
 
 	onDestroy(() => {
+		gone = true;
 		player?.pause();
 		if (url.startsWith('blob:')) URL.revokeObjectURL(url);
-		if (saving.status === 'working') void cancel(id);
-		void release(file);
+		// (what's still running stopped first: its copy of the file is let go after)
+		void (async () => {
+			if (saving.status === 'working') await cancel(id);
+			if (reading) await cancel(`${id}-wave`);
+			await release(file);
+		})();
 	});
 
 	// The effects, as far as the player can show them
@@ -127,6 +211,8 @@
 
 	let parts = $derived(duration ? partsOf(edit, duration) : []);
 	let kept = $derived(duration ? keptOf(edit, duration) : []);
+	/** The parts kept, each as it's cut (for a file each) */
+	let pieces = $derived(duration ? keptOf(edit, duration, true) : []);
 
 	let frame = 0;
 	/** Where it plays: over the parts taken out, stopped at the end */
@@ -210,6 +296,7 @@
 				id
 			);
 			saving = { status: 'done', progress: 1, saved, error: '' };
+			savedEdit();
 			void notifyDone(
 				'Saved',
 				`${saved.length === 1 ? saved[0].name : `${saved.length} parts`}, in Stosufy/Edited`
@@ -252,7 +339,8 @@
 		const sideways = edit.rotate % 180 !== 0;
 		const w = sideways ? (size.width / size.height) * 100 : 100;
 		const h = sideways ? (size.height / size.width) * 100 : 100;
-		return `left: 50%; top: 50%; width: ${w}%; height: ${h}%; transform: translate(-50%, -50%) rotate(${edit.rotate}deg)${edit.mirror ? ' scaleX(-1)' : ''}`;
+		// (turned, then mirrored as it's seen: the last one in the list is done first)
+		return `left: 50%; top: 50%; width: ${w}%; height: ${h}%; transform: translate(-50%, -50%)${edit.mirror ? ' scaleX(-1)' : ''} rotate(${edit.rotate}deg)`;
 	});
 </script>
 
@@ -316,12 +404,9 @@
 					src={url}
 					class="absolute max-w-none object-fill transition-transform duration-200"
 					style={videoStyle}
-					onloadedmetadata={() => ready(player.duration, player.videoWidth, player.videoHeight)}
+					onloadedmetadata={loaded}
 					onerror={unplayableFile}
-					onplay={() => {
-						playing = true;
-						follow();
-					}}
+					onplay={started}
 					onpause={() => {
 						playing = false;
 						cancelAnimationFrame(frame);
@@ -336,10 +421,7 @@
 			src={url}
 			onloadedmetadata={() => ready(player.duration)}
 			onerror={unplayableFile}
-			onplay={() => {
-				playing = true;
-				follow();
-			}}
+			onplay={started}
 			onpause={() => {
 				playing = false;
 				cancelAnimationFrame(frame);
@@ -366,6 +448,7 @@
 			bind:end={edit.end}
 			{time}
 			{wave}
+			{reading}
 			{parts}
 			{playing}
 			onseek={seek}
@@ -384,7 +467,9 @@
 					class="{playing ? 'icon-[mingcute--pause-fill]' : 'icon-[mingcute--play-fill]'} size-5"
 				></span>
 			</button>
-			<span class="tabular-nums text-white/70 w-16">{clock(time)}</span>
+			<span class="tabular-nums text-white/70 w-16" role="timer" aria-label="Where it plays"
+				>{clock(time)}</span
+			>
 			{#each MARKS as [which, label, key] (which)}
 				<label class="flex items-center gap-1.5">
 					<span class="text-white/60">{label}</span>
@@ -577,10 +662,10 @@
 					{edited ? 'Save as' : 'Nothing changed yet · save as'}
 				</span>
 				<Formats {targets} onpick={save} label="Save as" />
-				{#if kept.length > 1}
+				{#if pieces.length > 1}
 					<label class="ml-auto flex items-center gap-2 text-sm">
 						<input type="checkbox" class="accent-violet-400 size-4" bind:checked={edit.eachPart} />
-						Each of the {kept.length} parts as its own file
+						Each of the {pieces.length} parts as its own file
 					</label>
 				{/if}
 			{/if}
@@ -593,7 +678,12 @@
 				{saving.error}
 			</p>
 		{/if}
-	{:else if !unplayable}
+	{:else if failed}
+		<p class="flex items-center gap-1.5 text-sm text-red-300">
+			<span class="icon-[mingcute--warning-line] size-4"></span>
+			{failed}
+		</p>
+	{:else}
 		<p class="text-sm text-white/50">Reading the file…</p>
 	{/if}
 </div>

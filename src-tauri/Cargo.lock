@@ -8,6 +8,7 @@ version = "0.6.103"
 dependencies = [
  "clipboard-rs",
  "flate2",
+ "libc",
  "reqwest 0.13.5",
  "serde",
  "serde_json",

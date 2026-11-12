@@ -1,7 +1,8 @@
-// The downloader: a link looked at (yt-dlp mocked, see harness.cjs), a YouTube video's sound
-// as MP3 (YouTube's support fetched for it), a part of a Twitch VOD as a 720p MP4, a link that
-// can't be, signed in as in a browser, a download stopped, and on to the editor and the
-// converter.
+// The downloader: a link looked at (yt-dlp mocked, see harness.cjs), its formats and qualities
+// to choose from (each codec's own), a YouTube video's sound as MP3 at 192 kbps (YouTube's
+// support fetched for it), what was chosen kept for the next link, a part of a Twitch VOD, a
+// playlist's first video, a link that needs signing in, a download stopped, and on to the
+// editor and the converter.
 const { chromium, start } = require('./harness.cjs');
 
 const results = [];
@@ -13,9 +14,11 @@ function check(name, ok, detail = '') {
 const YOUTUBE = 'https://www.youtube.com/watch?v=abc123';
 const TWITCH = 'https://www.twitch.tv/videos/2385736857';
 const PLAYLIST = 'https://www.youtube.com/playlist?list=PL1';
-const PRIVATE = 'https://www.youtube.com/watch?v=private';
+const PRIVATE = 'https://www.youtube.com/watch?v=members';
 const SLOW = 'https://soundcloud.com/someone/slow';
-const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64001F' }));
+const MB = 1024 * 1024;
+const formats = (vcodec, heights, fps = 30) =>
+	heights.map((height) => ({ height, fps, vcodec, acodec: 'none', filesize: height * 50_000 }));
 
 (async () => {
 	const browser = await chromium.launch();
@@ -58,7 +61,16 @@ const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64
 						title: 'Mix',
 						extractor_key: 'YoutubeTab',
 						webpage_url: PLAYLIST,
+						playlist_count: 30,
 						entries: [{ title: 'a' }, { title: 'b' }, { title: 'c' }]
+					},
+					[PRIVATE]: {
+						_type: 'video',
+						title: 'Members video',
+						duration: 60,
+						extractor_key: 'Youtube',
+						webpage_url: PRIVATE,
+						formats: yt
 					},
 					[SLOW]: {
 						_type: 'video',
@@ -66,10 +78,12 @@ const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64
 						duration: 100,
 						extractor_key: 'Soundcloud',
 						webpage_url: SLOW,
-						formats: [{ vcodec: 'none' }]
+						formats: [{ vcodec: 'none', acodec: 'mp3', filesize: 2_000_000 }]
 					}
 				},
-				errors: { [PRIVATE]: 'This video is private' }
+				errors: { [PRIVATE]: 'Only for members of the channel: sign in to download it' },
+				unlocks: { [PRIVATE]: 'firefox' },
+				notes: { [PLAYLIST]: '2 of its videos are private' }
 			};
 		},
 		{
@@ -78,8 +92,14 @@ const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64
 			PLAYLIST,
 			PRIVATE,
 			SLOW,
-			yt: [...formats([360, 720, 1080]), { vcodec: 'none' }],
-			tw: formats([160, 480, 720, 1080])
+			yt: [
+				...formats('avc1.64001F', [360, 720]),
+				...formats('avc1.640028', [1080], 60),
+				...formats('vp09.00.40.08', [1440, 1080, 480]),
+				...formats('av01.0.08M.08', [1080]),
+				{ vcodec: 'none', acodec: 'opus', filesize: 3 * MB }
+			],
+			tw: formats('avc1.4D401F', [160, 480, 720, 1080])
 		}
 	);
 	const requests = () => page.evaluate(() => window.__ytdlp.requests ?? []);
@@ -88,46 +108,128 @@ const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64
 		await page.press('input[aria-label="Link"]', 'Enter');
 	};
 	const row = (title) => page.locator(`ul[aria-label="Downloads"] > li[aria-label="${title}"]`);
+	const dropdown = (label) => page.locator(`button[aria-label="${label}"][aria-haspopup]`);
+	/** The options of a dropdown (opened and closed again) */
+	const optionsOf = async (label) => {
+		await dropdown(label).click();
+		const list = page.locator(`[role="listbox"][aria-label="${label}"] [role="option"]`);
+		const all = [];
+		for (let i = 0; i < (await list.count()); i++)
+			all.push((await list.nth(i).innerText()).replace(/\s+/g, ' ').trim());
+		await page.keyboard.press('Escape');
+		return all;
+	};
+	const choose = async (label, value) => {
+		await dropdown(label).click();
+		await page.click(
+			`[role="listbox"][aria-label="${label}"] [role="option"][data-value="${value}"]`
+		);
+	};
+	const shown = async (label) => (await dropdown(label).innerText()).replace(/\s+/g, ' ').trim();
+	const tab = (name) =>
+		page.locator(`[role="tablist"][aria-label="What"] [role="tab"]:has-text("${name}")`);
 
 	await page.click('header button[aria-label="Downloader"]');
 	await page.waitForURL('**/addons/download');
 	await page.waitForSelector('text=Paste a link to start');
 	check('its page: a field for the link', true);
 
-	// --- A YouTube video's sound -------------------------------------------------------------
+	// --- A YouTube video: its formats, its qualities, its sound as MP3 -------------------------
 	await link(YOUTUBE);
 	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
+	const what = await page.locator('section[aria-label="What it is"]').innerText();
 	check(
 		'what it is: its site, channel and length',
-		/youtube/i.test(await page.locator('section[aria-label="What it is"]').innerText()) &&
-			/Someone · 3:35/.test(await page.locator('section[aria-label="What it is"]').innerText())
+		/youtube/i.test(what) && /Someone · 3:35/.test(what),
+		what
 	);
 	check(
 		'YouTube support fetched for a YouTube link',
 		(await page.evaluate(() => window.__ytdlp.denoInstalls)) === 1
 	);
-	const qualities = await page
-		.locator('[role="radiogroup"][aria-label="Quality"] button')
-		.allInnerTexts();
 	check(
-		'its qualities, the best first',
-		JSON.stringify(qualities) === JSON.stringify(['Best', '1080p', '720p', '360p']),
-		JSON.stringify(qualities)
+		'Video and Sound as two tabs, Video first',
+		(await tab('Video').getAttribute('aria-selected')) === 'true'
 	);
-	await page.click('[role="radiogroup"][aria-label="What"] button:has-text("Only the sound")');
-	await page.click('[role="radiogroup"][aria-label="Sound format"] button:has-text("MP3")');
+	const codecs = (await optionsOf('Video format')).map((text) =>
+		text.split(' ').slice(0, 3).join(' ')
+	);
+	check(
+		'every codec it has, to choose (and the best of all, as MKV)',
+		JSON.stringify(codecs) ===
+			JSON.stringify(['MP4 · H.264', 'MP4 · AV1', 'WebM · VP9', 'MKV · Best']),
+		JSON.stringify(codecs)
+	);
+	check(
+		'H.264 chosen at first (plays everywhere)',
+		/MP4 · H\.264/.test(await shown('Video format'))
+	);
+	const h264 = await optionsOf('Quality');
+	check(
+		"H.264's qualities, the best first, with 60 fps and how big",
+		/^Best/.test(h264[0]) &&
+			/^1080p60 .*≈ 5\d MB/.test(h264[1]) &&
+			/^720p/.test(h264[2]) &&
+			/^360p/.test(h264[3]) &&
+			h264.length === 4,
+		JSON.stringify(h264)
+	);
+	await choose('Video format', 'vp9');
+	const vp9 = (await optionsOf('Quality')).map((text) => text.split(' ')[0]);
+	check(
+		'another codec: its own qualities',
+		JSON.stringify(vp9) === JSON.stringify(['Best', '1440p', '1080p', '480p']),
+		JSON.stringify(vp9)
+	);
+	check(
+		'the download button says how big',
+		/Download ≈ \d+ MB/.test(
+			(
+				await page
+					.locator('section[aria-label="What it is"] button:has-text("Download")')
+					.innerText()
+			).replace(/\s+/g, ' ')
+		)
+	);
+	await tab('Sound').click();
+	const sounds = (await optionsOf('Sound format')).map((text) => text.split(' ')[0]);
+	check(
+		'sound formats, to choose',
+		JSON.stringify(sounds) === JSON.stringify(['MP3', 'M4A', 'Opus', 'FLAC', 'WAV', 'Original']),
+		JSON.stringify(sounds)
+	);
+	await choose('Sound format', 'mp3');
+	const kbps = (await optionsOf('Sound quality')).map((text) =>
+		text.split(' ').slice(0, 2).join(' ')
+	);
+	check(
+		"MP3's bitrates, to choose",
+		JSON.stringify(kbps) ===
+			JSON.stringify(['Best as', '320 kbps', '256 kbps', '192 kbps', '128 kbps']),
+		JSON.stringify(kbps)
+	);
+	await choose('Sound quality', '192');
 	await page.click('section[aria-label="What it is"] button:has-text("Download")');
 	await row('Test song').locator('text=Test song.mp3').waitFor();
 	const first = (await requests())[0];
 	check(
-		'asked for: its sound as MP3, sponsors out, just the video',
+		'asked for: its sound as MP3 at 192 kbps, sponsors out, just the video',
 		first.kind === 'audio' &&
 			first.format === 'mp3' &&
+			first.audioKbps === 192 &&
+			first.codec === null &&
+			first.height === null &&
 			first.sponsorblock === true &&
 			first.playlist === false &&
+			first.playlistItems === null &&
 			first.sections.length === 0 &&
 			first.cookies === null,
 		JSON.stringify(first)
+	);
+	check(
+		'the download says what it is',
+		/YouTube · MP3 · 192 kbps/.test(await row('Test song').innerText()),
+		await row('Test song').innerText()
 	);
 	check(
 		'saved in Stosufy/Downloads',
@@ -138,7 +240,7 @@ const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64
 		(await page.inputValue('input[aria-label="Link"]')) === ''
 	);
 
-	// --- A part of a Twitch VOD --------------------------------------------------------------
+	// --- A part of a Twitch VOD: what was chosen kept ----------------------------------------
 	await link(TWITCH);
 	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Long stream")');
 	check(
@@ -146,15 +248,18 @@ const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64
 		(await page.evaluate(() => window.__ytdlp.denoInstalls)) === 1
 	);
 	check(
-		'the last choice kept (only the sound)',
-		(await page.getAttribute(
-			'[role="radiogroup"][aria-label="What"] button:has-text("Only the sound")',
-			'aria-checked'
-		)) === 'true'
+		'the last choice kept (the sound, as MP3 at 192 kbps)',
+		(await tab('Sound').getAttribute('aria-selected')) === 'true' &&
+			/^MP3/.test(await shown('Sound format')) &&
+			/^192 kbps/.test(await shown('Sound quality'))
 	);
-	await page.click('[role="radiogroup"][aria-label="What"] button:has-text("Video")');
-	await page.click('[role="radiogroup"][aria-label="Video format"] button:has-text("MP4")');
-	await page.click('[role="radiogroup"][aria-label="Quality"] button:has-text("720p")');
+	await tab('Video').click();
+	check(
+		"a codec it doesn't have (VP9): the first it has",
+		/MP4 · H\.264/.test(await shown('Video format')),
+		await shown('Video format')
+	);
+	await choose('Quality', '720');
 	await page.check('text=Only a part of it');
 	await page.fill('input[aria-label="Part start time"]', '1:00:00');
 	await page.press('input[aria-label="Part start time"]', 'Enter');
@@ -165,43 +270,122 @@ const formats = (heights) => heights.map((height) => ({ height, vcodec: 'avc1.64
 	await row('Long stream').locator('text=Long stream.mp4').waitFor();
 	const second = (await requests())[1];
 	check(
-		'asked for: 1:00:00–1:05:00, cut exactly, as a 720p MP4',
+		'asked for: 1:00:00–1:05:00, cut exactly, as a 720p H.264 MP4',
 		JSON.stringify(second.sections) === '[[3600,3900]]' &&
 			second.exactCuts === true &&
 			second.kind === 'video' &&
 			second.format === 'mp4' &&
+			second.codec === 'h264' &&
 			second.height === 720 &&
+			second.audioKbps === null &&
 			second.sponsorblock === false,
 		JSON.stringify(second)
 	);
 	check(
 		'the download says what it is',
-		/Twitch · MP4 · 720p · 1:00:00–1:05:00/.test(await row('Long stream').innerText()),
+		/Twitch · MP4 · H\.264 · 720p · 1:00:00–1:05:00/.test(await row('Long stream').innerText()),
 		await row('Long stream').innerText()
 	);
 
-	// --- A playlist, a private video ---------------------------------------------------------
-	await link(PLAYLIST);
-	await page.waitForSelector('text=All 3 videos of the playlist');
-	check('a playlist: all of its videos, to choose', true);
-	await link(PRIVATE);
-	await page.waitForSelector('text=This video is private');
-	check("a link that can't be: says why", true);
+	// --- Back on YouTube: VP9 chosen there last (Twitch has none), 720p the highest under it ---
+	await link(YOUTUBE);
+	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
+	check(
+		'the codec chosen there last kept: VP9; it has no 720p, the highest under it',
+		/WebM · VP9/.test(await shown('Video format')) && /^480p/.test(await shown('Quality')),
+		`${await shown('Video format')} / ${await shown('Quality')}`
+	);
+	await choose('Video format', 'h264');
+	check(
+		'H.264 again: 720p, as chosen last',
+		/^720p/.test(await shown('Quality')),
+		await shown('Quality')
+	);
 
-	// --- Signed in, stopped ------------------------------------------------------------------
-	await page.selectOption('select[aria-label="Signed in as"]', 'firefox');
+	// --- A playlist, a video for members -----------------------------------------------------
+	await link(PLAYLIST);
+	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Mix")');
+	const which = await optionsOf('Which videos');
+	check(
+		'a playlist: all of its videos, or the first few',
+		JSON.stringify(which) ===
+			JSON.stringify(['All 30 videos', 'The first 10', 'The first 25', 'Only the first']),
+		JSON.stringify(which)
+	);
+	check(
+		"a playlist's codecs: all of them (not known one by one)",
+		(await optionsOf('Video format')).length === 5
+	);
+	await choose('Which videos', '1');
+	await page.click('section[aria-label="What it is"] button:has-text("Download")');
+	await row('Mix').locator('text=Mix.mp4').waitFor();
+	const third = (await requests())[2];
+	check(
+		"asked for: the playlist's first video",
+		third.playlist === true && third.playlistItems === '1' && third.codec === 'h264',
+		JSON.stringify(third)
+	);
+	check(
+		'in a folder of its own, and what went wrong with some said',
+		(await page.evaluate(() => !!window.__written['/home/tester/Stosufy/Downloads/Mix/Mix.mp4'])) &&
+			/2 of its videos are private/.test(await row('Mix').innerText()) &&
+			/the first video/.test(await row('Mix').innerText()),
+		await row('Mix').innerText()
+	);
+	await link(PRIVATE);
+	await page.waitForSelector('text=Only for members of the channel');
+	check("a link that can't be: says why", true);
+	const browsers = await optionsOf('Signed in as');
+	check(
+		'browsers to sign in as (no Safari but on a Mac)',
+		browsers[0].startsWith('Not signed in') &&
+			browsers.some((text) => text.startsWith('As in Firefox')) &&
+			!browsers.some((text) => /Safari/.test(text)),
+		JSON.stringify(browsers)
+	);
+	await choose('Signed in as', 'firefox');
+	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Members video")');
+	check(
+		'signed in: looked at again, as in Firefox',
+		(await page.evaluate(() => window.__ytdlp.looked.at(-1).cookies)) === 'firefox'
+	);
+
+	// --- Only sound, stopped -----------------------------------------------------------------
 	await link(SLOW);
 	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Slow one")');
 	check(
 		'only sound there: no video to choose',
-		(await page.locator('[role="radiogroup"][aria-label="What"]').count()) === 0
+		(await tab('Video').isDisabled()) &&
+			(await tab('Sound').getAttribute('aria-selected')) === 'true'
 	);
 	await page.click('section[aria-label="What it is"] button:has-text("Download")');
 	await row('Slow one').waitFor();
-	check('signed in as in Firefox', (await requests())[2].cookies === 'firefox');
+	const fourth = (await requests())[3];
+	check('signed in as in Firefox', fourth.cookies === 'firefox' && fourth.kind === 'audio');
 	await page.click('button[aria-label="Stop Slow one"]');
 	await row('Slow one').waitFor({ state: 'detached' });
 	check('stopped: off the list', true);
+	await link(YOUTUBE);
+	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
+	check(
+		'a link with only sound changes no choice: Video again for a video',
+		(await tab('Video').getAttribute('aria-selected')) === 'true'
+	);
+
+	// --- Remembered when the page is opened again --------------------------------------------
+	const kept = await page.evaluate(() =>
+		JSON.parse(localStorage.getItem('stosufy-download-options') ?? '{}')
+	);
+	check(
+		'kept: video, H.264, 720p, MP3 at 192 kbps, Firefox',
+		kept.tab === 'video' &&
+			kept.codec === 'h264' &&
+			kept.height === 720 &&
+			kept.audioFormat === 'mp3' &&
+			kept.audioKbps === 192 &&
+			kept.cookies === 'firefox',
+		JSON.stringify(kept)
+	);
 
 	// --- On to the editor and the converter --------------------------------------------------
 	await row('Test song').locator('button:has-text("Edit")').click();

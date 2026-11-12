@@ -8,6 +8,7 @@
 	import { reveal as revealFile } from '../files/save.ts';
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
 	import CopyButton from '../files/CopyButton.svelte';
+	import Formats from '../files/Formats.svelte';
 	import { dragOut } from '../files/dragout.ts';
 	import { pickFiles } from '../files/picked.ts';
 	import { nativeState, nativeFfmpeg, retryNative } from '../files/native.ts';
@@ -76,27 +77,29 @@
 	/** What several files not converted yet, all of one kind, can all become (for "All to") */
 	let common = $derived.by(() => {
 		if (waiting.length < 2 || waiting.some((job) => job.kind !== waiting[0].kind)) return [];
+		// ("Smaller" only when they're all of one format: a PNG's would make JPGs into PNGs)
+		const oneFormat = waiting.every((job) => job.format?.id === waiting[0].format?.id);
 		return waiting[0].targets.filter(
 			(target) =>
 				target.group !== 'Any file' &&
+				(oneFormat || target.group !== 'Smaller') &&
 				waiting.every((job) => job.targets.some((other) => other.id === target.id))
 		);
+	});
+
+	/** The last file done or failed, said to screen readers */
+	let announcement = $derived.by(() => {
+		const last = $jobs.findLast((job) => job.status === 'done' || job.status === 'failed');
+		if (!last) return '';
+		return last.status === 'done'
+			? `${last.file.name}: done, ${last.saved.map((file) => file.name).join(', ')}`
+			: `${last.file.name}: couldn't be converted. ${last.error}`;
 	});
 
 	let canEdit = $derived($installedAddons.some((addon) => addon.id === 'edit'));
 
 	const soundOnly = (target) => target.group === 'Only the sound';
 	const smaller = (target) => target.group === 'Smaller';
-	const titleOf = (target) =>
-		soundOnly(target)
-			? `Only the sound, as ${target.label}`
-			: smaller(target)
-				? `A smaller ${target.label}`
-				: target.id === 'unzip'
-					? 'Unpack the files in it'
-					: target.id === 'base64'
-						? 'As Base64 text'
-						: `As ${target.label}`;
 
 	function size(bytes) {
 		if (bytes < 1024) return `${bytes} B`;
@@ -138,7 +141,12 @@
 			reveal(path);
 		} catch (error) {
 			console.error('Could not make the ZIP:', error);
-			showToast("Couldn't make the ZIP", 'icon-[mingcute--warning-line]');
+			showToast(
+				String(error?.message ?? '').startsWith('Too big')
+					? error.message
+					: "Couldn't make the ZIP",
+				'icon-[mingcute--warning-line]'
+			);
 		} finally {
 			zipping = false;
 		}
@@ -165,49 +173,8 @@
 	});
 </script>
 
-{#snippet formats(targets, onpick, label)}
-	<div class="flex flex-wrap items-center gap-1.5" role="group" aria-label={label}>
-		{#each targets.slice(0, QUICK) as target (target.id)}
-			<button
-				class="h-8 px-3 flex items-center gap-1.5 rounded-full text-sm font-bold bg-white/[0.08] hover:bg-white hover:text-black cursor-pointer transition"
-				title={titleOf(target)}
-				data-target={target.id}
-				onclick={() => onpick(target.id)}
-			>
-				{#if soundOnly(target)}
-					<span class="icon-[mingcute--music-2-line] size-3.5 opacity-70"></span>
-				{:else if smaller(target)}
-					<span class="icon-[mingcute--arrow-down-line] size-3.5 opacity-70"></span>
-				{/if}
-				{smaller(target) ? `Smaller ${target.label}` : target.label}
-			</button>
-		{/each}
-		{#if targets.length > QUICK}
-			<label
-				class="relative h-8 pl-3 pr-2 flex items-center gap-1 rounded-full text-sm font-semibold text-white/70 hover:text-white hover:bg-white/[0.08] cursor-pointer transition"
-			>
-				More
-				<span class="icon-[mingcute--down-line] size-3.5"></span>
-				<select
-					class="absolute inset-0 opacity-0 cursor-pointer"
-					aria-label="More formats"
-					value=""
-					onchange={(event) => {
-						const value = event.currentTarget.value;
-						event.currentTarget.value = '';
-						if (value) onpick(value);
-					}}
-				>
-					<option value="" disabled>More formats</option>
-					{#each targets.slice(QUICK) as target (target.id)}
-						<option value={target.id} class="bg-panel">{titleOf(target).replace(/^As /, '')}</option
-						>
-					{/each}
-				</select>
-			</label>
-		{/if}
-	</div>
-{/snippet}
+<!-- (for screen readers: what's done, what failed) -->
+<p class="sr-only" aria-live="polite">{announcement}</p>
 
 <div
 	class="relative min-h-full pb-12"
@@ -241,12 +208,12 @@
 			style="background: linear-gradient(120deg, #f59e0b, #ef4444 55%, transparent)"
 		></div>
 		<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/30 to-transparent"></div>
-		<div class="relative px-8 pt-9 pb-5 flex flex-wrap items-end justify-between gap-4">
+		<div class="relative px-8 pt-7 pb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
 			<div>
-				<h1 class="flex items-center gap-3 text-4xl font-extrabold tracking-tight">
-					<span class="icon-[mingcute--transfer-line] size-9"></span>File converter
+				<h1 class="flex items-center gap-2.5 text-3xl font-extrabold tracking-tight">
+					<span class="icon-[mingcute--transfer-line] size-8"></span>File converter
 				</h1>
-				<p class="mt-1.5 text-white/75">
+				<p class="mt-1 text-sm text-white/70">
 					Drop a file, click the format you want. It stays on your computer.
 				</p>
 				{#if $nativeState.status === 'downloading'}
@@ -359,7 +326,7 @@
 					<span class="text-sm font-semibold text-amber-100"
 						>All {waiting.length} {KINDS[waiting[0].kind].plural} to</span
 					>
-					{@render formats(common, convertAllTo, 'All files to')}
+					<Formats targets={common} onpick={convertAllTo} label="All files to" quick={QUICK} />
 				</div>
 			{/if}
 
@@ -392,13 +359,14 @@
 							</div>
 						</div>
 
-						<div class="flex items-center gap-2 text-sm">
+						<div class="flex flex-wrap items-center justify-end gap-2 text-sm">
 							{#if job.status === 'ready'}
-								{@render formats(
-									job.targets,
-									(id) => convertTo(job.id, id),
-									`Convert ${job.file.name} to`
-								)}
+								<Formats
+									targets={job.targets}
+									onpick={(id) => convertTo(job.id, id)}
+									label="Convert {job.file.name} to"
+									quick={QUICK}
+								/>
 							{:else if job.status === 'waiting' || job.status === 'working'}
 								<span class="font-semibold text-white/70">
 									{target && soundOnly(target)
@@ -448,24 +416,20 @@
 								</button>
 								<CopyButton files={job.saved} />
 								<button
-									class="h-8 px-3 rounded-full font-semibold text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									class="h-8 px-3 rounded-full font-semibold whitespace-nowrap text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition"
 									onclick={() => chooseAgain(job.id)}
 								>
 									Other format
 								</button>
 							{:else if job.status === 'failed'}
-								<span class="max-w-80 flex items-center gap-1.5 text-red-300" title={job.error}>
-									<span class="icon-[mingcute--warning-line] size-4 shrink-0"></span>
-									<span class="line-clamp-2">{job.error}</span>
-								</span>
 								<button
-									class="h-8 px-3 rounded-full font-semibold bg-white/[0.08] hover:bg-white/15 cursor-pointer transition"
+									class="h-8 px-3 rounded-full font-semibold whitespace-nowrap bg-white/[0.08] hover:bg-white/15 cursor-pointer transition"
 									onclick={() => retry(job.id)}
 								>
 									Try again
 								</button>
 								<button
-									class="h-8 px-3 rounded-full font-semibold text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									class="h-8 px-3 rounded-full font-semibold whitespace-nowrap text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition"
 									onclick={() => chooseAgain(job.id)}
 								>
 									Other format
@@ -500,6 +464,12 @@
 								</button>
 							{/if}
 						</div>
+						{#if job.status === 'failed'}
+							<p class="basis-full pl-14 flex items-start gap-1.5 text-sm text-red-300">
+								<span class="icon-[mingcute--warning-line] size-4 shrink-0 mt-0.5"></span>
+								{job.error}
+							</p>
+						{/if}
 						{#if job.status === 'done' && job.note}
 							<p class="basis-full pl-14 flex items-center gap-1.5 text-xs text-amber-200/90">
 								<span class="icon-[mingcute--information-line] size-3.5"></span>

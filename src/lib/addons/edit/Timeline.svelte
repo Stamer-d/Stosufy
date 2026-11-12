@@ -12,6 +12,7 @@
 	 *   end: number,
 	 *   time: number,
 	 *   wave: import('./waveform.ts').Waveform | null,
+	 *   reading?: boolean,
 	 *   parts: import('./media.ts').Part[],
 	 *   playing: boolean,
 	 *   onseek: (time: number) => void,
@@ -25,6 +26,7 @@
 		end = $bindable(),
 		time,
 		wave,
+		reading = false,
 		parts,
 		playing,
 		onseek,
@@ -158,6 +160,14 @@
 		onwheel={wheel}
 	>
 		<canvas bind:this={canvas} class="absolute inset-0 size-full"></canvas>
+		{#if reading}
+			<span
+				class="absolute right-2 bottom-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/50 text-[11px] font-semibold text-white/60 pointer-events-none"
+			>
+				<span class="icon-[mingcute--loading-line] size-3 animate-spin"></span>
+				Reading the sound…
+			</span>
+		{/if}
 		<!-- The part kept -->
 		<div
 			class="absolute top-2.5 bottom-0 bg-violet-300/10 ring-1 ring-inset ring-violet-300/50 cursor-grab active:cursor-grabbing"

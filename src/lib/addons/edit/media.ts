@@ -95,12 +95,21 @@ export function partsOf(edit: MediaEdit, duration: number): Part[] {
 	}));
 }
 
-/** What's kept: the parts not taken out, within the start and the end */
-export function keptOf(edit: MediaEdit, duration: number) {
-	return partsOf(edit, duration)
+/** What's kept: the parts not taken out, within the start and the end (parts next to each
+ * other one piece: a split alone changes nothing; each part a file of its own: `split`) */
+export function keptOf(edit: MediaEdit, duration: number, split = false) {
+	const kept = partsOf(edit, duration)
 		.filter((part) => !part.dropped)
 		.map((part) => ({ from: Math.max(part.from, edit.start), to: Math.min(part.to, edit.end) }))
 		.filter((part) => part.to - part.from > 0.01);
+	if (split) return kept;
+	const joined: { from: number; to: number }[] = [];
+	for (const part of kept) {
+		const last = joined.at(-1);
+		if (last && Math.abs(part.from - last.to) < 1e-6) last.to = part.to;
+		else joined.push({ ...part });
+	}
+	return joined;
 }
 
 /** A cut more at `time` (a part taken out stays so on both sides) */
@@ -141,7 +150,9 @@ export function audioFilters(edit: MediaEdit, sampleRate: number, length: number
 		else filters.push(`asetrate=${Math.round(sampleRate * edit.speed)}`, `aresample=${sampleRate}`);
 	}
 	if (edit.volume) filters.push(`volume=${n(edit.volume)}dB`);
-	if (edit.normalize) filters.push('loudnorm=I=-14:TP=-1.5:LRA=11');
+	// (loudnorm works at 192 kHz: back to what the sound was)
+	if (edit.normalize)
+		filters.push('loudnorm=I=-14:TP=-1.5:LRA=11', `aresample=${sampleRate || 48000}`);
 	if (edit.fadeIn) filters.push(`afade=t=in:st=0:d=${n(Math.min(edit.fadeIn, length))}`);
 	if (edit.fadeOut)
 		filters.push(
@@ -186,11 +197,12 @@ function argsFor(
 	info: Probe,
 	audioOnly: boolean,
 	cover: boolean
-): { args: string[]; before: string[] } {
+): { args: string[]; before: string[]; inputs?: string[][] } {
 	const length = pieces.reduce((sum, piece) => sum + piece.to - piece.from, 0) / edit.speed;
 	const af = audioFilters(edit, info.sampleRate, length);
 	const vf = videoFilters(edit, length);
-	const sound = !audioOnly ? info.audio && !edit.mute : true;
+	// (a GIF has no sound)
+	const sound = audioOnly || (info.audio && !edit.mute && target.id !== 'gif');
 
 	// One piece: read from its start for its length (fast), the filters on it
 	if (pieces.length === 1) {
@@ -209,15 +221,16 @@ function argsFor(
 		};
 	}
 
-	// Several: each cut out and put together, the filters after that
+	// Several: each read from where it starts (the file once for each: fast, not all of it
+	// decoded), put together, the filters after that
 	const chains: string[] = [];
 	const inputs: string[] = [];
-	pieces.forEach(({ from, to }, i) => {
-		const range = `start=${n(from)}:end=${n(to)}`;
-		if (!audioOnly) chains.push(`[0:v:0]trim=${range},setpts=PTS-STARTPTS[v${i}]`);
-		if (sound) chains.push(`[0:a:0]atrim=${range},asetpts=PTS-STARTPTS[a${i}]`);
+	pieces.forEach((_, i) => {
+		if (!audioOnly) chains.push(`[${i}:v:0]setpts=PTS-STARTPTS[v${i}]`);
+		if (sound) chains.push(`[${i}:a:0]asetpts=PTS-STARTPTS[a${i}]`);
 		inputs.push(`${audioOnly ? '' : `[v${i}]`}${sound ? `[a${i}]` : ''}`);
 	});
+	const reads = pieces.map(({ from, to }) => ['-ss', String(n(from)), '-t', String(n(to - from))]);
 	const v = audioOnly ? 0 : 1;
 	const a = sound ? 1 : 0;
 	const outs = `${v ? '[vc]' : ''}${a ? '[ac]' : ''}`;
@@ -226,6 +239,7 @@ function argsFor(
 	if (audioOnly) {
 		return {
 			before: [],
+			inputs: reads,
 			args: audioArgs(target.id, 'best', {
 				cover,
 				graph: { filter: chains.join(';'), audio: '[a]' }
@@ -236,9 +250,14 @@ function argsFor(
 	chains.push(`[vc]${[vf, picture].filter(Boolean).join(',')}[v]`);
 	const filter = chains.join(';');
 	if (target.id === 'gif')
-		return { before: [], args: ['-filter_complex', filter, '-map', '[v]', '-an', '-loop', '0'] };
+		return {
+			before: [],
+			inputs: reads,
+			args: ['-filter_complex', filter, '-map', '[v]', '-an', '-loop', '0']
+		};
 	return {
 		before: [],
+		inputs: reads,
 		args: videoArgs(target.id, 'best', {
 			graph: { filter, video: '[v]', audio: a ? '[a]' : undefined },
 			mute: !a
@@ -257,9 +276,9 @@ export async function saveMedia(
 	id: string
 ): Promise<SavedFile[]> {
 	const extension = extensionOf(file.name);
-	const info = await probe(file, extension);
+	const info = await probe(file, extension, id);
 	const audioOnly = !isVideo || target.group === 'Only the sound';
-	const kept = keptOf(edit, duration);
+	const kept = keptOf(edit, duration, edit.eachPart);
 	if (!kept.length) throw new Error('Nothing is kept: every part is taken out');
 	const files = edit.eachPart && kept.length > 1 ? kept.map((piece) => [piece]) : [kept];
 	const total = files.reduce(
@@ -275,9 +294,10 @@ export async function saveMedia(
 				? `${baseName(file.name)} (part ${i + 1}).${target.extension}`
 				: `${baseName(file.name)} (edited).${target.extension}`;
 		const run = (cover: boolean) => {
-			const { args, before } = argsFor(pieces, edit, target, info, audioOnly, cover);
+			const { args, before, inputs } = argsFor(pieces, edit, target, info, audioOnly, cover);
 			return runFfmpeg(file, extension, args, target.extension, {
 				before,
+				inputs,
 				progress: (share) => progress((done + share * span) / total),
 				duration: span / edit.speed,
 				id

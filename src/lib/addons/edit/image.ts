@@ -80,19 +80,25 @@ export function adjust(canvas: HTMLCanvasElement, edit: ImageEdit) {
 	context.putImageData(image, 0, 0);
 }
 
-/** The picture turned and mirrored (the whole of it) */
-export function oriented(image: HTMLImageElement, edit: ImageEdit) {
-	const w = image.naturalWidth;
-	const h = image.naturalHeight;
+/**
+ * The picture turned and mirrored (the whole of it; at most `maxSide` px on its longest side,
+ * for showing it). Mirrored as it's seen: after it's turned.
+ */
+export function oriented(image: HTMLImageElement, edit: ImageEdit, maxSide = 0) {
+	const k = maxSide ? Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight)) : 1;
+	const w = Math.max(1, Math.round(image.naturalWidth * k));
+	const h = Math.max(1, Math.round(image.naturalHeight * k));
 	const sideways = edit.turns % 2 === 1;
 	const canvas = document.createElement('canvas');
 	canvas.width = sideways ? h : w;
 	canvas.height = sideways ? w : h;
 	const context = canvas.getContext('2d')!;
+	context.imageSmoothingQuality = 'high';
 	context.translate(canvas.width / 2, canvas.height / 2);
-	context.rotate((edit.turns * Math.PI) / 2);
+	// (the last applied first: turned, then mirrored)
 	context.scale(edit.mirrorX ? -1 : 1, edit.mirrorY ? -1 : 1);
-	context.drawImage(image, -w / 2, -h / 2);
+	context.rotate((edit.turns * Math.PI) / 2);
+	context.drawImage(image, -w / 2, -h / 2, w, h);
 	return canvas;
 }
 

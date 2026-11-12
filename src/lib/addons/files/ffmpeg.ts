@@ -24,7 +24,15 @@ export interface RunOptions {
 	id?: string;
 	/** Before the input (`-ss` to start there, `-t` for how long: fast, and exact) */
 	before?: string[];
+	/** The input more than once, each with its own `before` (pieces of it: input 0, 1, …) */
+	inputs?: string[][];
 }
+
+/** The input's arguments: once, or once for each piece of it */
+const inputArgs = (input: string, options: RunOptions) =>
+	options.inputs?.length
+		? options.inputs.flatMap((before) => [...before, '-i', input])
+		: [...(options.before ?? []), '-i', input];
 
 export interface Probe {
 	/** Seconds, 0 if unknown */
@@ -38,6 +46,19 @@ export interface Probe {
 	height: number;
 	/** Of the sound (Hz), 0 if unknown */
 	sampleRate: number;
+}
+
+/** What was stopped (by its id): stopped wherever it is, also before FFmpeg runs */
+const cancelled = new Set<string>();
+
+/** Throws `Cancelled` if what has this id was stopped */
+export function stopIfCancelled(id?: string) {
+	if (id && cancelled.has(id)) throw new Cancelled();
+}
+
+/** Done with an id (it can be used again) */
+export function forgetCancelled(id: string) {
+	cancelled.delete(id);
 }
 
 export class Cancelled extends Error {
@@ -63,10 +84,12 @@ async function turn(limit: number) {
 }
 
 /** Runs `work` in a turn: up to PARALLEL with the native FFmpeg, one with the other */
-async function inTurn<T>(work: (dir: string | null) => Promise<T>): Promise<T> {
+async function inTurn<T>(work: (dir: string | null) => Promise<T>, id?: string): Promise<T> {
 	const dir = await nativeFfmpeg();
+	stopIfCancelled(id);
 	const done = await turn(dir ? PARALLEL : 1);
 	try {
+		stopIfCancelled(id);
 		return await work(dir);
 	} finally {
 		done();
@@ -138,7 +161,7 @@ async function runNative(
 	try {
 		const result = await invoke<{ code: number; log: string; cancelled: boolean }>('ffmpeg_run', {
 			id,
-			args: [...(options.before ?? []), '-i', input, ...args, output],
+			args: [...inputArgs(input, options), ...args, output],
 			duration: options.duration || null
 		});
 		if (result.cancelled) {
@@ -199,15 +222,7 @@ async function runWasm(
 	wasmRunning = options.id ?? id;
 	try {
 		await ff.writeFile(from, input);
-		const code = await ff.exec([
-			'-hide_banner',
-			'-y',
-			...(options.before ?? []),
-			'-i',
-			from,
-			...args,
-			to
-		]);
+		const code = await ff.exec(['-hide_banner', '-y', ...inputArgs(from, options), ...args, to]);
 		if (wasmRunning === null) throw new Cancelled();
 		if (code !== 0) throw new Error(explain(wasmLog));
 		const data = (await ff.readFile(to)) as Uint8Array;
@@ -240,7 +255,16 @@ export function runFfmpeg(
 ): Promise<Made> {
 	return inTurn(async (dir) => {
 		if (dir)
-			return runNative(dir, await copyIn(input, extension, dir), args, outputExtension, options);
+			return runNative(
+				dir,
+				await copyIn(input, extension, dir).then((path) => {
+					stopIfCancelled(options.id);
+					return path;
+				}),
+				args,
+				outputExtension,
+				options
+			);
 		return runWasm(
 			new Uint8Array(await input.arrayBuffer()),
 			extension,
@@ -248,7 +272,7 @@ export function runFfmpeg(
 			outputExtension,
 			options
 		);
-	});
+	}, options.id);
 }
 
 /** The same, for bytes in and bytes out (pictures, small things) */
@@ -283,6 +307,7 @@ export async function discard(made: Made) {
 
 /** Stops what runs with this id (it ends with `Cancelled`) */
 export async function cancel(id: string) {
+	cancelled.add(id);
 	if (await nativeFfmpeg({ install: false })) {
 		await invoke('ffmpeg_cancel', { id }).catch(() => {});
 	} else if (wasmRunning === id && wasm) {
@@ -302,7 +327,7 @@ export async function releaseWasm() {
 }
 
 /** What's in a media file: how long, sound, picture, cover, size */
-export function probe(input: Blob, extension: string): Promise<Probe> {
+export function probe(input: Blob, extension: string, id?: string): Promise<Probe> {
 	return inTurn(async (dir) => {
 		let text: string;
 		if (dir) {
@@ -317,7 +342,7 @@ export function probe(input: Blob, extension: string): Promise<Probe> {
 			text = wasmLog.join('\n');
 		}
 		return parseProbe(text);
-	});
+	}, id);
 }
 
 export function parseProbe(text: string): Probe {

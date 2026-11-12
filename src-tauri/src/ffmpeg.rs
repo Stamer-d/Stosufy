@@ -103,6 +103,19 @@ pub fn binary_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// ~/Stosufy/tmp/media, made if it isn't there
+/// What the file add-ons left in their work folders (copies, what FFmpeg or yt-dlp made and
+/// wasn't saved: after a crash, or a file closed while it was worked on), taken away when the
+/// app starts: nothing's working on them yet
+pub fn clean_work_folders(app: &AppHandle) {
+    let Ok(root) = stosufy_root(app) else { return };
+    for folder in ["media", "downloads"] {
+        let dir = root.join("tmp").join(folder);
+        if dir.is_dir() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+}
+
 /// ~/Stosufy: what the add-ons made there (downloads, conversions) is read as it is
 fn stosufy_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app

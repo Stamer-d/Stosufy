@@ -14,6 +14,8 @@ export interface SavedFile {
 }
 
 const folders = new Map<string, Promise<string>>();
+/** Names being saved to now (two at once never take the same) */
+const reserved = new Set<string>();
 
 /** ~/Stosufy/<name>, made when it's first needed */
 export function outputFolder(name: string) {
@@ -50,16 +52,28 @@ export async function saveFile(
 	const dot = file.lastIndexOf('.');
 	const stem = dot > 0 ? file.slice(0, dot) : file;
 	const ext = dot > 0 ? file.slice(dot) : '';
-	let target = await path.join(dir, file);
-	for (let n = 2; await exists(target); n++) target = await path.join(dir, `${stem} (${n})${ext}`);
+	// (a name taken: by a file there, or by one being saved now, at the same time)
+	let target = '';
+	for (let n = 1; ; n++) {
+		target = await path.join(dir, n === 1 ? file : `${stem} (${n})${ext}`);
+		if (reserved.has(target) || (await exists(target))) continue;
+		// (checked again with nothing in between: taken while it looked, it's the next one)
+		if (reserved.has(target)) continue;
+		reserved.add(target);
+		break;
+	}
 	let size: number;
-	if (what instanceof Uint8Array || 'data' in what) {
-		const data = what instanceof Uint8Array ? what : what.data;
-		await writeFile(target, data);
-		size = data.length;
-	} else {
-		await rename(what.path, target);
-		size = what.size;
+	try {
+		if (what instanceof Uint8Array || 'data' in what) {
+			const data = what instanceof Uint8Array ? what : what.data;
+			await writeFile(target, data);
+			size = data.length;
+		} else {
+			await rename(what.path, target);
+			size = what.size;
+		}
+	} finally {
+		reserved.delete(target);
 	}
 	const base = await path.basename(target);
 	return { name: parts.length ? `${parts.join('/')}/${base}` : base, path: target, size };

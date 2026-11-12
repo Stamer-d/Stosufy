@@ -1,7 +1,8 @@
 <script>
 	// The downloader: a link pasted, what it is shown, then what's wanted of it (the video or
-	// its sound, how good, maybe only a part), and it's downloaded to ~/Stosufy/Downloads, to
-	// be copied, dragged out, edited or converted from there.
+	// its sound, its format and quality, maybe only a part), and it's downloaded to
+	// ~/Stosufy/Downloads, to be copied, dragged out, edited or converted from there. What was
+	// chosen last is chosen again (where a link has it), else the best there is.
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { showToast } from '#lib/stores/toast.ts';
@@ -11,7 +12,9 @@
 	import { PickedFile } from '../files/picked.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { clock } from '../files/time.ts';
+	import { sizeText } from '../files/size.ts';
 	import CopyButton from '../files/CopyButton.svelte';
+	import Dropdown from '../files/Dropdown.svelte';
 	import PartPicker from './PartPicker.svelte';
 	import { ensureTools, isYouTube, lookUp, tools } from './ytdlp.ts';
 	import {
@@ -25,24 +28,37 @@
 	} from './jobs.ts';
 
 	const OPTIONS_KEY = 'stosufy-download-options';
-	const VIDEO_FORMATS = [
-		['mp4', 'MP4', 'Plays everywhere (also in Premiere, on phones)'],
-		['mkv', 'Best quality', 'The best there is, up to 4K/8K (as MKV)']
+	const AUDIO_FORMATS = [
+		{ value: 'mp3', label: 'MP3', hint: 'plays everywhere' },
+		{ value: 'm4a', label: 'M4A · AAC', hint: 'small, good quality, Apple devices' },
+		{ value: 'opus', label: 'Opus', hint: 'the best quality for its size' },
+		{ value: 'flac', label: 'FLAC', hint: 'lossless, big' },
+		{ value: 'wav', label: 'WAV', hint: 'lossless, uncompressed, biggest' },
+		{ value: 'original', label: 'Original', hint: 'as it is there, not converted: fastest' }
 	];
-	const AUDIO_FORMATS = ['mp3', 'm4a', 'opus', 'flac', 'wav'];
+	/** The bitrates to choose from (where there are: not for lossless, nor as it is) */
+	const KBPS = { mp3: [320, 256, 192, 128], m4a: [320, 256, 192, 128], opus: [192, 160, 128, 96] };
+	/** A playlist's (its videos' qualities aren't known): at most that high */
+	const HEIGHTS = [2160, 1440, 1080, 720, 480, 360];
+	const MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
 	const BROWSERS = [
-		[null, 'Nobody'],
-		['chrome', 'Chrome'],
-		['firefox', 'Firefox'],
-		['edge', 'Edge'],
-		['brave', 'Brave'],
-		['opera', 'Opera'],
-		['vivaldi', 'Vivaldi'],
-		['safari', 'Safari'],
-		['chromium', 'Chromium']
+		{ value: null, label: 'Not signed in', hint: 'enough for almost everything' },
+		...[
+			'Chrome',
+			'Firefox',
+			'Edge',
+			'Brave',
+			'Opera',
+			'Vivaldi',
+			'Chromium',
+			...(MAC ? ['Safari'] : [])
+		].map((name) => ({
+			value: name.toLowerCase(),
+			label: `As in ${name}`,
+			hint: 'for age-restricted or members-only videos'
+		}))
 	];
 	const PHASES = {
-		download: 'Downloading',
 		Merger: 'Putting video and sound together',
 		ExtractAudio: 'Making the sound file',
 		FFmpegVideoRemuxer: 'Making it the format chosen',
@@ -57,15 +73,25 @@
 
 	function load() {
 		const fallback = {
-			kind: 'video',
-			videoFormat: 'mp4',
-			audioFormat: 'mp3',
+			tab: 'video',
+			codec: 'h264',
 			height: null,
+			audioFormat: 'mp3',
+			audioKbps: null,
 			sponsorblock: true,
 			cookies: null
 		};
 		try {
-			return { ...fallback, ...JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? '{}') };
+			const stored = JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? '{}');
+			// (as it was kept before: "kind", and MP4 or "Best quality")
+			if (stored.kind && !stored.tab) stored.tab = stored.kind;
+			if (stored.videoFormat && !stored.codec)
+				stored.codec = stored.videoFormat === 'mkv' ? 'any' : 'h264';
+			const { tab, codec, height, audioFormat, audioKbps, sponsorblock, cookies } = {
+				...fallback,
+				...stored
+			};
+			return { tab, codec, height, audioFormat, audioKbps, sponsorblock, cookies };
 		} catch {
 			return fallback;
 		}
@@ -84,19 +110,119 @@
 	/** @type {{ state: 'idle' | 'loading' | 'ready' | 'failed', info?: import('./ytdlp.ts').LinkInfo, error?: string }} */
 	let found = $state({ state: 'idle' });
 	let part = $state({ on: false, start: 0, end: 0, exact: true });
-	let wholePlaylist = $state(true);
+	/** Which of a playlist's videos (null: all) */
+	let items = $state(null);
 	let looked = '';
 
 	let canEdit = $derived($installedAddons.some((addon) => addon.id === 'edit'));
 	let canConvert = $derived($installedAddons.some((addon) => addon.id === 'convert'));
 	let info = $derived(found.info);
 	let youtube = $derived(info ? isYouTube(info.url) : false);
-	/** The heights to choose from: what it has, the usual ones */
-	let heights = $derived(
-		(info?.heights ?? []).filter((h) => [4320, 2160, 1440, 1080, 720, 480, 360].includes(h))
+	let playlist = $derived(info?.kind === 'playlist');
+
+	// --- What's chosen: the last choice where this link has it, else the best -----------------
+
+	/** Video or sound (a link with only sound: sound, without that being kept) */
+	let tab = $derived(info?.video ? options.tab : 'audio');
+	let choice = $derived(
+		info?.videos.find((video) => video.id === options.codec) ?? info?.videos[0] ?? null
+	);
+	/** The heights it comes in, in that codec (a playlist's: the usual ones, not known) */
+	let qualities = $derived(
+		choice?.qualities.length
+			? choice.qualities
+			: HEIGHTS.map((height) => ({ height, fps: 0, bytes: null }))
+	);
+	/** The height chosen last; else the highest under it; else the best (null) */
+	let height = $derived.by(() => {
+		const wanted = options.height;
+		if (!wanted) return null;
+		return (qualities.find((quality) => quality.height <= wanted) ?? null)?.height ?? null;
+	});
+	let kbpsChoices = $derived(KBPS[options.audioFormat] ?? []);
+	let kbps = $derived(kbpsChoices.includes(options.audioKbps) ? options.audioKbps : null);
+
+	/** The share of it that's downloaded (a part of it, or all) */
+	let share = $derived(
+		part.on && info?.duration ? Math.max(0, part.end - part.start) / info.duration : 1
+	);
+	const about = (bytes) => (bytes ? `≈ ${sizeText(Math.round(bytes * share))}` : '');
+	const heightLabel = (h) => (h === 4320 ? '8K' : h === 2160 ? '4K' : `${h}p`);
+	/** How big a video'd be, in a quality (its picture and its sound) */
+	const videoBytes = (quality) => (quality?.bytes ? quality.bytes + (info?.audioBytes ?? 0) : null);
+	/** How big the sound'd be, in a format at a bitrate (null: the best) */
+	function audioBytes(format, rate) {
+		const seconds = info?.duration ?? 0;
+		if (format === 'original' || (!rate && (format === 'opus' || format === 'm4a')))
+			return info?.audioBytes ?? null;
+		if (!seconds) return null;
+		if (rate) return (rate * 1000 * seconds) / 8;
+		// (MP3 at its best, VBR V0: about 245 kbps)
+		return format === 'mp3' ? (245 * 1000 * seconds) / 8 : null;
+	}
+
+	let videoOptions = $derived(
+		(info?.videos ?? []).map((video) => ({
+			value: video.id,
+			label: video.label,
+			hint: video.hint,
+			side: playlist ? '' : about(videoBytes(video.qualities[0]))
+		}))
+	);
+	let qualityOptions = $derived([
+		{
+			value: null,
+			label: 'Best',
+			hint: qualities[0] ? `the highest there is: ${heightLabel(qualities[0].height)}` : '',
+			side: playlist ? '' : about(videoBytes(qualities[0]))
+		},
+		...qualities.map((quality) => ({
+			value: quality.height,
+			label: `${heightLabel(quality.height)}${quality.fps > 30 ? quality.fps : ''}`,
+			hint: playlist ? 'or the highest under it' : '',
+			side: about(videoBytes(quality))
+		}))
+	]);
+	let audioOptions = $derived(
+		AUDIO_FORMATS.map((format) => ({
+			...format,
+			side: playlist ? '' : about(audioBytes(format.value, null))
+		}))
+	);
+	let kbpsOptions = $derived([
+		{
+			value: null,
+			label: 'Best',
+			hint: 'as good as it is there',
+			side: playlist ? '' : about(audioBytes(options.audioFormat, null))
+		},
+		...kbpsChoices.map((rate) => ({
+			value: rate,
+			label: `${rate} kbps`,
+			hint: rate >= 256 ? 'high' : rate >= 160 ? 'good' : 'smaller',
+			side: playlist ? '' : about(audioBytes(options.audioFormat, rate))
+		}))
+	]);
+	let itemOptions = $derived(
+		playlist
+			? [
+					{ value: null, label: `All ${info.count || ''} videos`.replace('  ', ' ') },
+					...[10, 25, 50]
+						.filter((n) => info.count > n)
+						.map((n) => ({ value: `1-${n}`, label: `The first ${n}` })),
+					{ value: '1', label: 'Only the first' }
+				]
+			: []
+	);
+	/** How big it'd be, all of it, for the download button */
+	let total = $derived(
+		!info || playlist
+			? ''
+			: tab === 'video'
+				? about(videoBytes(height ? qualities.find((q) => q.height === height) : qualities[0]))
+				: about(audioBytes(options.audioFormat, kbps))
 	);
 
-	const heightLabel = (h) => (h === 4320 ? '8K' : h === 2160 ? '4K' : `${h}p`);
 	const isLink = (text) => /^https?:\/\/\S+$/i.test(text.trim());
 
 	async function look(text = link) {
@@ -109,8 +235,7 @@
 			if (looked !== url) return;
 			found = { state: 'ready', info: result };
 			part = { on: false, start: 0, end: result.duration, exact: true };
-			wholePlaylist = true;
-			if (!result.video) options.kind = 'audio';
+			items = null;
 		} catch (error) {
 			if (looked !== url) return;
 			const message = String(error?.message ?? error);
@@ -118,6 +243,12 @@
 			found = { state: 'failed', error: message };
 			looked = '';
 		}
+	}
+
+	/** Signed in as in another browser: a link that couldn't be looked at, looked at again */
+	function signIn(value) {
+		options.cookies = value;
+		if (found.state === 'failed' && isLink(link)) void look();
 	}
 
 	/** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -148,8 +279,7 @@
 
 	function start() {
 		if (!info) return;
-		const audio = options.kind === 'audio' || !info.video;
-		const playlist = info.kind === 'playlist';
+		const audio = tab === 'audio';
 		/** @type {[number, number][]} */
 		const sections =
 			part.on && !playlist && info.duration && (part.start > 0 || part.end < info.duration)
@@ -158,12 +288,15 @@
 		addDownload($state.snapshot(info), {
 			url: info.url,
 			kind: audio ? 'audio' : 'video',
-			format: audio ? options.audioFormat : options.videoFormat,
-			height: audio ? null : options.height,
+			format: audio ? options.audioFormat : (choice?.container ?? 'mp4'),
+			codec: audio ? null : (choice?.id ?? 'any'),
+			height: audio ? null : height,
+			audioKbps: audio ? kbps : null,
 			sections,
 			exactCuts: part.exact,
 			sponsorblock: youtube && options.sponsorblock && !sections.length,
-			playlist: playlist && wholePlaylist,
+			playlist,
+			playlistItems: playlist ? items : null,
 			cookies: options.cookies
 		});
 		// (ready for the next link)
@@ -184,16 +317,41 @@
 	const asFiles = (job) =>
 		job.saved.map((file) => new PickedFile(file.path, file.name.split('/').pop(), file.size));
 
+	const short = (seconds) => clock(seconds).replace(/\.\d$/, '');
+
 	function summary(job) {
 		const r = job.request;
 		const what =
 			r.kind === 'audio'
-				? r.format.toUpperCase()
-				: `${r.format === 'mkv' ? 'Best quality' : 'MP4'}${r.height ? ` · ${r.height}p` : ''}`;
-		const cut = r.sections.length
-			? ` · ${clock(r.sections[0][0]).replace(/\.\d$/, '')}–${clock(r.sections[0][1]).replace(/\.\d$/, '')}`
-			: '';
-		return `${what}${cut}${r.playlist ? ` · ${job.info.count} videos` : ''}`;
+				? `${AUDIO_FORMATS.find((f) => f.value === r.format)?.label ?? r.format}${r.audioKbps ? ` · ${r.audioKbps} kbps` : ''}`
+				: `${job.info.videos.find((v) => v.id === r.codec)?.label ?? r.format.toUpperCase()}${r.height ? ` · ${heightLabel(r.height)}` : ''}`;
+		const cut = r.sections.length ? ` · ${short(r.sections[0][0])}–${short(r.sections[0][1])}` : '';
+		const videos = !r.playlist
+			? ''
+			: r.playlistItems === '1'
+				? ' · the first video'
+				: r.playlistItems
+					? ` · the first ${r.playlistItems.slice(2)} videos`
+					: ` · ${job.info.count} videos`;
+		return `${what}${cut}${videos}`;
+	}
+
+	/** What a download is doing now */
+	function doing(job) {
+		if (job.phase !== 'download') return `${PHASES[job.phase] ?? 'Finishing'}…`;
+		const of = job.count > 1 && job.index ? `Video ${job.index} of ${job.count}` : '';
+		// (a part: FFmpeg cuts it out of the stream, without a share to tell)
+		if (job.percent === null)
+			return [of, job.request.sections.length ? 'Cutting out the part…' : 'Downloading…']
+				.filter(Boolean)
+				.join(' · ');
+		const what =
+			job.request.kind === 'video' && job.stream === 'audio'
+				? 'Downloading the sound'
+				: 'Downloading';
+		return [of, `${what} · ${Math.round(job.percent)}%`, job.speed, job.eta && `${job.eta} left`]
+			.filter(Boolean)
+			.join(' · ');
 	}
 
 	onMount(() => {
@@ -201,38 +359,22 @@
 	});
 </script>
 
-{#snippet chips(label, items, value, onpick)}
-	<div class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={label}>
-		{#each items as [id, text, title] (id ?? 'none')}
-			<button
-				role="radio"
-				aria-checked={value === id}
-				{title}
-				class="h-8 px-3 rounded-full text-sm font-bold cursor-pointer transition {value === id
-					? 'bg-white text-black'
-					: 'bg-white/[0.08] hover:bg-white/15'}"
-				onclick={() => onpick(id)}
-			>
-				{text}
-			</button>
-		{/each}
-	</div>
-{/snippet}
-
 <div class="relative min-h-full pb-12">
 	<!-- Header -->
-	<div class="relative overflow-hidden">
-		<div
-			class="absolute inset-0 opacity-60"
-			style="background: linear-gradient(120deg, #e11d48, #7c3aed 55%, transparent)"
-		></div>
-		<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/30 to-transparent"></div>
-		<div class="relative px-8 pt-9 pb-5 flex flex-wrap items-end justify-between gap-4">
+	<div class="relative">
+		<div class="absolute inset-0 overflow-hidden">
+			<div
+				class="absolute inset-0 opacity-60"
+				style="background: linear-gradient(120deg, #e11d48, #7c3aed 55%, transparent)"
+			></div>
+			<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/30 to-transparent"></div>
+		</div>
+		<div class="relative px-8 pt-7 pb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
 			<div class="min-w-0">
-				<h1 class="flex items-center gap-3 text-4xl font-extrabold tracking-tight">
-					<span class="icon-[mingcute--download-3-line] size-9"></span>Downloader
+				<h1 class="flex items-center gap-2.5 text-3xl font-extrabold tracking-tight">
+					<span class="icon-[mingcute--download-3-line] size-8"></span>Downloader
 				</h1>
-				<p class="mt-1.5 text-white/75">
+				<p class="mt-1 text-sm text-white/70">
 					Videos and their sound from YouTube, Twitch and many more, whole or just a part.
 				</p>
 				{#if $tools.status === 'downloading'}
@@ -259,33 +401,19 @@
 				{/if}
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
-				<label
-					class="relative h-9 pl-3 pr-2 flex items-center gap-1.5 rounded-full text-sm cursor-pointer transition {options.cookies
-						? 'bg-white text-black'
-						: 'bg-black/25 hover:bg-black/40'}"
-					title="For what needs an account (age-restricted, members only): signed in as in this browser"
-				>
-					<span class="icon-[mingcute--user-3-line] size-4 opacity-70"></span>
-					<span class="font-semibold">
-						Signed in: {BROWSERS.find(([id]) => id === options.cookies)?.[1]}
-					</span>
-					<span class="icon-[mingcute--down-line] size-3.5 opacity-60"></span>
-					<select
-						class="absolute inset-0 opacity-0 cursor-pointer"
-						aria-label="Signed in as"
-						bind:value={options.cookies}
-					>
-						{#each BROWSERS as [id, label] (id ?? 'none')}
-							<option value={id} class="bg-panel text-white">{label}</option>
-						{/each}
-					</select>
-				</label>
+				<Dropdown
+					label="Signed in as"
+					icon="icon-[mingcute--user-3-line]"
+					options={BROWSERS}
+					value={options.cookies}
+					onchange={signIn}
+				/>
 				<button
-					class="h-9 px-3 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm font-semibold cursor-pointer transition"
+					class="h-10 px-3 flex items-center gap-1.5 rounded-xl bg-white/[0.07] hover:bg-white/[0.12] text-sm font-semibold cursor-pointer transition"
 					title="Where the downloads are: Stosufy/Downloads"
 					onclick={() => show()}
 				>
-					<span class="icon-[mingcute--folder-open-line] size-4 text-white/70"></span>
+					<span class="icon-[mingcute--folder-open-line] size-4 text-white/55"></span>
 					Open folder
 				</button>
 			</div>
@@ -354,7 +482,7 @@
 					</div>
 					<div class="min-w-0">
 						<p class="text-xs font-bold uppercase tracking-wide text-rose-200/80">
-							{info.site}{info.kind === 'playlist' ? ' · Playlist' : ''}{info.live ? ' · Live' : ''}
+							{info.site}{playlist ? ' · Playlist' : ''}{info.live ? ' · Live' : ''}
 						</p>
 						<h2 class="text-lg font-bold leading-snug line-clamp-2" title={info.title}>
 							{info.title}
@@ -362,11 +490,7 @@
 						<p class="mt-0.5 text-sm text-white/60">
 							{[
 								info.uploader,
-								info.kind === 'playlist'
-									? `${info.count} videos`
-									: info.duration
-										? clock(info.duration).replace(/\.\d$/, '')
-										: null
+								playlist ? `${info.count} videos` : info.duration ? short(info.duration) : null
 							]
 								.filter(Boolean)
 								.join(' · ')}
@@ -380,62 +504,78 @@
 						It's live right now: it can be downloaded once the stream has ended.
 					</p>
 				{:else}
-					<div class="flex flex-col gap-3">
-						{#if info.video}
-							{@render chips(
-								'What',
-								[
-									['video', 'Video'],
-									['audio', 'Only the sound']
-								],
-								options.kind,
-								(id) => (options.kind = id)
-							)}
-						{/if}
-						{#if options.kind === 'video' && info.video}
-							<div class="flex flex-wrap items-center gap-3">
-								{@render chips(
-									'Video format',
-									VIDEO_FORMATS,
-									options.videoFormat,
-									(id) => (options.videoFormat = id)
-								)}
-								<span class="w-px h-6 bg-white/10"></span>
-								{@render chips(
-									'Quality',
-									[[null, 'Best'], ...heights.map((h) => [h, heightLabel(h)])],
-									heights.includes(options.height) || options.height === null
-										? options.height
-										: null,
-									(id) => (options.height = id)
-								)}
-							</div>
+					<div class="flex flex-wrap items-center gap-2">
+						<div class="h-10 p-1 flex rounded-xl bg-black/30" role="tablist" aria-label="What">
+							{#each [['video', 'Video', 'icon-[mingcute--video-line]'], ['audio', 'Sound', 'icon-[mingcute--music-2-line]']] as [id, text, icon] (id)}
+								<button
+									class="px-3 flex items-center gap-1.5 rounded-lg text-sm font-bold cursor-pointer transition disabled:opacity-35 disabled:cursor-default {tab ===
+									id
+										? 'bg-white text-black'
+										: 'text-white/70 hover:text-white enabled:hover:bg-white/10'}"
+									role="tab"
+									aria-selected={tab === id}
+									disabled={id === 'video' && !info.video}
+									title={id === 'video' && !info.video ? 'There is only sound here' : ''}
+									onclick={() => (options.tab = id)}
+								>
+									<span class="{icon} size-4"></span>
+									{text}
+								</button>
+							{/each}
+						</div>
+						{#if tab === 'video'}
+							<Dropdown
+								label="Video format"
+								icon="icon-[mingcute--film-line]"
+								sideOnButton={false}
+								options={videoOptions}
+								value={choice?.id}
+								onchange={(value) => (options.codec = value)}
+							/>
+							<Dropdown
+								label="Quality"
+								icon="icon-[mingcute--sparkles-line]"
+								options={qualityOptions}
+								value={height}
+								onchange={(value) => (options.height = value)}
+							/>
 						{:else}
-							{@render chips(
-								'Sound format',
-								AUDIO_FORMATS.map((id) => [id, id.toUpperCase()]),
-								options.audioFormat,
-								(id) => (options.audioFormat = id)
-							)}
-						{/if}
-
-						{#if info.kind === 'playlist'}
-							<label class="flex items-center gap-2 text-sm">
-								<input
-									type="checkbox"
-									class="accent-rose-400 size-4"
-									bind:checked={wholePlaylist}
+							<Dropdown
+								label="Sound format"
+								icon="icon-[mingcute--music-2-line]"
+								sideOnButton={!kbpsChoices.length}
+								options={audioOptions}
+								value={options.audioFormat}
+								onchange={(value) => (options.audioFormat = value)}
+							/>
+							{#if kbpsChoices.length}
+								<Dropdown
+									label="Sound quality"
+									icon="icon-[mingcute--sparkles-line]"
+									options={kbpsOptions}
+									value={kbps}
+									onchange={(value) => (options.audioKbps = value)}
 								/>
-								All {info.count} videos of the playlist
-							</label>
-						{:else if info.duration}
-							<div class="flex flex-col gap-2">
+							{/if}
+						{/if}
+						{#if playlist}
+							<Dropdown
+								label="Which videos"
+								icon="icon-[mingcute--playlist-line]"
+								options={itemOptions}
+								value={items}
+								onchange={(value) => (items = value)}
+							/>
+						{/if}
+					</div>
+
+					{#if (!playlist && info.duration) || (youtube && !part.on)}
+						<div class="flex flex-col gap-2">
+							{#if !playlist && info.duration}
 								<label class="flex items-center gap-2 text-sm">
 									<input type="checkbox" class="accent-rose-400 size-4" bind:checked={part.on} />
 									Only a part of it
-									<span class="text-white/45"
-										>(a clip of a long stream: only that part is downloaded)</span
-									>
+									<span class="text-white/45">(only that part is downloaded)</span>
 								</label>
 								{#if part.on}
 									<PartPicker
@@ -452,20 +592,19 @@
 										Cut exactly (slower; else at the nearest keyframe)
 									</label>
 								{/if}
-							</div>
-						{/if}
-
-						{#if youtube && !part.on}
-							<label class="flex items-center gap-2 text-sm">
-								<input
-									type="checkbox"
-									class="accent-rose-400 size-4"
-									bind:checked={options.sponsorblock}
-								/>
-								Take out sponsors and the like (SponsorBlock)
-							</label>
-						{/if}
-					</div>
+							{/if}
+							{#if youtube && !part.on}
+								<label class="flex items-center gap-2 text-sm">
+									<input
+										type="checkbox"
+										class="accent-rose-400 size-4"
+										bind:checked={options.sponsorblock}
+									/>
+									Take out sponsors and the like (SponsorBlock)
+								</label>
+							{/if}
+						</div>
+					{/if}
 
 					<div>
 						<button
@@ -474,6 +613,9 @@
 						>
 							<span class="icon-[mingcute--download-3-line] size-5"></span>
 							Download
+							{#if total}
+								<span class="text-sm font-semibold text-white/75 tabular-nums">{total}</span>
+							{/if}
 						</button>
 					</div>
 				{/if}
@@ -526,6 +668,12 @@
 							<div class="min-w-0">
 								<p class="truncate font-semibold" title={job.info.title}>{job.info.title}</p>
 								<p class="text-xs text-secondary-600">{job.info.site} · {summary(job)}</p>
+								{#if job.status === 'done' && job.note}
+									<p class="flex items-center gap-1 text-xs text-amber-200/90" title={job.note}>
+										<span class="icon-[mingcute--information-line] size-3.5 shrink-0"></span>
+										<span class="truncate">{job.note}</span>
+									</p>
+								{/if}
 							</div>
 						</div>
 
@@ -548,14 +696,8 @@
 											<div class="h-full w-full rounded-full bg-rose-400/50 animate-pulse"></div>
 										{/if}
 									</div>
-									<p class="text-xs text-white/60 tabular-nums truncate">
-										{PHASES[job.phase] ?? 'Finishing'}{job.phase === 'download' && job.stream > 1
-											? ' the sound'
-											: ''}{job.phase === 'download' && job.percent !== null
-											? ` · ${Math.round(job.percent)}%`
-											: '…'}{job.phase === 'download' && job.speed
-											? ` · ${job.speed}`
-											: ''}{job.phase === 'download' && job.eta ? ` · ${job.eta} left` : ''}
+									<p class="text-xs text-white/60 tabular-nums truncate" title={doing(job)}>
+										{doing(job)}
 									</p>
 								</div>
 							{:else if job.status === 'done'}

@@ -22,6 +22,10 @@
 	let kind = $state('');
 	/** Each file opened anew (the editor started fresh) */
 	let opened = $state(0);
+	/** The editor has changes that aren't saved */
+	let dirty = $state(false);
+	/** Another file, waiting to be opened (said first that the changes would be lost) */
+	let waiting = $state(null);
 
 	let canConvert = $derived($installedAddons.some((addon) => addon.id === 'convert'));
 
@@ -34,6 +38,16 @@
 				showToast('Songs, videos and pictures can be edited here', 'icon-[mingcute--warning-line]');
 			return;
 		}
+		if (file && dirty) {
+			waiting = next;
+			return;
+		}
+		show(next);
+	}
+
+	function show(next) {
+		waiting = null;
+		dirty = false;
 		file = next;
 		kind = kindOf(detectFormat(next));
 		opened++;
@@ -105,12 +119,12 @@
 			style="background: linear-gradient(120deg, #8b5cf6, #ec4899 55%, transparent)"
 		></div>
 		<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/30 to-transparent"></div>
-		<div class="relative px-8 pt-9 pb-5 flex flex-wrap items-end justify-between gap-4">
+		<div class="relative px-8 pt-7 pb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
 			<div class="min-w-0">
-				<h1 class="flex items-center gap-3 text-4xl font-extrabold tracking-tight">
-					<span class="icon-[mingcute--scissors-line] size-9"></span>File editor
+				<h1 class="flex items-center gap-2.5 text-3xl font-extrabold tracking-tight">
+					<span class="icon-[mingcute--scissors-line] size-8"></span>File editor
 				</h1>
-				<p class="mt-1.5 text-white/75">
+				<p class="mt-1 text-sm text-white/70">
 					Cut, fade and turn songs, videos and pictures. It stays on your computer.
 				</p>
 			</div>
@@ -175,11 +189,40 @@
 				></span>
 				<h2 class="truncate text-lg font-bold" title={file.name}>{file.name}</h2>
 			</div>
+			{#if waiting}
+				<div
+					class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 p-3 pl-4 rounded-2xl bg-amber-300/10 ring-1 ring-amber-300/30 text-sm"
+					role="alertdialog"
+					aria-label="Changes not saved"
+				>
+					<span class="icon-[mingcute--warning-line] size-5 text-amber-200 shrink-0"></span>
+					<span class="min-w-0 flex-1">
+						The changes to <b class="font-semibold">{file.name}</b> aren't saved yet.
+					</span>
+					<button
+						class="h-8 px-3 rounded-full font-semibold bg-white/[0.08] hover:bg-white/15 cursor-pointer transition"
+						onclick={() => (waiting = null)}
+					>
+						Keep editing
+					</button>
+					<button
+						class="h-8 px-3 rounded-full font-semibold bg-amber-300 text-black hover:bg-amber-200 cursor-pointer transition"
+						onclick={() => show(waiting)}
+					>
+						Open {waiting.name} anyway
+					</button>
+				</div>
+			{/if}
 			{#key opened}
 				{#if kind === 'image'}
-					<ImageEditor {file} />
+					<ImageEditor {file} bind:dirty />
 				{:else}
-					<MediaEditor {file} video={kind === 'video'} />
+					<MediaEditor
+						{file}
+						video={kind === 'video'}
+						bind:dirty
+						onkind={(found) => (kind = found)}
+					/>
 				{/if}
 			{/key}
 		{/if}

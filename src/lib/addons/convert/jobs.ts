@@ -13,7 +13,15 @@ import {
 	type Kind,
 	type Target
 } from '../files/formats';
-import { cancel, parallelism, releaseWasm, release } from '../files/ffmpeg';
+import {
+	cancel,
+	discard,
+	forgetCancelled,
+	parallelism,
+	releaseWasm,
+	release,
+	stopIfCancelled
+} from '../files/ffmpeg';
 import { notifyDone } from '../files/notify';
 import { outputFolder, saveFile, type SavedFile } from '../files/save';
 import { convertFile, type ConvertOptions } from './convert';
@@ -229,7 +237,20 @@ async function convertOne(job: Job) {
 			String(job.id)
 		);
 		const saved: SavedFile[] = [];
-		for (const output of outputs) saved.push(await saveFile(FOLDER, output.name, output.what));
+		try {
+			for (const [i, output] of outputs.entries()) {
+				stopIfCancelled(String(job.id));
+				const what = typeof output.what === 'function' ? await output.what() : output.what;
+				saved.push(await saveFile(FOLDER, output.name, what));
+				if (outputs.length > 1) change(job.id, { progress: (i + 1) / outputs.length });
+			}
+		} catch (error) {
+			// (what FFmpeg made and wasn't saved: not left in its work folder)
+			for (const output of outputs.slice(saved.length))
+				if (typeof output.what !== 'function' && !(output.what instanceof Uint8Array))
+					await discard(output.what);
+			throw error;
+		}
 		change(job.id, { status: 'done', progress: 1, saved, note });
 		finished++;
 	} catch (error) {
@@ -242,6 +263,8 @@ async function convertOne(job: Job) {
 			status: 'failed',
 			error: (error as Error)?.message || "Couldn't convert it"
 		});
+	} finally {
+		forgetCancelled(String(job.id));
 	}
 }
 
@@ -249,16 +272,23 @@ export const converterFolder = () => outputFolder(FOLDER);
 
 /** What the files in the list were made into, together in one ZIP in the folder; its path */
 export async function saveAllAsZip() {
+	const files = get(jobs).flatMap((job) => job.saved);
+	// (it's made in memory: not of several GB)
+	if (files.reduce((sum, file) => sum + file.size, 0) > 1024 ** 3)
+		throw new Error('Too big for one ZIP (at most 1 GB together)');
 	const zip = new JSZip();
 	const names = new Set<string>();
-	for (const file of get(jobs).flatMap((job) => job.saved)) {
+	for (const file of files) {
 		let name = file.name;
 		for (let n = 2; names.has(name); n++) name = file.name.replace(/(\.[^./]+)?$/, ` (${n})$1`);
 		names.add(name);
 		zip.file(name, await readFile(file.path));
 	}
 	if (!names.size) throw new Error('Nothing converted yet');
-	const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
+	// (the time here, not UTC's)
+	const now = new Date();
+	const two = (n: number) => String(n).padStart(2, '0');
+	const stamp = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}-${two(now.getMinutes())}`;
 	const data = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 	return (await saveFile(FOLDER, `Converted ${stamp}.zip`, data)).path;
 }

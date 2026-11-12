@@ -43,7 +43,10 @@ function tauri({ online, writes }) {
 			if (yt && cmd === 'ytdlp_install') return 'current';
 			if (yt && cmd === 'deno_install') return void (yt.denoInstalls = (yt.denoInstalls ?? 0) + 1);
 			if (yt && cmd === 'ytdlp_info') {
-				if (yt.errors?.[args.url]) throw yt.errors[args.url];
+				(yt.looked ??= []).push({ url: args.url, cookies: args.cookies });
+				// (an error, unless signed in as that error's browser wants)
+				if (yt.errors?.[args.url] && yt.unlocks?.[args.url] !== args.cookies)
+					throw yt.errors[args.url];
 				return JSON.stringify(yt.infos[args.url]);
 			}
 			if (yt && cmd === 'ytdlp_cancel') return void yt.cancel?.(args.id);
@@ -57,7 +60,11 @@ function tauri({ online, writes }) {
 				const ext = args.request.kind === 'audio' ? args.request.format : args.request.format;
 				const path = `/home/tester/Stosufy/tmp/downloads/${args.id}/${info.title}.${ext}`;
 				written[path] = new Uint8Array(yt.file ?? [1, 2, 3]);
-				return { files: [{ path, size: written[path].length }], cancelled: false };
+				return {
+					files: [{ path, size: written[path].length }],
+					cancelled: false,
+					error: yt.notes?.[args.request.url] ?? null
+				};
 			}
 			if (writes && cmd === 'plugin:fs|rename') {
 				written[args.newPath] = written[args.oldPath];

@@ -20,18 +20,24 @@ export interface DownloadJob {
 	status: Status;
 	/** "download", or what's done after it (Merger, ExtractAudio, …) */
 	phase: string;
-	/** 0–100 of what's downloaded now; which of its streams (video, sound) */
+	/** 0–100 of what's downloaded now: the picture or the sound, which of a playlist's videos */
 	percent: number | null;
-	stream: number;
+	stream: 'video' | 'audio' | null;
+	index: number | null;
+	count: number | null;
 	speed: string | null;
 	eta: string | null;
 	error?: string;
+	/** Some of it couldn't be downloaded (a playlist's private videos, …) */
+	note?: string;
 	saved: SavedFile[];
 }
 
 export const downloads = writable<DownloadJob[]>([]);
 
 let nextId = 1;
+/** Stopped before yt-dlp ran (while it got ready) */
+const stopped = new Set<string>();
 let workers = 0;
 let finished = 0;
 
@@ -50,7 +56,9 @@ export function addDownload(info: LinkInfo, request: DownloadRequest) {
 			status: 'waiting',
 			phase: 'download',
 			percent: null,
-			stream: 1,
+			stream: null,
+			index: null,
+			count: null,
 			speed: null,
 			eta: null,
 			saved: []
@@ -82,36 +90,46 @@ function run() {
 }
 
 async function work(job: DownloadJob) {
-	let last = 0;
 	try {
-		const result = await download(job.id, job.request, (progress) => {
-			const patch: Partial<DownloadJob> = { phase: progress.phase };
-			if (progress.phase === 'download' && progress.percent !== null) {
-				// (a second stream starting: the sound after the video)
-				const current = get(downloads).find((other) => other.id === job.id);
-				if (current && progress.percent + 30 < last) patch.stream = current.stream + 1;
-				last = progress.percent;
-				patch.percent = progress.percent;
-				patch.speed =
-					progress.speed && !/^0(\.0+)?B\/s$/.test(progress.speed) ? progress.speed : null;
-				patch.eta = progress.eta;
-			}
-			change(job.id, patch);
-		});
+		const result = await download(
+			job.id,
+			job.request,
+			(progress) => {
+				const patch: Partial<DownloadJob> = { phase: progress.phase };
+				if (progress.phase === 'download') {
+					patch.percent = progress.percent;
+					patch.speed =
+						progress.speed && !/^0(\.0+)?B\/s$/.test(progress.speed) ? progress.speed : null;
+					patch.eta = progress.eta;
+					if (progress.stream) patch.stream = progress.stream;
+					if (progress.index) patch.index = progress.index;
+					if (progress.count) patch.count = progress.count;
+				}
+				change(job.id, patch);
+			},
+			() => stopped.has(job.id)
+		);
 		if (result.cancelled) {
 			downloads.update((all) => all.filter((other) => other.id !== job.id));
 			return;
 		}
-		if (!result.files.length) throw new Error('Nothing was downloaded');
+		if (!result.files.length) throw new Error(result.error ?? 'Nothing was downloaded');
+		// (a playlist's videos in a folder of its own)
+		const folder = job.request.playlist ? `${job.info.title.replace(/[\\/]/g, '_')}/` : '';
 		const saved: SavedFile[] = [];
 		for (const file of result.files) {
 			const name = file.path.split(/[\\/]/).pop()!;
-			saved.push(await saveFile(FOLDER, name, { path: file.path, size: file.size }));
+			saved.push(await saveFile(FOLDER, folder + name, { path: file.path, size: file.size }));
 		}
 		// (its folder in tmp, now empty)
-		const folder = result.files[0].path.replace(/[\\/][^\\/]+$/, '');
-		await remove(folder, { recursive: true }).catch(() => {});
-		change(job.id, { status: 'done', saved, percent: 100 });
+		const tmp = result.files[0].path.replace(/[\\/][^\\/]+$/, '');
+		await remove(tmp, { recursive: true }).catch(() => {});
+		change(job.id, {
+			status: 'done',
+			saved,
+			percent: 100,
+			note: result.error ?? undefined
+		});
 		finished++;
 	} catch (error) {
 		console.warn('Could not download:', error);
@@ -119,18 +137,30 @@ async function work(job: DownloadJob) {
 			status: 'failed',
 			error: String((error as Error)?.message ?? error) || "It couldn't be downloaded"
 		});
+	} finally {
+		stopped.delete(job.id);
 	}
 }
 
 /** Stops it (and takes it off the list), or takes a waiting one off */
 export function stop(id: string) {
 	const job = get(downloads).find((job) => job.id === id);
-	if (job?.status === 'working') void stopDownload(id);
-	else downloads.update((all) => all.filter((other) => other.id !== id));
+	if (job?.status === 'working') {
+		stopped.add(id);
+		void stopDownload(id);
+	} else downloads.update((all) => all.filter((other) => other.id !== id));
 }
 
 export function retry(id: string) {
-	change(id, { status: 'waiting', error: undefined, percent: null, stream: 1, phase: 'download' });
+	change(id, {
+		status: 'waiting',
+		error: undefined,
+		note: undefined,
+		percent: null,
+		stream: null,
+		index: null,
+		phase: 'download'
+	});
 	run();
 }
 

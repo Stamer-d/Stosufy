@@ -53,13 +53,22 @@ const MORE = [
 	['c-avi.mp4', 'c-avi.avi', 'avi', [8, 'AVI ']]
 ];
 
+/** A 1×1 PNG */
+const TINY = Buffer.from(
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+	'base64'
+);
+
 /** A file's row in the list */
 let row;
 /** Its format clicked: a button, or in "More" */
 async function pick(at, target) {
 	const button = at.locator(`button[data-target="${target}"]`);
 	if (await button.count()) await button.first().click();
-	else await at.locator('select[aria-label="More formats"]').selectOption(target);
+	else {
+		await at.locator('button[aria-label="More formats"]').click();
+		await at.locator(`[role="menuitem"][data-target="${target}"]`).click();
+	}
 }
 
 (async () => {
@@ -128,6 +137,31 @@ async function pick(at, target) {
 		[mp3('tagged-m4a.mp3'), 'm4a'],
 		[mp3('tagged-ogg.mp3'), 'ogg'],
 		[text('broken.json', 'application/json', '{"a": '), 'csv'],
+		// (UTF-16, as Excel's "Unicode text" writes it)
+		[
+			{
+				name: 'utf16.csv',
+				mimeType: 'text/csv',
+				buffer: Buffer.concat([
+					Buffer.from([0xff, 0xfe]),
+					Buffer.from('name,city\nJürgen,Köln\n', 'utf16le')
+				])
+			},
+			'json'
+		],
+		// (codes with their zeros, words that look like true: as they're written)
+		[text('codes.csv', 'text/csv', 'zip;flag;n\n00123;TRUE;7\n'), 'json'],
+		[
+			text(
+				'dates.toml',
+				'application/toml',
+				'when = 1979-05-27T07:32:00Z\nbig = 9007199254740993\n'
+			),
+			'json'
+		],
+		// (two of the same name at once: a name each)
+		[{ name: 'twin.wav', mimeType: 'audio/wav', buffer: wav() }, 'mp3'],
+		[{ name: 'twin.WAV', mimeType: 'audio/wav', buffer: wav() }, 'mp3'],
 		[text('blob.bin', 'application/octet-stream', 'abc'), 'base64']
 	];
 
@@ -151,11 +185,15 @@ async function pick(at, target) {
 		'every file is in the list',
 		(await page.locator('ul[aria-label="Files"] > li').count()) === FILES.length
 	);
-	const offered = (row) =>
-		row.evaluate((li) => [
-			...[...li.querySelectorAll('[data-target]')].map((button) => button.dataset.target),
-			...[...li.querySelectorAll('select option')].map((option) => option.value).filter(Boolean)
-		]);
+	const offered = async (row) => {
+		const more = row.locator('button[aria-label="More formats"]');
+		if (await more.count()) await more.click();
+		const ids = await row.evaluate((li) =>
+			[...li.querySelectorAll('[data-target]')].map((button) => button.dataset.target)
+		);
+		if (await more.count()) await row.page().keyboard.press('Escape');
+		return ids;
+	};
 	const data = await offered(row('data.json'));
 	check(
 		'a JSON can become YAML, TOML, CSV, XML…',
@@ -288,7 +326,31 @@ async function pick(at, target) {
 		'…and nothing out of it',
 		asText('pack/escape.txt') === 'kept inside' && !written['/home/tester/Stosufy/escape.txt']
 	);
-	check('any file → Base64', asText('blob.txt') === 'YWJj\n');
+	check('any file → Base64', asText('blob.bin.txt') === 'YWJj\n');
+	check(
+		'a UTF-16 CSV → JSON, its letters as they are',
+		asText('utf16.json').includes('"name": "Jürgen"') && asText('utf16.json').includes('Köln'),
+		asText('utf16.json')
+	);
+	let codes = null;
+	try {
+		codes = JSON.parse(asText('codes.json'));
+	} catch {}
+	check(
+		'CSV → JSON: "00123" and "TRUE" kept as written, 7 a number',
+		JSON.stringify(codes) === JSON.stringify([{ zip: '00123', flag: 'TRUE', n: 7 }]),
+		asText('codes.json')
+	);
+	check(
+		'TOML → JSON: a date as a date, a big number exactly',
+		asText('dates.json').includes('"1979-05-27T07:32:00.000Z"') &&
+			asText('dates.json').includes('9007199254740993'),
+		asText('dates.json')
+	);
+	check(
+		'two of the same name at once: twin.mp3 and twin (2).mp3',
+		file('twin.mp3').length > 1000 && file('twin (2).mp3').length > 1000
+	);
 	const latin = (name) => file(name).toString('latin1');
 	check(
 		'MP3 → FLAC: its title, artist and cover kept',
@@ -429,7 +491,8 @@ async function pick(at, target) {
 			{ name: 'noise.wav', mimeType: 'audio/wav', buffer: long },
 			{ name: 'noise-flac.wav', mimeType: 'audio/wav', buffer: long },
 			{ name: 'big.png', mimeType: 'image/png', buffer: png },
-			{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: clip }
+			{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: clip },
+			{ name: 'tiny.png', mimeType: 'image/png', buffer: TINY }
 		]);
 		await page.waitForSelector('li[aria-label="clip.mp4"]');
 		check(
@@ -441,6 +504,7 @@ async function pick(at, target) {
 		await pick(row('noise-flac.wav'), 'flac');
 		await pick(row('big.png'), 'png');
 		await pick(row('clip.mp4'), 'mp4');
+		await pick(row('tiny.png'), 'png');
 		await page.waitForFunction(
 			() =>
 				[...document.querySelectorAll('ul[aria-label="Files"] > li')].every((li) =>
@@ -465,6 +529,12 @@ async function pick(at, target) {
 			JSON.stringify(sizes)
 		);
 		check('a smaller MP4 under it', sizes['clip.mp4'] <= LIMIT, JSON.stringify(sizes));
+		check(
+			'already under it: kept as it was, and said so',
+			sizes['tiny.png'] === TINY.length &&
+				/Already under 150 KB: kept as it was/.test(await row('tiny.png').innerText()),
+			`${sizes['tiny.png']}: ${await row('tiny.png').innerText()}`
+		);
 		check(
 			"FLAC can't be made smaller: it says so",
 			/FLAC can't be made smaller/.test(await row('noise-flac.wav').innerText())

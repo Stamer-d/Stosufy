@@ -156,6 +156,58 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 			(await page.locator('input[aria-label="Where the view is"]').count()) === 1
 	);
 
+	// --- The arrow keys move where it plays ---------------------------------------------------
+	const seconds = (text) => {
+		const [m, s] = text.split(':');
+		return Number(m) * 60 + Number(s);
+	};
+	const now = async () =>
+		seconds(await page.locator('[role="timer"][aria-label="Where it plays"]').innerText());
+	const from = await now();
+	await page.keyboard.press('Shift+ArrowRight');
+	await page.keyboard.press('ArrowRight');
+	check(
+		'→ a tenth of a second on, Shift+→ a second',
+		Math.abs((await now()) - Math.min(end, from + 1.1)) < 0.06,
+		`${from} → ${await now()}`
+	);
+
+	// --- Another file while there are changes: said first ------------------------------------
+	await page.click('[role="radiogroup"][aria-label="Fade in"] button:has-text("1 s")');
+	await page.setInputFiles('input[aria-label="Choose a file"]', [
+		{ name: 'voice.webm', mimeType: 'audio/webm', buffer: fixture('voice.webm') }
+	]);
+	await page.waitForSelector('[role="alertdialog"][aria-label="Changes not saved"]');
+	await page.click('[role="alertdialog"] button:has-text("Keep editing")');
+	check(
+		'changes not saved: asked first, and kept on a "Keep editing"',
+		(await page.locator('h2:has-text("tagged.mp3")').count()) === 1 &&
+			(await page.getAttribute(
+				'[role="radiogroup"][aria-label="Fade in"] button:has-text("1 s")',
+				'aria-checked'
+			)) === 'true'
+	);
+	await page.setInputFiles('input[aria-label="Choose a file"]', [
+		{ name: 'voice.webm', mimeType: 'video/webm', buffer: fixture('voice.webm') }
+	]);
+	await page.click('[role="alertdialog"] button:has-text("Open voice.webm anyway")');
+	await page.waitForSelector('h2:has-text("voice.webm")');
+	check('…or the other file opened anyway', true);
+
+	// --- A WebM with only sound in it: a song ------------------------------------------------
+	await page.waitForSelector('[role="slider"][aria-label="End"]');
+	const voiceFormats = await page
+		.locator('[role="group"][aria-label="Save as"] [data-target]')
+		.evaluateAll((all) => all.map((button) => button.dataset.target));
+	check(
+		'a WebM with only sound: edited as a song (no picture, its sound as MP3, …)',
+		(await page.locator('button:has-text("Turn")').count()) === 0 &&
+			voiceFormats.includes('mp3') &&
+			!voiceFormats.includes('mp4') &&
+			!voiceFormats.includes('gif'),
+		voiceFormats.join()
+	);
+
 	// --- A video: turned, without sound; and its sound alone ---------------------------------
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: fixture('clip.mp4') }
@@ -190,6 +242,67 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	check(
 		'a frame as a picture, cut the same',
 		JSON.stringify(await sizeOf('clip (frame 0-00.0).png', 'image/png')) === '[64,64]'
+	);
+
+	// A GIF of parts of it (the sound left out: a GIF has none)
+	await page.click('button:has-text("Cut the picture")');
+	const clipEnd = Number(
+		await page.getAttribute('[role="slider"][aria-label="End"]', 'aria-valuenow')
+	);
+	const clipBox = await page
+		.locator('[role="slider"][aria-label="Start"]')
+		.locator('..')
+		.boundingBox();
+	for (const share of [1 / 3, 2 / 3]) {
+		await page.mouse.click(clipBox.x + clipBox.width * share, clipBox.y + 30);
+		await page.click('button:has-text("Split here")');
+	}
+	await page.click('button[aria-label="Take out part 2"]');
+	await page.click('[role="group"][aria-label="Save as"] [data-target="gif"]');
+	await saved('clip (edited).gif');
+	const gif = Buffer.from(await written('clip (edited).gif')).toString('latin1');
+	check(
+		'a GIF of two parts of a video with sound',
+		gif.startsWith('GIF8') && clipEnd > 0.5,
+		gif.slice(0, 6)
+	);
+
+	// --- A picture turned, then mirrored: mirrored as it's seen ------------------------------
+	const halves = await page.evaluate(() => {
+		const canvas = document.createElement('canvas');
+		canvas.width = 40;
+		canvas.height = 20;
+		const context = canvas.getContext('2d');
+		context.fillStyle = '#f00';
+		context.fillRect(0, 0, 20, 20);
+		context.fillStyle = '#00f';
+		context.fillRect(20, 0, 20, 20);
+		return canvas.toDataURL('image/png').split(',')[1];
+	});
+	await page.setInputFiles('input[aria-label="Choose a file"]', [
+		{ name: 'halves.png', mimeType: 'image/png', buffer: Buffer.from(halves, 'base64') }
+	]);
+	await page.waitForSelector('button:has-text("Turn right")');
+	await page.click('button:has-text("Turn right")');
+	await page.click('button:has-text("Mirror")');
+	await page.click('[role="group"][aria-label="Save as"] [data-target="png"]');
+	await saved('halves (edited).png');
+	const corners = await page.evaluate(async (path) => {
+		const image = new Image();
+		image.src = URL.createObjectURL(new Blob([window.__written[path]]));
+		await image.decode();
+		const canvas = document.createElement('canvas');
+		canvas.width = image.naturalWidth;
+		canvas.height = image.naturalHeight;
+		const context = canvas.getContext('2d');
+		context.drawImage(image, 0, 0);
+		const red = (x, y) => context.getImageData(x, y, 1, 1).data[0] > 200;
+		return [canvas.width, canvas.height, red(10, 5), red(10, 35)];
+	}, `${DIR}/halves (edited).png`);
+	check(
+		'turned right (its left on top), then mirrored left to right: red still on top',
+		JSON.stringify(corners) === '[20,40,true,false]',
+		JSON.stringify(corners)
 	);
 
 	// --- A picture: turned, cut to a square, smaller -----------------------------------------

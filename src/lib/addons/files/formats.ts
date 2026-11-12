@@ -116,8 +116,13 @@ export function baseName(name: string) {
 }
 
 /** What a file is, or null when it's none of these (it can still be zipped and encoded) */
-export function detectFormat(file: { name: string; type?: string }): Format | null {
-	const byExtension = formatByExtension.get(extensionOf(file.name));
+export function detectFormat(file: { name: string; type?: string; size?: number }): Format | null {
+	const extension = extensionOf(file.name);
+	// (.ts: a video's (MPEG transport stream), or TypeScript's code: a video only when it says so,
+	// or is too big to be code)
+	if (extension === 'ts' && !/^video\//.test(file.type ?? '') && (file.size ?? 0) < 2 * 1024 ** 2)
+		return null;
+	const byExtension = formatByExtension.get(extension);
 	if (byExtension) return byExtension;
 	const type = file.type ?? '';
 	for (const [pattern, id] of MIME_KINDS) if (pattern.test(type)) return formatById.get(id)!;
@@ -175,6 +180,9 @@ export function targetsFor(format: Format | null, { shrink = false } = {}): Targ
 	switch (format?.kind) {
 		case 'image':
 			own.push(...IMAGE_TARGETS.filter(not(format.id)).map((id) => target(id, 'Image')));
+			// (a GIF's moving picture as a video: smaller, and it plays everywhere)
+			if (format.id === 'gif')
+				(own.unshift(target('mp4', 'Video')), own.push(target('webm', 'Video')));
 			break;
 		case 'audio':
 			own.push(...AUDIO_TARGETS.filter(not(format.id)).map((id) => target(id, 'Audio')));
@@ -210,8 +218,12 @@ export function kindOf(format: Format | null): Kind {
  * what it can be made into (not a ZIP or Base64 of it)
  */
 export function editTargets(format: Format | null): Target[] {
+	// (not a ZIP or Base64 of it, nor a picture as a video: the picture editor makes pictures)
 	const others = targetsFor(format).filter(
-		(option) => option.group !== 'Any file' && option.id !== 'unzip'
+		(option) =>
+			option.group !== 'Any file' &&
+			option.id !== 'unzip' &&
+			!(format?.kind === 'image' && option.group === 'Video')
 	);
 	if (!format || format.readOnly || !formatById.has(format.id) || kindOf(format) === 'other')
 		return others;

@@ -187,7 +187,7 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 
 /** A GIF's filters: `fps` pictures a second, at most `width` wide, its own 256 colours */
 export function gifChain(fps: number, width: number) {
-	return `fps=${fps},scale='min(${width},iw)':-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse`;
+	return `fps=${fps},scale='min(${width},iw)':-1:flags=lanczos,split[gif1][gif2];[gif1]palettegen[gifp];[gif2][gifp]paletteuse`;
 }
 
 /** A GIF of a video: `fps` pictures a second, at most `width` wide */
@@ -199,7 +199,7 @@ export function gifArgs(fps: number, width: number, videoFilters?: string) {
 		'-vf',
 		[
 			videoFilters,
-			`fps=${fps},scale='min(${width},iw)':-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse`
+			`fps=${fps},scale='min(${width},iw)':-1:flags=lanczos,split[gif1][gif2];[gif1]palettegen[gifp];[gif2][gifp]paletteuse`
 		]
 			.filter(Boolean)
 			.join(','),
@@ -218,7 +218,12 @@ export const GIF_QUALITY: Record<Quality, { fps: number; width: number }> = {
 export function imageArgs(target: string, quality: number) {
 	switch (target) {
 		case 'gif':
-			return ['-vf', 'split[a][b];[a]palettegen[p];[b][p]paletteuse', '-frames:v', '1'];
+			return [
+				'-vf',
+				'split[gif1][gif2];[gif1]palettegen[gifp];[gif2][gifp]paletteuse',
+				'-frames:v',
+				'1'
+			];
 		case 'tiff':
 			return ['-c:v', 'tiff', '-compression_algo', 'deflate', '-frames:v', '1'];
 		case 'webp':

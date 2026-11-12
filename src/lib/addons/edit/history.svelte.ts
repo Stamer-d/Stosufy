@@ -15,6 +15,8 @@ export function createHistory<T>(apply: (value: T) => void) {
 	let last: string | null = null;
 	let pending: string | null = null;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	/** Waiting for the pointer to be let go (once, however many moves the drag has) */
+	let waiting = false;
 	const state = $state({ canUndo: false, canRedo: false });
 
 	const update = () => {
@@ -57,8 +59,19 @@ export function createHistory<T>(apply: (value: T) => void) {
 			pending = json;
 			clearTimeout(timer);
 			// (while dragging: once it's let go; else right after this change)
-			if (pressed) window.addEventListener('pointerup', () => setTimeout(settle), { once: true });
-			else timer = setTimeout(settle);
+			if (pressed) {
+				if (!waiting) {
+					waiting = true;
+					const done = () => {
+						window.removeEventListener('pointerup', done, true);
+						window.removeEventListener('pointercancel', done, true);
+						waiting = false;
+						setTimeout(settle);
+					};
+					window.addEventListener('pointerup', done, true);
+					window.addEventListener('pointercancel', done, true);
+				}
+			} else timer = setTimeout(settle);
 			update();
 		},
 		/** Starts over from what it is (another file) */

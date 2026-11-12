@@ -54,6 +54,9 @@ pub fn run() {
             ytdlp::ytdlp_cancel
         ])
         .setup(|app| {
+            // (off the start's way: it could be big)
+            let handle = app.handle().clone();
+            std::thread::spawn(move || ffmpeg::clean_work_folders(&handle));
             // The login link (stosufynew://) opens the app. On Linux this needs the desktop's
             // tools (xdg-utils): without them the app still starts, just without the link
             #[cfg(any(windows, target_os = "linux"))]
