@@ -44,6 +44,12 @@
 	import { userSettings, updateUserSettings } from './shims/user';
 	import { showToast } from '../lib/stores/toast';
 	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
+	import { devicesOpen } from './connect';
+	import { connect, DEVICE_ICONS } from '../lib/stores/connect';
+
+	// Another device plays (Stosufy Connect): the player controls it
+	let elsewhere = $derived($connect.remote && $connect.playback ? $connect.remoteDevice : null);
+	let hasOthers = $derived($connect.devices.length > 1);
 
 	let song = $derived($queue.songs[$queue.index] ?? null);
 	let upNext = $derived(
@@ -364,75 +370,107 @@
 			</div>
 
 			<div class="relative mt-2 flex justify-between">
-				<button
-					aria-label="Sleep timer"
-					class="h-11 px-2 flex items-center gap-1.5 text-sm {$sleepTimer
-						? 'text-primary-400'
-						: 'text-white/70'}"
-					onclick={() => (choosingSleep = !choosingSleep)}
-				>
-					<span class="icon-[mingcute--moon-line] size-6"></span>
-					{sleepLabel}
-				</button>
-				{#if choosingSleep}
-					<div
-						class="absolute bottom-12 left-0 z-10 w-48 py-1 rounded-xl bg-secondary-300 shadow-2xl ring-1 ring-white/10"
-					>
-						{#each SLEEP_MINUTES as minutes (minutes)}
-							<button
-								class="w-full px-4 py-2.5 text-start active:bg-white/5"
-								onclick={() => setSleep(minutes)}
-							>
-								In {minutes} minutes
-							</button>
-						{/each}
-						<button
-							class="w-full px-4 py-2.5 text-start active:bg-white/5"
-							onclick={() => setSleep('song')}
-						>
-							At the end of the song
-						</button>
-						{#if $sleepTimer}
-							<button
-								class="w-full px-4 py-2.5 text-start text-red-400 active:bg-white/5"
-								onclick={() => setSleep(null)}
-							>
-								Turn off
-							</button>
-						{/if}
-					</div>
-				{/if}
-				<div class="flex">
+				{#if elsewhere}
+					<!-- As in Spotify: where it plays, to choose another device -->
 					<button
-						aria-label={mod === 'NM' ? 'Speed mods' : `Speed mod: ${MODS[mod].name}`}
-						class="h-11 min-w-11 px-1 grid place-items-center {mod === 'NM' ? 'text-white/70' : ''}"
-						onclick={() => (choosingMods = true)}
+						aria-label="Playing on {elsewhere.name}: connect to a device"
+						class="min-w-0 h-11 px-2 flex items-center gap-2 text-sm font-semibold text-primary-400"
+						onclick={() => {
+							haptic();
+							devicesOpen.set(true);
+						}}
 					>
-						{#if mod === 'NM'}
-							<span class="icon-[mingcute--dashboard-3-line] size-6"></span>
-						{:else}
-							<span
-								class="px-1.5 py-0.5 rounded-md text-xs font-black tracking-wide text-black"
-								style="background-color: {MOD_COLOR[mod]}"
-							>
-								{mod}
-							</span>
-						{/if}
+						<span class="{DEVICE_ICONS[elsewhere.kind] ?? DEVICE_ICONS.computer} size-6 shrink-0"
+						></span>
+						<span class="truncate">{elsewhere.name}</span>
 					</button>
+				{:else}
 					<button
-						aria-label="Hitsounds"
-						aria-pressed={hitsoundsOn}
-						class="size-11 grid place-items-center {hitsoundsOn
+						aria-label="Sleep timer"
+						class="h-11 px-2 flex items-center gap-1.5 text-sm {$sleepTimer
 							? 'text-primary-400'
 							: 'text-white/70'}"
-						onclick={toggleHitsounds}
+						onclick={() => (choosingSleep = !choosingSleep)}
 					>
-						<span
-							class="{$hitsoundStatus === 'loading' && hitsoundsOn
-								? 'icon-[svg-spinners--ring-resize]'
-								: 'icon-[mingcute--drum-line]'} size-6"
-						></span>
+						<span class="icon-[mingcute--moon-line] size-6"></span>
+						{sleepLabel}
 					</button>
+					{#if choosingSleep}
+						<div
+							class="absolute bottom-12 left-0 z-10 w-48 py-1 rounded-xl bg-secondary-300 shadow-2xl ring-1 ring-white/10"
+						>
+							{#each SLEEP_MINUTES as minutes (minutes)}
+								<button
+									class="w-full px-4 py-2.5 text-start active:bg-white/5"
+									onclick={() => setSleep(minutes)}
+								>
+									In {minutes} minutes
+								</button>
+							{/each}
+							<button
+								class="w-full px-4 py-2.5 text-start active:bg-white/5"
+								onclick={() => setSleep('song')}
+							>
+								At the end of the song
+							</button>
+							{#if $sleepTimer}
+								<button
+									class="w-full px-4 py-2.5 text-start text-red-400 active:bg-white/5"
+									onclick={() => setSleep(null)}
+								>
+									Turn off
+								</button>
+							{/if}
+						</div>
+					{/if}
+				{/if}
+				<div class="flex">
+					{#if !elsewhere}
+						{#if hasOthers}
+							<button
+								aria-label="Connect to a device"
+								class="size-11 grid place-items-center text-white/70"
+								onclick={() => {
+									haptic();
+									devicesOpen.set(true);
+								}}
+							>
+								<span class="icon-[mingcute--device-line] size-6"></span>
+							</button>
+						{/if}
+						<button
+							aria-label={mod === 'NM' ? 'Speed mods' : `Speed mod: ${MODS[mod].name}`}
+							class="h-11 min-w-11 px-1 grid place-items-center {mod === 'NM'
+								? 'text-white/70'
+								: ''}"
+							onclick={() => (choosingMods = true)}
+						>
+							{#if mod === 'NM'}
+								<span class="icon-[mingcute--dashboard-3-line] size-6"></span>
+							{:else}
+								<span
+									class="px-1.5 py-0.5 rounded-md text-xs font-black tracking-wide text-black"
+									style="background-color: {MOD_COLOR[mod]}"
+								>
+									{mod}
+								</span>
+							{/if}
+						</button>
+						<button
+							aria-label="Hitsounds"
+							aria-pressed={hitsoundsOn}
+							class="size-11 grid place-items-center {hitsoundsOn
+								? 'text-primary-400'
+								: 'text-white/70'}"
+							onclick={toggleHitsounds}
+						>
+							<span
+								class="{$hitsoundStatus === 'loading' && hitsoundsOn
+									? 'icon-[svg-spinners--ring-resize]'
+									: 'icon-[mingcute--drum-line]'} size-6"
+							></span>
+						</button>
+					{/if}
 					<button
 						aria-label="Lyrics"
 						aria-pressed={view === 'lyrics'}

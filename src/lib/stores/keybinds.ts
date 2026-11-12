@@ -198,9 +198,8 @@ function changeVolume(step: number) {
 }
 
 const ACTIONS: Record<KeybindAction, Handler> = {
-	playPause: () => {
-		if (get(songQueue).audio) togglePlayback();
-	},
+	// (also with nothing loaded here: another device may play, see connectDesktop.ts)
+	playPause: () => togglePlayback(),
 	next: () => skipForward(),
 	previous: () => skipBackward(),
 	seekForward: () => seek(5),

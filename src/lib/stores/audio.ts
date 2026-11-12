@@ -455,6 +455,29 @@ export async function withoutPlaybackLock<T>(change: () => Promise<T>) {
 	}
 }
 
+/**
+ * Another device plays (Stosufy Connect, connectDesktop.ts): the player's controls and the
+ * songs chosen go to it. Returns the device's controls while they should, else null.
+ */
+export interface Redirect {
+	toggle(): void;
+	next(): void;
+	previous(): void;
+	playSongs(queue: MapSet[], index: number): void;
+	queueSong(song: MapSet, next: boolean): void;
+	queueSongs(songs: MapSet[]): void;
+}
+let redirect: (() => Redirect | null) | null = null;
+
+export function setRedirect(find: (() => Redirect | null) | null) {
+	redirect = find;
+}
+
+/** The other device's controls, if the user's song changes go there now */
+function redirected() {
+	return lockBypass ? null : (redirect?.() ?? null);
+}
+
 /** Whether a song change by the user is blocked (and says why) */
 function locked(quiet = false) {
 	if (lockBypass || !playbackLocks.size) return false;
@@ -475,8 +498,10 @@ export async function setSongQueue(
 	playSong = true,
 	currentSeconds = 0
 ) {
-	if (locked()) return;
 	if (!queue[index]) return;
+	const elsewhere = playSong ? redirected() : null;
+	if (elsewhere) return elsewhere.playSongs(queue, index);
+	if (locked()) return;
 	// Offline: on to the first downloaded song from there
 	if (get(offline) && type !== 'preview') {
 		const playable = (i: number) => localMapId(queue[i]) != null;
@@ -555,6 +580,8 @@ export function stopPlayback() {
 }
 
 export function togglePlayback() {
+	const elsewhere = redirected();
+	if (elsewhere) return elsewhere.toggle();
 	const audio = get(songQueue).audio;
 	if (!audio) return;
 	if (audio.paused) startPlayback(audio);
@@ -594,6 +621,8 @@ async function skipping(skip: () => Promise<void>) {
 }
 
 export function skipForward() {
+	const elsewhere = redirected();
+	if (elsewhere) return Promise.resolve(elsewhere.next());
 	return skipping(async () => {
 		const current = get(songQueue);
 		if (!current.queue?.length) return;
@@ -616,6 +645,8 @@ export function skipForward() {
 }
 
 export function skipBackward() {
+	const elsewhere = redirected();
+	if (elsewhere) return Promise.resolve(elsewhere.previous());
 	return skipping(async () => {
 		const current = get(songQueue);
 		if (!current.audio) return;
@@ -670,6 +701,8 @@ export function cycleRepeatMode() {
 
 /** Adds a song to the queue; `next` puts it in front of the other queued songs */
 export async function queueSong(song: MapSet, next = false) {
+	const elsewhere = redirected();
+	if (elsewhere) return elsewhere.queueSong(song, next);
 	const current = get(songQueue);
 	if (!current.queue?.length) {
 		// Nothing is playing yet: just play the song
@@ -682,6 +715,8 @@ export async function queueSong(song: MapSet, next = false) {
 /** Adds many songs (a whole playlist) to the queue; with nothing playing they play right away */
 export async function queueSongs(songs: MapSet[], playlistId: PlaylistId | null = null) {
 	if (!songs.length) return;
+	const elsewhere = redirected();
+	if (elsewhere) return elsewhere.queueSongs(songs);
 	if (!get(songQueue).queue?.length) {
 		await setSongQueue(0, songs, 'playlist', playlistId);
 		return;

@@ -11,6 +11,7 @@
 	import { keyStore, loginExpired } from '../shims/auth';
 	import { loadLibrary } from '../library';
 	import '../listening';
+	import '../connect';
 	import '../hitsounds';
 	import { offline } from '../../lib/stores/network';
 	import { queue } from '../player';
@@ -21,6 +22,7 @@
 	import Dock from '../Dock.svelte';
 	import SongBackdrop from '../SongBackdrop.svelte';
 	import FullPlayer from '../FullPlayer.svelte';
+	import ConnectSheet from '../ConnectSheet.svelte';
 	import SongMenu from '../SongMenu.svelte';
 	import Toasts from '../Toasts.svelte';
 	import Login from '../Login.svelte';
@@ -137,5 +139,6 @@
 		: 'opacity-0'}"
 ></div>
 <FullPlayer />
+<ConnectSheet />
 <SongMenu />
 <Toasts />
