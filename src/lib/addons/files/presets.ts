@@ -50,6 +50,8 @@ export interface AudioOptions {
 	kbps?: number;
 	/** Filters for the sound (the editor's: cut, fades, …) */
 	filters?: string;
+	/** A filter graph instead (the editor's parts put together), and its sound's label */
+	graph?: { filter: string; audio: string };
 }
 
 /** FFmpeg's arguments for a file's sound alone, in this format, its tags (and cover) kept */
@@ -66,20 +68,22 @@ export function audioArgs(target: string, quality: Quality, options: AudioOption
 					...(target === 'mp3' ? ['-id3v2_version', '3'] : [])
 				]
 			: ['-vn'];
+	const sound = options.graph
+		? ['-filter_complex', options.graph.filter, '-map', options.graph.audio]
+		: ['-map', '0:a:0'];
 	return [
-		'-map',
-		'0:a:0',
+		...sound,
 		...cover,
 		'-sn',
 		'-map_metadata',
 		'0',
-		...(options.filters ? ['-af', options.filters] : []),
+		...(options.filters && !options.graph ? ['-af', options.filters] : []),
 		...audioCodec(target, quality, options.kbps)
 	];
 }
 
 /** Scaled to at most this many lines high (0: as it is), a width that divides by 2 */
-function scale(height: number) {
+export function scale(height: number) {
 	return height ? `scale=-2:'min(${height},ih)'` : 'scale=trunc(iw/2)*2:trunc(ih/2)*2';
 }
 
@@ -94,6 +98,11 @@ export interface VideoOptions {
 	audioFilters?: string;
 	/** Without sound */
 	mute?: boolean;
+	/**
+	 * A filter graph instead (the editor's parts put together, its filters and the scale in
+	 * it), and its picture's and sound's labels
+	 */
+	graph?: { filter: string; video: string; audio?: string };
 }
 
 /** FFmpeg's arguments for a video in this format */
@@ -101,7 +110,19 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 	const { height = 0, videoKbps, audioKbps: aKbps, mute } = options;
 	const vf = [options.videoFilters, scale(height)].filter(Boolean).join(',');
 	const af = options.audioFilters ? ['-af', options.audioFilters] : [];
-	const maps = ['-map', '0:v:0', ...(mute ? ['-an'] : ['-map', '0:a:0?', ...af]), '-sn'];
+	const { graph } = options;
+	const maps = graph
+		? [
+				'-filter_complex',
+				graph.filter,
+				'-map',
+				graph.video,
+				...(mute || !graph.audio ? ['-an'] : ['-map', graph.audio]),
+				'-sn'
+			]
+		: ['-map', '0:v:0', ...(mute ? ['-an'] : ['-map', '0:a:0?', ...af]), '-sn'];
+	/** The picture's filters (in the graph, if there's one) */
+	const pic = graph ? [] : ['-vf', vf];
 	const sound = (codec: string[], fallback: number) =>
 		mute ? [] : [...codec, '-b:a', `${Math.round(aKbps ?? fallback)}k`];
 	const rate = (kbps: number) => [
@@ -126,14 +147,13 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 	switch (target) {
 		case 'mp4':
 		case 'mov':
-			return [...maps, '-vf', vf, ...h264, ...aac, '-movflags', '+faststart'];
+			return [...maps, ...pic, ...h264, ...aac, '-movflags', '+faststart'];
 		case 'mkv':
-			return [...maps, '-vf', vf, ...h264, ...aac];
+			return [...maps, ...pic, ...h264, ...aac];
 		case 'webm':
 			return [
 				...maps,
-				'-vf',
-				vf,
+				...pic,
 				'-c:v',
 				'libvpx',
 				'-deadline',
@@ -153,8 +173,7 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 		case 'avi':
 			return [
 				...maps,
-				'-vf',
-				vf,
+				...pic,
 				'-c:v',
 				'mpeg4',
 				...(videoKbps
@@ -164,6 +183,11 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 			];
 	}
 	throw new Error(`Can't make ${target} videos`);
+}
+
+/** A GIF's filters: `fps` pictures a second, at most `width` wide, its own 256 colours */
+export function gifChain(fps: number, width: number) {
+	return `fps=${fps},scale='min(${width},iw)':-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse`;
 }
 
 /** A GIF of a video: `fps` pictures a second, at most `width` wide */

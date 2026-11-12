@@ -9,7 +9,12 @@
 	import Formats from '../files/Formats.svelte';
 	import CopyButton from '../files/CopyButton.svelte';
 	import { dragOut } from '../files/dragout.ts';
-	import { freshImageEdit, oriented, outputSize, saveImage } from './image.ts';
+	import { onMount } from 'svelte';
+	import { cssFilter, freshImageEdit, oriented, outputSize, saveImage } from './image.ts';
+	import { SHAPES, biggest, ratioOf } from './crop.ts';
+	import { createHistory } from './history.svelte.ts';
+	import CropBox from './CropBox.svelte';
+	import Undo from './Undo.svelte';
 
 	/** @type {{ file: File }} */
 	let { file } = $props();
@@ -17,25 +22,25 @@
 	// (a file of its own each time: the page makes a new editor for another file)
 	// svelte-ignore state_referenced_locally
 	const targets = editTargets(detectFormat(file));
-	/** @type {[string, string, number][]} */
-	const SHAPES = [
-		['free', 'Free', 0],
-		['1:1', 'Square', 1],
-		['4:3', '4:3', 4 / 3],
-		['16:9', '16:9', 16 / 9],
-		['9:16', '9:16', 9 / 16]
-	];
-	/** @type {('nw' | 'ne' | 'sw' | 'se')[]} */
-	const CORNERS = ['nw', 'ne', 'sw', 'se'];
-	/** The smallest part kept (of the picture's side) */
-	const SMALLEST = 0.02;
-
 	let image = $state(null);
 	let failed = $state('');
 	let edit = $state(freshImageEdit());
 	let shape = $state('free');
 	let preview = $state('');
-	let box = $state();
+	/** @type {[('brightness' | 'contrast' | 'saturation'), string, string][]} */
+	const ADJUSTMENTS = [
+		['brightness', 'Light', 'icon-[mingcute--sun-line]'],
+		['contrast', 'Contrast', 'icon-[ri--contrast-2-line]'],
+		['saturation', 'Colour', 'icon-[mingcute--drop-line]']
+	];
+
+	const history = createHistory((value) => (edit = value));
+	$effect(() => history.changed($state.snapshot(edit)));
+	onMount(() => {
+		const keys = (event) => history.key(event);
+		window.addEventListener('keydown', keys);
+		return () => window.removeEventListener('keydown', keys);
+	});
 	let saving = $state({ status: 'idle', saved: null, error: '' });
 
 	// svelte-ignore state_referenced_locally
@@ -79,10 +84,7 @@
 			: { width: image.naturalWidth, height: image.naturalHeight };
 	});
 	let size = $derived(image ? outputSize(image, edit) : { width: 0, height: 0 });
-	let ratio = $derived(SHAPES.find(([id]) => id === shape)?.[2] ?? 0);
-
-	/** A part's height for its width in the shape (both 0–1 of the picture) */
-	const heightFor = (w) => (w * whole.width) / (whole.height * ratio);
+	let ratio = $derived(ratioOf(shape));
 
 	function turn(by) {
 		edit.turns = /** @type {0|1|2|3} */ ((edit.turns + by + 4) % 4);
@@ -93,80 +95,8 @@
 	/** The biggest part of this shape, in the middle */
 	function chooseShape(id) {
 		shape = id;
-		const wanted = SHAPES.find(([other]) => other === id)?.[2] ?? 0;
-		if (!wanted) return;
-		let w = 1;
-		let h = (whole.width * w) / (whole.height * wanted);
-		if (h > 1) {
-			h = 1;
-			w = (whole.height * h * wanted) / whole.width;
-		}
-		edit.crop = { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
-	}
-
-	const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-
-	function pointAt(event) {
-		const rect = box.getBoundingClientRect();
-		return {
-			x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
-			y: clamp((event.clientY - rect.top) / rect.height, 0, 1)
-		};
-	}
-
-	/** From a corner that stays (`anchor`) to the pointer, in the shape if there's one */
-	function spanned(anchor, point) {
-		let w = Math.max(SMALLEST, Math.abs(point.x - anchor.x));
-		let h = Math.max(SMALLEST, Math.abs(point.y - anchor.y));
-		const right = point.x >= anchor.x;
-		const down = point.y >= anchor.y;
-		if (ratio) {
-			h = heightFor(w);
-			const roomY = down ? 1 - anchor.y : anchor.y;
-			if (h > roomY) {
-				h = roomY;
-				w = (whole.height * h * ratio) / whole.width;
-			}
-		}
-		w = Math.min(w, right ? 1 - anchor.x : anchor.x);
-		if (ratio) h = heightFor(w);
-		return {
-			x: right ? anchor.x : anchor.x - w,
-			y: down ? anchor.y : anchor.y - h,
-			w,
-			h
-		};
-	}
-
-	/** @param {'new' | 'move' | 'nw' | 'ne' | 'sw' | 'se'} mode */
-	function drag(event, mode) {
-		event.preventDefault();
-		event.stopPropagation();
-		const start = pointAt(event);
-		const was = { ...edit.crop };
-		const anchor =
-			mode === 'new'
-				? start
-				: {
-						x: mode.includes('w') ? was.x + was.w : was.x,
-						y: mode.includes('n') ? was.y + was.h : was.y
-					};
-		const move = (moved) => {
-			const point = pointAt(moved);
-			if (mode === 'move') {
-				edit.crop = {
-					...was,
-					x: clamp(was.x + point.x - start.x, 0, 1 - was.w),
-					y: clamp(was.y + point.y - start.y, 0, 1 - was.h)
-				};
-			} else edit.crop = spanned(anchor, point);
-		};
-		const up = () => {
-			window.removeEventListener('pointermove', move);
-			window.removeEventListener('pointerup', up);
-		};
-		window.addEventListener('pointermove', move);
-		window.addEventListener('pointerup', up);
+		const wanted = ratioOf(id);
+		if (wanted) edit.crop = biggest(wanted, whole.width, whole.height);
 	}
 
 	function reset() {
@@ -196,6 +126,7 @@
 	}
 
 	let cropped = $derived(edit.crop.w < 0.999 || edit.crop.h < 0.999);
+	let adjusted = $derived(!!(edit.brightness || edit.contrast || edit.saturation));
 </script>
 
 {#if failed}
@@ -210,46 +141,17 @@
 		<div
 			class="grid place-items-center p-4 rounded-2xl bg-black/40 ring-1 ring-white/5 overflow-hidden isolate"
 		>
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div
-				bind:this={box}
-				class="relative max-w-full select-none touch-none cursor-crosshair"
-				style="aspect-ratio: {whole.width} / {whole.height}; width: min(100%, calc(50vh * {whole.width} / {whole.height}), {whole.width}px)"
-				onpointerdown={(event) => drag(event, 'new')}
-			>
+			<CropBox width={whole.width} height={whole.height} bind:crop={edit.crop} {ratio}>
 				{#if preview}
-					<img src={preview} alt="" class="absolute inset-0 size-full" draggable="false" />
+					<img
+						src={preview}
+						alt=""
+						class="absolute inset-0 size-full"
+						style="filter: {cssFilter(edit)}"
+						draggable="false"
+					/>
 				{/if}
-				<!-- Outside the part: darker -->
-				<div
-					class="absolute pointer-events-none ring-[9999px] ring-black/55"
-					style="left: {edit.crop.x * 100}%; top: {edit.crop.y * 100}%; width: {edit.crop.w *
-						100}%; height: {edit.crop.h * 100}%"
-				></div>
-				<div
-					class="absolute border-2 border-white cursor-move"
-					role="slider"
-					tabindex="-1"
-					aria-label="The part kept"
-					aria-valuenow={Math.round(edit.crop.w * 100)}
-					style="left: {edit.crop.x * 100}%; top: {edit.crop.y * 100}%; width: {edit.crop.w *
-						100}%; height: {edit.crop.h * 100}%"
-					onpointerdown={(event) => drag(event, 'move')}
-				>
-					{#each CORNERS as corner (corner)}
-						<div
-							class="absolute size-4 rounded-sm bg-white shadow {corner === 'nw'
-								? '-left-2 -top-2 cursor-nwse-resize'
-								: corner === 'ne'
-									? '-right-2 -top-2 cursor-nesw-resize'
-									: corner === 'sw'
-										? '-left-2 -bottom-2 cursor-nesw-resize'
-										: '-right-2 -bottom-2 cursor-nwse-resize'}"
-							onpointerdown={(event) => drag(event, corner)}
-						></div>
-					{/each}
-				</div>
-			</div>
+			</CropBox>
 		</div>
 
 		<!-- What's done to it -->
@@ -307,7 +209,7 @@
 					</button>
 				{/each}
 			</div>
-			{#if cropped || edit.turns || edit.mirrorX || edit.mirrorY || edit.width}
+			{#if cropped || adjusted || edit.turns || edit.mirrorX || edit.mirrorY || edit.width}
 				<button
 					class="h-8 px-3 rounded-full font-semibold text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition"
 					onclick={reset}
@@ -315,6 +217,8 @@
 					Undo all
 				</button>
 			{/if}
+
+			<Undo {history} />
 
 			<label class="ml-auto flex items-center gap-2">
 				<span class="text-white/60">Width</span>
@@ -330,6 +234,29 @@
 				/>
 				<span class="tabular-nums text-white/60">{size.width} × {size.height} px</span>
 			</label>
+		</div>
+
+		<!-- Light, contrast, colour -->
+		<div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+			{#each ADJUSTMENTS as [key, label, icon] (key)}
+				<label class="flex items-center gap-2">
+					<span class="{icon} size-4 text-white/60"></span>
+					<span class="w-16 text-white/60">{label}</span>
+					<input
+						type="range"
+						min="-100"
+						max="100"
+						step="1"
+						class="w-36 accent-violet-300"
+						aria-label={label}
+						bind:value={edit[key]}
+						ondblclick={() => (edit[key] = 0)}
+					/>
+					<span class="w-9 tabular-nums text-right text-white/60">
+						{edit[key] > 0 ? '+' : ''}{edit[key]}
+					</span>
+				</label>
+			{/each}
 		</div>
 
 		<!-- Saved as -->

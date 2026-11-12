@@ -98,6 +98,64 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	const mp3 = Buffer.from(await written('tagged (edited).mp3')).toString('latin1');
 	check('its title and cover kept', mp3.includes('Tone') && mp3.includes('APIC'));
 
+	// --- Parts: split, one taken out; each saved apart; undone and redone ---------------------
+	await page.fill('input[aria-label="Start time"]', '0');
+	await page.press('input[aria-label="Start time"]', 'Enter');
+	await page.fill('input[aria-label="End time"]', '2');
+	await page.press('input[aria-label="End time"]', 'Enter');
+	await page.click('[role="radiogroup"][aria-label="Fade in"] button:has-text("Off")');
+	await page.click('[role="radiogroup"][aria-label="Speed"] button:has-text("1×")');
+	const waveBox = await page
+		.locator('[role="slider"][aria-label="Start"]')
+		.locator('..')
+		.boundingBox();
+	const at = async (seconds) => {
+		await page.mouse.click(waveBox.x + (waveBox.width * seconds) / end, waveBox.y + 30);
+		await page.click('button:has-text("Split here")');
+	};
+	await at(0.5);
+	await at(1.5);
+	check(
+		'split twice: three parts',
+		(await page.locator('button[aria-label^="Take out part"]').count()) === 3
+	);
+	await page.click('button[aria-label="Take out part 2"]');
+	check(
+		'the length without the middle part: ~1 s',
+		(await page.locator('text=Length').innerText()).includes('0:01.0')
+	);
+	await page.waitForTimeout(500);
+	await page.keyboard.press('Control+z');
+	await page.waitForSelector('button[aria-label="Take out part 2"]');
+	check(
+		'Ctrl+Z: the part back in',
+		(await page.locator('button[aria-label="Put part 2"]').count()) === 0
+	);
+	await page.keyboard.press('Control+y');
+	await page.waitForSelector('button[aria-label="Put part 2"]');
+	check('Ctrl+Y: out again', true);
+	await page.click('[role="group"][aria-label="Save as"] [data-target="wav"]');
+	await saved('tagged (edited).wav');
+	const joined = await lengthOf('tagged (edited).wav');
+	check('saved without the middle part: ~1 s', joined > 0.9 && joined < 1.1, String(joined));
+	await page.click('button[aria-label="Put part 2"]');
+	await page.check('text=Each of the 3 parts as its own file');
+	await page.click('[role="group"][aria-label="Save as"] [data-target="wav"]');
+	await saved('tagged (part 3).wav');
+	const lengths = [];
+	for (const n of [1, 2, 3]) lengths.push(+(await lengthOf(`tagged (part ${n}).wav`)).toFixed(2));
+	check(
+		'each part its own file: 0.5, 1 and 0.5 s',
+		JSON.stringify(lengths) === '[0.5,1,0.5]',
+		JSON.stringify(lengths)
+	);
+	await page.click('button[aria-label="Zoom in"]');
+	check(
+		'zoomed in: 2×, and a way along',
+		(await page.locator('text=2.0×').count()) === 1 &&
+			(await page.locator('input[aria-label="Where the view is"]').count()) === 1
+	);
+
 	// --- A video: turned, without sound; and its sound alone ---------------------------------
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: fixture('clip.mp4') }
@@ -118,6 +176,21 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.click('[role="group"][aria-label="Save as"] [data-target="mp3"]');
 	await saved('clip (edited).mp3');
 	check("a video's sound alone, as MP3", (await lengthOf('clip (edited).mp3')) > 0.8);
+	// Cut to a square of its (turned) picture, and a frame of it as a picture
+	await page.click('button:has-text("Cut the picture")');
+	await page.click('[role="radiogroup"][aria-label="Shape"] button:has-text("Square")');
+	await page.click('[role="group"][aria-label="Save as"] [data-target="mp4"]');
+	await saved('clip (edited) (2).mp4');
+	check(
+		'the picture cut to a square: 64×64',
+		JSON.stringify(await sizeOf('clip (edited) (2).mp4', 'video/mp4')) === '[64,64]'
+	);
+	await page.click('button:has-text("Save this frame")');
+	await page.waitForSelector('text=Saved: clip (frame 0-00.0).png');
+	check(
+		'a frame as a picture, cut the same',
+		JSON.stringify(await sizeOf('clip (frame 0-00.0).png', 'image/png')) === '[64,64]'
+	);
 
 	// --- A picture: turned, cut to a square, smaller -----------------------------------------
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
@@ -149,6 +222,42 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		return [image.naturalWidth, image.naturalHeight];
 	});
 	check('"Copy": the edited picture on the clipboard', JSON.stringify(copied) === '[100,100]');
+
+	// Lighter: the same picture saved again is brighter; and undone
+	const light = async (name) =>
+		page.evaluate(async (path) => {
+			const image = new Image();
+			image.src = URL.createObjectURL(new Blob([window.__written[path]]));
+			await image.decode();
+			const canvas = document.createElement('canvas');
+			canvas.width = image.naturalWidth;
+			canvas.height = image.naturalHeight;
+			const context = canvas.getContext('2d');
+			context.drawImage(image, 0, 0);
+			const px = context.getImageData(0, 0, canvas.width, canvas.height).data;
+			let sum = 0;
+			for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+			return sum / (px.length / 4) / 3;
+		}, `${DIR}/${name}`);
+	await page.locator('input[aria-label="Light"]').evaluate((input) => {
+		input.value = '50';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+	check(
+		'lighter: shown so',
+		/brightness\(1\.5\)/.test(await page.locator('img[style*="filter"]').getAttribute('style'))
+	);
+	await page.click('[role="group"][aria-label="Save as"] [data-target="jpg"]');
+	await saved('logo (edited) (2).jpg');
+	const before = await light('logo (edited).jpg');
+	const after = await light('logo (edited) (2).jpg');
+	check('…and saved so', after > before + 10, `${before} → ${after}`);
+	await page.waitForTimeout(500);
+	await page.click('button[aria-label="Undo"]');
+	check(
+		'undone: as it was',
+		(await page.locator('input[aria-label="Light"]').inputValue()) === '0'
+	);
 
 	// --- Back to the converter ---------------------------------------------------------------
 	await page.click('button:has-text("Convert instead")');
