@@ -127,10 +127,11 @@ export function detectFormat(file: { name: string; type?: string }): Format | nu
 	return null;
 }
 
-const IMAGE_TARGETS = ['png', 'jpg', 'webp', 'gif', 'bmp', 'tiff', 'ico', 'pdf'];
-const AUDIO_TARGETS = ['mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a', 'aiff'];
-const VIDEO_TARGETS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'gif'];
-const DATA_TARGETS = ['json', 'yaml', 'toml', 'csv', 'tsv', 'xml'];
+// (each in the order they're offered: the most wanted first)
+const IMAGE_TARGETS = ['png', 'jpg', 'webp', 'pdf', 'ico', 'gif', 'bmp', 'tiff'];
+const AUDIO_TARGETS = ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'opus', 'aiff'];
+const VIDEO_TARGETS = ['mp4', 'gif', 'webm', 'mov', 'mkv', 'avi'];
+const DATA_TARGETS = ['json', 'csv', 'yaml', 'xml', 'toml', 'tsv'];
 const TEXT_TARGETS: Record<string, string[]> = {
 	md: ['html', 'txt'],
 	html: ['txt', 'md'],
@@ -138,9 +139,9 @@ const TEXT_TARGETS: Record<string, string[]> = {
 };
 
 function target(id: string, group: string): Target {
-	if (id === 'base64') return { id, label: 'Base64 text', extension: 'txt', group };
+	if (id === 'base64') return { id, label: 'Base64', extension: 'txt', group };
 	if (id === 'zip') return { id, label: 'ZIP', extension: 'zip', group };
-	if (id === 'unzip') return { id, label: 'Unpack the files', extension: '', group };
+	if (id === 'unzip') return { id, label: 'Unpack', extension: '', group };
 	const format = formatById.get(id)!;
 	return { id, label: format.label, extension: format.extensions[0], group };
 }
@@ -157,8 +158,10 @@ export function targetsFor(format: Format | null): Target[] {
 			own.push(...AUDIO_TARGETS.filter(not(format.id)).map((id) => target(id, 'Audio')));
 			break;
 		case 'video':
+			// (the sound alone first: what's wanted most of a video, MP3)
+			own.push(target('mp3', 'Only the sound'));
 			own.push(...VIDEO_TARGETS.filter(not(format.id)).map((id) => target(id, 'Video')));
-			own.push(...AUDIO_TARGETS.map((id) => target(id, 'Only the sound')));
+			own.push(...AUDIO_TARGETS.filter(not('mp3')).map((id) => target(id, 'Only the sound')));
 			break;
 		case 'data':
 			own.push(...DATA_TARGETS.filter(not(format.id)).map((id) => target(id, 'Data')));

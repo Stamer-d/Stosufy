@@ -23,13 +23,15 @@ export interface Job {
 	file: File;
 	format: Format | null;
 	kind: Kind;
+	/** What it can become, the most wanted (and the last one chosen for its format) first */
 	targets: Target[];
-	/** What it's to become (a target's id) */
-	target: string;
+	/** What it becomes (a target's id), null until one is chosen */
+	target: string | null;
 	status: Status;
 	/** 0–1 while it's converted */
 	progress: number;
 	error?: string;
+	/** What it was made into, the last time */
 	saved: SavedFile[];
 	/** A picture of it (for pictures), an object URL */
 	preview?: string;
@@ -59,32 +61,32 @@ export const options = writable<ConvertOptions>(
 );
 options.subscribe((value) => keep(OPTIONS_KEY, value));
 
-/** The target last chosen for each format, chosen again for the next file of it */
+/** The target last chosen for each format: offered first for the next file of it */
 const lastTargets: Record<string, string> = load(TARGETS_KEY, {});
 
 export const jobs = writable<Job[]>([]);
 
 let nextId = 1;
 
-/** The usual target of a file: the last one chosen for its format, else the first */
-function defaultTarget(format: Format | null, targets: Target[]) {
-	const last = lastTargets[format?.id ?? 'other'];
-	return targets.some((target) => target.id === last) ? last : targets[0].id;
+/** A format's targets, the last one chosen for it first */
+function ordered(format: Format | null) {
+	const targets = targetsFor(format);
+	const last = targets.findIndex((target) => target.id === lastTargets[format?.id ?? 'other']);
+	return last > 0 ? [targets[last], ...targets.filter((_, i) => i !== last)] : targets;
 }
 
 export function addFiles(files: Iterable<File>) {
 	const added: Job[] = [];
 	for (const file of files) {
 		const format = detectFormat(file);
-		const targets = targetsFor(format);
 		const kind = kindOf(format);
 		added.push({
 			id: nextId++,
 			file,
 			format,
 			kind,
-			targets,
-			target: defaultTarget(format, targets),
+			targets: ordered(format),
+			target: null,
 			status: 'ready',
 			progress: 0,
 			saved: [],
@@ -100,47 +102,52 @@ function change(id: number, patch: Partial<Job>) {
 	jobs.update((all) => all.map((job) => (job.id === id ? { ...job, ...patch } : job)));
 }
 
-export function setTarget(id: number, target: string) {
+/** Makes a file into this (right away, or after the ones before it) */
+export function convertTo(id: number, target: string) {
 	const job = get(jobs).find((job) => job.id === id);
 	if (!job || job.status === 'working' || job.status === 'waiting') return;
+	if (!job.targets.some((option) => option.id === target)) return;
 	lastTargets[job.format?.id ?? 'other'] = target;
 	keep(TARGETS_KEY, lastTargets);
-	// (a new target: to be converted again)
-	change(id, { target, status: 'ready', error: undefined, progress: 0 });
+	change(id, { target, status: 'waiting', progress: 0, error: undefined });
+	void run();
 }
 
-/** Every file of a kind (or all) to become this, where it can */
-export function setTargetForAll(target: string, kind?: Kind) {
+/** Every file not converted yet into this, where it can be */
+export function convertAllTo(target: string) {
 	for (const job of get(jobs))
-		if ((!kind || job.kind === kind) && job.targets.some((option) => option.id === target))
-			setTarget(job.id, target);
+		if (job.status === 'ready' && job.targets.some((option) => option.id === target))
+			convertTo(job.id, target);
+}
+
+/** The same again, after it failed */
+export function retry(id: number) {
+	const job = get(jobs).find((job) => job.id === id);
+	if (job?.target) convertTo(id, job.target);
+}
+
+/** Back to choosing what it becomes (to make it into something else too) */
+export function chooseAgain(id: number) {
+	const job = get(jobs).find((job) => job.id === id);
+	if (!job || job.status === 'working' || job.status === 'waiting') return;
+	change(id, { status: 'ready', target: null, error: undefined, progress: 0 });
 }
 
 export function removeJob(id: number) {
 	const job = get(jobs).find((job) => job.id === id);
-	if (!job || job.status === 'working') return;
+	if (!job || job.status === 'working' || job.status === 'waiting') return;
 	if (job.preview) URL.revokeObjectURL(job.preview);
 	jobs.update((all) => all.filter((other) => other.id !== id));
 }
 
-/** Takes away what's done or failed (and what's not started yet, with `everything`) */
-export function clearJobs(everything = false) {
-	for (const job of get(jobs))
-		if (job.status === 'done' || job.status === 'failed' || (everything && job.status === 'ready'))
-			removeJob(job.id);
+/** Empties the list, but for what's being converted */
+export function clearJobs() {
+	for (const job of get(jobs)) removeJob(job.id);
 }
 
 // --- Converting -------------------------------------------------------------------------------
 
 let running = false;
-
-/** Converts the files that are ready (or just these), one after the other */
-export function convert(ids?: number[]) {
-	for (const job of get(jobs))
-		if ((!ids || ids.includes(job.id)) && (job.status === 'ready' || job.status === 'failed'))
-			change(job.id, { status: 'waiting', progress: 0, error: undefined });
-	void run();
-}
 
 async function run() {
 	if (running) return;
@@ -220,17 +227,16 @@ async function save(name: string, data: Uint8Array) {
 	};
 }
 
-/** Everything converted, together in one ZIP in the folder; its path */
+/** What the files in the list were made into, together in one ZIP in the folder; its path */
 export async function saveAllAsZip() {
 	const zip = new JSZip();
 	const names = new Set<string>();
-	for (const job of get(jobs))
-		for (const file of job.saved) {
-			let name = file.name;
-			for (let n = 2; names.has(name); n++) name = file.name.replace(/(\.[^./]+)?$/, ` (${n})$1`);
-			names.add(name);
-			zip.file(name, await readFile(file.path));
-		}
+	for (const file of get(jobs).flatMap((job) => job.saved)) {
+		let name = file.name;
+		for (let n = 2; names.has(name); n++) name = file.name.replace(/(\.[^./]+)?$/, ` (${n})$1`);
+		names.add(name);
+		zip.file(name, await readFile(file.path));
+	}
 	if (!names.size) throw new Error('Nothing converted yet');
 	const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
 	const data = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });

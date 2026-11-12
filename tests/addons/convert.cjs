@@ -53,6 +53,15 @@ const MORE = [
 	['c-avi.mp4', 'c-avi.avi', 'avi', [8, 'AVI ']]
 ];
 
+/** A file's row in the list */
+let row;
+/** Its format clicked: a button, or in "More" */
+async function pick(at, target) {
+	const button = at.locator(`button[data-target="${target}"]`);
+	if (await button.count()) await button.first().click();
+	else await at.locator('select[aria-label="More formats"]').selectOption(target);
+}
+
 (async () => {
 	const zip = new JSZip();
 	zip.file('notes/hello.txt', 'hello');
@@ -122,6 +131,7 @@ const MORE = [
 		writes: true,
 		allow: /^https:\/\/unpkg\.com\//
 	});
+	row = (name) => page.locator(`li[aria-label="${name}"]`).last();
 	await page.click('header button[aria-label="File converter"]');
 	await page.waitForURL('**/addons/convert');
 	check('its title bar button opens its page', true);
@@ -135,18 +145,30 @@ const MORE = [
 		'every file is in the list',
 		(await page.locator('ul[aria-label="Files"] > li').count()) === FILES.length
 	);
-	const options = await page
-		.locator('select[aria-label="Convert data.json to"] option')
-		.evaluateAll((all) => all.map((option) => option.value));
+	const offered = (row) =>
+		row.evaluate((li) => [
+			...[...li.querySelectorAll('[data-target]')].map((button) => button.dataset.target),
+			...[...li.querySelectorAll('select option')].map((option) => option.value).filter(Boolean)
+		]);
+	const data = await offered(row('data.json'));
 	check(
 		'a JSON can become YAML, TOML, CSV, XML…',
-		['yaml', 'toml', 'csv', 'tsv', 'xml', 'zip'].every((id) => options.includes(id)),
-		options.join()
+		['yaml', 'toml', 'csv', 'tsv', 'xml', 'zip'].every((id) => data.includes(id)),
+		data.join()
 	);
-	for (const [file, target] of FILES)
-		await page.selectOption(`select[aria-label="Convert ${file.name} to"]`, target);
+	const video = await offered(row('clip.mp4'));
+	check(
+		'an MP4: MP3 first, then GIF, WebM…',
+		video.slice(0, 3).join() === 'mp3,gif,webm',
+		video.join()
+	);
+	check(
+		'files of all kinds: no "All to" for them',
+		!(await page.locator('text=/^All \\d+ .* to$/').count())
+	);
+	// One click on a format: converted right away
+	for (const [file, target] of FILES) await pick(row(file.name), target);
 
-	await page.click('button:has-text("Convert all")');
 	await page.waitForFunction(
 		() =>
 			[...document.querySelectorAll('ul[aria-label="Files"] > li')].every((li) =>
@@ -264,22 +286,16 @@ const MORE = [
 
 	// The same file again: a name of its own
 	await page.setInputFiles('input[aria-label="Choose files"]', [FILES[0][0]]);
-	const again = page.locator('ul[aria-label="Files"] > li').last();
+	const lastPng = FILES.findLast(([file]) => file.name.endsWith('.png'))[1];
 	check(
-		'a new file gets the last target chosen for its format',
-		(await again.locator('select').inputValue()) ===
-			FILES.findLast(([file]) => file.name.endsWith('.png'))[1]
+		'a new file: the last format chosen for its type is offered first',
+		(await offered(row('logo.png')))[0] === lastPng
 	);
-	await again.locator('select').selectOption('jpg');
-	await page
-		.locator('ul[aria-label="Files"] > li')
-		.last()
-		.locator('button:has-text("Convert")')
-		.click();
+	await pick(row('logo.png'), 'jpg');
 	await page.waitForFunction(() => window.__written['/home/tester/Stosufy/Converted/logo (2).jpg']);
 	check('a name that is taken: "logo (2).jpg"', true);
 
-	await page.click('button:has-text("Save all as one ZIP")');
+	await page.click('button:has-text("All as one ZIP")');
 	await page.waitForFunction(() =>
 		Object.keys(window.__written).some(
 			(name) => name.endsWith('.zip') && name.includes('Converted 2')
@@ -303,6 +319,37 @@ const MORE = [
 	await page.click('button:has-text("Clear the list")');
 	await page.waitForSelector('text=Drop files here');
 	check('the list cleared', true);
+
+	// Several of a kind: all at once
+	await page.setInputFiles(
+		'input[aria-label="Choose files"]',
+		['a', 'b', 'c'].map((n) => ({ name: `${n}.wav`, mimeType: 'audio/wav', buffer: wav() }))
+	);
+	await page.waitForSelector('text=All 3 sound files to');
+	await pick(page.locator('[role="group"][aria-label="All files to"]'), 'flac');
+	await page.waitForFunction(
+		() =>
+			[...document.querySelectorAll('ul[aria-label="Files"] > li')].every(
+				(li) => li.dataset.status === 'done'
+			),
+		null,
+		{ timeout: 60000 }
+	);
+	check(
+		'"All 3 sound files to FLAC": three FLACs',
+		await page.evaluate(() =>
+			['a', 'b', 'c'].every(
+				(n) => window.__written[`/home/tester/Stosufy/Converted/${n}.flac`]?.length > 100
+			)
+		)
+	);
+	check('…and the bar is gone', !(await page.locator('text=All 3 sound files to').count()));
+	await page.locator('li[aria-label="a.wav"] button:has-text("Other format")').click();
+	check(
+		'"Other format": its formats again',
+		(await page.locator('li[aria-label="a.wav"] button[data-target]').count()) > 0
+	);
+
 	check('no errors', errors.length === 0, errors.join('\n'));
 	await page.context().close();
 	await browser.close();
