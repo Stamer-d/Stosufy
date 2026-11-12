@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Stosfy"
-version = "0.6.102"
+version = "0.6.103"
 dependencies = [
  "clipboard-rs",
  "flate2",
