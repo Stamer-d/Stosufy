@@ -14,6 +14,7 @@
 	 *   wave: import('./waveform.ts').Waveform | null,
 	 *   reading?: boolean,
 	 *   frames?: import('./thumbnails.svelte.ts').Thumbnails | null,
+	 *   zoom?: number,
 	 *   parts: import('./media.ts').Part[],
 	 *   playing: boolean,
 	 *   onseek: (time: number) => void,
@@ -29,6 +30,7 @@
 		wave,
 		reading = false,
 		frames = null,
+		zoom = $bindable(1),
 		parts,
 		playing,
 		onseek,
@@ -53,7 +55,6 @@
 	];
 
 	/** How far in, and where the view starts (s) */
-	let zoom = $state(1);
 	let from = $state(0);
 	let span = $derived(duration / zoom);
 
@@ -62,6 +63,14 @@
 	const shown = (seconds) => seconds >= from - 1e-6 && seconds <= from + span + 1e-6;
 
 	/** Zoomed in or out, `around` staying where it is on the screen */
+	/** Twice as far in, or out (around where it plays, if that's in view) */
+	export function zoomIn() {
+		zoomTo(zoom * 2, shown(time) ? time : undefined);
+	}
+	export function zoomOut() {
+		zoomTo(zoom / 2, zoom > 1 && shown(time) ? time : undefined);
+	}
+
 	function zoomTo(next, around = from + span / 2) {
 		const share = (around - from) / span;
 		zoom = clamp(next, 1, MAX_ZOOM);
@@ -101,40 +110,27 @@
 	});
 
 	/**
-	 * The video's pictures along the top: one for each tile, on a grid that halves as it's
-	 * zoomed in (so those taken are the same ones when it's zoomed back), outside what's kept
+	 * The video's pictures along the top, whole, side by side; each of the time in its middle
+	 * (on a grid that halves as it's zoomed in: those taken are used again), outside what's kept
 	 * darker
 	 */
 	function drawFrames(context) {
 		if (!frames) return;
 		void frames.version;
 		const tile = STRIP * frames.aspect;
-		const wanted = (span * tile) / width;
-		let step = duration;
-		while (step > wanted && step > 0.02) step /= 2;
-		const first = Math.max(0, Math.floor(from / step));
-		const last = Math.min(Math.ceil(duration / step), Math.ceil((from + span) / step));
+		const count = Math.ceil(width / tile);
+		const per = (span * tile) / width;
+		let grid = duration;
+		while (grid > per / 2 && grid > 0.02) grid /= 2;
 		const times = [];
-		for (let j = first; j < last; j++) times.push(Math.min(duration - 0.05, (j + 0.5) * step));
+		for (let i = 0; i < count; i++) {
+			const t = from + (i + 0.5) * per;
+			times.push(clamp(Math.round(t / grid) * grid, 0, Math.max(0, duration - 0.05)));
+		}
 		frames.want(times);
-		const w = (step / span) * width;
 		times.forEach((time, i) => {
-			const x = (((first + i) * step - from) / span) * width;
 			const picture = frames.get(time);
-			if (!picture) return;
-			// (the middle of it, as wide as its tile)
-			const sw = Math.min(picture.width, (picture.height * w) / STRIP);
-			context.drawImage(
-				picture,
-				(picture.width - sw) / 2,
-				0,
-				sw,
-				picture.height,
-				x,
-				10,
-				w + 0.5,
-				STRIP
-			);
+			if (picture) context.drawImage(picture, i * tile, 10, tile, STRIP);
 		});
 		context.fillStyle = 'rgba(0, 0, 0, 0.6)';
 		const left = ((start - from) / span) * width;
@@ -315,39 +311,16 @@
 		{/if}
 	</div>
 
-	<!-- Zoom -->
-	<div class="flex items-center gap-2 text-xs text-white/50">
-		{#if zoom > 1}
-			<input
-				type="range"
-				class="flex-1 accent-violet-300"
-				aria-label="Where the view is"
-				min="0"
-				max={Math.max(0, duration - span)}
-				step="0.01"
-				bind:value={from}
-			/>
-		{:else}
-			<span class="flex-1">Ctrl + mouse wheel to zoom in</span>
-		{/if}
-		<button
-			class="size-7 grid place-items-center rounded-full hover:bg-white/10 hover:text-white cursor-pointer disabled:opacity-30 disabled:cursor-default"
-			aria-label="Zoom out"
-			disabled={zoom <= 1}
-			onclick={() => zoomTo(zoom / 2, zoom > 1 && shown(time) ? time : undefined)}
-		>
-			<span class="icon-[mingcute--zoom-out-line] size-4"></span>
-		</button>
-		<span class="w-10 text-center tabular-nums"
-			>{zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)}×</span
-		>
-		<button
-			class="size-7 grid place-items-center rounded-full hover:bg-white/10 hover:text-white cursor-pointer disabled:opacity-30 disabled:cursor-default"
-			aria-label="Zoom in"
-			disabled={zoom >= MAX_ZOOM}
-			onclick={() => zoomTo(zoom * 2, shown(time) ? time : undefined)}
-		>
-			<span class="icon-[mingcute--zoom-in-line] size-4"></span>
-		</button>
-	</div>
+	<!-- Where the view is, zoomed in -->
+	{#if zoom > 1}
+		<input
+			type="range"
+			class="w-full h-2 accent-violet-300"
+			aria-label="Where the view is"
+			min="0"
+			max={Math.max(0, duration - span)}
+			step="0.01"
+			bind:value={from}
+		/>
+	{/if}
 </div>

@@ -9,10 +9,19 @@
 	 *   crop: import('./crop.ts').Crop,
 	 *   ratio?: number,
 	 *   active?: boolean,
+	 *   maxHeight?: string,
 	 *   children: import('svelte').Snippet
 	 * }}
 	 */
-	let { width, height, crop = $bindable(), ratio = 0, active = true, children } = $props();
+	let {
+		width,
+		height,
+		crop = $bindable(),
+		ratio = 0,
+		active = true,
+		maxHeight = '50vh',
+		children
+	} = $props();
 
 	/** @type {('nw' | 'ne' | 'sw' | 'se')[]} */
 	const CORNERS = ['nw', 'ne', 'sw', 'se'];
@@ -96,7 +105,7 @@
 	class="relative max-w-full select-none touch-none overflow-hidden {active
 		? 'cursor-crosshair'
 		: ''}"
-	style="aspect-ratio: {width} / {height}; width: min(100%, calc(50vh * {width} / {height}), {width}px)"
+	style="aspect-ratio: {width} / {height}; width: min(100%, calc({maxHeight} * {width} / {height}), {width}px)"
 	onpointerdown={(event) => drag(event, 'new')}
 >
 	{@render children()}

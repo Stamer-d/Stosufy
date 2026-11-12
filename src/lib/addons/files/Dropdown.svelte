@@ -14,6 +14,7 @@
 	 *   onchange: (value: any) => void,
 	 *   label: string,
 	 *   icon?: string,
+	 *   prefix?: string,
 	 *   disabled?: boolean,
 	 *   sideOnButton?: boolean
 	 * }}
@@ -24,6 +25,7 @@
 		onchange,
 		label,
 		icon = '',
+		prefix = '',
 		disabled = false,
 		sideOnButton = true
 	} = $props();
@@ -105,6 +107,9 @@
 	>
 		{#if icon}
 			<span class="{icon} size-4 shrink-0 text-white/55"></span>
+		{/if}
+		{#if prefix}
+			<span class="shrink-0 text-white/50">{prefix}</span>
 		{/if}
 		<span class="min-w-0 truncate font-semibold">{chosen?.label ?? '—'}</span>
 		{#if sideOnButton && chosen?.side}

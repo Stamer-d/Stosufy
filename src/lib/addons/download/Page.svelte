@@ -21,6 +21,7 @@
 	import { sizeText } from '../files/size.ts';
 	import CopyButton from '../files/CopyButton.svelte';
 	import Dropdown from '../files/Dropdown.svelte';
+	import Toggle from '../files/Toggle.svelte';
 	import PartPicker from './PartPicker.svelte';
 	import { ensureTools, isYouTube, lookUp, tools } from './ytdlp.ts';
 	import {
@@ -456,7 +457,7 @@
 					<span class="icon-[mingcute--download-3-line] size-8"></span>Downloader
 				</h1>
 				<p class="mt-1 text-sm text-white/70">
-					Videos and their sound from YouTube, Twitch and many more, whole or just a part.
+					YouTube, Twitch and many more: a video, its sound, or just a part.
 				</p>
 				{#if $tools.status === 'downloading'}
 					<p class="mt-2 flex items-center gap-1.5 text-xs font-semibold text-rose-200/90">
@@ -678,50 +679,35 @@
 						{/if}
 					</div>
 
-					{#if (!playlist && info.duration) || (youtube && !part.on)}
-						<div class="flex flex-col gap-2">
-							{#if !playlist && info.duration}
-								<label class="flex items-center gap-2 text-sm">
-									<input type="checkbox" class="accent-rose-400 size-4" bind:checked={part.on} />
-									Only a part of it
-									<span class="text-white/45">
-										{fromLink && part.on && part.start === fromLink
-											? `(from ${short(fromLink)}, where the link starts)`
-											: '(only that part is downloaded)'}
-									</span>
-								</label>
-								{#if part.on}
-									<PartPicker
-										duration={info.duration}
-										bind:start={part.start}
-										bind:end={part.end}
-									/>
-									<label class="flex items-center gap-2 text-sm text-white/70">
-										<input
-											type="checkbox"
-											class="accent-rose-400 size-4"
-											bind:checked={part.exact}
-										/>
-										Cut exactly (slower; else at the nearest keyframe)
-									</label>
-								{/if}
+					<div class="flex flex-wrap items-center gap-2">
+						{#if !playlist && info.duration}
+							<Toggle
+								label="Only a part"
+								icon="icon-[mingcute--scissors-line]"
+								pressed={part.on}
+								title="Only the part chosen is downloaded"
+								onclick={() => (part.on = !part.on)}
+							/>
+							{#if part.on}
+								<Toggle
+									label="Exact cut"
+									pressed={part.exact}
+									title="Cut exactly where chosen (slower); else at the nearest keyframe"
+									onclick={() => (part.exact = !part.exact)}
+								/>
 							{/if}
-							{#if youtube && !part.on}
-								<label class="flex items-center gap-2 text-sm">
-									<input
-										type="checkbox"
-										class="accent-rose-400 size-4"
-										bind:checked={options.sponsorblock}
-									/>
-									Take out sponsors and the like (SponsorBlock)
-								</label>
-							{/if}
-						</div>
-					{/if}
-
-					<div>
+						{/if}
+						{#if youtube && !part.on}
+							<Toggle
+								label="Skip sponsors"
+								icon="icon-[mingcute--forward-line]"
+								pressed={options.sponsorblock}
+								title="SponsorBlock: sponsors, self-promotion and reminders to subscribe taken out"
+								onclick={() => (options.sponsorblock = !options.sponsorblock)}
+							/>
+						{/if}
 						<button
-							class="h-11 px-6 flex items-center gap-2 rounded-full text-base font-bold bg-rose-500 hover:bg-rose-400 text-white cursor-pointer transition"
+							class="ml-auto h-11 px-6 flex items-center gap-2 rounded-full text-base font-bold bg-rose-500 hover:bg-rose-400 text-white cursor-pointer transition"
 							onclick={start}
 						>
 							<span class="icon-[mingcute--download-3-line] size-5"></span>
@@ -731,6 +717,9 @@
 							{/if}
 						</button>
 					</div>
+					{#if part.on && !playlist && info.duration}
+						<PartPicker duration={info.duration} bind:start={part.start} bind:end={part.end} />
+					{/if}
 				{/if}
 			</section>
 		{:else if !$downloads.length}

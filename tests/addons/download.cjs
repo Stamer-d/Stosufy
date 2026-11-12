@@ -290,9 +290,9 @@ const formats = (vcodec, heights, fps = 30) =>
 	await choose('Quality', '720');
 	check(
 		'a link to a time in it: only a part, from there',
-		(await page.isChecked('text=Only a part of it')) &&
-			(await page.locator('text=from 1:00:00, where the link starts').count()) === 1,
-		await page.locator('section[aria-label="What it is"]').innerText()
+		(await page.locator('button[aria-pressed="true"]:has-text("Only a part")').count()) === 1 &&
+			/^1:00:00/.test(await page.inputValue('input[aria-label="Part start time"]')),
+		await page.inputValue('input[aria-label="Part start time"]')
 	);
 	await page.fill('input[aria-label="Part end time"]', '1:05:00');
 	await page.press('input[aria-label="Part end time"]', 'Enter');

@@ -12,6 +12,14 @@ function check(name, ok, detail = '') {
 	console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${ok || !detail ? '' : `  (${detail})`}`);
 }
 const DIR = '/home/tester/Stosufy/Edited';
+/** An option of a dropdown chosen (its button, then the option) */
+async function pick(page, label, value) {
+	await page.click(`button[aria-label="${label}"][aria-haspopup]`);
+	await page.click(
+		`[role="listbox"][aria-label="${label}"] [role="option"][data-value="${value}"]`
+	);
+}
+
 const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name));
 
 (async () => {
@@ -76,11 +84,11 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.press('input[aria-label="Start time"]', 'Enter');
 	await page.fill('input[aria-label="End time"]', '1.5');
 	await page.press('input[aria-label="End time"]', 'Enter');
-	await page.click('[role="radiogroup"][aria-label="Fade in"] button:has-text("1 s")');
-	await page.click('[role="radiogroup"][aria-label="Speed"] button:has-text("2×")');
+	await pick(page, 'Fade in', '1');
+	await pick(page, 'Speed', '2');
 	check(
 		'the length shown: 1 s at 2× → 0:00.5',
-		(await page.locator('text=Length').innerText()).includes('0:00.5')
+		(await page.locator('[aria-label="Length"]').innerText()).includes('0:00.5')
 	);
 	const audioFormats = await page
 		.locator('[role="group"][aria-label="Save as"] [data-target]')
@@ -103,15 +111,15 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.press('input[aria-label="Start time"]', 'Enter');
 	await page.fill('input[aria-label="End time"]', '2');
 	await page.press('input[aria-label="End time"]', 'Enter');
-	await page.click('[role="radiogroup"][aria-label="Fade in"] button:has-text("Off")');
-	await page.click('[role="radiogroup"][aria-label="Speed"] button:has-text("1×")');
+	await pick(page, 'Fade in', '0');
+	await pick(page, 'Speed', '1');
 	const waveBox = await page
 		.locator('[role="slider"][aria-label="Start"]')
 		.locator('..')
 		.boundingBox();
 	const at = async (seconds) => {
 		await page.mouse.click(waveBox.x + (waveBox.width * seconds) / end, waveBox.y + 30);
-		await page.click('button:has-text("Split here")');
+		await page.click('button:has-text("Split")');
 	};
 	await at(0.5);
 	await at(1.5);
@@ -122,7 +130,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.click('button[aria-label="Take out part 2"]');
 	check(
 		'the length without the middle part: ~1 s',
-		(await page.locator('text=Length').innerText()).includes('0:01.0')
+		(await page.locator('[aria-label="Length"]').innerText()).includes('0:01.0')
 	);
 	await page.waitForTimeout(500);
 	await page.keyboard.press('Control+z');
@@ -173,7 +181,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	);
 
 	// --- Another file while there are changes: said first ------------------------------------
-	await page.click('[role="radiogroup"][aria-label="Fade in"] button:has-text("1 s")');
+	await pick(page, 'Fade in', '1');
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'voice.webm', mimeType: 'audio/webm', buffer: fixture('voice.webm') }
 	]);
@@ -182,10 +190,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	check(
 		'changes not saved: asked first, and kept on a "Keep editing"',
 		(await page.locator('h2:has-text("tagged.mp3")').count()) === 1 &&
-			(await page.getAttribute(
-				'[role="radiogroup"][aria-label="Fade in"] button:has-text("1 s")',
-				'aria-checked'
-			)) === 'true'
+			/1 s/.test(await page.innerText('button[aria-label="Fade in"][aria-haspopup]'))
 	);
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'voice.webm', mimeType: 'video/webm', buffer: fixture('voice.webm') }
@@ -295,7 +300,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await saved('clip (edited).mp3');
 	check("a video's sound alone, as MP3", (await lengthOf('clip (edited).mp3')) > 0.8);
 	// Cut to a square of its (turned) picture, and a frame of it as a picture
-	await page.click('button:has-text("Cut the picture")');
+	await page.click('button:has-text("Crop")');
 	await page.click('[role="radiogroup"][aria-label="Shape"] button:has-text("Square")');
 	await page.click('[role="group"][aria-label="Save as"] [data-target="mp4"]');
 	await saved('clip (edited) (2).mp4');
@@ -303,7 +308,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		'the picture cut to a square: 64×64',
 		JSON.stringify(await sizeOf('clip (edited) (2).mp4', 'video/mp4')) === '[64,64]'
 	);
-	await page.click('button:has-text("Save this frame")');
+	await page.click('button:has-text("Save frame")');
 	await page.waitForSelector('text=Saved: clip (frame 0-00.0).png');
 	check(
 		'a frame as a picture, cut the same',
@@ -311,7 +316,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	);
 
 	// A GIF of parts of it (the sound left out: a GIF has none)
-	await page.click('button:has-text("Cut the picture")');
+	await page.click('button:has-text("Crop")');
 	const clipEnd = Number(
 		await page.getAttribute('[role="slider"][aria-label="End"]', 'aria-valuenow')
 	);
@@ -321,7 +326,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		.boundingBox();
 	for (const share of [1 / 3, 2 / 3]) {
 		await page.mouse.click(clipBox.x + clipBox.width * share, clipBox.y + 30);
-		await page.click('button:has-text("Split here")');
+		await page.click('button:has-text("Split")');
 	}
 	await page.click('button[aria-label="Take out part 2"]');
 	await page.click('[role="group"][aria-label="Save as"] [data-target="gif"]');

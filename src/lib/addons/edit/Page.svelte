@@ -124,9 +124,25 @@
 				<h1 class="flex items-center gap-2.5 text-3xl font-extrabold tracking-tight">
 					<span class="icon-[mingcute--scissors-line] size-8"></span>File editor
 				</h1>
-				<p class="mt-1 text-sm text-white/70">
-					Cut, fade and turn songs, videos and pictures. It stays on your computer.
-				</p>
+				{#if file}
+					<h2
+						class="mt-1 flex items-center gap-1.5 min-w-0 text-sm font-semibold"
+						title={file.name}
+					>
+						<span
+							class="{kind === 'image'
+								? 'icon-[mingcute--pic-line]'
+								: kind === 'video'
+									? 'icon-[mingcute--video-line]'
+									: 'icon-[mingcute--music-2-line]'} size-4 shrink-0 text-white/70"
+						></span>
+						<span class="truncate">{file.name}</span>
+					</h2>
+				{:else}
+					<p class="mt-1 text-sm text-white/70">
+						Cut, fade and turn songs, videos and pictures. It stays on your computer.
+					</p>
+				{/if}
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
 				{#if file}
@@ -179,16 +195,6 @@
 				>
 			</button>
 		{:else}
-			<div class="mb-4 flex items-center gap-2 min-w-0">
-				<span
-					class="{kind === 'image'
-						? 'icon-[mingcute--pic-line] text-amber-300'
-						: kind === 'video'
-							? 'icon-[mingcute--video-line] text-rose-300'
-							: 'icon-[mingcute--music-2-line] text-sky-300'} size-5 shrink-0"
-				></span>
-				<h2 class="truncate text-lg font-bold" title={file.name}>{file.name}</h2>
-			</div>
 			{#if waiting}
 				<div
 					class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 p-3 pl-4 rounded-2xl bg-amber-300/10 ring-1 ring-amber-300/30 text-sm"
