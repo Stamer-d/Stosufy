@@ -177,6 +177,42 @@
 		window.addEventListener('pointerup', up);
 	}
 
+	/** Where it plays, dragged there (from anywhere on the timeline, or by its line) */
+	function scrub(event) {
+		if (event.button > 0) return;
+		event.preventDefault();
+		event.stopPropagation();
+		onseek(timeAt(event));
+		const move = (pointer) => onseek(timeAt(pointer));
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+		window.addEventListener('pointercancel', up);
+	}
+
+	/** Where it plays, moved by the keys (a second; Shift: five) */
+	function playKey(event) {
+		const step = event.shiftKey ? 5 : 1;
+		const to =
+			event.key === 'ArrowLeft'
+				? time - step
+				: event.key === 'ArrowRight'
+					? time + step
+					: event.key === 'Home'
+						? 0
+						: event.key === 'End'
+							? duration
+							: null;
+		if (to === null) return;
+		event.preventDefault();
+		event.stopPropagation();
+		onseek(clamp(to, 0, duration));
+	}
+
 	function key(event, what) {
 		const step = event.shiftKey ? 1 : 0.1;
 		const by = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
@@ -204,7 +240,7 @@
 	<div
 		class="relative rounded-xl bg-black/30 ring-1 ring-white/5 cursor-pointer select-none touch-none overflow-hidden"
 		style="height: {HEIGHT}px"
-		onpointerdown={(event) => onseek(timeAt(event))}
+		onpointerdown={scrub}
 		onwheel={wheel}
 	>
 		<!-- (a little in from the edges: the handles at the start and the end seen whole) -->
@@ -284,7 +320,7 @@
 				{@const value = what === 'start' ? start : end}
 				{#if shown(value)}
 					<div
-						class="absolute top-2.5 bottom-0 w-4 -ml-2 flex justify-center cursor-ew-resize group/handle focus:outline-none"
+						class="absolute top-2.5 bottom-0 z-[15] w-4 -ml-2 flex justify-center cursor-ew-resize group/handle focus:outline-none"
 						style="left: {at(value)}%"
 						role="slider"
 						tabindex="0"
@@ -305,12 +341,29 @@
 					</div>
 				{/if}
 			{/each}
-			<!-- Where it plays -->
+			<!-- Where it plays: from the top to the bottom, dragged by its line or its knob (on
+			     top, over the part's handles) -->
 			{#if shown(time)}
 				<div
-					class="pointer-events-none absolute top-5 bottom-0 z-10 w-0.5 -ml-px bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]"
+					class="absolute inset-y-0 z-10 w-3 -ml-1.5 flex justify-center cursor-ew-resize group/play focus:outline-none"
 					style="left: {at(time)}%"
-				></div>
+					role="slider"
+					tabindex="0"
+					aria-label="Where it plays"
+					aria-valuemin="0"
+					aria-valuemax={duration}
+					aria-valuenow={time}
+					aria-valuetext={clock(time)}
+					onpointerdown={scrub}
+					onkeydown={playKey}
+				>
+					<div
+						class="w-0.5 h-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)] group-focus-visible/play:bg-violet-200"
+					></div>
+					<div
+						class="absolute top-0 z-20 w-2.5 h-2.5 rounded-b-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)] group-hover/play:scale-125 group-focus-visible/play:bg-violet-200 transition-transform"
+					></div>
+				</div>
 			{/if}
 		</div>
 	</div>

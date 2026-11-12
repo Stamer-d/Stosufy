@@ -3,7 +3,7 @@
 
 import * as path from '@tauri-apps/api/path';
 import { exists, mkdir, rename, writeFile } from '@tauri-apps/plugin-fs';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import type { Made } from './ffmpeg';
 
 export interface SavedFile {
@@ -79,7 +79,12 @@ export async function saveFile(
 	return { name: parts.length ? `${parts.join('/')}/${base}` : base, path: target, size };
 }
 
-/** A file shown in its folder (or the folder) */
+/** A file shown in its folder */
 export async function reveal(target: string) {
 	await revealItemInDir(target);
+}
+
+/** An add-on's folder in ~/Stosufy opened (its files shown, not it in the one above) */
+export async function openFolder(name: string) {
+	await openPath(await outputFolder(name));
 }

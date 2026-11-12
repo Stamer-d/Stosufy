@@ -220,12 +220,40 @@
 		})();
 	});
 
+	// How loud it's heard here (only here: the file's own volume is the edit's), kept
+	const LISTEN_KEY = 'stosufy-editor-listen';
+	let listen = $state(
+		(() => {
+			try {
+				const kept = Number(localStorage.getItem(LISTEN_KEY));
+				return localStorage.getItem(LISTEN_KEY) !== null && kept >= 0 && kept <= 1 ? kept : 1;
+			} catch {
+				return 1;
+			}
+		})()
+	);
+	/** What it was before it was muted here (back to it with a click) */
+	let listenWas = 1;
+	$effect(() => {
+		try {
+			localStorage.setItem(LISTEN_KEY, String(listen));
+		} catch {
+			// (not kept: the next time it's as loud as it was)
+		}
+	});
+	function toggleListen() {
+		if (listen > 0) {
+			listenWas = listen;
+			listen = 0;
+		} else listen = listenWas || 1;
+	}
+
 	// The effects, as far as the player can show them
 	$effect(() => {
 		if (!player) return;
 		player.playbackRate = edit.speed;
 		player.preservesPitch = edit.keepPitch;
-		player.volume = Math.min(1, Math.pow(10, edit.volume / 20));
+		player.volume = Math.min(1, Math.pow(10, edit.volume / 20) * listen);
 		player.muted = edit.mute;
 	});
 
@@ -621,6 +649,36 @@
 				onclick={split}
 			/>
 			<div class="ml-auto flex items-center gap-1 text-white/50">
+				<!-- How loud it's heard here: not saved in the file -->
+				<div
+					class="flex items-center gap-1"
+					title="How loud it plays here (the file stays as it is)"
+				>
+					<button
+						class="size-8 grid place-items-center rounded-full hover:bg-white/10 hover:text-white cursor-pointer"
+						aria-label={listen > 0 ? 'Mute here' : 'Unmute here'}
+						onclick={toggleListen}
+					>
+						<span
+							class="{listen === 0
+								? 'icon-[mingcute--volume-mute-line]'
+								: listen < 0.5
+									? 'icon-[mingcute--volume-off-line]'
+									: 'icon-[mingcute--volume-line]'} size-4"
+						></span>
+					</button>
+					<input
+						type="range"
+						class="w-20 h-1.5 accent-white cursor-pointer"
+						min="0"
+						max="1"
+						step="0.01"
+						aria-label="Listening volume"
+						aria-valuetext="{Math.round(listen * 100)}%"
+						bind:value={listen}
+					/>
+				</div>
+				<span class="w-px h-5 mx-1 bg-white/10"></span>
 				<button
 					class="size-8 grid place-items-center rounded-full hover:bg-white/10 hover:text-white cursor-pointer disabled:opacity-30 disabled:cursor-default"
 					aria-label="Zoom out"

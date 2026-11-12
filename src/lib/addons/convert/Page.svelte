@@ -5,7 +5,7 @@
 	import { fly, fade } from 'svelte/transition';
 	import { showToast } from '#lib/stores/toast.ts';
 	import { installedAddons } from '#lib/addons/store.ts';
-	import { reveal as revealFile } from '../files/save.ts';
+	import { openFolder, reveal as revealFile } from '../files/save.ts';
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
 	import CopyButton from '../files/CopyButton.svelte';
 	import Formats from '../files/Formats.svelte';
@@ -25,7 +25,7 @@
 		stopJob,
 		removeJob,
 		clearJobs,
-		converterFolder,
+		FOLDER as CONVERTED,
 		saveAllAsZip
 	} from './jobs.ts';
 
@@ -135,7 +135,7 @@
 
 	async function reveal(path) {
 		try {
-			await revealFile(path ?? (await converterFolder()));
+			await (path ? revealFile(path) : openFolder(CONVERTED));
 		} catch (error) {
 			console.error('Could not show the folder:', error);
 			showToast("Couldn't open the folder", 'icon-[mingcute--warning-line]');

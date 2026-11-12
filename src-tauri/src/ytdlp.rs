@@ -585,6 +585,8 @@ pub fn common_args(
         "utf-8",
         "--color",
         "never",
+        // (what it does said, step by step: told while it's done, see `step_of`)
+        "--no-quiet",
         "--ffmpeg-location",
     ]
     .iter()
@@ -975,10 +977,15 @@ pub fn run(
                 match reader.read_until(b'\n', &mut bytes) {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {
-                        let text = String::from_utf8_lossy(&bytes)
-                            .trim_end_matches(['\r', '\n'])
-                            .to_string();
-                        if send.send((is_error, text)).is_err() {
+                        // (FFmpeg's progress: lines ended with \r, each over the one before)
+                        let text = String::from_utf8_lossy(&bytes);
+                        let parts = text
+                            .split(['\r', '\n'])
+                            .filter(|part| !part.trim().is_empty());
+                        if parts
+                            .map(|part| send.send((is_error, part.to_string())))
+                            .any(|sent| sent.is_err())
+                        {
                             break;
                         }
                     }
@@ -991,7 +998,8 @@ pub fn run(
     let mut errors: Vec<String> = Vec::new();
     for (is_error, text) in lines {
         line(&text);
-        if is_error {
+        // (FFmpeg's progress isn't what went wrong)
+        if is_error && ffmpeg_time(&text).is_none() {
             errors.push(text);
             if errors.len() > 40 {
                 errors.remove(0);
@@ -1152,9 +1160,20 @@ pub async fn ytdlp_info(
     tauri::async_runtime::spawn_blocking(move || {
         let mut json = String::new();
         let ended = run(&binary, &id, &args, &running, |line| {
-            if !line.starts_with('[') || line.starts_with("[{") {
+            // (its JSON: one line; the others what it does, told)
+            if line.starts_with('{') {
                 json.push_str(line);
                 json.push('\n');
+            } else if let Some(step) = step_of(line) {
+                let _ = app.emit(
+                    "ytdlp-progress",
+                    Progress {
+                        id: id.clone(),
+                        phase: "step".into(),
+                        step: Some(step.into()),
+                        ..Default::default()
+                    },
+                );
             }
         })?;
         if ended.cancelled {
@@ -1183,6 +1202,73 @@ pub struct Progress {
     count: Option<u32>,
     /// "video" or "audio": what's downloaded now (of a video downloaded as two)
     stream: Option<String>,
+    /// Phase "step": what it does before the download (see `step_of`)
+    step: Option<String>,
+    /// Phase "cut": how much of the part FFmpeg has made (s)
+    seconds: Option<f64>,
+}
+
+/// What a line of yt-dlp's says it does now, before (or between) the downloads: "open" the
+/// link, "cookies" read, the site's "page" loaded, YouTube's "challenge" solved, the "formats"
+/// found, the download's "start", the "cut" of a part, a "wait" the site asks for, the
+/// "sponsors" found
+pub fn step_of(line: &str) -> Option<&'static str> {
+    let lower = line.to_lowercase();
+    if lower.starts_with("extracting cookies") {
+        return Some("cookies");
+    }
+    let (tag, rest) = line.strip_prefix('[')?.split_once(']')?;
+    let tag = tag.to_lowercase();
+    let rest = rest.trim();
+    match tag.as_str() {
+        "download" if rest.starts_with("Destination:") => return Some("start"),
+        "download" if rest.starts_with("Sleeping") => return Some("wait"),
+        "download" | "dl" | "pp" | "done" => return None,
+        "info" if rest.contains("time ranges") => return Some("cut"),
+        "info" if rest.contains("format(s)") => return Some("start"),
+        "info" => return None,
+        "sponsorblock" => return Some("sponsors"),
+        "hlsnative" | "dashsegments" | "ffmpeg" if rest.starts_with("Downloading") => {
+            return Some("start")
+        }
+        _ => {}
+    }
+    if lower.contains("jsc") || lower.contains("challenge") || lower.contains("nsig") {
+        return Some("challenge");
+    }
+    if rest.starts_with("Extracting URL") {
+        return Some("open");
+    }
+    if lower.contains("m3u8 information") || lower.contains("mpd manifest") {
+        return Some("formats");
+    }
+    if rest.contains("Downloading") {
+        return Some("page");
+    }
+    None
+}
+
+/// FFmpeg's progress line: how much it has made (s), and how fast ("2.1x")
+pub fn ffmpeg_time(line: &str) -> Option<(f64, Option<String>)> {
+    if !line.contains("size=") && !line.contains("frame=") {
+        return None;
+    }
+    let time = line.split("time=").nth(1)?.split_whitespace().next()?;
+    let mut seconds = 0.0;
+    for part in time.trim_start_matches('-').split(':') {
+        seconds = seconds * 60.0 + part.parse::<f64>().ok()?;
+    }
+    // (a moment before its start, at first)
+    if time.starts_with('-') {
+        seconds = 0.0;
+    }
+    let speed = line
+        .split("speed=")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .filter(|speed| *speed != "N/A")
+        .map(String::from);
+    Some((seconds, speed))
 }
 
 #[derive(Serialize)]
@@ -1234,6 +1320,23 @@ pub fn read_line(line: &str) -> (Option<Progress>, Option<String>) {
     }
     if let Some(path) = line.strip_prefix("[done] ") {
         return (None, Some(path.trim().to_string()));
+    }
+    if let Some((seconds, speed)) = ffmpeg_time(line) {
+        let progress = Progress {
+            phase: "cut".into(),
+            seconds: Some(seconds),
+            speed,
+            ..Default::default()
+        };
+        return (Some(progress), None);
+    }
+    if let Some(step) = step_of(line) {
+        let progress = Progress {
+            phase: "step".into(),
+            step: Some(step.into()),
+            ..Default::default()
+        };
+        return (Some(progress), None);
     }
     (None, None)
 }
@@ -1710,7 +1813,54 @@ mod tests {
         assert_eq!((p.speed, p.eta, p.stream), (None, None, None));
         assert_eq!(read_line("[pp] Merger").0.unwrap().phase, "Merger");
         assert_eq!(read_line("[done] /a/b c.mp4").1.unwrap(), "/a/b c.mp4");
-        assert!(read_line("[youtube] abc: Downloading").0.is_none());
+        assert!(read_line("[youtube] abc: Merging").0.is_none());
+        let step = |line: &str| read_line(line).0.and_then(|p| p.step);
+        for (line, said) in [
+            ("[youtube] Extracting URL: https://youtu.be/abc", "open"),
+            ("Extracting cookies from firefox", "cookies"),
+            ("[youtube] abc: Downloading webpage", "page"),
+            ("[youtube] abc: Downloading tv player API JSON", "page"),
+            (
+                "[youtube] [jsc:deno] Solving JS challenges using deno",
+                "challenge",
+            ),
+            ("[youtube] abc: Downloading m3u8 information", "formats"),
+            ("[info] abc: Downloading 1 format(s): 399+251", "start"),
+            ("[info] abc: Downloading 1 time ranges: 10.0-20.0", "cut"),
+            ("[download] Destination: /a/b.mp4", "start"),
+            (
+                "[download] Sleeping 3.00 seconds as required by the site...",
+                "wait",
+            ),
+            ("[SponsorBlock] Fetching SponsorBlock segments", "sponsors"),
+        ] {
+            assert_eq!(step(line).as_deref(), Some(said), "{line}");
+        }
+        for line in [
+            "[Merger] Merging formats into \"/a/b.mp4\"",
+            "[Metadata] Adding metadata to \"/a/b.mp4\"",
+            "[info] Writing video thumbnail",
+            "[download] 100% of 1.00MiB",
+            "Deleting original file /a/b.f399.mp4",
+        ] {
+            assert_eq!(step(line), None, "{line}");
+        }
+        let p = read_line("frame=  120 fps=60 q=28.0 size=    1024KiB time=00:01:04.50 bitrate=130.1kbits/s speed=2.01x")
+            .0
+            .unwrap();
+        assert_eq!(
+            (p.phase.as_str(), p.seconds, p.speed.as_deref()),
+            ("cut", Some(64.5), Some("2.01x"))
+        );
+        let p = read_line("size=N/A time=-00:00:00.02 bitrate=N/A speed=N/A")
+            .0
+            .unwrap();
+        assert_eq!((p.seconds, p.speed), (Some(0.0), None));
+        assert!(
+            read_line("  Duration: 00:03:20.00, start: 0.000000, bitrate: 128 kb/s")
+                .0
+                .is_none()
+        );
         let said = |error: &str| explain(&format!("WARNING: x\nERROR: {error}"));
         assert_eq!(
             said("[youtube] abc: Private video. Sign in if you've been granted access"),
@@ -1813,19 +1963,28 @@ mod tests {
         let mut args = common_args(Path::new("/usr/bin/ffmpeg"), None, &None, Path::new("/c"));
         args.extend(download_args(&r, &out, &software_encoder()).unwrap());
         let running = Mutex::new(HashMap::new());
-        let (mut percents, mut steps, mut files) = (vec![], vec![], vec![]);
+        let (mut percents, mut steps, mut files, mut cut) = (vec![], vec![], vec![], vec![]);
         let ended = run(Path::new(&bin), "t", &args, &running, |line| {
             let (progress, file) = read_line(line);
             if let Some(progress) = progress {
                 if let Some(p) = progress.percent {
                     percents.push(p);
                 }
+                if let Some(seconds) = progress.seconds {
+                    cut.push(seconds);
+                }
+                steps.extend(progress.step);
                 steps.push(progress.phase);
             }
             files.extend(file);
         })
         .unwrap();
         assert_eq!(ended.code, 0, "{}", ended.log);
+        // (what it did told: the link opened, the part cut out, how far)
+        for step in ["open", "cut", "start"] {
+            assert!(steps.iter().any(|s| s == step), "{step}: {steps:?}");
+        }
+        assert!(cut.iter().any(|&s| s > 2.0 && s <= 3.5), "{cut:?}");
         assert_eq!(files.len(), 1, "{files:?}");
         assert!(files[0].ends_with(".mp3") && Path::new(&files[0]).is_file());
         assert!(

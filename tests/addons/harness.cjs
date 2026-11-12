@@ -16,11 +16,19 @@ function tauri({ online, writes }) {
 			currentWindow: { label: 'main' },
 			currentWebview: { label: 'main', windowLabel: 'main' }
 		},
-		transformCallback: () => next++,
+		// (the app's event listeners: window.__emit(event, payload) calls them, as Rust's emit)
+		transformCallback: (callback) => {
+			const id = next++;
+			(window.__callbacks ??= {})[id] = callback;
+			return id;
+		},
 		unregisterCallback() {},
 		convertFileSrc: (path) => 'asset://' + path,
 		async invoke(cmd, args, options) {
-			if (cmd === 'plugin:event|listen') return next++;
+			if (cmd === 'plugin:event|listen') {
+				((window.__listeners ??= {})[args.event] ??= []).push(args.handler);
+				return next++;
+			}
 			if (writes && cmd === 'plugin:path|join') return args.paths.join('/');
 			if (writes && cmd === 'plugin:path|basename') return args.path.split('/').pop();
 			if (cmd.startsWith('plugin:path|')) return '/home/tester';
@@ -31,6 +39,7 @@ function tauri({ online, writes }) {
 			if (writes && cmd === 'plugin:fs|read_file' && written[args.path]) return written[args.path];
 			if (cmd === 'plugin:fs|exists') return !!(writes && written[args.path]);
 			if (cmd === 'plugin:opener|reveal_item_in_dir') return (window.__revealed = args.paths);
+			if (cmd === 'plugin:opener|open_path') return void (window.__opened = args.path);
 			if (cmd === 'copy_files') return void (window.__copied = args.paths);
 			if (cmd === 'clipboard_link') return window.__clipboardLink ?? null;
 			// (the cookies file: what a test put in window.__cookiesToAdd is chosen)
@@ -58,8 +67,19 @@ function tauri({ online, writes }) {
 				if (cmd === 'deno_install') return void (yt.denoInstalls = (yt.denoInstalls ?? 0) + 1);
 				return 'installed';
 			}
+			// (what yt-dlp says it does, told as it would: yt.steps, one each yt.stepDelay ms)
+			const tell = async (id, said) => {
+				for (const progress of said ?? []) {
+					await new Promise((done) => setTimeout(done, yt.stepDelay ?? 0));
+					window.__emit('ytdlp-progress', { id, ...progress });
+				}
+			};
 			if (yt && cmd === 'ytdlp_info') {
 				(yt.looked ??= []).push({ url: args.url, cookies: args.cookies });
+				await tell(
+					args.id,
+					yt.lookSteps?.map((step) => ({ phase: 'step', step }))
+				);
 				if (yt.locked?.includes(args.cookies))
 					throw "Your browser's sign-in couldn't be read: close the browser and try again, or choose Firefox";
 				// (an error, unless signed in as that error's browser wants)
@@ -76,6 +96,8 @@ function tauri({ online, writes }) {
 					return new Promise(
 						(resolve) => (yt.cancel = () => resolve({ files: [], cancelled: true }))
 					);
+				await tell(args.id, yt.progress);
+				if (yt.hold) await new Promise((done) => setTimeout(done, yt.hold));
 				const info = yt.infos[args.request.url];
 				const ext = args.request.kind === 'audio' ? args.request.format : args.request.format;
 				const path = `/home/tester/Stosufy/tmp/downloads/${args.id}/${info.title}.${ext}`;
@@ -103,6 +125,10 @@ function tauri({ online, writes }) {
 		}
 	};
 	window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+	window.__emit = (event, payload) =>
+		(window.__listeners?.[event] ?? []).forEach((handler) =>
+			window.__callbacks[handler]?.({ event, id: 0, payload })
+		);
 	if (!online) Object.defineProperty(navigator, 'onLine', { get: () => false });
 }
 

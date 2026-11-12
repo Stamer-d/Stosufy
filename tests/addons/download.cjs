@@ -280,8 +280,29 @@ const formats = (vcodec, heights, fps = 30) =>
 		at: TWITCH_AT,
 		plain: TWITCH
 	});
+	// (what yt-dlp does, told while it looks)
+	await page.evaluate(() => {
+		window.__ytdlp.lookSteps = ['open', 'page', 'formats'];
+		window.__ytdlp.stepDelay = 400;
+	});
 	await link(TWITCH_AT);
+	const looking = page.locator('ol[aria-label="Looking at the link"]');
+	// (polled: there for only a moment)
+	await page.waitForFunction(
+		() =>
+			[...document.querySelectorAll('ol[aria-label="Looking at the link"] li')].some((li) =>
+				li.textContent.includes('Loading the page')
+			),
+		null,
+		{ polling: 50 }
+	);
+	check(
+		'looking at a link: what it does now, and what it did',
+		/Opening the link\s+Loading the page…/.test(await looking.innerText()),
+		await looking.innerText()
+	);
 	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Long stream")');
+	await page.evaluate(() => (window.__ytdlp.lookSteps = null));
 	check(
 		'Twitch: no YouTube support needed',
 		(await page.evaluate(() => window.__ytdlp.denoInstalls)) === 1
@@ -313,8 +334,35 @@ const formats = (vcodec, heights, fps = 30) =>
 	await page.fill('input[aria-label="Part end time"]', '1:05:00');
 	await page.press('input[aria-label="Part end time"]', 'Enter');
 	check('the part shown: 5 minutes', (await page.locator('text=5:00 of 3:02:00').count()) === 1);
+	// (what it does, told: started, then FFmpeg cutting the part, at half of it)
+	await page.evaluate(() => {
+		window.__ytdlp.progress = [
+			{ phase: 'step', step: 'challenge' },
+			{ phase: 'step', step: 'cut' },
+			{ phase: 'cut', seconds: 150, speed: '2.5x' }
+		];
+		window.__ytdlp.hold = 1500;
+	});
 	await page.click('section[aria-label="What it is"] button:has-text("Download")');
+	await row('Long stream').locator("text=Solving YouTube's check…").waitFor();
+	check('downloading: what it does before, said', true);
+	await row('Long stream').locator('text=Cutting out the part · 50% · 2.5× speed').waitFor();
+	check(
+		'a part cut out: how far, and how fast',
+		(await row('Long stream').locator('[role="progressbar"]').getAttribute('aria-valuenow')) ===
+			'50'
+	);
+	await page.evaluate(() => {
+		window.__ytdlp.progress = null;
+		window.__ytdlp.hold = 0;
+	});
 	await row('Long stream').locator('text=Long stream.mp4').waitFor();
+	await page.click('button:has-text("Open folder")');
+	check(
+		'"Open folder": the Downloads folder opened (not shown in the one above)',
+		(await page.evaluate(() => window.__opened)) === '/home/tester/Stosufy/Downloads',
+		await page.evaluate(() => window.__opened)
+	);
 	const second = (await requests())[1];
 	check(
 		'asked for: 1:00:00–1:05:00, cut exactly, as a 720p H.264 MP4',

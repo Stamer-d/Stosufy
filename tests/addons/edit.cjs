@@ -220,6 +220,54 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		`${atEnd} → ${await now()}`
 	);
 
+	// --- Where it plays, dragged by its line (from top to bottom of the timeline) -----------
+	const playhead = page.locator('[role="slider"][aria-label="Where it plays"]');
+	const lane = await playhead.evaluate((el) => {
+		const r = el.parentElement.getBoundingClientRect();
+		return { x: r.x, y: r.y, width: r.width, height: r.height };
+	});
+	const head = await playhead.boundingBox();
+	check(
+		'the playhead: from the top of the timeline to its bottom',
+		Math.abs(head.y - lane.y) < 1 && Math.abs(head.y + head.height - (lane.y + lane.height)) < 1,
+		`${JSON.stringify(head)} in ${JSON.stringify(lane)}`
+	);
+	await page.mouse.move(head.x + head.width / 2, head.y + 3);
+	await page.mouse.down();
+	await page.mouse.move(lane.x + lane.width * 0.3, head.y + 3, { steps: 4 });
+	await page.mouse.move(lane.x + lane.width * 0.5, head.y + 3, { steps: 4 });
+	await page.mouse.up();
+	check(
+		'dragged: it plays from where it was let go',
+		Math.abs((await now()) - end * 0.5) < end * 0.03,
+		`${await now()} of ${end}`
+	);
+
+	// --- How loud it's heard here: not the file's volume ------------------------------------
+	await page.locator('input[aria-label="Listening volume"]').evaluate((input) => {
+		input.value = '0.5';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+	const heard = await page.evaluate(() => ({
+		volume: document.querySelector('audio, video')?.volume,
+		kept: localStorage.getItem('stosufy-editor-listen')
+	}));
+	check(
+		"listening volume: quieter here, the file's volume as it was, kept",
+		Math.abs(heard.volume - 0.5) < 0.01 &&
+			heard.kept === '0.5' &&
+			(await page.inputValue('input[aria-label="Volume"]')) === '0',
+		JSON.stringify(heard)
+	);
+	await page.click('button[aria-label="Mute here"]');
+	check(
+		'muted here with a click, and back',
+		(await page.evaluate(() => document.querySelector('audio, video')?.volume)) === 0 &&
+			(await page
+				.click('button[aria-label="Unmute here"]')
+				.then(() => page.evaluate(() => document.querySelector('audio, video')?.volume))) === 0.5
+	);
+
 	// --- Another file while there are changes: said first ------------------------------------
 	await setVolume(page, 3);
 	await page.setInputFiles('input[aria-label="Choose a file"]', [

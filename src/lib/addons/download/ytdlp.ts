@@ -425,18 +425,34 @@ export function readInfo(raw: RawInfo, url: string): LinkInfo {
 	};
 }
 
+const handlers = new Map<string, (progress: Progress) => void>();
+let listeningToProgress: Promise<unknown> | null = null;
+function listenToProgress() {
+	listeningToProgress ??= listen<Progress & { id: string }>('ytdlp-progress', ({ payload }) =>
+		handlers.get(payload.id)?.(payload)
+	).catch(() => (listeningToProgress = null));
+	return listeningToProgress;
+}
+
 const randomId = () => Math.random().toString(36).slice(2, 10);
 let lookingUp: string | null = null;
 
-/** What a link is (one at a time: a new one stops the one before) */
-export async function lookUp(url: string, cookies: string | null): Promise<LinkInfo> {
+/** What a link is (one at a time: a new one stops the one before); `onStep`: what it does */
+export async function lookUp(
+	url: string,
+	cookies: string | null,
+	onStep: (step: Step) => void = () => {}
+): Promise<LinkInfo> {
 	await readyFor(url);
 	if (lookingUp) void invoke('ytdlp_cancel', { id: lookingUp }).catch(() => {});
 	const id = (lookingUp = `info-${randomId()}`);
+	await listenToProgress();
+	handlers.set(id, (progress) => progress.step && onStep(progress.step));
 	try {
 		const json = await invoke<string>('ytdlp_info', { id, url, cookies });
 		return readInfo(JSON.parse(json), url);
 	} finally {
+		handlers.delete(id);
 		if (lookingUp === id) lookingUp = null;
 	}
 }
@@ -470,16 +486,19 @@ export interface Progress {
 	count: number | null;
 	/** The picture or the sound (of a video downloaded as two) */
 	stream: 'video' | 'audio' | null;
+	/** Phase "step": what it does before the download (see `Step`) */
+	step?: Step | null;
+	/** Phase "cut": how much of the part is made (s) */
+	seconds?: number | null;
 }
 
-const handlers = new Map<string, (progress: Progress) => void>();
-let listeningToProgress: Promise<unknown> | null = null;
-function listenToProgress() {
-	listeningToProgress ??= listen<Progress & { id: string }>('ytdlp-progress', ({ payload }) =>
-		handlers.get(payload.id)?.(payload)
-	).catch(() => (listeningToProgress = null));
-	return listeningToProgress;
-}
+/**
+ * What yt-dlp does before (and between) the downloads: the link opened, the sign-in read, the
+ * site's page loaded, YouTube's check solved, the qualities found, the download started, the
+ * part cut out, a wait the site asks for, the sponsors found
+ */
+export type Step =
+	'open' | 'cookies' | 'page' | 'challenge' | 'formats' | 'start' | 'cut' | 'wait' | 'sponsors';
 
 export interface Downloaded {
 	files: { path: string; size: number }[];

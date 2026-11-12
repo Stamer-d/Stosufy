@@ -13,7 +13,7 @@
 	import { fade } from 'svelte/transition';
 	import { showToast } from '#lib/stores/toast.ts';
 	import { installedAddons } from '#lib/addons/store.ts';
-	import { outputFolder, reveal } from '../files/save.ts';
+	import { openFolder, reveal } from '../files/save.ts';
 	import { handOver } from '../files/handoff.ts';
 	import { PickedFile } from '../files/picked.ts';
 	import { dragOut } from '../files/dragout.ts';
@@ -96,6 +96,18 @@
 		SponsorBlock: 'Finding the sponsors',
 		FixupM3u8: 'Tidying it up',
 		MoveFiles: 'Almost done'
+	};
+	/** What it does before the download (or while it looks at a link), said */
+	const STEPS = {
+		open: 'Opening the link',
+		cookies: 'Reading your sign-in',
+		page: 'Loading the page',
+		challenge: "Solving YouTube's check",
+		formats: 'Finding the qualities',
+		start: 'Starting the download',
+		cut: 'Cutting out the part',
+		wait: 'Waiting a moment, as the site asks',
+		sponsors: 'Finding the sponsors'
 	};
 
 	function load() {
@@ -288,6 +300,13 @@
 
 	/** Where the link said to start (s; 0: it didn't) */
 	let fromLink = $state(0);
+	/** What it did so far, looking at the link (the last: what it does now) */
+	let lookSteps = $state([]);
+	/** A step of looking at `url`, told (each once, in order) */
+	const stepOf = (url) => (step) => {
+		if (looked !== url || lookSteps.includes(step)) return;
+		lookSteps = [...lookSteps, step];
+	};
 
 	async function look(text = link) {
 		const url = text.trim();
@@ -296,16 +315,17 @@
 		offered = null;
 		used.add(url);
 		found = { state: 'loading' };
+		lookSteps = [];
 		signedOut = '';
 		try {
 			let result;
 			try {
-				result = await lookUp(url, options.cookies);
+				result = await lookUp(url, options.cookies, stepOf(url));
 			} catch (error) {
 				// (the browser's sign-in can't be read: without it, said so)
 				if (!options.cookies || !signInFailed(String(error?.message ?? error))) throw error;
 				if (looked !== url) return;
-				result = await lookUp(url, null);
+				result = await lookUp(url, null, stepOf(url));
 				signedOut = (
 					signIns.find((option) => option.value === options.cookies)?.label ?? 'the browser'
 				).replace(/^As in /, '');
@@ -459,7 +479,7 @@
 
 	async function show(path) {
 		try {
-			await reveal(path ?? (await outputFolder(FOLDER)));
+			await (path ? reveal(path) : openFolder(FOLDER));
 		} catch {
 			showToast("Couldn't open the folder", 'icon-[mingcute--warning-line]');
 		}
@@ -492,11 +512,19 @@
 	function doing(job) {
 		if (job.phase !== 'download') return `${PHASES[job.phase] ?? 'Finishing'}…`;
 		const of = job.count > 1 && job.index ? `Video ${job.index} of ${job.count}` : '';
-		// (a part: FFmpeg cuts it out of the stream, without a share to tell)
-		if (job.percent === null)
-			return [of, job.request.sections.length ? 'Cutting out the part…' : 'Downloading…']
+		// (a part: FFmpeg cuts it out of the stream, as fast as it says)
+		if (job.step === 'cut')
+			return [
+				of,
+				job.percent === null
+					? 'Cutting out the part…'
+					: `Cutting out the part · ${Math.round(job.percent)}%`,
+				job.speed && `${job.speed.replace(/x$/, '×')} speed`
+			]
 				.filter(Boolean)
 				.join(' · ');
+		if (job.percent === null)
+			return [of, `${STEPS[job.step] ?? 'Starting'}…`].filter(Boolean).join(' · ');
 		const what =
 			job.request.kind === 'video' && job.stream === 'audio'
 				? 'Downloading the sound'
@@ -699,7 +727,29 @@
 				{found.error}
 			</p>
 		{:else if found.state === 'loading'}
-			<p class="text-sm text-white/50">Looking at the link…</p>
+			<!-- What it did so far, and what it does now -->
+			<ol
+				class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+				aria-label="Looking at the link"
+				aria-live="polite"
+			>
+				{#each lookSteps.length ? lookSteps : ['open'] as step, i (step)}
+					{@const now = i === Math.max(lookSteps.length, 1) - 1}
+					<li
+						class="flex items-center gap-1.5 {now ? 'text-white/75' : 'text-white/40'}"
+						in:fade={{ duration: ms(120) }}
+					>
+						{#if now}
+							<span class="icon-[mingcute--loading-line] size-3.5 animate-spin shrink-0"></span>
+							{STEPS[step] ?? 'Looking at the link'}…
+						{:else}
+							<span class="icon-[mingcute--check-line] size-3.5 text-emerald-300/70 shrink-0"
+							></span>
+							{STEPS[step] ?? step}
+						{/if}
+					</li>
+				{/each}
+			</ol>
 		{:else if found.state === 'ready' && info}
 			<!-- What it is, and what's wanted of it -->
 			<section

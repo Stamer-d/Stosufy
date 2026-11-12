@@ -8,7 +8,7 @@
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
 	import { nativeFfmpeg } from '../files/native.ts';
 	import { pickFiles } from '../files/picked.ts';
-	import { outputFolder, reveal } from '../files/save.ts';
+	import { openFolder } from '../files/save.ts';
 	import MediaEditor from './MediaEditor.svelte';
 	import ImageEditor from './ImageEditor.svelte';
 	import { FOLDER } from './media.ts';
@@ -62,7 +62,7 @@
 
 	async function showFolder() {
 		try {
-			await reveal(await outputFolder(FOLDER));
+			await openFolder(FOLDER);
 		} catch {
 			showToast("Couldn't open the folder", 'icon-[mingcute--warning-line]');
 		}

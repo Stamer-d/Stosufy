@@ -23,7 +23,7 @@ import {
 	stopIfCancelled
 } from '../files/ffmpeg';
 import { notifyDone } from '../files/notify';
-import { outputFolder, saveFile, type SavedFile } from '../files/save';
+import { saveFile, type SavedFile } from '../files/save';
 import { convertFile, type ConvertOptions } from './convert';
 
 export type Status = 'ready' | 'waiting' | 'working' | 'done' | 'failed';
@@ -267,8 +267,6 @@ async function convertOne(job: Job) {
 		forgetCancelled(String(job.id));
 	}
 }
-
-export const converterFolder = () => outputFolder(FOLDER);
 
 /** What the files in the list were made into, together in one ZIP in the folder; its path */
 export async function saveAllAsZip() {

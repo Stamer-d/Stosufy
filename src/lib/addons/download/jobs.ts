@@ -11,7 +11,8 @@ import {
 	stopDownload,
 	type DownloadRequest,
 	type Downloaded,
-	type LinkInfo
+	type LinkInfo,
+	type Step
 } from './ytdlp';
 
 export const FOLDER = 'Downloads';
@@ -37,6 +38,8 @@ export interface DownloadJob {
 	count: number | null;
 	speed: string | null;
 	eta: string | null;
+	/** What it does before the download (the link opened, …; null: not told yet) */
+	step?: Step | null;
 	error?: string;
 	/** Some of it couldn't be downloaded (a playlist's private videos, …) */
 	note?: string;
@@ -194,8 +197,23 @@ function downloadIt(job: DownloadJob) {
 		job.id,
 		job.request,
 		(progress) => {
+			// (what it does before the download: told, not a phase of its own)
+			if (progress.phase === 'step') return change(job.id, { step: progress.step ?? null });
+			// (a part cut out by FFmpeg: how far, of the part's length)
+			if (progress.phase === 'cut') {
+				const [from, to] = job.request.sections[0] ?? [0, 0];
+				const share = to > from ? ((progress.seconds ?? 0) / (to - from)) * 100 : null;
+				return change(job.id, {
+					phase: 'download',
+					step: 'cut',
+					percent: share === null ? null : Math.min(100, Math.max(0, share)),
+					speed: progress.speed && progress.speed !== '0x' ? progress.speed : null,
+					eta: null
+				});
+			}
 			const patch: Partial<DownloadJob> = { phase: progress.phase };
 			if (progress.phase === 'download') {
+				patch.step = null;
 				patch.percent = progress.percent;
 				patch.speed =
 					progress.speed && !/^0(\.0+)?B\/s$/.test(progress.speed) ? progress.speed : null;
