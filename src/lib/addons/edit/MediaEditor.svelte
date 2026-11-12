@@ -14,6 +14,8 @@
 	import { reveal } from '../files/save.ts';
 	import Formats from '../files/Formats.svelte';
 	import CopyButton from '../files/CopyButton.svelte';
+	import Dropdown from '../files/Dropdown.svelte';
+	import { LIMITS, sizeLimit } from './limit.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { notifyDone } from '../files/notify.ts';
 	import { playable } from '../files/picked.ts';
@@ -22,6 +24,7 @@
 	import Undo from './Undo.svelte';
 	import { SHAPES, biggest, ratioOf } from './crop.ts';
 	import { createHistory } from './history.svelte.ts';
+	import { createThumbnails } from './thumbnails.svelte.ts';
 	import {
 		addCut,
 		freshEdit,
@@ -80,13 +83,15 @@
 	let wave = $state(null);
 	let cropping = $state(false);
 	let shape = $state('free');
-	/** @type {{ status: string, progress: number, saved: import('../files/save.ts').SavedFile[], error: string }} */
+	/** @type {{ status: string, progress: number, saved: import('../files/save.ts').SavedFile[], error: string, note?: string }} */
 	let saving = $state({ status: 'idle', progress: 0, saved: [], error: '' });
 	let frameSaved = $state(null);
 	/** It couldn't be read at all */
 	let failed = $state('');
 	/** The waveform's being read */
 	let reading = $state(false);
+	/** @type {import('./thumbnails.svelte.ts').Thumbnails | null} */
+	let frames = $state.raw(null);
 	const id = `edit-${Math.random().toString(36).slice(2, 8)}`;
 	let gone = false;
 
@@ -108,6 +113,8 @@
 		edit = freshEdit(seconds);
 		history.reset();
 		savedEdit();
+		// (a video's pictures along its timeline, where the browser can play it)
+		if (video && !unplayable) frames = createThumbnails(url);
 		reading = true;
 		void waveform(file, seconds, `${id}-wave`).then((found) => {
 			if (gone) return;
@@ -190,6 +197,7 @@
 
 	onDestroy(() => {
 		gone = true;
+		frames?.destroy();
 		player?.pause();
 		if (url.startsWith('blob:')) URL.revokeObjectURL(url);
 		// (what's still running stopped first: its copy of the file is let go after)
@@ -286,16 +294,17 @@
 		player?.pause();
 		saving = { status: 'working', progress: 0, saved: [], error: '' };
 		try {
-			const saved = await saveMedia(
+			const { saved, note } = await saveMedia(
 				file,
 				$state.snapshot(edit),
 				duration,
 				target,
 				video,
 				(progress) => (saving.progress = progress),
-				id
+				id,
+				$sizeLimit
 			);
-			saving = { status: 'done', progress: 1, saved, error: '' };
+			saving = { status: 'done', progress: 1, saved, error: '', note };
 			savedEdit();
 			void notifyDone(
 				'Saved',
@@ -356,7 +365,7 @@
 				<button
 					role="radio"
 					aria-checked={value === option}
-					class="h-7 px-2.5 rounded-full text-xs font-bold cursor-pointer transition {value ===
+					class="h-7 px-2.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition {value ===
 					option
 						? 'bg-white text-black'
 						: 'text-white/70 hover:text-white'}"
@@ -449,6 +458,7 @@
 			{time}
 			{wave}
 			{reading}
+			{frames}
 			{parts}
 			{playing}
 			onseek={seek}
@@ -507,7 +517,7 @@
 
 		<!-- What's done to it -->
 		<div
-			class="grid gap-x-8 gap-y-3 p-4 rounded-2xl bg-white/[0.03] ring-1 ring-white/5 lg:grid-cols-2"
+			class="grid gap-x-8 gap-y-3 p-4 rounded-2xl bg-white/[0.03] ring-1 ring-white/5 xl:grid-cols-2"
 		>
 			{@render choice(
 				'Fade in',
@@ -553,7 +563,7 @@
 				Even it out (as loud as on streaming services)
 			</label>
 			{#if video}
-				<div class="flex flex-wrap items-center gap-2 text-sm lg:col-span-2">
+				<div class="flex flex-wrap items-center gap-2 text-sm xl:col-span-2">
 					<span class="w-24 shrink-0 text-white/60">Picture</span>
 					<button
 						class="h-8 px-3 flex items-center gap-1.5 rounded-full font-semibold bg-white/[0.06] hover:bg-white/15 cursor-pointer transition"
@@ -634,7 +644,7 @@
 
 		<!-- Saved as -->
 		<div
-			class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 pl-4 rounded-2xl bg-violet-300/[0.07] ring-1 ring-violet-300/20"
+			class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 rounded-2xl bg-violet-300/[0.07] ring-1 ring-violet-300/20"
 		>
 			{#if saving.status === 'working'}
 				<span class="text-sm font-semibold">Saving…</span>
@@ -658,6 +668,13 @@
 					Stop
 				</button>
 			{:else}
+				<Dropdown
+					label="Size limit"
+					icon="icon-[mingcute--arrow-down-line]"
+					options={LIMITS}
+					value={$sizeLimit}
+					onchange={(value) => sizeLimit.set(value)}
+				/>
 				<span class="text-sm font-semibold text-violet-100">
 					{edited ? 'Save as' : 'Nothing changed yet · save as'}
 				</span>
@@ -672,6 +689,12 @@
 		</div>
 		{#if saving.status === 'done' && saving.saved.length}
 			{@render result(saving.saved)}
+			{#if saving.note}
+				<p class="-mt-2 flex items-center gap-1.5 text-sm text-amber-200">
+					<span class="icon-[mingcute--information-line] size-4"></span>
+					{saving.note}
+				</p>
+			{/if}
 		{:else if saving.status === 'failed'}
 			<p class="flex items-center gap-1.5 text-sm text-red-300">
 				<span class="icon-[mingcute--warning-line] size-4"></span>

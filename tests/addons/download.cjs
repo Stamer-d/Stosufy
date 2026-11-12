@@ -13,6 +13,8 @@ function check(name, ok, detail = '') {
 
 const YOUTUBE = 'https://www.youtube.com/watch?v=abc123';
 const TWITCH = 'https://www.twitch.tv/videos/2385736857';
+/** A link to a time in it (where it starts) */
+const TWITCH_AT = `${TWITCH}?t=1h00m00s`;
 const PLAYLIST = 'https://www.youtube.com/playlist?list=PL1';
 const PRIVATE = 'https://www.youtube.com/watch?v=members';
 const SLOW = 'https://soundcloud.com/someone/slow';
@@ -27,13 +29,15 @@ const formats = (vcodec, heights, fps = 30) =>
 		writes: true
 	});
 	await page.evaluate(
-		({ YOUTUBE, TWITCH, PLAYLIST, PRIVATE, SLOW, yt, tw }) => {
+		({ YOUTUBE, TWITCH, TWITCH_AT, PLAYLIST, PRIVATE, SLOW, yt, tw }) => {
 			window.__ffmpegStatus = {
 				supported: true,
 				installed: true,
 				downloadSize: 0,
 				workDir: '/home/tester/Stosufy/tmp/media'
 			};
+			// (a link on the clipboard, offered when the page opens)
+			window.__clipboardLink = YOUTUBE;
 			window.__ytdlp = {
 				status: { supported: true, installed: true, denoSupported: true, denoInstalled: false },
 				slow: SLOW,
@@ -89,6 +93,7 @@ const formats = (vcodec, heights, fps = 30) =>
 		{
 			YOUTUBE,
 			TWITCH,
+			TWITCH_AT,
 			PLAYLIST,
 			PRIVATE,
 			SLOW,
@@ -134,8 +139,15 @@ const formats = (vcodec, heights, fps = 30) =>
 	await page.waitForSelector('text=Paste a link to start');
 	check('its page: a field for the link', true);
 
-	// --- A YouTube video: its formats, its qualities, its sound as MP3 -------------------------
-	await link(YOUTUBE);
+	// --- A YouTube video (the link on the clipboard): its formats, qualities, sound as MP3 ----
+	const offer = page.locator('[role="group"][aria-label="Link on the clipboard"]');
+	await offer.waitFor();
+	check(
+		'a link on the clipboard: offered, not used yet',
+		/youtube\.com\/watch\?v=abc123/.test(await offer.innerText()) &&
+			(await page.inputValue('input[aria-label="Link"]')) === ''
+	);
+	await offer.locator('button:has-text("Use it")').click();
 	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
 	const what = await page.locator('section[aria-label="What it is"]').innerText();
 	check(
@@ -240,8 +252,24 @@ const formats = (vcodec, heights, fps = 30) =>
 		(await page.inputValue('input[aria-label="Link"]')) === ''
 	);
 
-	// --- A part of a Twitch VOD: what was chosen kept ----------------------------------------
-	await link(TWITCH);
+	check('the link used: not offered again', (await offer.count()) === 0);
+	// (another one copied, back in Stosufy: offered; "Not this link": gone)
+	await page.evaluate((url) => {
+		window.__clipboardLink = url;
+		window.dispatchEvent(new Event('focus'));
+	}, TWITCH_AT);
+	await offer.waitFor();
+	await offer.locator('button[aria-label="Not this link"]').click();
+	await offer.waitFor({ state: 'detached' });
+	check('another link copied: offered; "Not this link": gone', true);
+
+	// --- A part of a Twitch VOD (a link to an hour in): what was chosen kept -----------------
+	// (yt-dlp's answer for it: the video's, its own address without the time)
+	await page.evaluate(({ at, plain }) => (window.__ytdlp.infos[at] = window.__ytdlp.infos[plain]), {
+		at: TWITCH_AT,
+		plain: TWITCH
+	});
+	await link(TWITCH_AT);
 	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Long stream")');
 	check(
 		'Twitch: no YouTube support needed',
@@ -260,9 +288,12 @@ const formats = (vcodec, heights, fps = 30) =>
 		await shown('Video format')
 	);
 	await choose('Quality', '720');
-	await page.check('text=Only a part of it');
-	await page.fill('input[aria-label="Part start time"]', '1:00:00');
-	await page.press('input[aria-label="Part start time"]', 'Enter');
+	check(
+		'a link to a time in it: only a part, from there',
+		(await page.isChecked('text=Only a part of it')) &&
+			(await page.locator('text=from 1:00:00, where the link starts').count()) === 1,
+		await page.locator('section[aria-label="What it is"]').innerText()
+	);
 	await page.fill('input[aria-label="Part end time"]', '1:05:00');
 	await page.press('input[aria-label="Part end time"]', 'Enter');
 	check('the part shown: 5 minutes', (await page.locator('text=5:00 of 3:02:00').count()) === 1);
@@ -398,6 +429,34 @@ const formats = (vcodec, heights, fps = 30) =>
 	await page.waitForSelector('li[aria-label="Long stream.mp4"]');
 	check('"Convert": in the converter', true);
 	check('no errors', errors.length === 0, errors.join('\n'));
+
+	// --- Kept for next time: what was downloading, stopped; files gone, said so -------------
+	await page.click('header button[aria-label="Downloader"]');
+	await link(SLOW);
+	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Slow one")');
+	await page.click('section[aria-label="What it is"] button:has-text("Download")');
+	await row('Slow one').waitFor();
+	await page.waitForTimeout(500);
+	// (Stosufy opened again: its files are gone too, as the mock forgets them)
+	await page.reload();
+	await page.waitForSelector('header button[aria-label="Downloader"]', { timeout: 60000 });
+	await page.click('header button[aria-label="Downloader"]');
+	await row('Slow one').waitFor();
+	check(
+		'opened again: the downloads still there',
+		(await row('Test song').count()) === 1 && (await row('Mix').count()) === 1
+	);
+	check(
+		'what was downloading: stopped, to try again',
+		/Stopped when Stosufy was closed/.test(await row('Slow one').innerText()) &&
+			(await row('Slow one').locator('button:has-text("Try again")').count()) === 1,
+		await row('Slow one').innerText()
+	);
+	await row('Test song').locator('text=Moved or deleted').waitFor();
+	check(
+		'a file not there any more: said so, to download again',
+		(await row('Test song').locator('button:has-text("Download again")').count()) === 1
+	);
 
 	await browser.close();
 	console.log(`\n${results.filter(Boolean).length}/${results.length}`);

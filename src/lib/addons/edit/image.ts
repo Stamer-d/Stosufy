@@ -139,8 +139,14 @@ export async function saveImage(
 	file: File,
 	image: HTMLImageElement,
 	edit: ImageEdit,
-	target: Target
+	target: Target,
+	/** At most this many bytes (0: any size; made smaller, as far as it can be) */
+	maxBytes = 0
 ): Promise<SavedFile> {
-	const data = await writeImage(render(image, edit), target.id, { maxSize: 0, quality: 0.92 });
+	const data = await writeImage(render(image, edit), target.id, {
+		maxSize: 0,
+		quality: 0.92,
+		maxBytes
+	});
 	return saveFile(FOLDER, `${baseName(file.name)} (edited).${target.extension}`, data);
 }

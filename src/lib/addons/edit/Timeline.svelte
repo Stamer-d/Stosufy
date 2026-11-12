@@ -13,6 +13,7 @@
 	 *   time: number,
 	 *   wave: import('./waveform.ts').Waveform | null,
 	 *   reading?: boolean,
+	 *   frames?: import('./thumbnails.svelte.ts').Thumbnails | null,
 	 *   parts: import('./media.ts').Part[],
 	 *   playing: boolean,
 	 *   onseek: (time: number) => void,
@@ -27,6 +28,7 @@
 		time,
 		wave,
 		reading = false,
+		frames = null,
 		parts,
 		playing,
 		onseek,
@@ -37,7 +39,10 @@
 	let box = $state();
 	let canvas = $state();
 	let width = $state(0);
-	const HEIGHT = 112;
+	/** The waveform's height, and the video's pictures' over it */
+	const WAVE = 112;
+	const STRIP = 40;
+	let HEIGHT = $derived(frames ? WAVE + STRIP + 4 : WAVE);
 	/** At least this much is kept (s) */
 	const SHORTEST = 0.1;
 	const MAX_ZOOM = 200;
@@ -78,6 +83,9 @@
 		const context = canvas.getContext('2d');
 		context.scale(scale, scale);
 		context.clearRect(0, 0, width, HEIGHT);
+		if (frames) drawFrames(context);
+		const top = frames ? 10 + STRIP + 4 : 10;
+		const room = HEIGHT - top;
 		const bars = Math.max(1, Math.floor(width / 3));
 		const per = span / bars;
 		for (let i = 0; i < bars; i++) {
@@ -86,11 +94,54 @@
 			const part = parts.find((other) => t >= other.from && t < other.to);
 			const kept = t >= start && t <= end && !part?.dropped;
 			const peak = wave ? peakBetween(wave, t0, t0 + per) : 0.35;
-			const h = Math.max(2, peak * (HEIGHT - 28));
+			const h = Math.max(2, peak * (room - 18));
 			context.fillStyle = kept ? 'rgba(196, 181, 253, 0.95)' : 'rgba(255, 255, 255, 0.16)';
-			context.fillRect(i * 3, 10 + (HEIGHT - 10 - h) / 2, 2, h);
+			context.fillRect(i * 3, top + (room - h) / 2, 2, h);
 		}
 	});
+
+	/**
+	 * The video's pictures along the top: one for each tile, on a grid that halves as it's
+	 * zoomed in (so those taken are the same ones when it's zoomed back), outside what's kept
+	 * darker
+	 */
+	function drawFrames(context) {
+		if (!frames) return;
+		void frames.version;
+		const tile = STRIP * frames.aspect;
+		const wanted = (span * tile) / width;
+		let step = duration;
+		while (step > wanted && step > 0.02) step /= 2;
+		const first = Math.max(0, Math.floor(from / step));
+		const last = Math.min(Math.ceil(duration / step), Math.ceil((from + span) / step));
+		const times = [];
+		for (let j = first; j < last; j++) times.push(Math.min(duration - 0.05, (j + 0.5) * step));
+		frames.want(times);
+		const w = (step / span) * width;
+		times.forEach((time, i) => {
+			const x = (((first + i) * step - from) / span) * width;
+			const picture = frames.get(time);
+			if (!picture) return;
+			// (the middle of it, as wide as its tile)
+			const sw = Math.min(picture.width, (picture.height * w) / STRIP);
+			context.drawImage(
+				picture,
+				(picture.width - sw) / 2,
+				0,
+				sw,
+				picture.height,
+				x,
+				10,
+				w + 0.5,
+				STRIP
+			);
+		});
+		context.fillStyle = 'rgba(0, 0, 0, 0.6)';
+		const left = ((start - from) / span) * width;
+		const right = ((end - from) / span) * width;
+		if (left > 0) context.fillRect(0, 10, left, STRIP);
+		if (right < width) context.fillRect(right, 10, width - right, STRIP);
+	}
 
 	/** The time under the pointer */
 	function timeAt(event) {
@@ -155,7 +206,8 @@
 	<div
 		bind:this={box}
 		bind:clientWidth={width}
-		class="relative h-28 rounded-xl bg-black/30 ring-1 ring-white/5 cursor-pointer select-none touch-none overflow-hidden"
+		class="relative rounded-xl bg-black/30 ring-1 ring-white/5 cursor-pointer select-none touch-none overflow-hidden"
+		style="height: {HEIGHT}px"
 		onpointerdown={(event) => onseek(timeAt(event))}
 		onwheel={wheel}
 	>

@@ -1,8 +1,9 @@
 // The downloads: what's been asked for, two at a time, their progress, and what they made,
-// moved to ~/Stosufy/Downloads. Kept while the app runs (leaving the page stops nothing).
+// moved to ~/Stosufy/Downloads. Leaving the page stops nothing; the list is kept for the next
+// time Stosufy opens (what was still downloading then: stopped, to try again).
 
 import { get, writable } from 'svelte/store';
-import { remove } from '@tauri-apps/plugin-fs';
+import { exists, remove } from '@tauri-apps/plugin-fs';
 import { saveFile, type SavedFile } from '../files/save';
 import { notifyDone } from '../files/notify';
 import { download, stopDownload, type DownloadRequest, type LinkInfo } from './ytdlp';
@@ -10,6 +11,9 @@ import { download, stopDownload, type DownloadRequest, type LinkInfo } from './y
 export const FOLDER = 'Downloads';
 /** At once (more would only share the same line) */
 const PARALLEL = 2;
+/** Kept for next time: the last this many */
+const KEPT = 50;
+const STORE_KEY = 'stosufy-downloads';
 
 export type Status = 'waiting' | 'working' | 'done' | 'failed';
 
@@ -31,9 +35,63 @@ export interface DownloadJob {
 	/** Some of it couldn't be downloaded (a playlist's private videos, …) */
 	note?: string;
 	saved: SavedFile[];
+	/** Its files aren't there any more (moved or deleted) */
+	missing?: boolean;
 }
 
-export const downloads = writable<DownloadJob[]>([]);
+/** The list as it was kept: what was still to do then, stopped */
+function load(): DownloadJob[] {
+	try {
+		const kept = JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]') as DownloadJob[];
+		if (!Array.isArray(kept)) return [];
+		return kept
+			.filter((job) => job?.id && job.info && job.request)
+			.map((job) =>
+				job.status === 'done' || job.status === 'failed'
+					? job
+					: {
+							...job,
+							status: 'failed',
+							error: 'Stopped when Stosufy was closed',
+							percent: null,
+							speed: null,
+							eta: null
+						}
+			);
+	} catch {
+		return [];
+	}
+}
+
+export const downloads = writable<DownloadJob[]>(typeof window === 'undefined' ? [] : load());
+
+/** Kept as it is now (only what's needed again: not a link's every quality) */
+let keeping: ReturnType<typeof setTimeout> | undefined;
+downloads.subscribe((all) => {
+	if (typeof window === 'undefined') return;
+	clearTimeout(keeping);
+	keeping = setTimeout(() => {
+		const slim = all.slice(0, KEPT).map((job) => ({
+			...job,
+			info: { ...job.info, videos: job.info.videos.map((video) => ({ ...video, qualities: [] })) }
+		}));
+		try {
+			localStorage.setItem(STORE_KEY, JSON.stringify(slim));
+		} catch {
+			// (only a convenience)
+		}
+	}, 300);
+});
+
+/** The kept downloads whose files aren't there any more: said so */
+export async function checkFiles() {
+	const done = get(downloads).filter((job) => job.status === 'done' && job.saved.length);
+	for (const job of done) {
+		const there = await Promise.all(job.saved.map((file) => exists(file.path).catch(() => true)));
+		const missing = !there.some(Boolean);
+		if (missing !== !!job.missing) change(job.id, { missing });
+	}
+}
 
 let nextId = 1;
 /** Stopped before yt-dlp ran (while it got ready) */
@@ -156,6 +214,8 @@ export function retry(id: string) {
 		status: 'waiting',
 		error: undefined,
 		note: undefined,
+		missing: false,
+		saved: [],
 		percent: null,
 		stream: null,
 		index: null,

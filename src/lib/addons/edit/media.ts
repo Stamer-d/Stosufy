@@ -4,8 +4,17 @@
 // as one file or a file for each part. In ~/Stosufy/Edited.
 
 import { baseName, extensionOf, type Target } from '../files/formats';
-import { probe, runFfmpeg, type Probe } from '../files/ffmpeg';
-import { audioArgs, gifArgs, gifChain, scale, videoArgs } from '../files/presets';
+import { discard, probe, runFfmpeg, stopIfCancelled, type Made, type Probe } from '../files/ffmpeg';
+import {
+	LOSSY_AUDIO,
+	audioArgs,
+	audioKbps,
+	gifArgs,
+	gifChain,
+	scale,
+	videoArgs
+} from '../files/presets';
+import { sizeText } from '../files/size';
 import { saveFile, type SavedFile } from '../files/save';
 
 export const FOLDER = 'Edited';
@@ -189,6 +198,14 @@ interface Piece {
 	to: number;
 }
 
+/** Made to fit a size limit: the picture's height, the bitrates, a GIF's frame rate and width */
+interface Fit {
+	height?: number;
+	videoKbps?: number;
+	audioKbps?: number;
+	gif?: { fps: number; width: number };
+}
+
 /** FFmpeg's arguments for some pieces of the file, put together, in `target`'s format */
 function argsFor(
 	pieces: Piece[],
@@ -196,27 +213,42 @@ function argsFor(
 	target: Target,
 	info: Probe,
 	audioOnly: boolean,
-	cover: boolean
+	cover: boolean,
+	fit: Fit = {}
 ): { args: string[]; before: string[]; inputs?: string[][] } {
 	const length = pieces.reduce((sum, piece) => sum + piece.to - piece.from, 0) / edit.speed;
 	const af = audioFilters(edit, info.sampleRate, length);
 	const vf = videoFilters(edit, length);
 	// (a GIF has no sound)
 	const sound = audioOnly || (info.audio && !edit.mute && target.id !== 'gif');
+	const { fps, width } = fit.gif ?? { fps: 15, width: 480 };
+	const video = {
+		mute: !sound,
+		height: fit.height,
+		videoKbps: fit.videoKbps,
+		audioKbps: fit.audioKbps
+	};
 
 	// One piece: read from its start for its length (fast), the filters on it
 	if (pieces.length === 1) {
 		const [{ from, to }] = pieces;
 		const before = ['-ss', String(n(from)), '-t', String(n(to - from))];
 		if (audioOnly)
-			return { before, args: audioArgs(target.id, 'best', { cover, filters: af || undefined }) };
-		if (target.id === 'gif') return { before, args: gifArgs(15, 480, vf || undefined) };
+			return {
+				before,
+				args: audioArgs(target.id, 'best', {
+					cover,
+					filters: af || undefined,
+					kbps: fit.audioKbps
+				})
+			};
+		if (target.id === 'gif') return { before, args: gifArgs(fps, width, vf || undefined) };
 		return {
 			before,
 			args: videoArgs(target.id, 'best', {
+				...video,
 				videoFilters: vf || undefined,
-				audioFilters: af || undefined,
-				mute: !sound
+				audioFilters: af || undefined
 			})
 		};
 	}
@@ -242,11 +274,12 @@ function argsFor(
 			inputs: reads,
 			args: audioArgs(target.id, 'best', {
 				cover,
+				kbps: fit.audioKbps,
 				graph: { filter: chains.join(';'), audio: '[a]' }
 			})
 		};
 	}
-	const picture = target.id === 'gif' ? gifChain(15, 480) : scale(0);
+	const picture = target.id === 'gif' ? gifChain(fps, width) : scale(fit.height ?? 0);
 	chains.push(`[vc]${[vf, picture].filter(Boolean).join(',')}[v]`);
 	const filter = chains.join(';');
 	if (target.id === 'gif')
@@ -259,13 +292,26 @@ function argsFor(
 		before: [],
 		inputs: reads,
 		args: videoArgs(target.id, 'best', {
+			...video,
 			graph: { filter, video: '[v]', audio: a ? '[a]' : undefined },
 			mute: !a
 		})
 	};
 }
 
-/** Saves the edited file in `target`'s format (a file for each part, if so); where they are */
+const sizeOf = (made: Made) => ('data' in made ? made.data.length : made.size);
+
+export interface SavedMedia {
+	saved: SavedFile[];
+	/** Something to know about it (it couldn't be made small enough, …) */
+	note?: string;
+}
+
+/**
+ * Saves the edited file in `target`'s format (a file for each part, if so); where they are.
+ * With `maxBytes`: each file under it (bitrates from how long it is, never more than the file
+ * has; tried again smaller when it's still too big).
+ */
 export async function saveMedia(
 	file: File,
 	edit: MediaEdit,
@@ -273,8 +319,9 @@ export async function saveMedia(
 	target: Target,
 	isVideo: boolean,
 	progress: (share: number) => void,
-	id: string
-): Promise<SavedFile[]> {
+	id: string,
+	maxBytes = 0
+): Promise<SavedMedia> {
 	const extension = extensionOf(file.name);
 	const info = await probe(file, extension, id);
 	const audioOnly = !isVideo || target.group === 'Only the sound';
@@ -285,34 +332,94 @@ export async function saveMedia(
 		(sum, pieces) => sum + pieces.reduce((s, piece) => s + piece.to - piece.from, 0),
 		0
 	);
+	// (the file's own bitrate: more would only make it bigger)
+	const own = info.duration ? (file.size * 8) / 1000 / info.duration : Infinity;
+	const sound = audioOnly || (info.audio && !edit.mute && target.id !== 'gif');
 	const saved: SavedFile[] = [];
+	let note: string | undefined;
 	let done = 0;
 	for (const [i, pieces] of files.entries()) {
 		const span = pieces.reduce((sum, piece) => sum + piece.to - piece.from, 0);
+		const length = span / edit.speed;
 		const name =
 			files.length > 1
 				? `${baseName(file.name)} (part ${i + 1}).${target.extension}`
 				: `${baseName(file.name)} (edited).${target.extension}`;
-		const run = (cover: boolean) => {
-			const { args, before, inputs } = argsFor(pieces, edit, target, info, audioOnly, cover);
+		const run = (fit: Fit, cover: boolean) => {
+			const { args, before, inputs } = argsFor(pieces, edit, target, info, audioOnly, cover, fit);
 			return runFfmpeg(file, extension, args, target.extension, {
 				before,
 				inputs,
 				progress: (share) => progress((done + share * span) / total),
-				duration: span / edit.speed,
+				duration: length,
 				id
 			});
 		};
 		// (a song's cover kept where the format holds one; without it, if that doesn't work)
 		const cover = audioOnly && !isVideo && info.cover;
-		const made = await run(cover).catch((error) => {
-			if (!cover || error?.name === 'Cancelled') throw error;
-			return run(false);
-		});
+		const make = (fit: Fit) =>
+			run(fit, cover).catch((error) => {
+				if (!cover || error?.name === 'Cancelled') throw error;
+				return run(fit, false);
+			});
+
+		let made: Made;
+		if (!maxBytes || !length) made = await make({});
+		else if (audioOnly) {
+			// The bitrate that fits (a little under it: the container and the cover take some)
+			const fits = Math.floor(Math.min(((maxBytes * 8) / 1000 / length) * 0.93, own));
+			const lossy = LOSSY_AUDIO.has(target.id);
+			made = await make(
+				lossy && fits < audioKbps(target.id, 'best') ? { audioKbps: Math.max(24, fits) } : {}
+			);
+			if (sizeOf(made) > maxBytes)
+				note = lossy
+					? `Couldn't get it under ${sizeText(maxBytes)}`
+					: `${target.label} can't be made smaller: MP3 can`;
+		} else if (target.id === 'gif') {
+			let gif = { fps: 15, width: 480 };
+			made = await make({ gif });
+			for (let attempt = 0; attempt < 4 && sizeOf(made) > maxBytes; attempt++) {
+				const shrink = Math.sqrt(maxBytes / sizeOf(made));
+				gif = {
+					width: Math.max(120, Math.round(gif.width * Math.min(0.85, shrink))),
+					fps: Math.max(6, Math.round(gif.fps * Math.min(0.9, shrink + 0.2)))
+				};
+				await discard(made);
+				stopIfCancelled(id);
+				made = await make({ gif });
+			}
+			if (sizeOf(made) > maxBytes) note = `Couldn't get it under ${sizeText(maxBytes)}`;
+		} else {
+			// The bitrate that fits: the sound's share first, fewer lines where there are few bits
+			const all = Math.min(((maxBytes * 8) / 1000 / length) * 0.92, own);
+			const audio = sound ? Math.min(128, Math.max(48, Math.round(all * 0.12))) : 0;
+			let videoKbps = Math.max(60, all - audio);
+			made = null as unknown as Made;
+			for (let attempt = 0; attempt < 3; attempt++) {
+				// (as high as it is when there are bits enough)
+				const height =
+					videoKbps < 350
+						? 360
+						: videoKbps < 800
+							? 480
+							: videoKbps < 1800
+								? 720
+								: videoKbps < 5000
+									? 1080
+									: 0;
+				if (made) await discard(made);
+				stopIfCancelled(id);
+				made = await make({ height, videoKbps, audioKbps: audio || undefined });
+				if (sizeOf(made) <= maxBytes) break;
+				videoKbps = Math.max(40, videoKbps * (maxBytes / sizeOf(made)) * 0.9);
+			}
+			if (sizeOf(made) > maxBytes) note = `Couldn't get it under ${sizeText(maxBytes)}`;
+		}
 		saved.push(await saveFile(FOLDER, name, made));
 		done += span;
 	}
-	return saved;
+	return { saved, note };
 }
 
 /** The video's picture at `time`, as a PNG (turned, mirrored and cut as in the edit) */

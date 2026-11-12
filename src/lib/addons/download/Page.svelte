@@ -1,9 +1,15 @@
+<script module>
+	/** The links offered or used already (not offered again, also after leaving the page) */
+	const used = new Set();
+</script>
+
 <script>
 	// The downloader: a link pasted, what it is shown, then what's wanted of it (the video or
 	// its sound, its format and quality, maybe only a part), and it's downloaded to
 	// ~/Stosufy/Downloads, to be copied, dragged out, edited or converted from there. What was
 	// chosen last is chosen again (where a link has it), else the best there is.
 	import { onMount } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
 	import { fade } from 'svelte/transition';
 	import { showToast } from '#lib/stores/toast.ts';
 	import { installedAddons } from '#lib/addons/store.ts';
@@ -20,6 +26,7 @@
 	import {
 		FOLDER,
 		addDownload,
+		checkFiles,
 		clearFinished,
 		downloads,
 		removeDownload,
@@ -225,16 +232,46 @@
 
 	const isLink = (text) => /^https?:\/\/\S+$/i.test(text.trim());
 
+	/** Where a link says to start (YouTube's and Twitch's "?t=1h2m3s", "&t=90", "#t=90"), s */
+	function startIn(url) {
+		try {
+			const address = new URL(url);
+			const value =
+				address.searchParams.get('t') ??
+				address.searchParams.get('start') ??
+				new URLSearchParams(address.hash.slice(1)).get('t');
+			if (!value) return 0;
+			if (/^\d+(\.\d+)?s?$/.test(value)) return parseFloat(value);
+			const parts = value.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+			return parts ? (+parts[1] || 0) * 3600 + (+parts[2] || 0) * 60 + (+parts[3] || 0) : 0;
+		} catch {
+			return 0;
+		}
+	}
+
+	/** Where the link said to start (s; 0: it didn't) */
+	let fromLink = $state(0);
+
 	async function look(text = link) {
 		const url = text.trim();
 		if (!isLink(url) || url === looked) return;
 		looked = url;
+		offered = null;
+		used.add(url);
 		found = { state: 'loading' };
 		try {
 			const result = await lookUp(url, options.cookies);
 			if (looked !== url) return;
 			found = { state: 'ready', info: result };
-			part = { on: false, start: 0, end: result.duration, exact: true };
+			// (a link to a time in it: only the part from there, ready to be changed)
+			const at = result.kind === 'video' ? startIn(url) : 0;
+			fromLink = at > 0 && at < result.duration - 1 ? at : 0;
+			part = {
+				on: fromLink > 0,
+				start: fromLink,
+				end: result.duration,
+				exact: true
+			};
 			items = null;
 		} catch (error) {
 			if (looked !== url) return;
@@ -354,8 +391,52 @@
 			.join(' · ');
 	}
 
+	// --- A link on the clipboard: offered (not used until it's clicked) ----------------------
+
+	/** @type {string | null} */
+	let offered = $state(null);
+
+	async function offerClipboard() {
+		if (link.trim() || found.state !== 'idle') return;
+		try {
+			const text = await invoke('clipboard_link');
+			if (typeof text !== 'string' || !isLink(text) || used.has(text.trim())) return;
+			if (!link.trim() && found.state === 'idle') offered = text.trim();
+		} catch {
+			// (no clipboard here: nothing offered)
+		}
+	}
+
+	function useOffered() {
+		if (!offered) return;
+		link = offered;
+		void look(offered);
+	}
+
+	function dismissOffered() {
+		if (offered) used.add(offered);
+		offered = null;
+	}
+
+	/** A link, short: its site and the start of its path */
+	function shortLink(url) {
+		try {
+			const address = new URL(url);
+			const rest = address.pathname + address.search;
+			return `${address.hostname.replace(/^www\./, '')}${rest.length > 32 ? `${rest.slice(0, 31)}…` : rest}`;
+		} catch {
+			return url;
+		}
+	}
+
 	onMount(() => {
 		void ensureTools();
+		void checkFiles();
+		void offerClipboard();
+		// (copied in the browser, back in Stosufy: offered then)
+		const focused = () => void offerClipboard();
+		window.addEventListener('focus', focused);
+		return () => window.removeEventListener('focus', focused);
 	});
 </script>
 
@@ -450,6 +531,34 @@
 				Paste
 			</button>
 		</div>
+
+		{#if offered && found.state === 'idle' && !link.trim()}
+			<div
+				class="-mt-1 flex flex-wrap items-center gap-2 text-sm"
+				role="group"
+				aria-label="Link on the clipboard"
+				transition:fade={{ duration: 120 }}
+			>
+				<span class="icon-[mingcute--clipboard-line] size-4 text-white/45 shrink-0"></span>
+				<span class="text-white/55">On the clipboard:</span>
+				<button
+					class="h-8 max-w-full px-3 flex items-center gap-1.5 rounded-full bg-rose-500/15 hover:bg-rose-500/25 text-rose-100 font-semibold cursor-pointer transition"
+					title={offered}
+					onclick={useOffered}
+				>
+					<span class="truncate">{shortLink(offered)}</span>
+					<span class="shrink-0 text-rose-200/80">· Use it</span>
+				</button>
+				<button
+					class="size-7 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+					aria-label="Not this link"
+					title="Not this link"
+					onclick={dismissOffered}
+				>
+					<span class="icon-[mingcute--close-line] size-3.5"></span>
+				</button>
+			</div>
+		{/if}
 
 		{#if found.state === 'failed'}
 			<p class="flex items-center gap-1.5 text-sm text-red-300" transition:fade={{ duration: 120 }}>
@@ -575,7 +684,11 @@
 								<label class="flex items-center gap-2 text-sm">
 									<input type="checkbox" class="accent-rose-400 size-4" bind:checked={part.on} />
 									Only a part of it
-									<span class="text-white/45">(only that part is downloaded)</span>
+									<span class="text-white/45">
+										{fromLink && part.on && part.start === fromLink
+											? `(from ${short(fromLink)}, where the link starts)`
+											: '(only that part is downloaded)'}
+									</span>
 								</label>
 								{#if part.on}
 									<PartPicker
@@ -700,6 +813,20 @@
 										{doing(job)}
 									</p>
 								</div>
+							{:else if job.status === 'done' && job.missing}
+								<span
+									class="flex items-center gap-1.5 text-white/50"
+									title="It's not in Stosufy/Downloads any more"
+								>
+									<span class="icon-[mingcute--file-unknown-line] size-4 shrink-0"></span>
+									Moved or deleted
+								</span>
+								<button
+									class="h-8 px-3 rounded-full font-semibold bg-white/[0.08] hover:bg-white/15 cursor-pointer transition"
+									onclick={() => retry(job.id)}
+								>
+									Download again
+								</button>
 							{:else if job.status === 'done'}
 								<button
 									class="h-8 pl-2.5 pr-3 flex items-center gap-1.5 rounded-full font-semibold text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 cursor-pointer transition"

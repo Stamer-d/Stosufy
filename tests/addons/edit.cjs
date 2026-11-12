@@ -208,12 +208,78 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		voiceFormats.join()
 	);
 
+	// --- A size limit: a 5-minute song as an MP3 under 8 MB; a WAV can't be ------------------
+	const noise = Buffer.alloc(44 + 22050 * 2 * 300);
+	noise.write('RIFF', 0);
+	noise.writeUInt32LE(36 + 22050 * 2 * 300, 4);
+	noise.write('WAVEfmt ', 8);
+	noise.writeUInt32LE(16, 16);
+	noise.writeUInt16LE(1, 20);
+	noise.writeUInt16LE(1, 22);
+	noise.writeUInt32LE(22050, 24);
+	noise.writeUInt32LE(22050 * 2, 28);
+	noise.writeUInt16LE(2, 32);
+	noise.writeUInt16LE(16, 34);
+	noise.write('data', 36);
+	noise.writeUInt32LE(22050 * 2 * 300, 40);
+	for (let i = 44; i < noise.length; i += 2)
+		noise.writeInt16LE(Math.round((Math.random() - 0.5) * 30000), i);
+	await page.setInputFiles('input[aria-label="Choose a file"]', [
+		{ name: 'noise.wav', mimeType: 'audio/wav', buffer: noise }
+	]);
+	await page.waitForSelector('h2:has-text("noise.wav")');
+	await page.waitForSelector('[role="slider"][aria-label="End"]');
+	check(
+		'a song: no pictures along its timeline',
+		/height: 112px/.test(
+			await page.locator('[role="slider"][aria-label="Start"]').locator('..').getAttribute('style')
+		)
+	);
+	await page.click('button[aria-label="Size limit"]');
+	await page.click(
+		'[role="listbox"][aria-label="Size limit"] [role="option"][data-value="8388608"]'
+	);
+	await page.click('[role="group"][aria-label="Save as"] [data-target="mp3"]');
+	await saved('noise (edited).mp3');
+	const limited = (await written('noise (edited).mp3')).length;
+	check(
+		'under 8 MB: a 5-minute MP3 at a lower bitrate (not 320 kbps: 11 MB)',
+		limited <= 8 * 1024 * 1024 && limited > 6 * 1000 * 1000,
+		String(limited)
+	);
+	await page.click('[role="group"][aria-label="Save as"] [data-target="wav"]');
+	await saved('noise (edited).wav');
+	await page.waitForSelector("text=WAV can't be made smaller: MP3 can");
+	check("a WAV can't be made smaller: said so", true);
+	await page.click('button[aria-label="Size limit"]');
+	await page.click('[role="listbox"][aria-label="Size limit"] [role="option"][data-value="0"]');
+	check(
+		'the size limit kept for next time',
+		(await page.evaluate(() => localStorage.getItem('stosufy-edit-limit'))) === '0'
+	);
+
 	// --- A video: turned, without sound; and its sound alone ---------------------------------
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: fixture('clip.mp4') }
 	]);
 	await page.waitForSelector('h2:has-text("clip.mp4")');
 	await page.waitForSelector('[role="slider"][aria-label="End"]');
+	// Its pictures along its timeline
+	await page.waitForFunction(
+		() => {
+			const box = document.querySelector('[role="slider"][aria-label="Start"]')?.parentElement;
+			const canvas = box?.querySelector('canvas');
+			if (!canvas || !/height: 156px/.test(box.getAttribute('style'))) return false;
+			const scale = canvas.width / box.clientWidth;
+			const pixel = canvas
+				.getContext('2d')
+				.getImageData(Math.round(20 * scale), Math.round(30 * scale), 1, 1).data;
+			return pixel[3] > 200;
+		},
+		null,
+		{ timeout: 20000 }
+	);
+	check('a video: its pictures along its timeline', true);
 	await page.click('button:has-text("Turn")');
 	await page.click('button:has-text("No sound")');
 	await page.click('[role="group"][aria-label="Save as"] [data-target="mp4"]');

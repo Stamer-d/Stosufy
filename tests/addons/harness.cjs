@@ -32,6 +32,7 @@ function tauri({ online, writes }) {
 			if (cmd === 'plugin:fs|exists') return !!(writes && written[args.path]);
 			if (cmd === 'plugin:opener|reveal_item_in_dir') return (window.__revealed = args.paths);
 			if (cmd === 'copy_files') return void (window.__copied = args.paths);
+			if (cmd === 'clipboard_link') return window.__clipboardLink ?? null;
 			if (cmd === 'plugin:drag|start_drag') return void (window.__dragged = args.item);
 			// (the system's file picker: what a test put in window.__pickable, read from there)
 			if (cmd === 'files_pick') return window.__pickable ?? null;

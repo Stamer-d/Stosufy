@@ -73,10 +73,42 @@ pub fn copy_files(
         .map_err(|e| format!("Couldn't copy it: {e}"))
 }
 
+/// A link on the clipboard, if that's what's there (only a link: anything else, a password say,
+/// isn't handed to the page)
+pub fn as_link(text: &str) -> Option<String> {
+    let text = text.trim();
+    let lower = text.to_ascii_lowercase();
+    let link = (lower.starts_with("https://") || lower.starts_with("http://"))
+        && text.len() <= 2048
+        && !text.chars().any(|c| c.is_whitespace() || c.is_control());
+    link.then(|| text.to_string())
+}
+
+/// The link on the clipboard (for the downloader: offered, not used, until it's clicked)
+#[tauri::command]
+pub fn clipboard_link() -> Option<String> {
+    as_link(&ClipboardContext::new().ok()?.get_text().ok()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn only_a_link() {
+        assert_eq!(
+            as_link("  https://youtu.be/abc?t=42\n").as_deref(),
+            Some("https://youtu.be/abc?t=42")
+        );
+        assert_eq!(as_link("my password").as_deref(), None);
+        assert_eq!(as_link("https://a.b/c and more").as_deref(), None);
+        assert_eq!(as_link("ftp://a.b/c").as_deref(), None);
+        assert_eq!(
+            as_link(&format!("https://a.b/{}", "x".repeat(3000))).as_deref(),
+            None
+        );
+    }
 
     #[test]
     fn only_files_in_the_folder() {

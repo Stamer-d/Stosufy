@@ -46,6 +46,7 @@ pub fn run() {
             ffmpeg::files_pick,
             ffmpeg::files_read,
             clipboard::copy_files,
+            clipboard::clipboard_link,
             ytdlp::ytdlp_status,
             ytdlp::ytdlp_install,
             ytdlp::deno_install,

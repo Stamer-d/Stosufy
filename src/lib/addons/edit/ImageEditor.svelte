@@ -8,6 +8,9 @@
 	import { reveal } from '../files/save.ts';
 	import Formats from '../files/Formats.svelte';
 	import CopyButton from '../files/CopyButton.svelte';
+	import Dropdown from '../files/Dropdown.svelte';
+	import { sizeText } from '../files/size.ts';
+	import { LIMITS, sizeLimit } from './limit.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { onMount } from 'svelte';
 	import { cssFilter, freshImageEdit, oriented, outputSize, saveImage } from './image.ts';
@@ -41,6 +44,7 @@
 		window.addEventListener('keydown', keys);
 		return () => window.removeEventListener('keydown', keys);
 	});
+	/** @type {{ status: string, saved: any, error: string, note?: string }} */
 	let saving = $state({ status: 'idle', saved: null, error: '' });
 	/** What it was when it was opened or last saved (to say when there's something to lose) */
 	let lastSaved = $state(JSON.stringify(freshImageEdit()));
@@ -119,8 +123,11 @@
 		if (!target || !image) return;
 		saving = { status: 'working', saved: null, error: '' };
 		try {
-			const saved = await saveImage(file, image, $state.snapshot(edit), target);
-			saving = { status: 'done', saved, error: '' };
+			const limit = $sizeLimit;
+			const saved = await saveImage(file, image, $state.snapshot(edit), target, limit);
+			const note =
+				limit && saved.size > limit ? `Couldn't get it under ${sizeText(limit)}` : undefined;
+			saving = { status: 'done', saved, error: '', note };
 			lastSaved = JSON.stringify($state.snapshot(edit));
 		} catch (error) {
 			console.warn('Could not save the picture:', error);
@@ -272,8 +279,15 @@
 
 		<!-- Saved as -->
 		<div
-			class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 pl-4 rounded-2xl bg-violet-300/[0.07] ring-1 ring-violet-300/20"
+			class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 rounded-2xl bg-violet-300/[0.07] ring-1 ring-violet-300/20"
 		>
+			<Dropdown
+				label="Size limit"
+				icon="icon-[mingcute--arrow-down-line]"
+				options={LIMITS}
+				value={$sizeLimit}
+				onchange={(value) => sizeLimit.set(value)}
+			/>
 			<span class="text-sm font-semibold text-violet-100">
 				{saving.status === 'working' ? 'Saving…' : 'Save as'}
 			</span>
@@ -293,6 +307,12 @@
 				<CopyButton files={[saving.saved]} />
 				<span class="text-white/50">in Stosufy/Edited</span>
 			</div>
+			{#if saving.note}
+				<p class="-mt-2 flex items-center gap-1.5 text-sm text-amber-200">
+					<span class="icon-[mingcute--information-line] size-4"></span>
+					{saving.note}
+				</p>
+			{/if}
 		{:else if saving.status === 'failed'}
 			<p class="flex items-center gap-1.5 text-sm text-red-300">
 				<span class="icon-[mingcute--warning-line] size-4"></span>
