@@ -9,6 +9,7 @@ import MacNowPlaying from './components/widgets/MacNowPlaying.svelte';
 import MacUpNext from './components/widgets/MacUpNext.svelte';
 import MacLibrary from './components/widgets/MacLibrary.svelte';
 import MacPlaylists from './components/widgets/MacPlaylists.svelte';
+import MacRecent from './components/widgets/MacRecent.svelte';
 import LinuxFetch from './components/widgets/LinuxFetch.svelte';
 import LinuxClock from './components/widgets/LinuxClock.svelte';
 import LinuxPlayer from './components/widgets/LinuxPlayer.svelte';
@@ -68,6 +69,12 @@ export const WIDGETS: Record<string, WidgetDefinition> = {
 		description: 'Quick access to four playlists',
 		family: 'macos',
 		component: MacPlaylists
+	},
+	'mac-recent': {
+		name: 'Recently played',
+		description: 'The songs you heard last, to play again',
+		family: 'macos',
+		component: MacRecent
 	},
 	'mac-lyrics': {
 		name: 'Lyrics',
@@ -144,9 +151,10 @@ export const WIDGETS: Record<string, WidgetDefinition> = {
 };
 
 export const DEFAULT_WIDGETS: PlacedWidget[] = [
-	{ uid: 'default-clock', type: 'minimal-clock', x: 0.03, y: 0.04 },
+	{ uid: 'default-recent', type: 'mac-recent', x: 0.03, y: 0.04 },
+	{ uid: 'default-clock', type: 'mac-clock', x: 1, y: 0.04 },
+	{ uid: 'default-playlists', type: 'mac-playlists', x: 1, y: 0.5 },
 	{ uid: 'default-now-playing', type: 'mac-now-playing', x: 0.03, y: 1 },
-	{ uid: 'default-playlists', type: 'mac-playlists', x: 1, y: 0.42 },
 	{ uid: 'default-up-next', type: 'mac-up-next', x: 0.7, y: 1 },
 	{ uid: 'default-library', type: 'mac-library', x: 1, y: 1 }
 ];

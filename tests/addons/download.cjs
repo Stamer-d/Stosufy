@@ -113,7 +113,7 @@ const formats = (vcodec, heights, fps = 30) =>
 		await page.press('input[aria-label="Link"]', 'Enter');
 	};
 	const row = (title) => page.locator(`ul[aria-label="Downloads"] > li[aria-label="${title}"]`);
-	const dropdown = (label) => page.locator(`button[aria-label="${label}"][aria-haspopup]`);
+	const dropdown = (label) => page.locator(`[role="combobox"][aria-label^="${label}:"]`);
 	/** The options of a dropdown (opened and closed again) */
 	const optionsOf = async (label) => {
 		await dropdown(label).click();

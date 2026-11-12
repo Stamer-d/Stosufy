@@ -253,6 +253,7 @@
 					{formatTime(currentTime)}
 				</span>
 				<Range
+					label="Where the song is"
 					value={currentTime}
 					min={0}
 					max={duration || 1}
@@ -332,6 +333,7 @@
 					class="w-28 max-xl:absolute max-xl:bottom-full max-xl:right-0 max-xl:mb-1 max-xl:p-3 max-xl:rounded-lg max-xl:bg-secondary-200 max-xl:shadow-xl max-xl:ring-1 max-xl:ring-white/5 max-xl:invisible max-xl:opacity-0 max-xl:group-hover/volume:visible max-xl:group-hover/volume:opacity-100 max-xl:group-focus-within/volume:visible max-xl:group-focus-within/volume:opacity-100 transition-opacity"
 				>
 					<Range
+						label="Volume"
 						value={volume}
 						min={0}
 						max={MAX_VOLUME}

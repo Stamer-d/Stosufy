@@ -203,7 +203,7 @@
 					onclick={() => (edit.mirrorY = !edit.mirrorY)}
 				/>
 				<div
-					class="h-10 p-1 flex items-center gap-0.5 rounded-xl bg-black/30"
+					class="h-10 p-1 flex items-center gap-0.5 rounded-lg bg-secondary-300"
 					role="radiogroup"
 					aria-label="Shape"
 					use:radioKeys
@@ -215,7 +215,7 @@
 							role="radio"
 							aria-checked={shape === id}
 							tabindex={shape === id ? 0 : -1}
-							class="h-full px-2.5 rounded-lg text-xs font-bold cursor-pointer transition {shape ===
+							class="h-full px-2.5 rounded-md text-xs font-bold cursor-pointer transition {shape ===
 							id
 								? 'bg-white text-black'
 								: 'text-white/70 hover:text-white'}"
@@ -225,7 +225,7 @@
 						</button>
 					{/each}
 				</div>
-				<div class="h-10 pl-3 pr-2 flex items-center gap-1 rounded-xl bg-white/[0.07]">
+				<div class="h-10 pl-3 pr-2 flex items-center gap-1 rounded-lg bg-secondary-300">
 					<span class="text-white/50">Width</span>
 					<input
 						type="number"

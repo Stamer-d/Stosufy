@@ -132,6 +132,7 @@
 						<span class="tabular-nums">{Math.round((settings.hitsoundVolume ?? 0.8) * 100)} %</span>
 					</div>
 					<Range
+						label="Hitsound volume"
 						value={settings.hitsoundVolume ?? 0.8}
 						min={0}
 						max={1}

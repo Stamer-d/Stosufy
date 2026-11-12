@@ -7,6 +7,8 @@
 	 *   max?: number,
 	 *   step?: number,
 	 *   disabled?: boolean,
+	 *   label?: string,
+	 *   valueText?: string,
 	 *   oninput?: (value: number) => void,
 	 *   onchange?: (value: number) => void
 	 * }}
@@ -17,6 +19,8 @@
 		max = 1,
 		step = 0.01,
 		disabled = false,
+		label,
+		valueText,
 		oninput,
 		onchange
 	} = $props();
@@ -44,6 +48,8 @@
 		{max}
 		{step}
 		{disabled}
+		aria-label={label}
+		aria-valuetext={valueText}
 		bind:value
 		oninput={handleInput}
 	/>

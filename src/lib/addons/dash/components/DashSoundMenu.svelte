@@ -50,6 +50,7 @@
 					<span class="tabular-nums">{Math.round($dashSounds.volume * 100)} %</span>
 				</div>
 				<Range
+					label="Effects volume"
 					value={$dashSounds.volume}
 					min={0}
 					max={1}
@@ -93,6 +94,7 @@
 					<span class="tabular-nums">{$dashSounds.delay ?? 0} ms</span>
 				</div>
 				<Range
+					label="Audio delay"
 					value={$dashSounds.delay ?? 0}
 					min={-100}
 					max={300}
@@ -133,6 +135,7 @@
 							<span class="tabular-nums">{Math.round(hitsoundVolume * 100)} %</span>
 						</div>
 						<Range
+							label="Hitsound volume"
 							value={hitsoundVolume}
 							min={0}
 							max={1}

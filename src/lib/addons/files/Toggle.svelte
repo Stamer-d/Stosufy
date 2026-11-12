@@ -15,16 +15,16 @@
 </script>
 
 <button
-	class="h-10 px-3 flex items-center gap-2 rounded-xl text-sm font-semibold whitespace-nowrap cursor-pointer transition outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-40 disabled:cursor-default {pressed
+	class="h-10 px-3 flex items-center gap-2 rounded-lg text-sm font-medium whitespace-nowrap cursor-pointer transition outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:opacity-40 disabled:cursor-default {pressed
 		? 'bg-white text-black'
-		: 'bg-white/[0.07] enabled:hover:bg-white/[0.12]'}"
+		: 'bg-secondary-300 enabled:hover:bg-secondary-400'}"
 	aria-pressed={pressed}
 	{title}
 	{disabled}
 	{onclick}
 >
 	{#if icon}
-		<span class="{icon} size-4 shrink-0 {pressed ? '' : 'text-white/60'}"></span>
+		<span class="{icon} size-4 shrink-0 {pressed ? '' : 'text-secondary-600'}"></span>
 	{/if}
 	{label}
 </button>

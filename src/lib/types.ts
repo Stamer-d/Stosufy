@@ -253,6 +253,8 @@ export interface Settings {
 	autoplay?: boolean;
 	/** The installed add-ons, by id (see lib/addons); none said: from before add-ons, see legacy.ts */
 	addons?: string[];
+	/** The add-ons with a button of their own in the title bar (the rest: in its add-ons menu) */
+	pinnedAddons?: string[];
 	/** Chosen sort order per playlist id */
 	playlistSort?: Record<string, import('./songSort').SongSort>;
 }

@@ -493,7 +493,7 @@
 					onchange={signIn}
 				/>
 				<button
-					class="h-10 px-3 flex items-center gap-1.5 rounded-xl bg-white/[0.07] hover:bg-white/[0.12] text-sm font-semibold cursor-pointer transition"
+					class="h-10 px-3 flex items-center gap-1.5 rounded-lg bg-secondary-300 hover:bg-secondary-400 text-sm font-medium cursor-pointer transition"
 					title="Where the downloads are: Stosufy/Downloads"
 					onclick={() => show()}
 				>
@@ -618,14 +618,14 @@
 				{:else}
 					<div class="flex flex-wrap items-center gap-2">
 						<div
-							class="h-10 p-1 flex rounded-xl bg-black/30"
+							class="h-10 p-1 flex rounded-lg bg-secondary-300"
 							role="radiogroup"
 							aria-label="What"
 							use:radioKeys
 						>
 							{#each [['video', 'Video', 'icon-[mingcute--video-line]'], ['audio', 'Sound', 'icon-[mingcute--music-2-line]']] as [id, text, icon] (id)}
 								<button
-									class="px-3 flex items-center gap-1.5 rounded-lg text-sm font-bold cursor-pointer transition disabled:opacity-35 disabled:cursor-default {tab ===
+									class="px-3 flex items-center gap-1.5 rounded-md text-sm font-bold cursor-pointer transition disabled:opacity-35 disabled:cursor-default {tab ===
 									id
 										? 'bg-white text-black'
 										: 'text-white/70 hover:text-white enabled:hover:bg-white/10'}"

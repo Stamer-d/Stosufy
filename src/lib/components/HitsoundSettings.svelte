@@ -126,6 +126,7 @@
 				</span>
 			</div>
 			<Range
+				label="Hitsound volume"
 				value={settings.hitsoundVolume ?? 0.8}
 				min={0}
 				max={1}
@@ -216,6 +217,7 @@
 				</span>
 			</div>
 			<Range
+				label="Hitsound offset"
 				value={settings.hitsoundOffset ?? 0}
 				min={-100}
 				max={100}

@@ -14,7 +14,7 @@ function check(name, ok, detail = '') {
 const DIR = '/home/tester/Stosufy/Edited';
 /** An option of a dropdown chosen (its button, then the option) */
 async function pick(page, label, value) {
-	await page.click(`button[aria-label="${label}"][aria-haspopup]`);
+	await page.click(`[role="combobox"][aria-label^="${label}:"]`);
 	await page.click(
 		`[role="listbox"][aria-label="${label}"] [role="option"][data-value="${value}"]`
 	);
@@ -190,7 +190,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	check(
 		'changes not saved: asked first, and kept on a "Keep editing"',
 		(await page.locator('h2:has-text("tagged.mp3")').count()) === 1 &&
-			/1 s/.test(await page.innerText('button[aria-label="Fade in"][aria-haspopup]'))
+			/1 s/.test(await page.innerText('[role="combobox"][aria-label^="Fade in:"]'))
 	);
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'voice.webm', mimeType: 'video/webm', buffer: fixture('voice.webm') }
@@ -243,7 +243,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 				.getAttribute('style')
 		)
 	);
-	await page.click('button[aria-label="Size limit"]');
+	await page.click('[role="combobox"][aria-label^="Size limit:"]');
 	await page.click(
 		'[role="listbox"][aria-label="Size limit"] [role="option"][data-value="8388608"]'
 	);
@@ -259,7 +259,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await saved('noise (edited).wav');
 	await page.waitForSelector("text=WAV can't be made smaller: MP3 can");
 	check("a WAV can't be made smaller: said so", true);
-	await page.click('button[aria-label="Size limit"]');
+	await page.click('[role="combobox"][aria-label^="Size limit:"]');
 	await page.click('[role="listbox"][aria-label="Size limit"] [role="option"][data-value="0"]');
 	check(
 		'the size limit kept for next time',

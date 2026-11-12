@@ -13,7 +13,9 @@
 	import { relaunch } from '@tauri-apps/plugin-process';
 	import { focusMode } from '#lib/stores/audio.ts';
 	import { openOverlay } from '#lib/addons/overlay.ts';
-	import { installedAddons, openAddon } from '#lib/addons/store.ts';
+	import { installedAddons, openAddon, pinnedAddons } from '#lib/addons/store.ts';
+	import AddonLauncher from './AddonLauncher.svelte';
+	import { offline } from '#lib/stores/network.ts';
 	import { page } from '$app/state';
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 	import { logout } from '#lib/stores/account.ts';
@@ -44,6 +46,10 @@
 	};
 	const addonActive = (addon) =>
 		addon.overlay ? $openOverlay === addon.id : page.url.pathname === `/addons/${addon.id}`;
+	/** The add-ons with a button here: the pinned ones, and the one that's open (to leave it) */
+	let barAddons = $derived(
+		$installedAddons.filter((addon) => $pinnedAddons.includes(addon) || addonActive(addon))
+	);
 	let updating = $state(false);
 	let updateModal = $state({
 		show: false,
@@ -166,7 +172,10 @@
 						: 'icon-[mingcute--fullscreen-line]'} size-[18px]"
 				></span>
 			</button>
-			{#each $installedAddons as addon (addon.id)}
+			{#if barAddons.length}
+				<span class="w-px h-4 mx-1 bg-white/10"></span>
+			{/if}
+			{#each barAddons as addon (addon.id)}
 				{@const active = addonActive(addon)}
 				{@const label = active && addon.overlay ? `Leave ${addon.name}` : addon.name}
 				<button
@@ -181,18 +190,7 @@
 					<span class="{addon.icon} size-[18px]"></span>
 				</button>
 			{/each}
-			<button
-				title="Add-ons"
-				aria-label="Add-ons"
-				aria-pressed={page.url.pathname === '/addons'}
-				class="size-8 grid place-items-center rounded-full hover:bg-secondary-300 cursor-pointer transition {page
-					.url.pathname === '/addons'
-					? 'text-primary-500'
-					: 'text-secondary-600 hover:text-white'}"
-				onclick={() => go('/addons')}
-			>
-				<span class="icon-[mingcute--classify-add-2-line] size-[18px]"></span>
-			</button>
+			<AddonLauncher {go} />
 		{/if}
 	</div>
 
@@ -203,6 +201,16 @@
 	</div>
 
 	<div class="flex items-center h-full {isMac ? 'pr-3' : ''}">
+		{#if $offline}
+			<span
+				class="mr-2 h-7 px-2.5 flex items-center gap-1.5 rounded-full bg-amber-400/10 ring-1 ring-amber-300/25 text-xs font-semibold text-amber-200"
+				role="status"
+				title="Your downloaded songs and playlists still play; the rest comes back with the connection"
+			>
+				<span class="icon-[mingcute--wifi-off-line] size-3.5"></span>
+				Offline
+			</span>
+		{/if}
 		{#if $user?.username}
 			<ListenTogether />
 			<button

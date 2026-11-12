@@ -448,7 +448,7 @@
 					/>
 					{#if cropping}
 						<div
-							class="h-10 p-1 flex gap-0.5 rounded-xl bg-black/30"
+							class="h-10 p-1 flex gap-0.5 rounded-lg bg-secondary-300"
 							role="radiogroup"
 							aria-label="Shape"
 							use:radioKeys
@@ -458,7 +458,7 @@
 									role="radio"
 									aria-checked={shape === shapeId}
 									tabindex={shape === shapeId ? 0 : -1}
-									class="px-2.5 rounded-lg text-xs font-bold cursor-pointer transition {shape ===
+									class="px-2.5 rounded-md text-xs font-bold cursor-pointer transition {shape ===
 									shapeId
 										? 'bg-white text-black'
 										: 'text-white/70 hover:text-white'}"
@@ -575,7 +575,7 @@
 				>
 			</span>
 			{#each MARKS as [which, label, key] (which)}
-				<div class="h-10 pl-3 pr-1 flex items-center gap-1 rounded-xl bg-white/[0.07]">
+				<div class="h-10 pl-3 pr-1 flex items-center gap-1 rounded-lg bg-secondary-300">
 					<span class="text-white/50">{label}</span>
 					<input
 						class="w-[4.5rem] h-8 px-1 bg-transparent tabular-nums font-semibold outline-none rounded-md focus:bg-white/10"

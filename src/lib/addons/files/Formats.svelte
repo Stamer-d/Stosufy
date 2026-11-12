@@ -3,7 +3,7 @@
 	// to become, for the converter and the editor. Nothing is chosen until one's clicked (or
 	// Enter on it): the menu can be gone through with the arrow keys.
 	import { tick } from 'svelte';
-	import { pastRight, place } from './popover.ts';
+	import { pastRight, place } from '#lib/popover.ts';
 
 	/**
 	 * @type {{

@@ -24,6 +24,40 @@ export const installedAddons = derived(
 	[] as Addon[]
 );
 
+/** At most this many with a button of their own in the title bar */
+export const PINS = 3;
+
+/** The pinned ones' ids: as they were chosen, else the first installed ones */
+function pinnedIds(settings: { addons?: string[]; pinnedAddons?: string[] } | undefined) {
+	const installed = ADDONS.filter((addon) => settings?.addons?.includes(addon.id)).map(
+		(addon) => addon.id
+	);
+	return settings?.pinnedAddons
+		? settings.pinnedAddons.filter((id) => installed.includes(id))
+		: installed.slice(0, PINS);
+}
+
+/** The installed add-ons with a button of their own in the title bar, in the store's order */
+export const pinnedAddons = derived([installedAddons, userSettings], ([$installed, $user]) => {
+	const ids = pinnedIds($user.settings);
+	return $installed.filter((addon) => ids.includes(addon.id));
+});
+
+/** An add-on's button in the title bar, or taken off it (to its add-ons menu); whether it is */
+export function togglePin(id: string) {
+	const ids = pinnedIds(get(userSettings).settings);
+	if (ids.includes(id)) {
+		updateUserSettings({ pinnedAddons: ids.filter((other) => other !== id) });
+		return false;
+	}
+	if (ids.length >= PINS) {
+		showToast(`Up to ${PINS} add-ons in the title bar`, 'icon-[mingcute--information-line]');
+		return false;
+	}
+	updateUserSettings({ pinnedAddons: [...ids, id] });
+	return true;
+}
+
 /** The add-ons being installed now (their code is being loaded) */
 export const installing = writable<string[]>([]);
 
@@ -91,7 +125,14 @@ export async function installAddon(id: string) {
 		await load(addon);
 		// (the settings as they are now: another one may have been installed meanwhile)
 		const now = get(userSettings).settings?.addons ?? [];
-		if (!now.includes(id)) updateUserSettings({ addons: [...now, id] });
+		if (!now.includes(id)) {
+			// (in the title bar, while there's room there)
+			const pins = pinnedIds(get(userSettings).settings);
+			updateUserSettings({
+				addons: [...now, id],
+				...(pins.length < PINS ? { pinnedAddons: [...pins, id] } : { pinnedAddons: pins })
+			});
+		}
 		showToast(`${addon.name} installed`, 'icon-[mingcute--check-circle-line]');
 	} catch (error) {
 		console.error(`Could not install ${id}:`, error);
@@ -110,7 +151,11 @@ export function uninstallAddon(id: string) {
 	const installed = get(userSettings).settings?.addons ?? [];
 	if (!addon || !installed.includes(id)) return;
 	openOverlay.update((open) => (open === id ? null : open));
-	updateUserSettings({ addons: installed.filter((other) => other !== id) });
+	const pins = pinnedIds(get(userSettings).settings);
+	updateUserSettings({
+		addons: installed.filter((other) => other !== id),
+		pinnedAddons: pins.filter((other) => other !== id)
+	});
 	showToast(`${addon.name} removed`, 'icon-[mingcute--delete-2-line]');
 }
 

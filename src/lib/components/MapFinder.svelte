@@ -41,6 +41,8 @@
 	import PlayButton from './PlayButton.svelte';
 	import { openSettings } from '#lib/stores/settings.ts';
 	import DesktopCanvas from './DesktopCanvas.svelte';
+	import FirstSteps from './FirstSteps.svelte';
+	import { showFirstSteps } from '#lib/stores/firstSteps.ts';
 	import WidgetStore from './WidgetStore.svelte';
 	import MapperLink from './MapperLink.svelte';
 	import MixCover from './MixCover.svelte';
@@ -708,7 +710,18 @@
 				{/if}
 			{/if}
 			{#if widgetsShown}
-				<DesktopCanvas editing={editingWidgets} />
+				<!-- (no songs yet: only how to get some, not empty widgets; all of them to edit) -->
+				{#if editingWidgets || !$showFirstSteps}
+					<DesktopCanvas editing={editingWidgets} />
+				{/if}
+				{#if !editingWidgets}
+					<!-- (someone without songs yet: how to get some, in the middle) -->
+					<div class="absolute inset-0 z-20 grid place-items-center p-6 pointer-events-none">
+						<div class="w-full max-w-xl pointer-events-auto empty:hidden">
+							<FirstSteps />
+						</div>
+					</div>
+				{/if}
 			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
@@ -799,6 +812,7 @@
 			</h1>
 			{@render customizeButton(false)}
 		</div>
+		<FirstSteps />
 
 		{#each homeSettings.sections.filter((section) => section.visible) as section (section.id)}
 			{#if section.id === 'hero'}

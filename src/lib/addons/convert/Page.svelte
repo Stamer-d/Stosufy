@@ -9,6 +9,7 @@
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
 	import CopyButton from '../files/CopyButton.svelte';
 	import Formats from '../files/Formats.svelte';
+	import Dropdown from '../files/Dropdown.svelte';
 	import { ms } from '../files/motion.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { pickFiles } from '../files/picked.ts';
@@ -66,6 +67,13 @@
 		[50 * MB, 'Up to 50 MB'],
 		[100 * MB, 'Up to 100 MB']
 	];
+	/** The size limits to choose from (and one set otherwise, as it is) */
+	let limitOptions = $derived([
+		...LIMITS.map(([bytes, text]) => ({ value: bytes, label: String(text) })),
+		...(LIMITS.some(([bytes]) => bytes === $options.maxBytes)
+			? []
+			: [{ value: $options.maxBytes, label: `Up to ${size($options.maxBytes)}` }])
+	]);
 	const EDITABLE = new Set(['image', 'audio', 'video']);
 
 	let input = $state();
@@ -233,49 +241,22 @@
 				{/if}
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
-				<label
-					class="relative h-9 pl-3 pr-2 flex items-center gap-1.5 rounded-full text-sm cursor-pointer transition {$options.maxBytes
-						? 'bg-amber-300 text-black'
-						: 'bg-black/25 hover:bg-black/40'}"
-					title="Make every file smaller than this (sound, video, pictures)"
-				>
-					<span class="icon-[mingcute--arrow-down-line] size-4 opacity-70"></span>
-					<span class="font-semibold">
-						{LIMITS.find(([bytes]) => bytes === $options.maxBytes)?.[1] ??
-							`Up to ${size($options.maxBytes)}`}
-					</span>
-					<span class="icon-[mingcute--down-line] size-3.5 opacity-60"></span>
-					<select
-						class="absolute inset-0 opacity-0 cursor-pointer"
-						aria-label="Size limit"
-						bind:value={$options.maxBytes}
-					>
-						{#each LIMITS as [bytes, label] (bytes)}
-							<option value={bytes} class="bg-panel text-white">{label}</option>
-						{/each}
-					</select>
-				</label>
-				<label
-					class="relative h-9 pl-3 pr-2 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm cursor-pointer transition"
-					title="Smaller files or better quality (sound, video, JPG, WebP)"
-				>
-					<span class="icon-[mingcute--settings-3-line] size-4 text-white/70"></span>
-					<span class="font-semibold">
-						{QUALITIES.find(([id]) => id === $options.quality)?.[1]}
-					</span>
-					<span class="icon-[mingcute--down-line] size-3.5 text-white/60"></span>
-					<select
-						class="absolute inset-0 opacity-0 cursor-pointer"
-						aria-label="Quality"
-						bind:value={$options.quality}
-					>
-						{#each QUALITIES as [id, label] (id)}
-							<option value={id} class="bg-panel">{label}</option>
-						{/each}
-					</select>
-				</label>
+				<Dropdown
+					label="Size limit"
+					icon="icon-[mingcute--arrow-down-line]"
+					options={limitOptions}
+					value={$options.maxBytes}
+					onchange={(value) => options.update((all) => ({ ...all, maxBytes: value }))}
+				/>
+				<Dropdown
+					label="Quality"
+					icon="icon-[mingcute--settings-3-line]"
+					options={QUALITIES.map(([id, text]) => ({ value: id, label: String(text) }))}
+					value={$options.quality}
+					onchange={(value) => options.update((all) => ({ ...all, quality: value }))}
+				/>
 				<button
-					class="h-9 px-3 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm font-semibold cursor-pointer transition"
+					class="h-10 px-3 flex items-center gap-1.5 rounded-lg bg-secondary-300 hover:bg-secondary-400 text-sm font-medium cursor-pointer transition"
 					title="Where the converted files are: Stosufy/Converted"
 					onclick={() => reveal()}
 				>

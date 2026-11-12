@@ -3,8 +3,7 @@
 	import Songbar from '#lib/components/Songbar.svelte';
 	import Playlist from '#lib/components/Playlist.svelte';
 	import { onMount } from 'svelte';
-	import { fly, slide } from 'svelte/transition';
-	import { offline } from '#lib/stores/network.ts';
+	import { fly } from 'svelte/transition';
 	import { startBeatEffects } from '#lib/stores/beat.ts';
 	import { joinSession } from '#lib/stores/listen.ts';
 	import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
@@ -145,7 +144,13 @@
 			updateShowUI();
 		}
 	});
+
+	/** A narrow window: the side panels (queue, friends) over the page, not next to it */
+	let windowWidth = $state(typeof window === 'undefined' ? 1280 : window.innerWidth);
+	let narrow = $derived(windowWidth < 1200);
 </script>
+
+<svelte:window bind:innerWidth={windowWidth} />
 
 {#if showUI}
 	{#if backgroundOn}
@@ -177,20 +182,8 @@
 		class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'} {$appHidden ? 'invisible' : ''}"
 	>
 		<Titlebar />
-		{#if $offline}
-			<div
-				class="mx-2 mb-2 flex items-center gap-2.5 px-4 h-9 shrink-0 rounded-lg bg-amber-400/10 ring-1 ring-amber-300/20 text-sm text-amber-100"
-				transition:slide={{ duration: 200 }}
-			>
-				<span class="icon-[mingcute--wifi-off-line] size-4 text-amber-300"></span>
-				<span class="font-semibold">You're offline.</span>
-				<span class="text-amber-100/70 truncate"
-					>Your downloaded songs and playlists still play; the rest comes back with the connection.</span
-				>
-			</div>
-		{/if}
 
-		<div class="flex flex-1 min-h-0 px-2 gap-2">
+		<div class="relative flex flex-1 min-h-0 px-2 gap-2">
 			<aside class="w-72 shrink-0 rounded-lg {panel} overflow-hidden transition-colors">
 				<Playlist />
 			</aside>
@@ -205,22 +198,30 @@
 
 			<!-- The width animates, so the content next to it shrinks smoothly instead of jumping -->
 			<div
-				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$queuePanelOpen
-					? 'w-80'
-					: 'w-0 -ml-2'}"
+				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {narrow
+					? 'absolute z-30 right-2 top-0 bottom-0 rounded-lg shadow-2xl shadow-black/60'
+					: ''} {$queuePanelOpen ? 'w-80' : narrow ? 'w-0' : 'w-0 -ml-2'}"
 				inert={!$queuePanelOpen}
 			>
-				<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
+				<div
+					class="w-80 h-full rounded-lg {narrow
+						? 'bg-secondary-100/95 backdrop-blur-2xl ring-1 ring-white/10'
+						: panel} overflow-hidden transition-colors"
+				>
 					<QueuePanel />
 				</div>
 			</div>
 			<div
-				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {$friendsPanelOpen
-					? 'w-80'
-					: 'w-0 -ml-2'}"
+				class="shrink-0 overflow-hidden transition-[width,margin] duration-200 ease-out {narrow
+					? 'absolute z-30 right-2 top-0 bottom-0 rounded-lg shadow-2xl shadow-black/60'
+					: ''} {$friendsPanelOpen ? 'w-80' : narrow ? 'w-0' : 'w-0 -ml-2'}"
 				inert={!$friendsPanelOpen}
 			>
-				<div class="w-80 h-full rounded-lg {panel} overflow-hidden transition-colors">
+				<div
+					class="w-80 h-full rounded-lg {narrow
+						? 'bg-secondary-100/95 backdrop-blur-2xl ring-1 ring-white/10'
+						: panel} overflow-hidden transition-colors"
+				>
 					<FriendsPanel />
 				</div>
 			</div>

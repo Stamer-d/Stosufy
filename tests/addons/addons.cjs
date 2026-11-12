@@ -11,8 +11,8 @@ function check(name, ok, detail = '') {
 	console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${ok || !detail ? '' : `  (${detail})`}`);
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-/** The add-ons' buttons in the title bar */
-const buttons = (page) =>
+/** The add-ons with a button of their own in the title bar (the pinned ones, and an open one) */
+const barButtons = (page) =>
 	page
 		.locator('header')
 		.first()
@@ -24,16 +24,48 @@ const buttons = (page) =>
 					.filter((label) => names.includes(label)),
 			ALL
 		);
+/** The installed add-ons: those in the title bar's add-ons menu (none: it goes to the store) */
+async function buttons(page) {
+	const button = page.locator('header button[aria-label="Add-ons"]').first();
+	if (!(await button.getAttribute('aria-haspopup'))) return [];
+	await button.click();
+	const menu = page.locator('header [role="dialog"][aria-label="Add-ons"]');
+	await menu.waitFor();
+	const names = await menu.locator('li > button:first-child').allInnerTexts();
+	await page.keyboard.press('Escape');
+	await menu.waitFor({ state: 'detached' });
+	return names.map((name) => name.trim());
+}
+/** Waits until that one's installed (in the add-ons menu) */
+async function installed(page, name) {
+	for (let i = 0; i < 60; i++) {
+		if ((await buttons(page)).includes(name)) return;
+		await page.waitForTimeout(500);
+	}
+	throw new Error(`${name} isn't installed`);
+}
 const card = (page, name) => page.locator(`article[aria-label="${name}"]`);
 const install = (page, name) => card(page, name).locator('button:has-text("Install")').click();
 const uninstall = (page, name) => card(page, name).locator('button:has-text("Uninstall")').click();
-const store = (page) => page.click('header button[aria-label="Add-ons"]');
+/** The add-on store: from the title bar's add-ons button (straight there, or from its menu) */
+async function store(page) {
+	await page.click('header button[aria-label="Add-ons"]');
+	const menu = page.locator('header [role="dialog"][aria-label="Add-ons"]');
+	if (await menu.count()) await menu.locator('button:has-text("Add-on store")').click();
+	await page.waitForURL('**/addons');
+}
 const view = '.fixed.inset-0.z-40';
 const widget = (name) => `[role="group"][aria-label="${name}"]`;
+/** The first steps on the home page (no songs yet) closed: the widgets shown */
+async function closeFirstSteps(page) {
+	const steps = page.locator('section[aria-labelledby="first-steps"]');
+	if (await steps.count()) await steps.first().locator('button[aria-label="Close"]').click();
+}
 /** The widget store, from the home page (its buttons show while the mouse moves there) */
 async function widgetStore(page) {
 	await page.click('header button[aria-label="Home"]');
 	await page.waitForURL('**/home');
+	await closeFirstSteps(page);
 	await page.mouse.move(800, 400);
 	await page.mouse.move(820, 420);
 	await page.click('main button:has-text("Edit widgets")');
@@ -51,6 +83,11 @@ const PLACED = [
 	{
 		const { page, errors } = await start(browser);
 		check('new user: no add-on in the title bar', same(await buttons(page), []));
+		await page.waitForSelector('section[aria-labelledby="first-steps"]');
+		check(
+			'new user, no songs: how to get some on the home page, no empty widgets',
+			(await page.locator('[role="group"][aria-label="Recently played"]').count()) === 0
+		);
 		await store(page);
 		await page.waitForURL('**/addons');
 		check(
@@ -66,7 +103,7 @@ const PLACED = [
 		);
 		check(
 			'DJ mode: kept in the settings',
-			same(await saved(page), { addons: ['dj'] }),
+			same(await saved(page), { addons: ['dj'], pinnedAddons: ['dj'] }),
 			JSON.stringify(await saved(page))
 		);
 		await page.click('header button[aria-label="DJ mode"]');
@@ -143,7 +180,9 @@ const PLACED = [
 		// Removed again
 		await store(page);
 		await uninstall(page, 'World center');
-		await page.waitForSelector('header button[aria-label="World center"]', { state: 'detached' });
+		await page.waitForFunction(
+			() => !document.querySelector('header button[aria-label="World center"]')
+		);
 		check(
 			'World center: removed',
 			same((await saved(page)).addons, ['dj', 'dash', 'puzzle']),
@@ -168,7 +207,10 @@ const PLACED = [
 		await page.click('button:has-text("Installed")');
 		for (const name of NAMES) await uninstall(page, name);
 		await page.waitForSelector('text=No add-ons installed yet');
-		check('all removed: none in the title bar', same(await buttons(page), []));
+		check(
+			'all removed: none in the title bar, the add-ons button goes to the store',
+			same(await buttons(page), []) && same(await barButtons(page), [])
+		);
 		check('no errors', errors.length === 0, errors.join('\n'));
 		await page.context().close();
 	}
@@ -178,11 +220,39 @@ const PLACED = [
 		const { page } = await start(browser, {
 			stored: { settings: { home: { layout: 'desktop', widgets: PLACED } }, currentQueue: null }
 		});
+		await closeFirstSteps(page);
 		check(
 			'settings from before: all installed',
 			same(await buttons(page), NAMES),
 			JSON.stringify(await buttons(page))
 		);
+		check(
+			'…the first three with a button in the title bar, the rest in its add-ons menu',
+			same(await barButtons(page), ['DJ mode', 'Dash', 'Puzzle']),
+			JSON.stringify(await barButtons(page))
+		);
+		// Pinned from the menu instead: Puzzle off, World center on
+		await page.click('header button[aria-label="Add-ons"]');
+		await page.click('header [role="dialog"] button[aria-label="Unpin Puzzle"]');
+		await page.click('header [role="dialog"] button[aria-label="Pin World center"]');
+		await page.keyboard.press('Escape');
+		await page.waitForSelector('header button[aria-label="World center"]');
+		check(
+			'pinned and unpinned in the add-ons menu',
+			same(await barButtons(page), ['DJ mode', 'Dash', 'World center']) &&
+				same((await saved(page)).pinnedAddons, ['dj', 'dash', 'world']),
+			JSON.stringify(await barButtons(page))
+		);
+		await page.click('header button[aria-label="Add-ons"]');
+		await page.click('header [role="dialog"] button:has-text("Puzzle")');
+		await page.waitForURL('**/addons/puzzle');
+		check(
+			'opened from the menu: its button in the title bar while it is open',
+			same(await barButtons(page), ['DJ mode', 'Dash', 'Puzzle', 'World center']),
+			JSON.stringify(await barButtons(page))
+		);
+		await page.click('header button[aria-label="Home"]');
+		await page.waitForURL('**/home');
 		await page.waitForSelector(widget('Weather'));
 		check('settings from before: the placed weather widget is there', true);
 		await store(page);
@@ -223,7 +293,7 @@ const PLACED = [
 		const { page, sent } = await start(browser, {
 			account: { settings: { appearance: { accent: 'teal' } }, updatedAt: 5 }
 		});
-		await page.waitForSelector('header button[aria-label="World center"]');
+		await installed(page, 'World center');
 		check(
 			'account from before, new device: all installed',
 			same(await buttons(page), NAMES),

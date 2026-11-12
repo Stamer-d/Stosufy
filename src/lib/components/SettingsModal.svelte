@@ -305,6 +305,7 @@
 							<span class="tabular-nums text-secondary-600">{appearance.dim}%</span>
 						</div>
 						<Range
+							label="Background dim"
 							value={appearance.dim}
 							min={0}
 							max={95}
@@ -412,6 +413,7 @@
 							</span>
 						</div>
 						<Range
+							label="Crossfade"
 							value={crossfade}
 							min={0}
 							max={12}

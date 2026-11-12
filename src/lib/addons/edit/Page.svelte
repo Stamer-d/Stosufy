@@ -148,7 +148,7 @@
 				{#if file}
 					{#if canConvert}
 						<button
-							class="h-9 px-3 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm font-semibold cursor-pointer transition"
+							class="h-10 px-3 flex items-center gap-1.5 rounded-lg bg-secondary-300 hover:bg-secondary-400 text-sm font-medium cursor-pointer transition"
 							title="Convert it as it is, in the file converter"
 							onclick={() => handOver('convert', [file])}
 						>
@@ -157,7 +157,7 @@
 						</button>
 					{/if}
 					<button
-						class="h-9 px-3 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm font-semibold cursor-pointer transition"
+						class="h-10 px-3 flex items-center gap-1.5 rounded-lg bg-secondary-300 hover:bg-secondary-400 text-sm font-medium cursor-pointer transition"
 						onclick={choose}
 					>
 						<span class="icon-[mingcute--file-new-line] size-4 text-white/70"></span>
@@ -165,7 +165,7 @@
 					</button>
 				{/if}
 				<button
-					class="h-9 px-3 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm font-semibold cursor-pointer transition"
+					class="h-10 px-3 flex items-center gap-1.5 rounded-lg bg-secondary-300 hover:bg-secondary-400 text-sm font-medium cursor-pointer transition"
 					title="Where the edited files are: Stosufy/Edited"
 					onclick={showFolder}
 				>
