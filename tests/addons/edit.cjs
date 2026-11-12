@@ -12,6 +12,20 @@ function check(name, ok, detail = '') {
 	console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${ok || !detail ? '' : `  (${detail})`}`);
 }
 const DIR = '/home/tester/Stosufy/Edited';
+/** Exported in a format: chosen in the export bar, then Export */
+async function exportAs(page, id) {
+	await pick(page, 'Format', id);
+	await page.click('section[aria-label="Export"] button:has-text("Export as")');
+}
+/** The formats it can be exported as (its own first) */
+async function formatsOf(page) {
+	await page.click('[role="combobox"][aria-label^="Format:"]');
+	const ids = await page
+		.locator('[role="listbox"][aria-label="Format"] [role="option"]')
+		.evaluateAll((all) => all.map((option) => option.dataset.value));
+	await page.keyboard.press('Escape');
+	return ids;
+}
 /** An option of a dropdown chosen (its button, then the option) */
 async function pick(page, label, value) {
 	await page.click(`[role="combobox"][aria-label^="${label}:"]`);
@@ -90,15 +104,13 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		'the length shown: 1 s at 2× → 0:00.5',
 		(await page.locator('[data-length]').innerText()).includes('0:00.5')
 	);
-	const audioFormats = await page
-		.locator('[role="group"][aria-label="Save as"] [data-target]')
-		.evaluateAll((all) => all.map((button) => button.dataset.target));
+	const audioFormats = await formatsOf(page);
 	check(
 		'its own format first (MP3), then others',
 		audioFormats[0] === 'mp3' && audioFormats.includes('wav'),
 		audioFormats.join()
 	);
-	await page.click('[role="group"][aria-label="Save as"] [data-target="mp3"]');
+	await exportAs(page, 'mp3');
 	await saved('tagged (edited).mp3');
 	await page.waitForSelector('text=Saved: tagged (edited).mp3');
 	const cut = await lengthOf('tagged (edited).mp3');
@@ -142,13 +154,13 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.keyboard.press('Control+y');
 	await page.waitForSelector('button[aria-label="Put part 2"]');
 	check('Ctrl+Y: out again', true);
-	await page.click('[role="group"][aria-label="Save as"] [data-target="wav"]');
+	await exportAs(page, 'wav');
 	await saved('tagged (edited).wav');
 	const joined = await lengthOf('tagged (edited).wav');
 	check('saved without the middle part: ~1 s', joined > 0.9 && joined < 1.1, String(joined));
 	await page.click('button[aria-label="Put part 2"]');
 	await page.check('text=Each of the 3 parts as its own file');
-	await page.click('[role="group"][aria-label="Save as"] [data-target="wav"]');
+	await exportAs(page, 'wav');
 	await saved('tagged (part 3).wav');
 	const lengths = [];
 	for (const n of [1, 2, 3]) lengths.push(+(await lengthOf(`tagged (part ${n}).wav`)).toFixed(2));
@@ -201,9 +213,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 
 	// --- A WebM with only sound in it: a song ------------------------------------------------
 	await page.waitForSelector('[role="slider"][aria-label="End"]');
-	const voiceFormats = await page
-		.locator('[role="group"][aria-label="Save as"] [data-target]')
-		.evaluateAll((all) => all.map((button) => button.dataset.target));
+	const voiceFormats = await formatsOf(page);
 	check(
 		'a WebM with only sound: edited as a song (no picture, its sound as MP3, …)',
 		(await page.locator('button:has-text("Turn")').count()) === 0 &&
@@ -247,7 +257,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.click(
 		'[role="listbox"][aria-label="Size limit"] [role="option"][data-value="8388608"]'
 	);
-	await page.click('[role="group"][aria-label="Save as"] [data-target="mp3"]');
+	await exportAs(page, 'mp3');
 	await saved('noise (edited).mp3');
 	const limited = (await written('noise (edited).mp3')).length;
 	check(
@@ -255,7 +265,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		limited <= 8 * 1024 * 1024 && limited > 6 * 1000 * 1000,
 		String(limited)
 	);
-	await page.click('[role="group"][aria-label="Save as"] [data-target="wav"]');
+	await exportAs(page, 'wav');
 	await saved('noise (edited).wav');
 	await page.waitForSelector("text=WAV can't be made smaller: MP3 can");
 	check("a WAV can't be made smaller: said so", true);
@@ -291,7 +301,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	check('a video: its pictures along its timeline', true);
 	await page.click('button:has-text("Turn")');
 	await page.click('button:has-text("No sound")');
-	await page.click('[role="group"][aria-label="Save as"] [data-target="mp4"]');
+	await exportAs(page, 'mp4');
 	await saved('clip (edited).mp4');
 	check(
 		'turned: 96×64 → 64×96',
@@ -300,13 +310,13 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	const turned = Buffer.from(await written('clip (edited).mp4')).toString('latin1');
 	check('…and without sound', !turned.includes('mp4a'));
 	await page.click('button:has-text("No sound")');
-	await page.click('[role="group"][aria-label="Save as"] [data-target="mp3"]');
+	await exportAs(page, 'mp3');
 	await saved('clip (edited).mp3');
 	check("a video's sound alone, as MP3", (await lengthOf('clip (edited).mp3')) > 0.8);
 	// Cut to a square of its (turned) picture, and a frame of it as a picture
 	await page.click('button:has-text("Crop")');
 	await page.click('[role="radiogroup"][aria-label="Shape"] button:has-text("Square")');
-	await page.click('[role="group"][aria-label="Save as"] [data-target="mp4"]');
+	await exportAs(page, 'mp4');
 	await saved('clip (edited) (2).mp4');
 	check(
 		'the picture cut to a square: 64×64',
@@ -333,7 +343,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		await page.click('button:has-text("Split")');
 	}
 	await page.click('button[aria-label="Take out part 2"]');
-	await page.click('[role="group"][aria-label="Save as"] [data-target="gif"]');
+	await exportAs(page, 'gif');
 	await saved('clip (edited).gif');
 	const gif = Buffer.from(await written('clip (edited).gif')).toString('latin1');
 	check(
@@ -360,7 +370,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.waitForSelector('button:has-text("Turn right")');
 	await page.click('button:has-text("Turn right")');
 	await page.click('button:has-text("Mirror")');
-	await page.click('[role="group"][aria-label="Save as"] [data-target="png"]');
+	await exportAs(page, 'png');
 	await saved('halves (edited).png');
 	const corners = await page.evaluate(async (path) => {
 		const image = new Image();
@@ -394,7 +404,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.fill('input[aria-label="Width"]', '100');
 	await page.press('input[aria-label="Width"]', 'Enter');
 	check('its size shown: 100 × 100', (await page.locator('text=100 × 100 px').count()) === 1);
-	await page.click('[role="group"][aria-label="Save as"] [data-target="jpg"]');
+	await exportAs(page, 'jpg');
 	await saved('logo (edited).jpg');
 	check(
 		'saved: a 100×100 JPG',
@@ -435,7 +445,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		'lighter: shown so',
 		/brightness\(1\.5\)/.test(await page.locator('img[style*="filter"]').getAttribute('style'))
 	);
-	await page.click('[role="group"][aria-label="Save as"] [data-target="jpg"]');
+	await exportAs(page, 'jpg');
 	await saved('logo (edited) (2).jpg');
 	const before = await light('logo (edited).jpg');
 	const after = await light('logo (edited) (2).jpg');
@@ -447,10 +457,54 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		(await page.locator('input[aria-label="Light"]').inputValue()) === '0'
 	);
 
+	// --- The original replaced: a picture chosen in the system's picker (its place known) ------
+	const PLACE = '/home/tester/Pictures/pic.png';
+	check(
+		'dropped or pasted (its place not known): only a new file, no replacing',
+		(await page.locator('button:has-text("Replace original")').count()) === 0
+	);
+	await page.evaluate(
+		({ place, png }) => {
+			window.__pickable = [{ path: place, name: 'pic.png', size: png.length }];
+			window.__pickBytes = { [place]: png };
+		},
+		{ place: PLACE, png: Array.from(Buffer.from(halves, 'base64')) }
+	);
+	await page.click('button:has-text("Other file")');
+	const unsaved = page.locator('[role="alertdialog"][aria-label="Changes not saved"]');
+	if (await unsaved.count()) await unsaved.locator('button:has-text("anyway")').click();
+	await page.waitForSelector('h2:has-text("pic.png")');
+	await page.click('button:has-text("Turn right")');
+	await page.click('section[aria-label="Export"] button:has-text("Replace original")');
+	await page.waitForSelector('section[aria-label="Export"] [role="alertdialog"]');
+	check(
+		'"Replace original": asked first',
+		/goes to\s+the trash/.test(await page.innerText('section[aria-label="Export"]'))
+	);
+	await page.click('section[aria-label="Export"] button:has-text("Replace it")');
+	await page.waitForSelector('text=Replaced: pic.png');
+	const replaced = await page.evaluate(() => window.__replaced);
+	check(
+		'replaced: the edited one put in its place',
+		replaced?.to === PLACE && /Stosufy\/Edited\/pic \(edited\)\.png$/.test(replaced.from),
+		JSON.stringify(replaced)
+	);
+	const turnedSize = await page.evaluate(async (path) => {
+		const image = new Image();
+		image.src = URL.createObjectURL(new Blob([window.__written[path]]));
+		await image.decode();
+		return [image.naturalWidth, image.naturalHeight];
+	}, PLACE);
+	check(
+		'…turned: 40×20 → 20×40',
+		JSON.stringify(turnedSize) === '[20,40]',
+		JSON.stringify(turnedSize)
+	);
+
 	// --- Back to the converter ---------------------------------------------------------------
 	await page.click('button:has-text("Convert instead")');
 	await page.waitForURL('**/addons/convert');
-	await page.waitForSelector('li[aria-label="logo.png"]');
+	await page.waitForSelector('li[aria-label="pic.png"]');
 	check('"Convert instead" hands it to the converter', true);
 
 	check('no errors', errors.length === 0, errors.join('\n'));

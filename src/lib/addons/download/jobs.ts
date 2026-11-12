@@ -6,7 +6,13 @@ import { get, writable } from 'svelte/store';
 import { exists, remove } from '@tauri-apps/plugin-fs';
 import { saveFile, type SavedFile } from '../files/save';
 import { notifyDone } from '../files/notify';
-import { download, stopDownload, type DownloadRequest, type LinkInfo } from './ytdlp';
+import {
+	download,
+	stopDownload,
+	type DownloadRequest,
+	type Downloaded,
+	type LinkInfo
+} from './ytdlp';
 
 export const FOLDER = 'Downloads';
 /** At once (more would only share the same line) */
@@ -147,48 +153,18 @@ function run() {
 	}
 }
 
+/** The browser's sign-in couldn't be read (it locks it, or isn't there) */
+const signInFailed = (message: string) =>
+	/sign-in couldn't be read|Full Disk Access/i.test(message);
+
 async function work(job: DownloadJob) {
 	try {
-		const result = await download(
-			job.id,
-			job.request,
-			(progress) => {
-				const patch: Partial<DownloadJob> = { phase: progress.phase };
-				if (progress.phase === 'download') {
-					patch.percent = progress.percent;
-					patch.speed =
-						progress.speed && !/^0(\.0+)?B\/s$/.test(progress.speed) ? progress.speed : null;
-					patch.eta = progress.eta;
-					if (progress.stream) patch.stream = progress.stream;
-					if (progress.index) patch.index = progress.index;
-					if (progress.count) patch.count = progress.count;
-				}
-				change(job.id, patch);
-			},
-			() => stopped.has(job.id)
-		);
+		const result = await downloadOrWithout(job);
 		if (result.cancelled) {
 			downloads.update((all) => all.filter((other) => other.id !== job.id));
 			return;
 		}
-		if (!result.files.length) throw new Error(result.error ?? 'Nothing was downloaded');
-		// (a playlist's videos in a folder of its own)
-		const folder = job.request.playlist ? `${job.info.title.replace(/[\\/]/g, '_')}/` : '';
-		const saved: SavedFile[] = [];
-		for (const file of result.files) {
-			const name = file.path.split(/[\\/]/).pop()!;
-			saved.push(await saveFile(FOLDER, folder + name, { path: file.path, size: file.size }));
-		}
-		// (its folder in tmp, now empty)
-		const tmp = result.files[0].path.replace(/[\\/][^\\/]+$/, '');
-		await remove(tmp, { recursive: true }).catch(() => {});
-		change(job.id, {
-			status: 'done',
-			saved,
-			percent: 100,
-			note: result.error ?? undefined
-		});
-		finished++;
+		await finish(job, result);
 	} catch (error) {
 		console.warn('Could not download:', error);
 		change(job.id, {
@@ -198,6 +174,63 @@ async function work(job: DownloadJob) {
 	} finally {
 		stopped.delete(job.id);
 	}
+}
+
+/** Downloaded; without the browser's sign-in, if that can't be read (said so) */
+async function downloadOrWithout(job: DownloadJob) {
+	try {
+		return await downloadIt(job);
+	} catch (error) {
+		if (!job.request.cookies || !signInFailed(String((error as Error)?.message ?? error)))
+			throw error;
+		const request = { ...job.request, cookies: null };
+		change(job.id, { request, note: "The browser's sign-in couldn't be read: without it" });
+		return downloadIt({ ...job, request });
+	}
+}
+
+function downloadIt(job: DownloadJob) {
+	return download(
+		job.id,
+		job.request,
+		(progress) => {
+			const patch: Partial<DownloadJob> = { phase: progress.phase };
+			if (progress.phase === 'download') {
+				patch.percent = progress.percent;
+				patch.speed =
+					progress.speed && !/^0(\.0+)?B\/s$/.test(progress.speed) ? progress.speed : null;
+				patch.eta = progress.eta;
+				if (progress.stream) patch.stream = progress.stream;
+				if (progress.index) patch.index = progress.index;
+				if (progress.count) patch.count = progress.count;
+			}
+			change(job.id, patch);
+		},
+		() => stopped.has(job.id)
+	);
+}
+
+/** What was downloaded moved to Stosufy/Downloads */
+async function finish(job: DownloadJob, result: Downloaded) {
+	if (!result.files.length) throw new Error(result.error ?? 'Nothing was downloaded');
+	// (a playlist's videos in a folder of its own)
+	const folder = job.request.playlist ? `${job.info.title.replace(/[\\/]/g, '_')}/` : '';
+	const saved: SavedFile[] = [];
+	for (const file of result.files) {
+		const name = file.path.split(/[\\/]/).pop()!;
+		saved.push(await saveFile(FOLDER, folder + name, { path: file.path, size: file.size }));
+	}
+	// (its folder in tmp, now empty)
+	const tmp = result.files[0].path.replace(/[\\/][^\\/]+$/, '');
+	await remove(tmp, { recursive: true }).catch(() => {});
+	change(job.id, {
+		status: 'done',
+		saved,
+		percent: 100,
+		// (what went wrong with some, else that it was without the sign-in)
+		note: result.error ?? get(downloads).find((other) => other.id === job.id)?.note
+	});
+	finished++;
 }
 
 /** Stops it (and takes it off the list), or takes a waiting one off */

@@ -176,7 +176,7 @@
 		</div>
 	</div>
 
-	<div class="px-8">
+	<div class="px-8 pt-3">
 		{#if !file}
 			<button
 				class="group w-full h-72 flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed cursor-pointer transition {dragging

@@ -131,6 +131,49 @@ fn readable(app: &AppHandle, state: &FfmpegState, path: &str) -> Result<bool, St
         || is_picked(&*state.picked.lock().map_err(|e| e.to_string())?, path))
 }
 
+/// The file at `to` replaced by `from` (the old one to the system's trash first: nothing's lost
+/// for good). `from`: what an add-on made, in ~/Stosufy; `to`: a file the user chose, or in
+/// ~/Stosufy. Whether it worked, else why not.
+pub fn replace_file(
+    root: &Path,
+    allowed: &dyn Fn(&str) -> bool,
+    from: &str,
+    to: &str,
+) -> Result<(), String> {
+    if !inside(root, from) || !Path::new(from).is_file() {
+        return Err("Only what Stosufy made can take its place".into());
+    }
+    if !allowed(to) || !Path::new(to).is_file() {
+        return Err("Only a file you chose here can be replaced".into());
+    }
+    trash::delete(to).map_err(|e| {
+        format!("The original couldn't be put in the trash ({e}): it wasn't replaced")
+    })?;
+    // (moved; copied where it's on another drive)
+    if fs::rename(from, to).is_err() {
+        fs::copy(from, to).map_err(|e| format!("Couldn't put it there: {e}"))?;
+        let _ = fs::remove_file(from);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn files_replace(
+    app: AppHandle,
+    state: State<'_, FfmpegState>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    let root = stosufy_root(&app)?;
+    let picked = state.picked.lock().map_err(|e| e.to_string())?.clone();
+    replace_file(
+        &root,
+        &|path: &str| inside(&root, path) || is_picked(&picked, path),
+        &from,
+        &to,
+    )
+}
+
 fn work_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -590,6 +633,39 @@ mod tests {
 
     fn s(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    #[test]
+    fn a_chosen_file_replaced() {
+        let root = std::env::temp_dir().join(format!("stosufy-replace-{}", std::process::id()));
+        let made = root.join("Edited");
+        fs::create_dir_all(&made).unwrap();
+        let new = made.join("song (edited).mp3");
+        fs::write(&new, b"new").unwrap();
+        let elsewhere =
+            std::env::temp_dir().join(format!("stosufy-replace-out-{}", std::process::id()));
+        fs::create_dir_all(&elsewhere).unwrap();
+        let original = elsewhere.join("song.mp3");
+        fs::write(&original, b"old").unwrap();
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let chosen = original.canonicalize().unwrap();
+        let allowed = |path: &str| Path::new(path).canonicalize().ok().as_ref() == Some(&chosen);
+        // (not one that was chosen; not from outside ~/Stosufy)
+        let other = elsewhere.join("other.mp3");
+        fs::write(&other, b"other").unwrap();
+        assert!(replace_file(&root, &allowed, &s(&new), &s(&other)).is_err());
+        assert!(replace_file(&root, &allowed, &s(&other), &s(&original)).is_err());
+        // (where there's a trash: the original in it, the new one in its place)
+        match replace_file(&root, &allowed, &s(&new), &s(&original)) {
+            Ok(()) => {
+                assert_eq!(fs::read(&original).unwrap(), b"new");
+                assert!(!new.exists());
+            }
+            Err(error) => {
+                assert!(error.contains("wasn't replaced"), "{error}");
+                assert_eq!(fs::read(&original).unwrap(), b"old");
+            }
+        }
     }
 
     #[test]

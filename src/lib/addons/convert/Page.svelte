@@ -267,7 +267,7 @@
 		</div>
 	</div>
 
-	<div class="px-8 flex flex-col gap-4">
+	<div class="px-8 pt-3 flex flex-col gap-4">
 		{#if !$jobs.length}
 			<!-- Nothing yet: where files go in -->
 			<button

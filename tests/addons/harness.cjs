@@ -33,6 +33,11 @@ function tauri({ online, writes }) {
 			if (cmd === 'plugin:opener|reveal_item_in_dir') return (window.__revealed = args.paths);
 			if (cmd === 'copy_files') return void (window.__copied = args.paths);
 			if (cmd === 'clipboard_link') return window.__clipboardLink ?? null;
+			if (writes && cmd === 'files_replace') {
+				written[args.to] = written[args.from];
+				delete written[args.from];
+				return void (window.__replaced = args);
+			}
 			if (cmd === 'plugin:drag|start_drag') return void (window.__dragged = args.item);
 			// (the system's file picker: what a test put in window.__pickable, read from there)
 			if (cmd === 'files_pick') return window.__pickable ?? null;
@@ -45,6 +50,8 @@ function tauri({ online, writes }) {
 			if (yt && cmd === 'deno_install') return void (yt.denoInstalls = (yt.denoInstalls ?? 0) + 1);
 			if (yt && cmd === 'ytdlp_info') {
 				(yt.looked ??= []).push({ url: args.url, cookies: args.cookies });
+				if (yt.locked?.includes(args.cookies))
+					throw "Your browser's sign-in couldn't be read: close the browser and try again, or choose Firefox";
 				// (an error, unless signed in as that error's browser wants)
 				if (yt.errors?.[args.url] && yt.unlocks?.[args.url] !== args.cookies)
 					throw yt.errors[args.url];
@@ -53,6 +60,8 @@ function tauri({ online, writes }) {
 			if (yt && cmd === 'ytdlp_cancel') return void yt.cancel?.(args.id);
 			if (yt && cmd === 'ytdlp_download') {
 				(yt.requests ??= []).push(args.request);
+				if (yt.locked?.includes(args.request.cookies))
+					throw "Your browser's sign-in couldn't be read: close the browser and try again, or choose Firefox";
 				if (args.request.url === yt.slow)
 					return new Promise(
 						(resolve) => (yt.cancel = () => resolve({ files: [], cancelled: true }))

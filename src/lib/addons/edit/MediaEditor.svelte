@@ -12,15 +12,16 @@
 	import { detectFormat, editTargets, extensionOf } from '../files/formats.ts';
 	import { cancel, probe, release } from '../files/ffmpeg.ts';
 	import { reveal } from '../files/save.ts';
-	import Formats from '../files/Formats.svelte';
 	import CopyButton from '../files/CopyButton.svelte';
 	import Dropdown from '../files/Dropdown.svelte';
 	import Toggle from '../files/Toggle.svelte';
 	import { radioKeys } from '../files/radio.ts';
-	import { LIMITS, sizeLimit } from './limit.ts';
+	import { sizeLimit } from './limit.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { notifyDone } from '../files/notify.ts';
 	import { playable } from '../files/picked.ts';
+	import ExportBar from './ExportBar.svelte';
+	import { replaceOriginal, replaceable } from './replace.ts';
 	import Timeline from './Timeline.svelte';
 	import CropBox from './CropBox.svelte';
 	import Undo from './Undo.svelte';
@@ -88,7 +89,7 @@
 	let wave = $state(null);
 	let cropping = $state(false);
 	let shape = $state('free');
-	/** @type {{ status: string, progress: number, saved: import('../files/save.ts').SavedFile[], error: string, note?: string }} */
+	/** @type {{ status: string, progress: number, saved: import('../files/save.ts').SavedFile[], error: string, note?: string, replaced?: boolean }} */
 	let saving = $state({ status: 'idle', progress: 0, saved: [], error: '' });
 	let frameSaved = $state(null);
 	/** It couldn't be read at all */
@@ -298,13 +299,20 @@
 		if (ratio) edit.crop = biggest(ratio, turned.width, turned.height);
 	}
 
-	async function save(targetId) {
+	/** Its file's place is known: it can be replaced (one file, in its own format) */
+	let canReplace = $derived(
+		replaceable(file) &&
+			targets[0]?.group === 'Same format' &&
+			!(edit.eachPart && pieces.length > 1)
+	);
+
+	async function save(targetId, replace = false) {
 		const target = targets.find((option) => option.id === targetId);
 		if (!target) return;
 		player?.pause();
 		saving = { status: 'working', progress: 0, saved: [], error: '' };
 		try {
-			const { saved, note } = await saveMedia(
+			let { saved, note } = await saveMedia(
 				file,
 				$state.snapshot(edit),
 				duration,
@@ -314,11 +322,14 @@
 				id,
 				$sizeLimit
 			);
-			saving = { status: 'done', progress: 1, saved, error: '', note };
+			if (replace && replaceable(file)) saved = [await replaceOriginal(saved[0], file)];
+			saving = { status: 'done', progress: 1, saved, error: '', note, replaced: replace };
 			savedEdit();
 			void notifyDone(
-				'Saved',
-				`${saved.length === 1 ? saved[0].name : `${saved.length} parts`}, in Stosufy/Edited`
+				replace ? 'Replaced' : 'Saved',
+				replace
+					? file.name
+					: `${saved.length === 1 ? saved[0].name : `${saved.length} parts`}, in Stosufy/Edited`
 			);
 		} catch (error) {
 			if (error?.name === 'Cancelled') {
@@ -482,7 +493,7 @@
 	</div>
 {/snippet}
 
-{#snippet result(files)}
+{#snippet result(files, replaced = false)}
 	<div class="flex flex-wrap items-center gap-2 text-sm">
 		<button
 			class="h-8 pl-2.5 pr-3 flex items-center gap-1.5 rounded-full font-semibold text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 cursor-pointer transition"
@@ -491,10 +502,14 @@
 			onclick={() => show(files[0].path)}
 		>
 			<span class="icon-[mingcute--check-circle-fill] size-4"></span>
-			Saved: {files.length === 1 ? files[0].name : `${files.length} parts`}
+			{replaced ? 'Replaced' : 'Saved'}: {files.length === 1
+				? files[0].name
+				: `${files.length} parts`}
 		</button>
 		<CopyButton {files} />
-		<span class="text-white/50">in Stosufy/Edited</span>
+		{#if !replaced}
+			<span class="text-white/55">in Stosufy/Edited</span>
+		{/if}
 	</div>
 {/snippet}
 
@@ -656,60 +671,24 @@
 		{/if}
 
 		<!-- Saved as -->
-		<div
-			class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 rounded-2xl bg-violet-300/[0.07] ring-1 ring-violet-300/20"
+		<ExportBar
+			{targets}
+			busy={saving.status === 'working'}
+			progress={saving.progress}
+			onexport={(targetId) => save(targetId)}
+			onstop={() => cancel(id)}
+			original={canReplace ? file.name : null}
+			onreplace={() => save(targets[0].id, true)}
 		>
-			{#if saving.status === 'working'}
-				<span class="pl-1 text-sm font-semibold">Saving…</span>
-				<div
-					class="flex-1 min-w-40 h-1.5 rounded-full bg-white/10 overflow-hidden"
-					role="progressbar"
-					aria-label="Saving"
-					aria-valuemin="0"
-					aria-valuemax="100"
-					aria-valuenow={saving.progress > 0 ? Math.round(saving.progress * 100) : undefined}
-				>
-					{#if saving.progress > 0}
-						<div
-							class="h-full rounded-full bg-violet-300 transition-[width]"
-							style="width: {saving.progress * 100}%"
-						></div>
-					{:else}
-						<div class="h-full w-full rounded-full bg-violet-300/50 animate-pulse"></div>
-					{/if}
-				</div>
-				<button
-					class="h-8 px-3 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition"
-					onclick={() => cancel(id)}
-				>
-					Stop
-				</button>
-			{:else}
-				<span class="pl-1 text-sm font-semibold text-violet-100">Save as</span>
-				<Formats {targets} onpick={save} label="Save as" />
-				<div class="ml-auto flex flex-wrap items-center gap-3">
-					{#if pieces.length > 1}
-						<label class="flex items-center gap-2 text-sm">
-							<input
-								type="checkbox"
-								class="accent-violet-400 size-4"
-								bind:checked={edit.eachPart}
-							/>
-							Each of the {pieces.length} parts as its own file
-						</label>
-					{/if}
-					<Dropdown
-						label="Size limit"
-						icon="icon-[mingcute--arrow-down-line]"
-						options={LIMITS}
-						value={$sizeLimit}
-						onchange={(value) => sizeLimit.set(value)}
-					/>
-				</div>
+			{#if pieces.length > 1}
+				<label class="flex items-center gap-2 px-1 text-sm">
+					<input type="checkbox" class="accent-violet-400 size-4" bind:checked={edit.eachPart} />
+					Each of the {pieces.length} parts as its own file
+				</label>
 			{/if}
-		</div>
+		</ExportBar>
 		{#if saving.status === 'done' && saving.saved.length}
-			{@render result(saving.saved)}
+			{@render result(saving.saved, saving.replaced)}
 			{#if saving.note}
 				<p class="-mt-1 flex items-center gap-1.5 text-sm text-amber-200">
 					<span class="icon-[mingcute--information-line] size-4"></span>

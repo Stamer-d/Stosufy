@@ -44,6 +44,7 @@ pub fn run() {
             ffmpeg::ffmpeg_probe,
             ffmpeg::ffmpeg_cancel,
             ffmpeg::files_pick,
+            ffmpeg::files_replace,
             ffmpeg::files_read,
             clipboard::copy_files,
             clipboard::clipboard_link,

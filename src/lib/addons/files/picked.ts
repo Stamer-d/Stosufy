@@ -52,10 +52,22 @@ export async function pickFiles(multiple = true): Promise<File[] | null> {
 	for (const { path, name, size } of picked) {
 		const file = new PickedFile(path, name, size);
 		if (ON_DISK.has(kindOf(detectFormat(file)))) files.push(file);
-		// (what the page reads itself: read now)
-		else files.push(new File([await file.arrayBuffer()], name));
+		// (what the page reads itself: read now, where it is kept, to save it there again)
+		else {
+			const read = new File([await file.arrayBuffer()], name);
+			places.set(read, path);
+			files.push(read);
+		}
 	}
 	return files;
+}
+
+/** Where the files read at once (pictures, …) were on the computer */
+const places = new WeakMap<File, string>();
+
+/** Where a file is on the computer (null: dropped or pasted, its place not known) */
+export function placeOf(file: File): string | null {
+	return file instanceof PickedFile ? file.path : (places.get(file) ?? null);
 }
 
 /** Where the player plays a file from */

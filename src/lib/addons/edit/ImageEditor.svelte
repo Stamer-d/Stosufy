@@ -6,13 +6,13 @@
 	import { detectFormat, editTargets, extensionOf } from '../files/formats.ts';
 	import { readImage } from '../files/image.ts';
 	import { reveal } from '../files/save.ts';
-	import Formats from '../files/Formats.svelte';
 	import CopyButton from '../files/CopyButton.svelte';
-	import Dropdown from '../files/Dropdown.svelte';
 	import Toggle from '../files/Toggle.svelte';
 	import { radioKeys } from '../files/radio.ts';
 	import { sizeText } from '../files/size.ts';
-	import { LIMITS, sizeLimit } from './limit.ts';
+	import { sizeLimit } from './limit.ts';
+	import ExportBar from './ExportBar.svelte';
+	import { replaceOriginal, replaceable } from './replace.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { onMount } from 'svelte';
 	import { cssFilter, freshImageEdit, oriented, outputSize, saveImage } from './image.ts';
@@ -46,7 +46,7 @@
 		window.addEventListener('keydown', keys);
 		return () => window.removeEventListener('keydown', keys);
 	});
-	/** @type {{ status: string, saved: any, error: string, note?: string }} */
+	/** @type {{ status: string, saved: any, error: string, note?: string, replaced?: boolean }} */
 	let saving = $state({ status: 'idle', saved: null, error: '' });
 	/** What it was when it was opened or last saved (to say when there's something to lose) */
 	let lastSaved = $state(JSON.stringify(freshImageEdit()));
@@ -120,16 +120,20 @@
 		shape = 'free';
 	}
 
-	async function save(targetId) {
+	/** Its file's place is known: it can be replaced (in its own format) */
+	let canReplace = $derived(replaceable(file) && targets[0]?.group === 'Same format');
+
+	async function save(targetId, replace = false) {
 		const target = targets.find((option) => option.id === targetId);
 		if (!target || !image) return;
 		saving = { status: 'working', saved: null, error: '' };
 		try {
 			const limit = $sizeLimit;
-			const saved = await saveImage(file, image, $state.snapshot(edit), target, limit);
+			let saved = await saveImage(file, image, $state.snapshot(edit), target, limit);
 			const note =
 				limit && saved.size > limit ? `Couldn't get it under ${sizeText(limit)}` : undefined;
-			saving = { status: 'done', saved, error: '', note };
+			if (replace && replaceable(file)) saved = await replaceOriginal(saved, file);
+			saving = { status: 'done', saved, error: '', note, replaced: replace };
 			lastSaved = JSON.stringify($state.snapshot(edit));
 		} catch (error) {
 			console.warn('Could not save the picture:', error);
@@ -280,23 +284,13 @@
 		</div>
 
 		<!-- Saved as -->
-		<div
-			class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 rounded-2xl bg-violet-300/[0.07] ring-1 ring-violet-300/20"
-		>
-			<span class="pl-1 text-sm font-semibold text-violet-100">
-				{saving.status === 'working' ? 'Saving…' : 'Save as'}
-			</span>
-			<Formats {targets} onpick={save} label="Save as" disabled={saving.status === 'working'} />
-			<div class="ml-auto">
-				<Dropdown
-					label="Size limit"
-					icon="icon-[mingcute--arrow-down-line]"
-					options={LIMITS}
-					value={$sizeLimit}
-					onchange={(value) => sizeLimit.set(value)}
-				/>
-			</div>
-		</div>
+		<ExportBar
+			{targets}
+			busy={saving.status === 'working'}
+			onexport={(targetId) => save(targetId)}
+			original={canReplace ? file.name : null}
+			onreplace={() => save(targets[0].id, true)}
+		/>
 		{#if saving.status === 'done' && saving.saved}
 			<div class="flex flex-wrap items-center gap-2 text-sm">
 				<button
@@ -306,10 +300,12 @@
 					onclick={() => show(saving.saved.path)}
 				>
 					<span class="icon-[mingcute--check-circle-fill] size-4"></span>
-					Saved: {saving.saved.name}
+					{saving.replaced ? 'Replaced' : 'Saved'}: {saving.saved.name}
 				</button>
 				<CopyButton files={[saving.saved]} />
-				<span class="text-white/50">in Stosufy/Edited</span>
+				{#if !saving.replaced}
+					<span class="text-white/55">in Stosufy/Edited</span>
+				{/if}
 			</div>
 			{#if saving.note}
 				<p class="-mt-1 flex items-center gap-1.5 text-sm text-amber-200">

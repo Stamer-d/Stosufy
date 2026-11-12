@@ -86,6 +86,8 @@ const formats = (vcodec, heights, fps = 30) =>
 					}
 				},
 				errors: { [PRIVATE]: 'Only for members of the channel: sign in to download it' },
+				// (a browser that locks its sign-in)
+				locked: ['chrome'],
 				unlocks: { [PRIVATE]: 'firefox' },
 				notes: { [PLAYLIST]: '2 of its videos are private' }
 			};
@@ -303,6 +305,11 @@ const formats = (vcodec, heights, fps = 30) =>
 			/^1:00:00/.test(await page.inputValue('input[aria-label="Part start time"]')),
 		await page.inputValue('input[aria-label="Part start time"]')
 	);
+	check(
+		'a part: cut at the keyframes at first (fast, as good as the original)',
+		(await page.getAttribute('button:has-text("Exact cut")', 'aria-pressed')) === 'false'
+	);
+	await page.click('button:has-text("Exact cut")');
 	await page.fill('input[aria-label="Part end time"]', '1:05:00');
 	await page.press('input[aria-label="Part end time"]', 'Enter');
 	check('the part shown: 5 minutes', (await page.locator('text=5:00 of 3:02:00').count()) === 1);
@@ -389,6 +396,17 @@ const formats = (vcodec, heights, fps = 30) =>
 		'signed in: looked at again, as in Firefox',
 		(await page.evaluate(() => window.__ytdlp.looked.at(-1).cookies)) === 'firefox'
 	);
+	// A browser whose sign-in can't be read: looked at without it, said so
+	await choose('Signed in as', 'chrome');
+	await link(YOUTUBE);
+	await page.waitForSelector("text=Chrome's sign-in couldn't be read: without it");
+	const tries = (await page.evaluate(() => window.__ytdlp.looked.slice(-2))).map((t) => t.cookies);
+	check(
+		"a browser's sign-in that can't be read: looked at without it, said so",
+		JSON.stringify(tries) === '["chrome",null]',
+		JSON.stringify(tries)
+	);
+	await choose('Signed in as', 'firefox');
 
 	// --- Only sound, stopped -----------------------------------------------------------------
 	await link(SLOW);
@@ -417,8 +435,9 @@ const formats = (vcodec, heights, fps = 30) =>
 		JSON.parse(localStorage.getItem('stosufy-download-options') ?? '{}')
 	);
 	check(
-		'kept: video, H.264, 720p, MP3 at 192 kbps, Firefox',
+		'kept: video, H.264, 720p, MP3 at 192 kbps, exact cuts, Firefox',
 		kept.tab === 'video' &&
+			kept.exactCuts === true &&
 			kept.codec === 'h264' &&
 			kept.height === 720 &&
 			kept.audioFormat === 'mp3' &&

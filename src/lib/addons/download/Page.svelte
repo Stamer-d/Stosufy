@@ -50,24 +50,37 @@
 	const KBPS = { mp3: [320, 256, 192, 128], m4a: [320, 256, 192, 128], opus: [192, 160, 128, 96] };
 	/** A playlist's (its videos' qualities aren't known): at most that high */
 	const HEIGHTS = [2160, 1440, 1080, 720, 480, 360];
-	const MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+	const AGENT = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+	const MAC = /Mac/i.test(AGENT);
+	const WINDOWS = /Windows/i.test(AGENT);
+	/**
+	 * The browsers whose sign-in can be read here: on Windows only Firefox's (Chrome, Edge and
+	 * the others lock theirs there, since 2024); on a Mac Safari's too
+	 */
+	const SIGN_INS = WINDOWS
+		? ['Firefox']
+		: [
+				...(MAC ? ['Safari'] : []),
+				'Chrome',
+				'Firefox',
+				'Edge',
+				'Brave',
+				'Opera',
+				'Vivaldi',
+				'Chromium'
+			];
 	const BROWSERS = [
 		{ value: null, label: 'Not signed in', hint: 'enough for almost everything' },
-		...[
-			'Chrome',
-			'Firefox',
-			'Edge',
-			'Brave',
-			'Opera',
-			'Vivaldi',
-			'Chromium',
-			...(MAC ? ['Safari'] : [])
-		].map((name) => ({
+		...SIGN_INS.map((name) => ({
 			value: name.toLowerCase(),
 			label: `As in ${name}`,
-			hint: 'for age-restricted or members-only videos'
+			hint: WINDOWS
+				? 'for age-restricted or members-only videos (Chrome and Edge lock theirs on Windows)'
+				: 'for age-restricted or members-only videos'
 		}))
 	];
+	/** Its sign-in couldn't be read (the browser locks it, or isn't there) */
+	const signInFailed = (message) => /sign-in couldn't be read|Full Disk Access/i.test(message);
 	const PHASES = {
 		Merger: 'Putting video and sound together',
 		ExtractAudio: 'Making the sound file',
@@ -89,6 +102,7 @@
 			audioFormat: 'mp3',
 			audioKbps: null,
 			sponsorblock: true,
+			exactCuts: false,
 			cookies: null
 		};
 		try {
@@ -97,11 +111,22 @@
 			if (stored.kind && !stored.tab) stored.tab = stored.kind;
 			if (stored.videoFormat && !stored.codec)
 				stored.codec = stored.videoFormat === 'mkv' ? 'any' : 'h264';
-			const { tab, codec, height, audioFormat, audioKbps, sponsorblock, cookies } = {
+			const { tab, codec, height, audioFormat, audioKbps, sponsorblock, exactCuts, cookies } = {
 				...fallback,
 				...stored
 			};
-			return { tab, codec, height, audioFormat, audioKbps, sponsorblock, cookies };
+			// (a browser whose sign-in can't be read here: none)
+			const browser = BROWSERS.some((option) => option.value === cookies) ? cookies : null;
+			return {
+				tab,
+				codec,
+				height,
+				audioFormat,
+				audioKbps,
+				sponsorblock,
+				exactCuts,
+				cookies: browser
+			};
 		} catch {
 			return fallback;
 		}
@@ -119,7 +144,9 @@
 	let link = $state('');
 	/** @type {{ state: 'idle' | 'loading' | 'ready' | 'failed', info?: import('./ytdlp.ts').LinkInfo, error?: string }} */
 	let found = $state({ state: 'idle' });
-	let part = $state({ on: false, start: 0, end: 0, exact: true });
+	let part = $state({ on: false, start: 0, end: 0 });
+	/** The sign-in of the browser chosen couldn't be read: looked at (and downloaded) without it */
+	let signedOut = $state('');
 	/** Which of a playlist's videos (null: all) */
 	let items = $state(null);
 	let looked = '';
@@ -262,19 +289,26 @@
 		offered = null;
 		used.add(url);
 		found = { state: 'loading' };
+		signedOut = '';
 		try {
-			const result = await lookUp(url, options.cookies);
+			let result;
+			try {
+				result = await lookUp(url, options.cookies);
+			} catch (error) {
+				// (the browser's sign-in can't be read: without it, said so)
+				if (!options.cookies || !signInFailed(String(error?.message ?? error))) throw error;
+				if (looked !== url) return;
+				result = await lookUp(url, null);
+				signedOut = (
+					BROWSERS.find((option) => option.value === options.cookies)?.label ?? 'the browser'
+				).replace(/^As in /, '');
+			}
 			if (looked !== url) return;
 			found = { state: 'ready', info: result };
 			// (a link to a time in it: only the part from there, ready to be changed)
 			const at = result.kind === 'video' ? startIn(url) : 0;
 			fromLink = at > 0 && at < result.duration - 1 ? at : 0;
-			part = {
-				on: fromLink > 0,
-				start: fromLink,
-				end: result.duration,
-				exact: true
-			};
+			part = { on: fromLink > 0, start: fromLink, end: result.duration };
 			items = null;
 		} catch (error) {
 			if (looked !== url) return;
@@ -333,11 +367,11 @@
 			height: audio ? null : height,
 			audioKbps: audio ? kbps : null,
 			sections,
-			exactCuts: part.exact,
+			exactCuts: options.exactCuts,
 			sponsorblock: youtube && options.sponsorblock && !sections.length,
 			playlist,
 			playlistItems: playlist ? items : null,
-			cookies: options.cookies
+			cookies: signedOut ? null : options.cookies
 		});
 		// (ready for the next link)
 		link = '';
@@ -504,7 +538,7 @@
 		</div>
 	</div>
 
-	<div class="px-8 flex flex-col gap-4">
+	<div class="px-8 pt-3 flex flex-col gap-4">
 		<!-- The link -->
 		<div
 			class="flex items-center gap-2 p-2 pl-4 rounded-2xl bg-white/[0.05] ring-1 ring-white/10 focus-within:ring-rose-300/60 transition"
@@ -607,6 +641,12 @@
 								.filter(Boolean)
 								.join(' · ')}
 						</p>
+						{#if signedOut}
+							<p class="mt-1 flex items-center gap-1 text-xs text-amber-200">
+								<span class="icon-[mingcute--information-line] size-3.5 shrink-0"></span>
+								{signedOut}'s sign-in couldn't be read: without it
+							</p>
+						{/if}
 					</div>
 				</div>
 
@@ -699,9 +739,9 @@
 							{#if part.on}
 								<Toggle
 									label="Exact cut"
-									pressed={part.exact}
-									title="Cut exactly where chosen (slower); else at the nearest keyframe"
-									onclick={() => (part.exact = !part.exact)}
+									pressed={options.exactCuts}
+									title="Exactly where chosen (its picture made again: slower). Off: at the nearest keyframe, as fast as it gets, in the original quality"
+									onclick={() => (options.exactCuts = !options.exactCuts)}
 								/>
 							{/if}
 						{/if}

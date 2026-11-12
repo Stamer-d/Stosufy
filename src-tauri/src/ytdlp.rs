@@ -464,8 +464,125 @@ fn codec_filter(codec: &str) -> Result<&'static str, String> {
 /// how many), and whether it's the picture or the sound
 pub const PROGRESS: &str = "download:[dl] %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(info.playlist_index|)s|%(info.playlist_count|)s|%(info.vcodec|)s";
 
+/// H.264 made on the processor: fast, at a high quality (what's used without a graphics card's)
+pub fn software_encoder() -> Vec<String> {
+    [
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// The graphics card's H.264 encoders there may be, the likeliest first
+fn hardware_encoders() -> Vec<Vec<&'static str>> {
+    let mut all: Vec<Vec<&'static str>> = Vec::new();
+    if cfg!(target_os = "macos") {
+        all.push(vec![
+            "-c:v",
+            "h264_videotoolbox",
+            "-q:v",
+            "65",
+            "-pix_fmt",
+            "yuv420p",
+        ]);
+    } else {
+        all.push(vec![
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p4",
+            "-rc",
+            "vbr",
+            "-cq",
+            "19",
+            "-b:v",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+        ]);
+        all.push(vec![
+            "-c:v",
+            "h264_qsv",
+            "-global_quality",
+            "20",
+            "-pix_fmt",
+            "nv12",
+        ]);
+        if cfg!(windows) {
+            all.push(vec![
+                "-c:v", "h264_amf", "-quality", "balanced", "-pix_fmt", "nv12",
+            ]);
+        }
+    }
+    all
+}
+
+/// Whether FFmpeg can make half a second of video with these (in at most 10 s)
+fn encodes(ffmpeg: &Path, encoder: &[&str]) -> bool {
+    let mut command = Command::new(ffmpeg);
+    command
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x240:r=30:d=0.5",
+        ])
+        .args(encoder)
+        .args(["-f", "null", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    for _ in 0..100 {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            Err(_) => return false,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    false
+}
+
+/// The graphics card's encoder failed on a real video: the processor's from now on
+static HARDWARE_FAILED: AtomicBool = AtomicBool::new(false);
+static FAST_ENCODER: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// The fastest H.264 encoder that works here: the graphics card's, else the processor's
+/// (found once: each is tried on half a second of video)
+pub fn fast_encoder(ffmpeg: &Path) -> Vec<String> {
+    if HARDWARE_FAILED.load(Ordering::Relaxed) {
+        return software_encoder();
+    }
+    FAST_ENCODER
+        .get_or_init(|| {
+            hardware_encoders()
+                .into_iter()
+                .find(|encoder| encodes(ffmpeg, encoder))
+                .map(|encoder| encoder.iter().map(|s| s.to_string()).collect())
+                .unwrap_or_else(software_encoder)
+        })
+        .clone()
+}
+
 /// yt-dlp's arguments for a download into `out` (checked: only what's offered)
-pub fn download_args(request: &DownloadRequest, out: &Path) -> Result<Vec<String>, String> {
+pub fn download_args(
+    request: &DownloadRequest,
+    out: &Path,
+    encoder: &[String],
+) -> Result<Vec<String>, String> {
     check_url(&request.url)?;
     check_browser(&request.cookies)?;
     let mut args: Vec<String> = Vec::new();
@@ -489,6 +606,9 @@ pub fn download_args(request: &DownloadRequest, out: &Path) -> Result<Vec<String
         "--windows-filenames",
         "--no-mtime",
         "--embed-metadata",
+        // (a stream in many pieces, Twitch's, YouTube's live ones: four of them at once)
+        "--concurrent-fragments",
+        "4",
     ]);
     let height = match request.height {
         // (any a video has: 800p, a phone's upright 1920, …)
@@ -556,8 +676,18 @@ pub fn download_args(request: &DownloadRequest, out: &Path) -> Result<Vec<String
         let section = format!("*{}-{}", seconds(*from), seconds(*to));
         push(&["--download-sections", &section]);
     }
-    if !request.sections.is_empty() && request.exact_cuts {
+    // Cut exactly (a video's picture made again where it's cut: with the fastest encoder there
+    // is, at a high quality); else the streams as they are, cut at the keyframes (fast, and as
+    // good as the original). Sound is cut exactly as it is.
+    if !request.sections.is_empty() && request.exact_cuts && request.kind == "video" {
         push(&["--force-keyframes-at-cuts"]);
+        let output = if request.format == "webm" {
+            "-c:v libvpx-vp9 -deadline realtime -cpu-used 8 -row-mt 1 -crf 30 -b:v 0 -c:a libopus -b:a 160k"
+                .to_string()
+        } else {
+            format!("{} -c:a aac -b:a 192k", encoder.join(" "))
+        };
+        push(&["--downloader-args", &format!("ffmpeg_o:{output}")]);
     }
     if request.sponsorblock {
         // (sponsors, self-promotion and "subscribe!": not intros, recaps or previews, which can be
@@ -955,7 +1085,7 @@ fn media_in(dir: &Path) -> Vec<String> {
                 .then(|| (meta.len(), path.to_string_lossy().into_owned()))
         })
         .collect();
-    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.sort_by_key(|b| std::cmp::Reverse(b.0));
     found.into_iter().map(|(_, path)| path).collect()
 }
 
@@ -968,25 +1098,51 @@ pub async fn ytdlp_download(
 ) -> Result<Downloaded, String> {
     let (binary, ffmpeg, deno) = runtime(&app)?;
     let out = download_dir(&app, &id)?;
-    let mut args = common_args(&ffmpeg, deno.as_deref(), &request.cookies);
-    args.extend(download_args(&request, &out)?);
+    // (checked now: what's asked for, before anything runs)
+    download_args(&request, &out, &software_encoder())?;
     let running = state.running.clone();
     let playlist = request.playlist;
+    let cuts = request.kind == "video" && request.exact_cuts && !request.sections.is_empty();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut files: Vec<String> = Vec::new();
-        let ended = run(&binary, &id, &args, &running, |line| {
-            let (progress, file) = read_line(line);
-            if let Some(mut progress) = progress {
-                progress.id = id.clone();
-                let _ = app.emit("ytdlp-progress", progress);
-            }
-            // (only what it made in its folder, each once)
-            if let Some(file) = file {
-                if Path::new(&file).starts_with(&out) && !files.contains(&file) {
-                    files.push(file);
+        let mut encoder = if cuts {
+            fast_encoder(&ffmpeg)
+        } else {
+            software_encoder()
+        };
+        let (ended, files) = loop {
+            let mut args = common_args(&ffmpeg, deno.as_deref(), &request.cookies);
+            args.extend(download_args(&request, &out, &encoder)?);
+            let mut files: Vec<String> = Vec::new();
+            let ended = run(&binary, &id, &args, &running, |line| {
+                let (progress, file) = read_line(line);
+                if let Some(mut progress) = progress {
+                    progress.id = id.clone();
+                    let _ = app.emit("ytdlp-progress", progress);
                 }
+                // (only what it made in its folder, each once)
+                if let Some(file) = file {
+                    if Path::new(&file).starts_with(&out) && !files.contains(&file) {
+                        files.push(file);
+                    }
+                }
+            })?;
+            // The graphics card's encoder failed on it: again, with the processor's
+            let software = software_encoder();
+            if cuts
+                && !ended.cancelled
+                && ended.code != 0
+                && files.is_empty()
+                && encoder != software
+            {
+                HARDWARE_FAILED.store(true, Ordering::Relaxed);
+                encoder = software;
+                let _ = fs::remove_dir_all(&out);
+                let _ = fs::create_dir_all(&out);
+                continue;
             }
-        })?;
+            break (ended, files);
+        };
+        let mut files = files;
         if ended.cancelled {
             let _ = fs::remove_dir_all(&out);
             return Ok(Downloaded {
@@ -1064,7 +1220,7 @@ mod tests {
         let mut r = request("video", "mp4");
         r.codec = Some("h264".into());
         r.height = Some(1080);
-        let args = download_args(&r, Path::new("/out")).unwrap();
+        let args = download_args(&r, Path::new("/out"), &software_encoder()).unwrap();
         let text = joined(&args);
         assert!(
             text.contains("-f bv*[vcodec~='^(avc|h264)'][height<=1080]+(ba[acodec^=mp4a]/ba)/bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"),
@@ -1079,15 +1235,69 @@ mod tests {
         );
         let mut r = request("video", "webm");
         r.codec = Some("vp9".into());
-        let webm = joined(&download_args(&r, Path::new("/out")).unwrap());
+        let webm = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
         assert!(
             webm.contains("-f bv*[vcodec~='^vp0?9']+(ba[acodec=opus]/ba)/bv*+ba/b/bv*+ba/b"),
             "{webm}"
         );
         assert!(webm.contains("--merge-output-format webm/mkv --remux-video webm>webm/mkv"));
         assert!(!webm.contains("--embed-thumbnail"), "WebM holds no cover");
-        let best = joined(&download_args(&request("video", "mkv"), Path::new("/out")).unwrap());
+        let best = joined(
+            &download_args(
+                &request("video", "mkv"),
+                Path::new("/out"),
+                &software_encoder(),
+            )
+            .unwrap(),
+        );
         assert!(best.contains("-f bv*+ba/bv*+ba/b/bv*+ba/b"), "{best}");
+    }
+
+    #[test]
+    fn a_part_of_a_video_fast_or_exact() {
+        let mut r = request("video", "mp4");
+        r.sections = vec![[60.0, 90.0]];
+        r.exact_cuts = false;
+        let fast = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
+        assert!(fast.contains("--download-sections *60.000-90.000"));
+        assert!(!fast.contains("--force-keyframes-at-cuts"), "{fast}");
+        assert!(!fast.contains("--downloader-args"), "{fast}");
+        assert!(fast.contains("--concurrent-fragments 4"));
+        r.exact_cuts = true;
+        let exact = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
+        assert!(exact.contains("--force-keyframes-at-cuts"));
+        assert!(
+            exact.contains(
+                "--downloader-args ffmpeg_o:-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k"
+            ),
+            "{exact}"
+        );
+        r.format = "webm".into();
+        let webm = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
+        assert!(
+            webm.contains("ffmpeg_o:-c:v libvpx-vp9 -deadline realtime"),
+            "{webm}"
+        );
+    }
+
+    /// The fastest encoder found works (the processor's at least, with this FFmpeg)
+    #[test]
+    fn an_encoder_that_works() {
+        let ffmpeg = Path::new("/usr/bin/ffmpeg");
+        if !ffmpeg.is_file() {
+            return;
+        }
+        let soft = software_encoder();
+        assert!(encodes(
+            ffmpeg,
+            &soft.iter().map(String::as_str).collect::<Vec<_>>()
+        ));
+        assert!(!encodes(ffmpeg, &["-c:v", "no_such_encoder"]));
+        let found = fast_encoder(ffmpeg);
+        assert!(encodes(
+            ffmpeg,
+            &found.iter().map(String::as_str).collect::<Vec<_>>()
+        ));
     }
 
     #[test]
@@ -1097,20 +1307,37 @@ mod tests {
         r.sections = vec![[83.5, 125.0]];
         r.exact_cuts = true;
         r.sponsorblock = true;
-        let text = joined(&download_args(&r, Path::new("/out")).unwrap());
+        let text = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
         assert!(
             text.contains("-f ba/b -x --audio-format mp3 --audio-quality 192K --embed-thumbnail"),
             "{text}"
         );
-        assert!(text.contains("--download-sections *83.500-125.000 --force-keyframes-at-cuts"));
+        assert!(text.contains("--download-sections *83.500-125.000"));
+        assert!(
+            !text.contains("--force-keyframes-at-cuts"),
+            "sound: cut as it is, not made again"
+        );
         assert!(text.contains("--sponsorblock-remove sponsor,selfpromo,interaction"));
-        let m4a = joined(&download_args(&request("audio", "m4a"), Path::new("/out")).unwrap());
+        let m4a = joined(
+            &download_args(
+                &request("audio", "m4a"),
+                Path::new("/out"),
+                &software_encoder(),
+            )
+            .unwrap(),
+        );
         assert!(
             m4a.contains("-f ba[acodec^=mp4a]/ba/b -x --audio-format m4a --audio-quality 0"),
             "{m4a}"
         );
-        let original =
-            joined(&download_args(&request("audio", "original"), Path::new("/out")).unwrap());
+        let original = joined(
+            &download_args(
+                &request("audio", "original"),
+                Path::new("/out"),
+                &software_encoder(),
+            )
+            .unwrap(),
+        );
         assert!(original.contains("-x --audio-format best"), "{original}");
     }
 
@@ -1119,14 +1346,14 @@ mod tests {
         let mut r = request("audio", "mp3");
         r.playlist = true;
         r.playlist_items = Some("1-10".into());
-        let text = joined(&download_args(&r, Path::new("/out")).unwrap());
+        let text = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
         assert!(
             text.contains("-o %(playlist_index)03d %(title).140B.%(ext)s"),
             "{text}"
         );
         assert!(text.contains("--yes-playlist -I 1-10"));
         r.playlist_items = Some("1;rm".into());
-        assert!(download_args(&r, Path::new("/out")).is_err());
+        assert!(download_args(&r, Path::new("/out"), &software_encoder()).is_err());
     }
 
     #[test]
@@ -1134,7 +1361,7 @@ mod tests {
         let bad = |change: &dyn Fn(&mut DownloadRequest)| {
             let mut r = request("video", "mp4");
             change(&mut r);
-            download_args(&r, Path::new("/out")).is_err()
+            download_args(&r, Path::new("/out"), &software_encoder()).is_err()
         };
         assert!(bad(&|r| r.url = "--exec=rm -rf ~".into()));
         assert!(bad(&|r| r.url = "file:///etc/passwd".into()));
@@ -1296,7 +1523,7 @@ mod tests {
         r.sections = vec![[2.0, 5.0]];
         r.exact_cuts = true;
         let mut args = common_args(Path::new("/usr/bin/ffmpeg"), None, &None);
-        args.extend(download_args(&r, &out).unwrap());
+        args.extend(download_args(&r, &out, &software_encoder()).unwrap());
         let running = Mutex::new(HashMap::new());
         let (mut percents, mut steps, mut files) = (vec![], vec![], vec![]);
         let ended = run(Path::new(&bin), "t", &args, &running, |line| {
