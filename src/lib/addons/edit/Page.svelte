@@ -7,6 +7,7 @@
 	import { detectFormat, kindOf } from '../files/formats.ts';
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
 	import { nativeFfmpeg } from '../files/native.ts';
+	import { pickFiles } from '../files/picked.ts';
 	import { outputFolder, reveal } from '../files/save.ts';
 	import MediaEditor from './MediaEditor.svelte';
 	import ImageEditor from './ImageEditor.svelte';
@@ -36,6 +37,13 @@
 		file = next;
 		kind = kindOf(detectFormat(next));
 		opened++;
+	}
+
+	/** The system's file picker (a song or video read where it is), else the page's own */
+	async function choose() {
+		const files = await pickFiles(false);
+		if (files) open(files);
+		else input.click();
 	}
 
 	async function showFolder() {
@@ -120,7 +128,7 @@
 					{/if}
 					<button
 						class="h-9 px-3 flex items-center gap-1.5 rounded-full bg-black/25 hover:bg-black/40 text-sm font-semibold cursor-pointer transition"
-						onclick={() => input.click()}
+						onclick={choose}
 					>
 						<span class="icon-[mingcute--file-new-line] size-4 text-white/70"></span>
 						Other file
@@ -144,7 +152,7 @@
 				class="group w-full h-72 flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed cursor-pointer transition {dragging
 					? 'border-violet-300 bg-violet-300/10'
 					: 'border-white/15 hover:border-white/30 hover:bg-white/[0.03]'}"
-				onclick={() => input.click()}
+				onclick={choose}
 			>
 				<span
 					class="size-16 grid place-items-center rounded-2xl bg-white/[0.06] group-hover:bg-white/10 transition"

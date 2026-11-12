@@ -30,6 +30,8 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_drpc::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_drag::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_prevent_default::debug())
         .manage(ffmpeg::FfmpegState::default())
         .manage(clipboard::ClipboardState::default())
@@ -39,6 +41,8 @@ pub fn run() {
             ffmpeg::ffmpeg_run,
             ffmpeg::ffmpeg_probe,
             ffmpeg::ffmpeg_cancel,
+            ffmpeg::files_pick,
+            ffmpeg::files_read,
             clipboard::copy_files
         ])
         .setup(|app| {

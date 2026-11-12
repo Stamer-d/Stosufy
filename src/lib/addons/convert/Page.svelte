@@ -8,6 +8,8 @@
 	import { reveal as revealFile } from '../files/save.ts';
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
 	import CopyButton from '../files/CopyButton.svelte';
+	import { dragOut } from '../files/dragout.ts';
+	import { pickFiles } from '../files/picked.ts';
 	import { nativeState, nativeFfmpeg, retryNative } from '../files/native.ts';
 	import {
 		jobs,
@@ -110,6 +112,13 @@
 
 	function add(files) {
 		if (files?.length) addFiles(files);
+	}
+
+	/** The system's file picker (songs and videos read where they are), else the page's own */
+	async function choose() {
+		const files = await pickFiles(true);
+		if (files) add(files);
+		else input.click();
 	}
 
 	async function reveal(path) {
@@ -316,7 +325,7 @@
 				class="group h-72 flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed cursor-pointer transition {dragging
 					? 'border-amber-300 bg-amber-300/10'
 					: 'border-white/15 hover:border-white/30 hover:bg-white/[0.03]'}"
-				onclick={() => input.click()}
+				onclick={choose}
 			>
 				<span
 					class="size-16 grid place-items-center rounded-2xl bg-white/[0.06] group-hover:bg-white/10 transition"
@@ -423,7 +432,8 @@
 							{:else if job.status === 'done'}
 								<button
 									class="h-8 pl-2.5 pr-3 flex items-center gap-1.5 rounded-full font-semibold text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 cursor-pointer transition"
-									title="Show it in the folder"
+									title="Drag it out into a chat or a folder, or click to show it in its folder"
+									use:dragOut={job.saved.map((file) => file.path)}
 									onclick={() => reveal(job.saved[0]?.path)}
 								>
 									<span class="icon-[mingcute--check-circle-fill] size-4"></span>
@@ -503,7 +513,7 @@
 			<div class="flex flex-wrap items-center gap-2">
 				<button
 					class="h-9 px-4 flex items-center gap-2 rounded-full text-sm font-semibold bg-white/[0.08] hover:bg-white/15 cursor-pointer transition"
-					onclick={() => input.click()}
+					onclick={choose}
 				>
 					<span class="icon-[mingcute--add-line] size-4"></span>
 					Add files

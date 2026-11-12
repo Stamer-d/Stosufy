@@ -13,7 +13,8 @@ import {
 	type Kind,
 	type Target
 } from '../files/formats';
-import { cancel, releaseWasm, release } from '../files/ffmpeg';
+import { cancel, parallelism, releaseWasm, release } from '../files/ffmpeg';
+import { notifyDone } from '../files/notify';
 import { outputFolder, saveFile, type SavedFile } from '../files/save';
 import { convertFile, type ConvertOptions } from './convert';
 
@@ -182,22 +183,37 @@ export function clearJobs() {
 
 // --- Converting -------------------------------------------------------------------------------
 
-let running = false;
+/** How many are being converted now */
+let workers = 0;
+/** Done since the converter last had nothing to do (for the notification) */
+let finished = 0;
 
+/** Converts what's waiting: several at once with the native FFmpeg (see `parallelism`) */
 async function run() {
-	if (running) return;
-	running = true;
-	try {
-		for (;;) {
-			const job = get(jobs).find((job) => job.status === 'waiting');
-			if (!job) break;
-			await convertOne(job);
-		}
-	} finally {
-		running = false;
-		// (FFmpeg's memory back, when there's nothing more for it)
-		void releaseWasm();
+	const limit = await parallelism();
+	while (workers < limit) {
+		const job = get(jobs).find((job) => job.status === 'waiting');
+		if (!job) break;
+		workers++;
+		// (taken now, so the next one is another)
+		change(job.id, { status: 'working', progress: 0 });
+		void convertOne(job).finally(() => {
+			workers--;
+			if (get(jobs).some((job) => job.status === 'waiting')) void run();
+			else if (!workers) idle();
+		});
 	}
+}
+
+/** Nothing more to do: FFmpeg's memory back, and a word if the user's elsewhere */
+function idle() {
+	void releaseWasm();
+	if (finished)
+		void notifyDone(
+			finished === 1 ? 'Converted' : `${finished} files converted`,
+			'Ready in Stosufy/Converted'
+		);
+	finished = 0;
 }
 
 async function convertOne(job: Job) {
@@ -215,6 +231,7 @@ async function convertOne(job: Job) {
 		const saved: SavedFile[] = [];
 		for (const output of outputs) saved.push(await saveFile(FOLDER, output.name, output.what));
 		change(job.id, { status: 'done', progress: 1, saved, note });
+		finished++;
 	} catch (error) {
 		if ((error as Error)?.name === 'Cancelled') {
 			change(job.id, { status: 'ready', target: null, progress: 0 });

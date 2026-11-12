@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { readFile, remove, stat, writeFile } from '@tauri-apps/plugin-fs';
 import { nativeFfmpeg } from './native';
+import { PickedFile } from './picked';
 
 /** What FFmpeg made: its bytes, or (the native one) a file in the work folder */
 export type Made = { data: Uint8Array } | { path: string; size: number };
@@ -46,12 +47,35 @@ export class Cancelled extends Error {
 	}
 }
 
-let queue: Promise<unknown> = Promise.resolve();
-/** One at a time (the WebAssembly one can't do more, and the native one is faster alone) */
-function inTurn<T>(work: () => Promise<T>): Promise<T> {
-	const run = queue.then(work);
-	queue = run.catch(() => {});
-	return run;
+/** How many the native one runs at once (the WebAssembly one: one) */
+export const PARALLEL = 3;
+let active = 0;
+const waiting: (() => void)[] = [];
+
+/** A turn to run: at most `limit` at once; call what it returns when done */
+async function turn(limit: number) {
+	while (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+	active++;
+	return () => {
+		active--;
+		waiting.shift()?.();
+	};
+}
+
+/** Runs `work` in a turn: up to PARALLEL with the native FFmpeg, one with the other */
+async function inTurn<T>(work: (dir: string | null) => Promise<T>): Promise<T> {
+	const dir = await nativeFfmpeg();
+	const done = await turn(dir ? PARALLEL : 1);
+	try {
+		return await work(dir);
+	} finally {
+		done();
+	}
+}
+
+/** How many files the converter works on at once */
+export async function parallelism() {
+	return (await nativeFfmpeg({ install: false })) ? PARALLEL : 1;
 }
 
 const randomId = () => Math.random().toString(36).slice(2, 10);
@@ -64,6 +88,8 @@ const CHUNK = 8 * 1024 * 1024;
 
 /** A file in the work folder (copied there in parts, once) */
 function copyIn(file: Blob, extension: string, dir: string): Promise<string> {
+	// (chosen in the file picker: read where it is)
+	if (file instanceof PickedFile) return Promise.resolve(file.path);
 	let copy = copies.get(file);
 	if (!copy) {
 		copy = (async () => {
@@ -212,8 +238,7 @@ export function runFfmpeg(
 	outputExtension: string,
 	options: RunOptions = {}
 ): Promise<Made> {
-	return inTurn(async () => {
-		const dir = await nativeFfmpeg();
+	return inTurn(async (dir) => {
 		if (dir)
 			return runNative(dir, await copyIn(input, extension, dir), args, outputExtension, options);
 		return runWasm(
@@ -278,8 +303,7 @@ export async function releaseWasm() {
 
 /** What's in a media file: how long, sound, picture, cover, size */
 export function probe(input: Blob, extension: string): Promise<Probe> {
-	return inTurn(async () => {
-		const dir = await nativeFfmpeg();
+	return inTurn(async (dir) => {
 		let text: string;
 		if (dir) {
 			text = await invoke<string>('ffmpeg_probe', { path: await copyIn(input, extension, dir) });

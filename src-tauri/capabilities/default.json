@@ -271,6 +271,8 @@
 			"allow": [{ "path": "$HOME/Stosufy" }, { "path": "$HOME/Stosufy/**" }]
 		},
 		"dialog:allow-open",
+		"drag:default",
+		"notification:default",
 		"core:window:default",
 		"core:window:allow-start-dragging",
 		"core:window:allow-minimize",

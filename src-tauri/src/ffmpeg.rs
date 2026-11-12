@@ -6,7 +6,7 @@
 // It only works on files in its work folder (~/Stosufy/tmp/media), where the app puts what's
 // to be converted: every input (-i) and the output have to be in there.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -72,6 +72,8 @@ pub struct FfmpegState {
     /// What's running, by the id the page gave it (to stop it)
     running: Arc<Mutex<HashMap<String, Child>>>,
     installing: Mutex<bool>,
+    /// Files the user chose (in the file picker): read where they are, not copied first
+    picked: Mutex<HashSet<PathBuf>>,
 }
 
 impl FfmpegState {
@@ -256,14 +258,23 @@ fn inside(dir: &Path, path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Only FFmpeg's inputs and output in the work folder, nothing read from elsewhere
-pub fn check_args(dir: &Path, args: &[String]) -> Result<(), String> {
+/// One of the files the user chose
+fn is_picked(picked: &HashSet<PathBuf>, path: &str) -> bool {
+    Path::new(path)
+        .canonicalize()
+        .map(|real| picked.contains(&real))
+        .unwrap_or(false)
+}
+
+/// FFmpeg's output in the work folder, its inputs there or chosen by the user, nothing read
+/// from elsewhere
+pub fn check_args(dir: &Path, picked: &HashSet<PathBuf>, args: &[String]) -> Result<(), String> {
     let output = args.last().ok_or("No output")?;
     if !inside(dir, output) {
         return Err("The output has to be in the work folder".into());
     }
     for pair in args.windows(2) {
-        if pair[0] == "-i" && !inside(dir, &pair[1]) {
+        if pair[0] == "-i" && !inside(dir, &pair[1]) && !is_picked(picked, &pair[1]) {
             return Err("The inputs have to be in the work folder".into());
         }
     }
@@ -388,7 +399,11 @@ pub async fn ffmpeg_run(
     if !binary.is_file() {
         return Err("FFmpeg isn't installed".into());
     }
-    check_args(&work_dir(&app)?, &args)?;
+    check_args(
+        &work_dir(&app)?,
+        &*state.picked.lock().map_err(|e| e.to_string())?,
+        &args,
+    )?;
     let running = state.running.clone();
     tauri::async_runtime::spawn_blocking(move || {
         run(&binary, &id, &args, duration, &running, |progress| {
@@ -416,9 +431,14 @@ pub fn probe(binary: &Path, path: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn ffmpeg_probe(app: AppHandle, path: String) -> Result<String, String> {
+pub async fn ffmpeg_probe(
+    app: AppHandle,
+    state: State<'_, FfmpegState>,
+    path: String,
+) -> Result<String, String> {
     let binary = binary_path(&app)?;
-    if !inside(&work_dir(&app)?, &path) {
+    let picked = is_picked(&*state.picked.lock().map_err(|e| e.to_string())?, &path);
+    if !picked && !inside(&work_dir(&app)?, &path) {
         return Err("The file has to be in the work folder".into());
     }
     tauri::async_runtime::spawn_blocking(move || probe(&binary, &path))
@@ -437,6 +457,75 @@ pub fn ffmpeg_cancel(state: State<'_, FfmpegState>, id: String) -> Result<bool, 
         }
         None => false,
     })
+}
+
+#[derive(Serialize)]
+pub struct Picked {
+    path: String,
+    name: String,
+    size: u64,
+}
+
+/// Files chosen in the system's file picker: where they are (FFmpeg reads them there, the
+/// player plays them from there), their names and sizes. None if it was closed.
+#[tauri::command]
+pub async fn files_pick(
+    app: AppHandle,
+    state: State<'_, FfmpegState>,
+    multiple: bool,
+) -> Result<Vec<Picked>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app.dialog().file();
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        if multiple {
+            dialog.blocking_pick_files().unwrap_or_default()
+        } else {
+            dialog.blocking_pick_file().into_iter().collect()
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut picked = state.picked.lock().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for file in chosen {
+        let Ok(path) = file.into_path() else { continue };
+        let Ok(real) = path.canonicalize() else {
+            continue;
+        };
+        let Ok(meta) = fs::metadata(&real) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let _ = app.asset_protocol_scope().allow_file(&real);
+        out.push(Picked {
+            name: real
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: real.to_string_lossy().into_owned(),
+            size: meta.len(),
+        });
+        picked.insert(real);
+    }
+    Ok(out)
+}
+
+/// A chosen file's bytes (a picture, a text: what the page reads itself)
+#[tauri::command]
+pub async fn files_read(
+    state: State<'_, FfmpegState>,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    if !is_picked(&*state.picked.lock().map_err(|e| e.to_string())?, &path) {
+        return Err("Only a file that was chosen can be read".into());
+    }
+    let data = tauri::async_runtime::spawn_blocking(move || fs::read(path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(data))
 }
 
 #[cfg(test)]
@@ -470,22 +559,47 @@ mod tests {
     #[test]
     fn only_the_work_folder() {
         let dir = temp_dir("args");
+        let none = HashSet::new();
         let inside_file = dir.join("in.wav");
         fs::write(&inside_file, b"x").unwrap();
         let input = inside_file.to_string_lossy().into_owned();
         let output = dir.join("out.mp3").to_string_lossy().into_owned();
-        assert!(check_args(&dir, &s(&["-i", &input, "-c:a", "libmp3lame", &output])).is_ok());
-        assert!(check_args(&dir, &s(&["-i", "/etc/passwd", &output])).is_err());
-        assert!(check_args(&dir, &s(&["-i", &input, "/tmp/elsewhere.mp3"])).is_err());
+        assert!(check_args(
+            &dir,
+            &none,
+            &s(&["-i", &input, "-c:a", "libmp3lame", &output])
+        )
+        .is_ok());
+        assert!(check_args(&dir, &none, &s(&["-i", "/etc/passwd", &output])).is_err());
+        assert!(check_args(&dir, &none, &s(&["-i", &input, "/tmp/elsewhere.mp3"])).is_err());
         let sneaky = dir
             .join("..")
             .join("out.mp3")
             .to_string_lossy()
             .into_owned();
-        assert!(check_args(&dir, &s(&["-i", &input, &sneaky])).is_err());
-        assert!(check_args(&dir, &s(&["-i", "http://example.com/a.mp4", &output])).is_err());
-        assert!(check_args(&dir, &s(&["-i", &input, "-vf", "movie=/etc/x", &output])).is_err());
-        assert!(check_args(&dir, &s(&["-i", &input, "relative.mp3"])).is_err());
+        assert!(check_args(&dir, &none, &s(&["-i", &input, &sneaky])).is_err());
+        assert!(check_args(
+            &dir,
+            &none,
+            &s(&["-i", "http://example.com/a.mp4", &output])
+        )
+        .is_err());
+        assert!(check_args(
+            &dir,
+            &none,
+            &s(&["-i", &input, "-vf", "movie=/etc/x", &output])
+        )
+        .is_err());
+        assert!(check_args(&dir, &none, &s(&["-i", &input, "relative.mp3"])).is_err());
+        // A file the user chose: read where it is (but still nothing written there)
+        let elsewhere =
+            std::env::temp_dir().join(format!("stosufy-picked-{}.wav", std::process::id()));
+        fs::write(&elsewhere, b"x").unwrap();
+        let chosen = elsewhere.to_string_lossy().into_owned();
+        assert!(check_args(&dir, &none, &s(&["-i", &chosen, &output])).is_err());
+        let picked: HashSet<PathBuf> = [elsewhere.canonicalize().unwrap()].into();
+        assert!(check_args(&dir, &picked, &s(&["-i", &chosen, &output])).is_ok());
+        assert!(check_args(&dir, &picked, &s(&["-i", &input, &chosen])).is_err());
     }
 
     #[test]

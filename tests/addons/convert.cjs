@@ -472,6 +472,98 @@ async function pick(at, target) {
 		check('no errors (size limit)', errors.length === 0, errors.join('\n'));
 		await page.context().close();
 	}
+
+	// --- From the file picker, a word when it's done, dragged out ----------------------------
+	{
+		const { page, errors } = await start(browser, {
+			stored: { settings: { addons: ['convert'] }, currentQueue: null },
+			writes: true,
+			allow: /^https:\/\/unpkg\.com\//
+		});
+		row = (name) => page.locator(`li[aria-label="${name}"]`).last();
+		const tone = Array.from(wav());
+		await page.evaluate(
+			({ tone, png }) => {
+				window.__pickable = [
+					{ path: '/home/tester/Music/a.wav', name: 'a.wav', size: tone.length },
+					{ path: '/home/tester/Music/b.wav', name: 'b.wav', size: tone.length },
+					{ path: '/home/tester/Pictures/p.png', name: 'p.png', size: png.length }
+				];
+				window.__pickBytes = {
+					'/home/tester/Music/a.wav': tone,
+					'/home/tester/Music/b.wav': tone,
+					'/home/tester/Pictures/p.png': png
+				};
+				// (the app not in front, and the system's notifications)
+				window.__notified = [];
+				document.hasFocus = () => false;
+				window.Notification = class {
+					static permission = 'granted';
+					constructor(title, options) {
+						window.__notified.push([title, options?.body]);
+					}
+				};
+			},
+			{ tone, png: Array.from(png) }
+		);
+		await page.click('header button[aria-label="File converter"]');
+		await page.click('button:has-text("Drop files here")');
+		await page.waitForSelector('li[aria-label="p.png"]');
+		check(
+			"the system's file picker: its files in the list",
+			(await page.locator('ul[aria-label="Files"] > li').count()) === 3
+		);
+		const readFirst = await page.evaluate(() => window.__read ?? []);
+		check(
+			'a picture is read right away, songs only when they are converted',
+			JSON.stringify(readFirst) === JSON.stringify(['/home/tester/Pictures/p.png']),
+			JSON.stringify(readFirst)
+		);
+		check(
+			'a picked song shows its size on disk',
+			/WAV · 43 KB/.test(await row('a.wav').innerText())
+		);
+		await pick(row('a.wav'), 'mp3');
+		await pick(row('b.wav'), 'mp3');
+		await pick(row('p.png'), 'jpg');
+		await page.waitForFunction(
+			() =>
+				[...document.querySelectorAll('ul[aria-label="Files"] > li')].every(
+					(li) => li.dataset.status === 'done'
+				),
+			null,
+			{ timeout: 120000 }
+		);
+		check(
+			'converted from where they are',
+			(await page.evaluate(() => window.__read)).includes('/home/tester/Music/a.wav')
+		);
+		await page.waitForFunction(() => window.__notified.length);
+		const notified = await page.evaluate(() => window.__notified);
+		check(
+			'done while the app is behind: a notification',
+			JSON.stringify(notified) ===
+				JSON.stringify([['3 files converted', 'Ready in Stosufy/Converted']]),
+			JSON.stringify(notified)
+		);
+		const result = row('a.wav').locator('button:has-text("a.mp3")');
+		const box = await result.boundingBox();
+		await page.mouse.move(box.x + 10, box.y + 10);
+		await page.mouse.down();
+		await page.mouse.move(box.x + 30, box.y + 30, { steps: 4 });
+		await page.mouse.up();
+		check(
+			'dragged out: the file itself',
+			JSON.stringify(await page.evaluate(() => window.__dragged)) ===
+				JSON.stringify(['/home/tester/Stosufy/Converted/a.mp3'])
+		);
+		check(
+			'…and not shown in its folder (no click)',
+			!(await page.evaluate(() => window.__revealed))
+		);
+		check('no errors (picker)', errors.length === 0, errors.join('\n'));
+		await page.context().close();
+	}
 	await browser.close();
 
 	console.log(`\n${results.filter(Boolean).length}/${results.length}`);

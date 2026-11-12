@@ -9,6 +9,9 @@
 	import { reveal } from '../files/save.ts';
 	import Formats from '../files/Formats.svelte';
 	import CopyButton from '../files/CopyButton.svelte';
+	import { dragOut } from '../files/dragout.ts';
+	import { notifyDone } from '../files/notify.ts';
+	import { playable } from '../files/picked.ts';
 	import Timeline from './Timeline.svelte';
 	import { freshEdit, isEdited, lengthOf, saveMedia } from './media.ts';
 	import { clock, parseClock, waveform } from './waveform.ts';
@@ -18,7 +21,7 @@
 
 	// (a file of its own each time: the page makes a new editor for another file)
 	// svelte-ignore state_referenced_locally
-	const url = URL.createObjectURL(file);
+	const url = playable(file);
 	// svelte-ignore state_referenced_locally
 	const targets = editTargets(detectFormat(file));
 	/** @type {['start' | 'end', string, string][]} */
@@ -73,7 +76,7 @@
 
 	onDestroy(() => {
 		player?.pause();
-		URL.revokeObjectURL(url);
+		if (url.startsWith('blob:')) URL.revokeObjectURL(url);
 		if (saving.status === 'working') void cancel(id);
 		void release(file);
 	});
@@ -141,6 +144,7 @@
 				id
 			);
 			saving = { status: 'done', progress: 1, saved, error: '' };
+			void notifyDone('Saved', `${saved.name}, in Stosufy/Edited`);
 		} catch (error) {
 			if (error?.name === 'Cancelled') {
 				saving = { status: 'idle', progress: 0, saved: null, error: '' };
@@ -410,7 +414,8 @@
 			<div class="flex flex-wrap items-center gap-2 text-sm">
 				<button
 					class="h-8 pl-2.5 pr-3 flex items-center gap-1.5 rounded-full font-semibold text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 cursor-pointer transition"
-					title="Show it in the folder"
+					title="Drag it out into a chat or a folder, or click to show it in its folder"
+					use:dragOut={[saving.saved.path]}
 					onclick={() => show(saving.saved.path)}
 				>
 					<span class="icon-[mingcute--check-circle-fill] size-4"></span>

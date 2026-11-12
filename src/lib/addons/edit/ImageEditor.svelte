@@ -8,6 +8,7 @@
 	import { reveal } from '../files/save.ts';
 	import Formats from '../files/Formats.svelte';
 	import CopyButton from '../files/CopyButton.svelte';
+	import { dragOut } from '../files/dragout.ts';
 	import { freshImageEdit, oriented, outputSize, saveImage } from './image.ts';
 
 	/** @type {{ file: File }} */
@@ -344,7 +345,8 @@
 			<div class="flex flex-wrap items-center gap-2 text-sm">
 				<button
 					class="h-8 pl-2.5 pr-3 flex items-center gap-1.5 rounded-full font-semibold text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 cursor-pointer transition"
-					title="Show it in the folder"
+					title="Drag it out into a chat or a folder, or click to show it in its folder"
+					use:dragOut={[saving.saved.path]}
 					onclick={() => show(saving.saved.path)}
 				>
 					<span class="icon-[mingcute--check-circle-fill] size-4"></span>
