@@ -88,7 +88,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await pick(page, 'Speed', '2');
 	check(
 		'the length shown: 1 s at 2× → 0:00.5',
-		(await page.locator('[aria-label="Length"]').innerText()).includes('0:00.5')
+		(await page.locator('[data-length]').innerText()).includes('0:00.5')
 	);
 	const audioFormats = await page
 		.locator('[role="group"][aria-label="Save as"] [data-target]')
@@ -130,7 +130,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.click('button[aria-label="Take out part 2"]');
 	check(
 		'the length without the middle part: ~1 s',
-		(await page.locator('[aria-label="Length"]').innerText()).includes('0:01.0')
+		(await page.locator('[data-length]').innerText()).includes('0:01.0')
 	);
 	await page.waitForTimeout(500);
 	await page.keyboard.press('Control+z');
@@ -237,7 +237,10 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	check(
 		'a song: no pictures along its timeline',
 		/height: 112px/.test(
-			await page.locator('[role="slider"][aria-label="Start"]').locator('..').getAttribute('style')
+			await page
+				.locator('[role="slider"][aria-label="Start"]')
+				.locator('../..')
+				.getAttribute('style')
 		)
 	);
 	await page.click('button[aria-label="Size limit"]');
@@ -273,8 +276,9 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.waitForFunction(
 		() => {
 			const box = document.querySelector('[role="slider"][aria-label="Start"]')?.parentElement;
+			const outer = box?.parentElement;
 			const canvas = box?.querySelector('canvas');
-			if (!canvas || !/height: 156px/.test(box.getAttribute('style'))) return false;
+			if (!canvas || !/height: 156px/.test(outer.getAttribute('style'))) return false;
 			const scale = canvas.width / box.clientWidth;
 			const pixel = canvas
 				.getContext('2d')

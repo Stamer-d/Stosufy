@@ -132,7 +132,7 @@ const formats = (vcodec, heights, fps = 30) =>
 	};
 	const shown = async (label) => (await dropdown(label).innerText()).replace(/\s+/g, ' ').trim();
 	const tab = (name) =>
-		page.locator(`[role="tablist"][aria-label="What"] [role="tab"]:has-text("${name}")`);
+		page.locator(`[role="radiogroup"][aria-label="What"] [role="radio"]:has-text("${name}")`);
 
 	await page.click('header button[aria-label="Downloader"]');
 	await page.waitForURL('**/addons/download');
@@ -161,7 +161,7 @@ const formats = (vcodec, heights, fps = 30) =>
 	);
 	check(
 		'Video and Sound as two tabs, Video first',
-		(await tab('Video').getAttribute('aria-selected')) === 'true'
+		(await tab('Video').getAttribute('aria-checked')) === 'true'
 	);
 	const codecs = (await optionsOf('Video format')).map((text) =>
 		text.split(' ').slice(0, 3).join(' ')
@@ -203,6 +203,15 @@ const formats = (vcodec, heights, fps = 30) =>
 			).replace(/\s+/g, ' ')
 		)
 	);
+	// (the arrow keys too, as with radio buttons)
+	await tab('Video').focus();
+	await page.keyboard.press('ArrowRight');
+	check(
+		'Video or Sound: the arrow keys choose',
+		(await tab('Sound').getAttribute('aria-checked')) === 'true' &&
+			(await page.evaluate(() => document.activeElement?.textContent?.trim())) === 'Sound'
+	);
+	await page.keyboard.press('ArrowLeft');
 	await tab('Sound').click();
 	const sounds = (await optionsOf('Sound format')).map((text) => text.split(' ')[0]);
 	check(
@@ -277,7 +286,7 @@ const formats = (vcodec, heights, fps = 30) =>
 	);
 	check(
 		'the last choice kept (the sound, as MP3 at 192 kbps)',
-		(await tab('Sound').getAttribute('aria-selected')) === 'true' &&
+		(await tab('Sound').getAttribute('aria-checked')) === 'true' &&
 			/^MP3/.test(await shown('Sound format')) &&
 			/^192 kbps/.test(await shown('Sound quality'))
 	);
@@ -387,7 +396,7 @@ const formats = (vcodec, heights, fps = 30) =>
 	check(
 		'only sound there: no video to choose',
 		(await tab('Video').isDisabled()) &&
-			(await tab('Sound').getAttribute('aria-selected')) === 'true'
+			(await tab('Sound').getAttribute('aria-checked')) === 'true'
 	);
 	await page.click('section[aria-label="What it is"] button:has-text("Download")');
 	await row('Slow one').waitFor();
@@ -400,7 +409,7 @@ const formats = (vcodec, heights, fps = 30) =>
 	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
 	check(
 		'a link with only sound changes no choice: Video again for a video',
-		(await tab('Video').getAttribute('aria-selected')) === 'true'
+		(await tab('Video').getAttribute('aria-checked')) === 'true'
 	);
 
 	// --- Remembered when the page is opened again --------------------------------------------

@@ -87,6 +87,7 @@
 				aria-valuemin="0"
 				aria-valuemax={duration}
 				aria-valuenow={value}
+				aria-valuetext={clock(value)}
 				onpointerdown={(event) => {
 					event.stopPropagation();
 					drag(event, which);

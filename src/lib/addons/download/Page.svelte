@@ -22,6 +22,8 @@
 	import CopyButton from '../files/CopyButton.svelte';
 	import Dropdown from '../files/Dropdown.svelte';
 	import Toggle from '../files/Toggle.svelte';
+	import { radioKeys } from '../files/radio.ts';
+	import { ms } from '../files/motion.ts';
 	import PartPicker from './PartPicker.svelte';
 	import { ensureTools, isYouTube, lookUp, tools } from './ytdlp.ts';
 	import {
@@ -538,9 +540,9 @@
 				class="-mt-1 flex flex-wrap items-center gap-2 text-sm"
 				role="group"
 				aria-label="Link on the clipboard"
-				transition:fade={{ duration: 120 }}
+				in:fade={{ duration: ms(120) }}
 			>
-				<span class="icon-[mingcute--clipboard-line] size-4 text-white/45 shrink-0"></span>
+				<span class="icon-[mingcute--clipboard-line] size-4 text-white/55 shrink-0"></span>
 				<span class="text-white/55">On the clipboard:</span>
 				<button
 					class="h-8 max-w-full px-3 flex items-center gap-1.5 rounded-full bg-rose-500/15 hover:bg-rose-500/25 text-rose-100 font-semibold cursor-pointer transition"
@@ -551,7 +553,7 @@
 					<span class="shrink-0 text-rose-200/80">· Use it</span>
 				</button>
 				<button
-					class="size-7 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+					class="size-7 grid place-items-center rounded-full text-white/55 hover:text-white hover:bg-white/10 cursor-pointer transition"
 					aria-label="Not this link"
 					title="Not this link"
 					onclick={dismissOffered}
@@ -562,7 +564,7 @@
 		{/if}
 
 		{#if found.state === 'failed'}
-			<p class="flex items-center gap-1.5 text-sm text-red-300" transition:fade={{ duration: 120 }}>
+			<p class="flex items-center gap-1.5 text-sm text-red-300" in:fade={{ duration: ms(120) }}>
 				<span class="icon-[mingcute--warning-line] size-4 shrink-0"></span>
 				{found.error}
 			</p>
@@ -573,7 +575,7 @@
 			<section
 				class="flex flex-col gap-4 p-4 rounded-2xl bg-white/[0.04] ring-1 ring-white/5"
 				aria-label="What it is"
-				transition:fade={{ duration: 120 }}
+				in:fade={{ duration: ms(120) }}
 			>
 				<div class="flex gap-4 min-w-0">
 					<div
@@ -615,15 +617,21 @@
 					</p>
 				{:else}
 					<div class="flex flex-wrap items-center gap-2">
-						<div class="h-10 p-1 flex rounded-xl bg-black/30" role="tablist" aria-label="What">
+						<div
+							class="h-10 p-1 flex rounded-xl bg-black/30"
+							role="radiogroup"
+							aria-label="What"
+							use:radioKeys
+						>
 							{#each [['video', 'Video', 'icon-[mingcute--video-line]'], ['audio', 'Sound', 'icon-[mingcute--music-2-line]']] as [id, text, icon] (id)}
 								<button
 									class="px-3 flex items-center gap-1.5 rounded-lg text-sm font-bold cursor-pointer transition disabled:opacity-35 disabled:cursor-default {tab ===
 									id
 										? 'bg-white text-black'
 										: 'text-white/70 hover:text-white enabled:hover:bg-white/10'}"
-									role="tab"
-									aria-selected={tab === id}
+									role="radio"
+									aria-checked={tab === id}
+									tabindex={tab === id ? 0 : -1}
 									disabled={id === 'video' && !info.video}
 									title={id === 'video' && !info.video ? 'There is only sound here' : ''}
 									onclick={() => (options.tab = id)}
@@ -707,13 +715,13 @@
 							/>
 						{/if}
 						<button
-							class="ml-auto h-11 px-6 flex items-center gap-2 rounded-full text-base font-bold bg-rose-500 hover:bg-rose-400 text-white cursor-pointer transition"
+							class="ml-auto h-11 px-6 flex items-center gap-2 rounded-full text-base font-bold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition"
 							onclick={start}
 						>
 							<span class="icon-[mingcute--download-3-line] size-5"></span>
 							Download
 							{#if total}
-								<span class="text-sm font-semibold text-white/75 tabular-nums">{total}</span>
+								<span class="text-sm font-semibold text-white tabular-nums">{total}</span>
 							{/if}
 						</button>
 					</div>
@@ -787,7 +795,11 @@
 									<div
 										class="h-1.5 rounded-full bg-white/10 overflow-hidden"
 										role="progressbar"
-										aria-valuenow={Math.round(job.percent ?? 0)}
+										aria-label="Downloading {job.info.title}"
+										aria-valuemin="0"
+										aria-valuemax="100"
+										aria-valuenow={job.percent === null ? undefined : Math.round(job.percent)}
+										aria-valuetext={doing(job)}
 									>
 										{#if job.phase === 'download' && job.percent !== null}
 											<div
@@ -863,7 +875,7 @@
 							{/if}
 							{#if job.status === 'working' || job.status === 'waiting'}
 								<button
-									class="size-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									class="size-8 grid place-items-center rounded-full text-white/55 hover:text-white hover:bg-white/10 cursor-pointer transition"
 									aria-label="Stop {job.info.title}"
 									title="Stop"
 									onclick={() => stop(job.id)}
@@ -872,7 +884,7 @@
 								</button>
 							{:else}
 								<button
-									class="size-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									class="size-8 grid place-items-center rounded-full text-white/55 hover:text-white hover:bg-white/10 cursor-pointer transition"
 									aria-label="Remove {job.info.title}"
 									title="Take it off the list (the file stays)"
 									onclick={() => removeDownload(job.id)}

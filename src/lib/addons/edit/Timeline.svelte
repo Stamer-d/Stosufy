@@ -3,7 +3,7 @@
 	// wheel, or the buttons; the wheel then moves along), the part kept between two handles
 	// (dragged, or the part itself moved), the cuts in it and the parts taken out, where it
 	// plays, and a click to go there.
-	import { peakBetween } from './waveform.ts';
+	import { clock, peakBetween } from './waveform.ts';
 
 	/**
 	 * @type {{
@@ -200,115 +200,117 @@
 <div class="flex flex-col gap-1.5">
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 	<div
-		bind:this={box}
-		bind:clientWidth={width}
 		class="relative rounded-xl bg-black/30 ring-1 ring-white/5 cursor-pointer select-none touch-none overflow-hidden"
 		style="height: {HEIGHT}px"
 		onpointerdown={(event) => onseek(timeAt(event))}
 		onwheel={wheel}
 	>
-		<canvas bind:this={canvas} class="absolute inset-0 size-full"></canvas>
-		{#if reading}
-			<span
-				class="absolute right-2 bottom-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/50 text-[11px] font-semibold text-white/60 pointer-events-none"
-			>
-				<span class="icon-[mingcute--loading-line] size-3 animate-spin"></span>
-				Reading the sound…
-			</span>
-		{/if}
-		<!-- The part kept -->
-		<div
-			class="absolute top-2.5 bottom-0 bg-violet-300/10 ring-1 ring-inset ring-violet-300/50 cursor-grab active:cursor-grabbing"
-			style="left: {at(start)}%; width: {((end - start) / span) * 100}%"
-			onpointerdown={(event) => drag(event, 'part')}
-		></div>
-		<!-- Parts taken out -->
-		{#each parts.filter((part) => part.dropped) as part (part.from)}
-			<div
-				class="pointer-events-none absolute top-2.5 bottom-0 bg-[repeating-linear-gradient(135deg,rgba(0,0,0,0.55)_0_6px,rgba(0,0,0,0.25)_6px_12px)]"
-				style="left: {at(part.from)}%; width: {((part.to - part.from) / span) * 100}%"
-			></div>
-		{/each}
-		<!-- The cuts -->
-		{#each parts.slice(1) as part (part.from)}
-			{#if shown(part.from)}
-				<div
-					class="absolute top-0 bottom-0 z-20 w-0.5 -ml-px bg-amber-300"
-					style="left: {at(part.from)}%"
+		<!-- (a little in from the edges: the handles at the start and the end seen whole) -->
+		<div bind:this={box} bind:clientWidth={width} class="absolute inset-y-0 inset-x-2">
+			<canvas bind:this={canvas} class="absolute inset-0 size-full"></canvas>
+			{#if reading}
+				<span
+					class="absolute right-2 bottom-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/50 text-[11px] font-semibold text-white/60 pointer-events-none"
 				>
-					<button
-						class="absolute -top-0 left-1/2 -translate-x-1/2 size-5 grid place-items-center rounded-full bg-amber-300 text-black hover:bg-white cursor-pointer"
-						aria-label="Take the cut at {part.from.toFixed(1)} s away"
-						title="Take this cut away"
-						onpointerdown={(event) => event.stopPropagation()}
-						onclick={(event) => {
-							event.stopPropagation();
-							onuncut(part.from);
-						}}
-					>
-						<span class="icon-[mingcute--close-line] size-3"></span>
-					</button>
-				</div>
+					<span class="icon-[mingcute--loading-line] size-3 animate-spin"></span>
+					Reading the sound…
+				</span>
 			{/if}
-		{/each}
-		<!-- Each part: out, or back in -->
-		{#if parts.length > 1}
-			{#each parts as part, i (part.from)}
-				{@const middle = (Math.max(part.from, from) + Math.min(part.to, from + span)) / 2}
-				{#if part.to > from && part.from < from + span}
-					<button
-						class="absolute bottom-1.5 -translate-x-1/2 h-6 px-2 flex items-center gap-1 rounded-full text-[11px] font-bold cursor-pointer transition {part.dropped
-							? 'bg-white text-black hover:bg-white/85'
-							: 'bg-black/60 text-white/80 hover:bg-red-500/80 hover:text-white'}"
-						style="left: clamp(3.5rem, {at(middle)}%, calc(100% - 3.5rem))"
-						aria-label="{part.dropped ? 'Put part' : 'Take out part'} {i + 1}"
-						onpointerdown={(event) => event.stopPropagation()}
-						onclick={(event) => {
-							event.stopPropagation();
-							ontoggle(part.from);
-						}}
+			<!-- The part kept -->
+			<div
+				class="absolute top-2.5 bottom-0 bg-violet-300/10 ring-1 ring-inset ring-violet-300/50 cursor-grab active:cursor-grabbing"
+				style="left: {at(start)}%; width: {((end - start) / span) * 100}%"
+				onpointerdown={(event) => drag(event, 'part')}
+			></div>
+			<!-- Parts taken out -->
+			{#each parts.filter((part) => part.dropped) as part (part.from)}
+				<div
+					class="pointer-events-none absolute top-2.5 bottom-0 bg-[repeating-linear-gradient(135deg,rgba(0,0,0,0.55)_0_6px,rgba(0,0,0,0.25)_6px_12px)]"
+					style="left: {at(part.from)}%; width: {((part.to - part.from) / span) * 100}%"
+				></div>
+			{/each}
+			<!-- The cuts -->
+			{#each parts.slice(1) as part (part.from)}
+				{#if shown(part.from)}
+					<div
+						class="absolute top-0 bottom-0 z-20 w-0.5 -ml-px bg-amber-300"
+						style="left: {at(part.from)}%"
 					>
-						<span
-							class="{part.dropped
-								? 'icon-[mingcute--back-2-line]'
-								: 'icon-[mingcute--delete-2-line]'} size-3"
-						></span>
-						{part.dropped ? 'Put back' : 'Take out'}
-					</button>
+						<button
+							class="absolute -top-0 left-1/2 -translate-x-1/2 size-5 grid place-items-center rounded-full bg-amber-300 text-black hover:bg-white cursor-pointer"
+							aria-label="Take the cut at {part.from.toFixed(1)} s away"
+							title="Take this cut away"
+							onpointerdown={(event) => event.stopPropagation()}
+							onclick={(event) => {
+								event.stopPropagation();
+								onuncut(part.from);
+							}}
+						>
+							<span class="icon-[mingcute--close-line] size-3"></span>
+						</button>
+					</div>
 				{/if}
 			{/each}
-		{/if}
-		{#each HANDLES as [what, label] (what)}
-			{@const value = what === 'start' ? start : end}
-			{#if shown(value)}
-				<div
-					class="absolute top-2.5 bottom-0 w-4 -ml-2 flex justify-center cursor-ew-resize group/handle focus:outline-none"
-					style="left: {at(value)}%"
-					role="slider"
-					tabindex="0"
-					aria-label={label}
-					aria-valuemin="0"
-					aria-valuemax={duration}
-					aria-valuenow={value}
-					onpointerdown={(event) => drag(event, what)}
-					onkeydown={(event) => key(event, what)}
-				>
-					<div
-						class="w-1 h-full rounded-full bg-violet-300 group-hover/handle:bg-white group-focus/handle:bg-white transition"
-					></div>
-					<div
-						class="absolute top-1/2 -translate-y-1/2 w-3 h-8 rounded-md bg-violet-300 group-hover/handle:bg-white group-focus/handle:bg-white transition"
-					></div>
-				</div>
+			<!-- Each part: out, or back in -->
+			{#if parts.length > 1}
+				{#each parts as part, i (part.from)}
+					{@const middle = (Math.max(part.from, from) + Math.min(part.to, from + span)) / 2}
+					{#if part.to > from && part.from < from + span}
+						<button
+							class="absolute bottom-1.5 -translate-x-1/2 h-6 px-2 flex items-center gap-1 rounded-full text-[11px] font-bold cursor-pointer transition {part.dropped
+								? 'bg-white text-black hover:bg-white/85'
+								: 'bg-black/60 text-white/80 hover:bg-red-500/80 hover:text-white'}"
+							style="left: clamp(3.5rem, {at(middle)}%, calc(100% - 3.5rem))"
+							aria-label="{part.dropped ? 'Put part' : 'Take out part'} {i + 1}"
+							onpointerdown={(event) => event.stopPropagation()}
+							onclick={(event) => {
+								event.stopPropagation();
+								ontoggle(part.from);
+							}}
+						>
+							<span
+								class="{part.dropped
+									? 'icon-[mingcute--back-2-line]'
+									: 'icon-[mingcute--delete-2-line]'} size-3"
+							></span>
+							{part.dropped ? 'Put back' : 'Take out'}
+						</button>
+					{/if}
+				{/each}
 			{/if}
-		{/each}
-		<!-- Where it plays -->
-		{#if shown(time)}
-			<div
-				class="pointer-events-none absolute top-5 bottom-0 z-10 w-0.5 -ml-px bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]"
-				style="left: {at(time)}%"
-			></div>
-		{/if}
+			{#each HANDLES as [what, label] (what)}
+				{@const value = what === 'start' ? start : end}
+				{#if shown(value)}
+					<div
+						class="absolute top-2.5 bottom-0 w-4 -ml-2 flex justify-center cursor-ew-resize group/handle focus:outline-none"
+						style="left: {at(value)}%"
+						role="slider"
+						tabindex="0"
+						aria-label={label}
+						aria-valuemin="0"
+						aria-valuemax={duration}
+						aria-valuenow={value}
+						aria-valuetext={clock(value)}
+						onpointerdown={(event) => drag(event, what)}
+						onkeydown={(event) => key(event, what)}
+					>
+						<div
+							class="w-1 h-full rounded-full bg-violet-300 group-hover/handle:bg-white group-focus/handle:bg-white transition"
+						></div>
+						<div
+							class="absolute top-1/2 -translate-y-1/2 w-3 h-8 rounded-md bg-violet-300 group-hover/handle:bg-white group-focus/handle:bg-white transition"
+						></div>
+					</div>
+				{/if}
+			{/each}
+			<!-- Where it plays -->
+			{#if shown(time)}
+				<div
+					class="pointer-events-none absolute top-5 bottom-0 z-10 w-0.5 -ml-px bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]"
+					style="left: {at(time)}%"
+				></div>
+			{/if}
+		</div>
 	</div>
 
 	<!-- Where the view is, zoomed in -->

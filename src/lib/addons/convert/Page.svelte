@@ -9,6 +9,7 @@
 	import { handOver, takeHandedOver } from '../files/handoff.ts';
 	import CopyButton from '../files/CopyButton.svelte';
 	import Formats from '../files/Formats.svelte';
+	import { ms } from '../files/motion.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { pickFiles } from '../files/picked.ts';
 	import { nativeState, nativeFfmpeg, retryNative } from '../files/native.ts';
@@ -311,7 +312,7 @@
 							{example}
 						</span>
 					{/each}
-					<span class="px-1 h-6 grid place-items-center text-xs font-semibold text-white/40">
+					<span class="px-1 h-6 grid place-items-center text-xs font-semibold text-white/55">
 						and many more
 					</span>
 				</span>
@@ -321,7 +322,7 @@
 			{#if common.length}
 				<div
 					class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 pl-4 rounded-xl bg-amber-300/[0.07] ring-1 ring-amber-300/20"
-					transition:fade={{ duration: 120 }}
+					in:fade={{ duration: ms(120) }}
 				>
 					<span class="text-sm font-semibold text-amber-100"
 						>All {waiting.length} {KINDS[waiting[0].kind].plural} to</span
@@ -336,7 +337,7 @@
 					{@const kind = KINDS[job.kind]}
 					{@const target = job.targets.find((option) => option.id === job.target)}
 					<li
-						in:fly={{ y: 8, duration: 180 }}
+						in:fly={{ y: 8, duration: ms(180) }}
 						class="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 rounded-xl bg-white/[0.04] ring-1 ring-white/5"
 						aria-label={job.file.name}
 						data-status={job.status}
@@ -379,6 +380,9 @@
 								<div
 									class="w-40 h-1.5 rounded-full bg-white/10 overflow-hidden"
 									role="progressbar"
+									aria-label="Converting {job.file.name}"
+									aria-valuemin="0"
+									aria-valuemax="100"
 									aria-valuenow={Math.round(job.progress * 100)}
 								>
 									{#if job.progress > 0}
@@ -410,7 +414,7 @@
 											? job.saved[0].name.split('/').pop()
 											: `${job.saved.length} files`}
 									</span>
-									<span class="text-emerald-300/60 font-medium">
+									<span class="text-emerald-300/80 font-medium">
 										{size(job.saved.reduce((sum, file) => sum + file.size, 0))}
 									</span>
 								</button>
@@ -447,7 +451,7 @@
 							{/if}
 							{#if job.status === 'working' || job.status === 'waiting'}
 								<button
-									class="size-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									class="size-8 grid place-items-center rounded-full text-white/55 hover:text-white hover:bg-white/10 cursor-pointer transition"
 									aria-label="Stop {job.file.name}"
 									title="Stop"
 									onclick={() => stopJob(job.id)}
@@ -456,7 +460,7 @@
 								</button>
 							{:else}
 								<button
-									class="size-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition"
+									class="size-8 grid place-items-center rounded-full text-white/55 hover:text-white hover:bg-white/10 cursor-pointer transition"
 									aria-label="Remove {job.file.name}"
 									onclick={() => removeJob(job.id)}
 								>
@@ -511,7 +515,7 @@
 	{#if dragging && $jobs.length}
 		<div
 			class="pointer-events-none fixed inset-0 z-30 grid place-items-center bg-black/40 backdrop-blur-[2px]"
-			transition:fade={{ duration: 100 }}
+			transition:fade={{ duration: ms(100) }}
 		>
 			<div
 				class="flex flex-col items-center gap-3 px-10 py-8 rounded-3xl bg-panel/90 ring-2 ring-amber-300/60"

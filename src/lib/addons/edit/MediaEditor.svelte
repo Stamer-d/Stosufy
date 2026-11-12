@@ -16,6 +16,7 @@
 	import CopyButton from '../files/CopyButton.svelte';
 	import Dropdown from '../files/Dropdown.svelte';
 	import Toggle from '../files/Toggle.svelte';
+	import { radioKeys } from '../files/radio.ts';
 	import { LIMITS, sizeLimit } from './limit.ts';
 	import { dragOut } from '../files/dragout.ts';
 	import { notifyDone } from '../files/notify.ts';
@@ -182,7 +183,9 @@
 			const target = event.target;
 			if (
 				target instanceof HTMLElement &&
-				target.closest('input, select, textarea, [role="menu"], [role="listbox"]')
+				target.closest(
+					'input, select, textarea, [role="menu"], [role="listbox"], [role="radiogroup"]'
+				)
 			)
 				return;
 			if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -367,7 +370,7 @@
 			: ''}"
 	>
 		<div class="flex flex-wrap items-center gap-2" role="group" aria-label="Sound">
-			<span class="w-full text-xs font-bold uppercase tracking-wide text-white/40">Sound</span>
+			<span class="w-full text-xs font-bold uppercase tracking-wide text-white/55">Sound</span>
 			<Dropdown
 				label="Fade in"
 				prefix="Fade in"
@@ -422,7 +425,7 @@
 		</div>
 		{#if video}
 			<div class="flex flex-wrap items-center gap-2" role="group" aria-label="Picture">
-				<span class="w-full text-xs font-bold uppercase tracking-wide text-white/40">Picture</span>
+				<span class="w-full text-xs font-bold uppercase tracking-wide text-white/55">Picture</span>
 				<Toggle
 					label={edit.rotate ? `Turn · ${edit.rotate}°` : 'Turn'}
 					icon="icon-[mingcute--clockwise-line]"
@@ -448,11 +451,13 @@
 							class="h-10 p-1 flex gap-0.5 rounded-xl bg-black/30"
 							role="radiogroup"
 							aria-label="Shape"
+							use:radioKeys
 						>
 							{#each SHAPES as [shapeId, label] (shapeId)}
 								<button
 									role="radio"
 									aria-checked={shape === shapeId}
+									tabindex={shape === shapeId ? 0 : -1}
 									class="px-2.5 rounded-lg text-xs font-bold cursor-pointer transition {shape ===
 									shapeId
 										? 'bg-white text-black'
@@ -512,7 +517,7 @@
 					<video
 						bind:this={player}
 						src={url}
-						class="absolute max-w-none object-fill transition-transform duration-200"
+						class="absolute max-w-none object-fill transition-transform duration-200 motion-reduce:transition-none"
 						style={videoStyle}
 						onloadedmetadata={loaded}
 						onerror={unplayableFile}
@@ -565,8 +570,8 @@
 			</button>
 			<span class="w-28 tabular-nums">
 				<span class="font-semibold" role="timer" aria-label="Where it plays">{clock(time)}</span>
-				<span class="text-white/40" aria-label="Length" title="How long it is, saved"
-					>/ {clock(lengthOf(edit, duration))}</span
+				<span class="text-white/55" title="How long it is, saved" data-length
+					><span class="sr-only">Length</span>/ {clock(lengthOf(edit, duration))}</span
 				>
 			</span>
 			{#each MARKS as [which, label, key] (which)}
@@ -659,6 +664,10 @@
 				<div
 					class="flex-1 min-w-40 h-1.5 rounded-full bg-white/10 overflow-hidden"
 					role="progressbar"
+					aria-label="Saving"
+					aria-valuemin="0"
+					aria-valuemax="100"
+					aria-valuenow={saving.progress > 0 ? Math.round(saving.progress * 100) : undefined}
 				>
 					{#if saving.progress > 0}
 						<div

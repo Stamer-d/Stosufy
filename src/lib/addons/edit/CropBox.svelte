@@ -128,12 +128,11 @@
 		</div>
 	{/if}
 	{#if active}
+		<!-- (dragged with the pointer; with the keyboard, its shapes are chosen) -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="absolute z-20 border-2 border-white cursor-move"
-			role="slider"
-			tabindex="-1"
-			aria-label="The part kept"
-			aria-valuenow={Math.round(crop.w * 100)}
+			aria-hidden="true"
 			style={place}
 			onpointerdown={(event) => drag(event, 'move')}
 		>

@@ -10,6 +10,7 @@
 	import CopyButton from '../files/CopyButton.svelte';
 	import Dropdown from '../files/Dropdown.svelte';
 	import Toggle from '../files/Toggle.svelte';
+	import { radioKeys } from '../files/radio.ts';
 	import { sizeText } from '../files/size.ts';
 	import { LIMITS, sizeLimit } from './limit.ts';
 	import { dragOut } from '../files/dragout.ts';
@@ -182,7 +183,7 @@
 		<!-- What's done to it -->
 		<div class="flex flex-col gap-2 p-3 rounded-2xl bg-white/[0.03] ring-1 ring-white/5">
 			<div class="flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Picture">
-				<span class="w-16 text-xs font-bold uppercase tracking-wide text-white/40">Picture</span>
+				<span class="w-16 text-xs font-bold uppercase tracking-wide text-white/55">Picture</span>
 				<Toggle
 					label="Turn left"
 					icon="icon-[mingcute--anticlockwise-line]"
@@ -205,6 +206,7 @@
 					class="h-10 p-1 flex items-center gap-0.5 rounded-xl bg-black/30"
 					role="radiogroup"
 					aria-label="Shape"
+					use:radioKeys
 					title="Crop: drag on the picture, or choose a shape"
 				>
 					<span class="icon-[ri--crop-line] size-4 mx-1.5 text-white/50"></span>
@@ -212,6 +214,7 @@
 						<button
 							role="radio"
 							aria-checked={shape === id}
+							tabindex={shape === id ? 0 : -1}
 							class="h-full px-2.5 rounded-lg text-xs font-bold cursor-pointer transition {shape ===
 							id
 								? 'bg-white text-black'
@@ -234,7 +237,7 @@
 						onchange={(event) =>
 							(edit.width = Math.max(0, Math.round(+event.currentTarget.value || 0)))}
 					/>
-					<span class="tabular-nums text-white/40">{size.width} × {size.height} px</span>
+					<span class="tabular-nums text-white/55">{size.width} × {size.height} px</span>
 				</div>
 				<div class="ml-auto flex items-center gap-1">
 					{#if cropped || adjusted || edit.turns || edit.mirrorX || edit.mirrorY || edit.width}
@@ -253,7 +256,7 @@
 				role="group"
 				aria-label="Adjust"
 			>
-				<span class="w-16 text-xs font-bold uppercase tracking-wide text-white/40">Adjust</span>
+				<span class="w-16 text-xs font-bold uppercase tracking-wide text-white/55">Adjust</span>
 				{#each ADJUSTMENTS as [key, label, icon] (key)}
 					<label class="flex items-center gap-2" title="Double-click: back to 0">
 						<span class="{icon} size-4 text-white/50"></span>

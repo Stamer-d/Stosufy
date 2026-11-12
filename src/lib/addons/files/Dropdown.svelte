@@ -3,7 +3,7 @@
 	// under it (with a line of their own under each, like "plays everywhere" or "≈ 245 MB").
 	// Arrow keys go through them, Enter or a click chooses, Escape closes.
 	import { tick } from 'svelte';
-	import { place } from './popover.ts';
+	import { pastRight, place } from './popover.ts';
 
 	/** @typedef {{ value: any, label: string, hint?: string, side?: string }} Choice */
 
@@ -53,7 +53,7 @@
 			const placed = place(box, Math.min(320, list.scrollHeight));
 			up = placed.up;
 			max = Math.min(320, placed.max);
-			if (list.getBoundingClientRect().right > window.innerWidth - 8) right = true;
+			if (pastRight(list)) right = true;
 		}
 		(list?.querySelector('[aria-selected="true"]') ?? list?.querySelector('button'))?.focus();
 	}
@@ -109,11 +109,11 @@
 			<span class="{icon} size-4 shrink-0 text-white/55"></span>
 		{/if}
 		{#if prefix}
-			<span class="shrink-0 text-white/50">{prefix}</span>
+			<span class="shrink-0 text-white/60">{prefix}</span>
 		{/if}
 		<span class="min-w-0 truncate font-semibold">{chosen?.label ?? '—'}</span>
 		{#if sideOnButton && chosen?.side}
-			<span class="shrink-0 text-white/45 tabular-nums">{chosen.side}</span>
+			<span class="shrink-0 text-white/55 tabular-nums">{chosen.side}</span>
 		{/if}
 		<span
 			class="icon-[mingcute--down-line] size-4 shrink-0 text-white/55 transition-transform {open
@@ -148,11 +148,11 @@
 					<span class="min-w-0 flex-1">
 						<span class="block text-sm font-semibold truncate">{option.label}</span>
 						{#if option.hint}
-							<span class="block text-xs text-white/50 truncate">{option.hint}</span>
+							<span class="block text-xs text-white/60 truncate">{option.hint}</span>
 						{/if}
 					</span>
 					{#if option.side}
-						<span class="shrink-0 text-xs text-white/50 tabular-nums">{option.side}</span>
+						<span class="shrink-0 text-xs text-white/60 tabular-nums">{option.side}</span>
 					{/if}
 					<span
 						class="icon-[mingcute--check-line] size-4 shrink-0 {selected

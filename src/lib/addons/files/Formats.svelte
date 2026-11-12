@@ -3,7 +3,7 @@
 	// to become, for the converter and the editor. Nothing is chosen until one's clicked (or
 	// Enter on it): the menu can be gone through with the arrow keys.
 	import { tick } from 'svelte';
-	import { place } from './popover.ts';
+	import { pastRight, place } from './popover.ts';
 
 	/**
 	 * @type {{
@@ -35,6 +35,19 @@
 
 	let open = $state(false);
 	let up = $state(false);
+	/** Lined up with its right side (no room for it to the right) */
+	let right = $state(false);
+
+	/** The formats in "More", by their group (Video, Only the sound, …) */
+	let groups = $derived.by(() => {
+		const all = [];
+		for (const target of targets.slice(quick)) {
+			const last = all.at(-1);
+			if (last?.name === target.group) last.targets.push(target);
+			else all.push({ name: target.group, targets: [target] });
+		}
+		return all;
+	});
 	/** How high the menu can be (px) */
 	let max = $state(288);
 	let box = $state();
@@ -43,10 +56,12 @@
 	async function toggle() {
 		if (open) return close();
 		up = false;
+		right = false;
 		max = 288;
 		open = true;
 		await tick();
 		if (menu) {
+			if (pastRight(menu)) right = true;
 			// (under it, or above it where there's more room: not cut off by the page's edge)
 			const placed = place(box, Math.min(288, menu.scrollHeight));
 			up = placed.up;
@@ -135,7 +150,9 @@
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<div
 					bind:this={menu}
-					class="absolute z-30 left-0 min-w-52 overflow-y-auto p-1 rounded-xl bg-[#1c1c22] ring-1 ring-white/10 shadow-2xl shadow-black/60 {up
+					class="absolute z-30 {right
+						? 'right-0'
+						: 'left-0'} min-w-52 overflow-y-auto p-1 rounded-xl bg-[#1c1c22] ring-1 ring-white/10 shadow-2xl shadow-black/60 {up
 						? 'bottom-full mb-1.5'
 						: 'top-full mt-1.5'}"
 					style="max-height: {max}px"
@@ -144,24 +161,29 @@
 					aria-label="More formats"
 					onkeydown={keys}
 				>
-					{#each targets.slice(quick) as target, i (target.id + target.group)}
-						{#if i === 0 || targets[quick + i - 1].group !== target.group}
-							<p class="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wide text-white/40">
-								{target.group}
+					{#each groups as group (group.name)}
+						<div role="group" aria-label={group.name}>
+							<p
+								class="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wide text-white/55"
+								aria-hidden="true"
+							>
+								{group.name}
 							</p>
-						{/if}
-						<button
-							class="w-full h-8 px-3 flex items-center gap-2 rounded-lg text-left text-sm font-semibold cursor-pointer outline-none hover:bg-white/10 focus:bg-white/10"
-							role="menuitem"
-							data-target={target.id}
-							title={titleOf(target)}
-							onclick={() => pick(target.id)}
-						>
-							{#if soundOnly(target)}
-								<span class="icon-[mingcute--music-2-line] size-3.5 opacity-60"></span>
-							{/if}
-							{nameOf(target)}
-						</button>
+							{#each group.targets as target (target.id + target.group)}
+								<button
+									class="w-full h-8 px-3 flex items-center gap-2 rounded-lg text-left text-sm font-semibold cursor-pointer outline-none hover:bg-white/10 focus:bg-white/10"
+									role="menuitem"
+									data-target={target.id}
+									title={titleOf(target)}
+									onclick={() => pick(target.id)}
+								>
+									{#if soundOnly(target)}
+										<span class="icon-[mingcute--music-2-line] size-3.5 opacity-60"></span>
+									{/if}
+									{nameOf(target)}
+								</button>
+							{/each}
+						</div>
 					{/each}
 				</div>
 			{/if}
