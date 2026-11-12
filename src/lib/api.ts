@@ -1,7 +1,7 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { get } from 'svelte/store';
 import { keyStore, freshToken } from './stores/auth';
-import type { Playlist, PlaylistSongInfo, User } from './types';
+import type { MapSet, Playlist, PlaylistSongInfo, User } from './types';
 
 // Trailing slash: nginx redirects /v2 to /v2/, which turns the POST into a GET
 export const API_URL = 'https://api.stamer-d.de/v2/';
@@ -227,6 +227,71 @@ export async function updateListenPlayback(
 		'mutation ($code: String!, $playback: ListenPlaybackInput!) { updateListenPlayback(code: $code, playback: $playback) }',
 		{ code, playback }
 	);
+}
+
+// --- Stosufy Connect (connect.ts): the user's devices playing and controlling each other ---
+
+export interface ConnectPlaybackInput {
+	song: MapSet;
+	position: number;
+	duration: number;
+	playing: boolean;
+	rate: number;
+	/** 0–1; null if it can't be set from another device */
+	volume: number | null;
+	shuffle: boolean;
+	repeat: string;
+}
+
+export interface ConnectQueueInput {
+	songs: MapSet[];
+	index: number;
+}
+
+/** The playing device's state (the queue only when it changed); returns whether it's the active one */
+export async function updateConnectPlayback(
+	token: string,
+	deviceId: string,
+	playback: ConnectPlaybackInput | null,
+	queue: ConnectQueueInput | null,
+	claim: boolean
+): Promise<boolean> {
+	const data = await graphql<any>(
+		token,
+		'mutation ($deviceId: String!, $playback: ConnectPlaybackInput, $queue: ConnectQueueInput, $claim: Boolean) { updateConnectPlayback(deviceId: $deviceId, playback: $playback, queue: $queue, claim: $claim) }',
+		{ deviceId, playback, queue, claim }
+	);
+	return data.updateConnectPlayback;
+}
+
+/** Asks the device that plays to do something (play, pause, next, seek, volume, …) */
+export async function sendConnectCommand(
+	token: string,
+	deviceId: string,
+	type: string,
+	data: unknown = null
+): Promise<boolean> {
+	const result = await graphql<any>(
+		token,
+		'mutation ($deviceId: String!, $type: String!, $data: JSON) { sendConnectCommand(deviceId: $deviceId, type: $type, data: $data) }',
+		{ deviceId, type, data }
+	);
+	return result.sendConnectCommand;
+}
+
+/** Moves the playback to another device (or this one) */
+export async function transferConnectPlayback(
+	token: string,
+	deviceId: string,
+	targetId: string,
+	play: boolean | null
+): Promise<boolean> {
+	const data = await graphql<any>(
+		token,
+		'mutation ($deviceId: String!, $targetId: String!, $play: Boolean) { transferConnectPlayback(deviceId: $deviceId, targetId: $targetId, play: $play) }',
+		{ deviceId, targetId, play }
+	);
+	return data.transferConnectPlayback;
 }
 
 export interface FriendActivity {
