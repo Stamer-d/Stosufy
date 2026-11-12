@@ -39,8 +39,16 @@ its button in the title bar.
 - 🌍 **World center.** The weather with its radar, live lightning, storms, flights, earthquakes,
   departures, the ISS and webcams on one live map, and widgets of them for the home screen.
 - 🔁 **File converter.** Pictures, sound, video, data and text into other formats (PNG, JPG, WebP,
-  GIF, ICO, PDF, MP3, FLAC, Opus, MP4, WebM, JSON, YAML, TOML, CSV, XML, Markdown, HTML and more),
-  many files at once, ZIPs packed and unpacked. All on your computer, saved to `Stosufy/Converted`.
+  GIF, ICO, PDF, MP3, FLAC, Opus, MP4, WebM, JSON, YAML, TOML, CSV, XML, Markdown, HTML and more)
+  with one click, many files at once, under a size limit if you like (10 MB for Discord), tags and
+  covers kept, ZIPs packed and unpacked. Saved to `Stosufy/Converted`.
+- ✂️ **File editor.** Cut songs and videos on their waveform, fade them, make them louder, faster
+  or slower, turn and mirror videos, turn, mirror and crop pictures, and save them in any format.
+  Saved to `Stosufy/Edited`.
+
+The file add-ons work on your computer, nothing is uploaded. For sound and video they use
+FFmpeg: the first time it's needed, a build of it for your computer (~20–30 MB) is downloaded
+once and checked; until then (or if it can't be) a slower one runs in the app.
 
 ## Install
 

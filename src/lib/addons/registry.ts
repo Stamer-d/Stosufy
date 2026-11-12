@@ -7,8 +7,9 @@ import dash from './dash/addon';
 import puzzle from './puzzle/addon';
 import world from './world/addon';
 import convert from './convert/addon';
+import edit from './edit/addon';
 
-export const ADDONS: Addon[] = [dj, dash, puzzle, world, convert];
+export const ADDONS: Addon[] = [dj, dash, puzzle, world, convert, edit];
 
 export const ADDON_CATEGORIES: { id: AddonCategory; label: string }[] = [
 	{ id: 'music', label: 'Music' },

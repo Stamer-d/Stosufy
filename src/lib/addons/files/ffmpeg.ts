@@ -21,6 +21,8 @@ export interface RunOptions {
 	duration?: number;
 	/** To stop it, with `cancel` */
 	id?: string;
+	/** Before the input (`-ss` to start there, `-t` for how long: fast, and exact) */
+	before?: string[];
 }
 
 export interface Probe {
@@ -33,6 +35,8 @@ export interface Probe {
 	cover: boolean;
 	width: number;
 	height: number;
+	/** Of the sound (Hz), 0 if unknown */
+	sampleRate: number;
 }
 
 export class Cancelled extends Error {
@@ -108,7 +112,7 @@ async function runNative(
 	try {
 		const result = await invoke<{ code: number; log: string; cancelled: boolean }>('ffmpeg_run', {
 			id,
-			args: ['-i', input, ...args, output],
+			args: [...(options.before ?? []), '-i', input, ...args, output],
 			duration: options.duration || null
 		});
 		if (result.cancelled) {
@@ -169,7 +173,15 @@ async function runWasm(
 	wasmRunning = options.id ?? id;
 	try {
 		await ff.writeFile(from, input);
-		const code = await ff.exec(['-hide_banner', '-y', '-i', from, ...args, to]);
+		const code = await ff.exec([
+			'-hide_banner',
+			'-y',
+			...(options.before ?? []),
+			'-i',
+			from,
+			...args,
+			to
+		]);
 		if (wasmRunning === null) throw new Cancelled();
 		if (code !== 0) throw new Error(explain(wasmLog));
 		const data = (await ff.readFile(to)) as Uint8Array;
@@ -296,7 +308,8 @@ export function parseProbe(text: string): Probe {
 		video: moving.length > 0,
 		cover: videos.some((line) => /attached pic/.test(line)),
 		width: size ? +size[1] : 0,
-		height: size ? +size[2] : 0
+		height: size ? +size[2] : 0,
+		sampleRate: +(/Audio:.*?(\d{4,6}) Hz/.exec(text)?.[1] ?? 0)
 	};
 }
 

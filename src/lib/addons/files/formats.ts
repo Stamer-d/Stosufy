@@ -204,3 +204,16 @@ export function targetsFor(format: Format | null, { shrink = false } = {}): Targ
 export function kindOf(format: Format | null): Kind {
 	return format?.id === 'pdf' ? 'other' : (format?.kind ?? 'other');
 }
+
+/**
+ * What an edited file can be saved as: its own format first (if it can be written), then
+ * what it can be made into (not a ZIP or Base64 of it)
+ */
+export function editTargets(format: Format | null): Target[] {
+	const others = targetsFor(format).filter(
+		(option) => option.group !== 'Any file' && option.id !== 'unzip'
+	);
+	if (!format || format.readOnly || !formatById.has(format.id) || kindOf(format) === 'other')
+		return others;
+	return [target(format.id, 'Same format'), ...others];
+}
