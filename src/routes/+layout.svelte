@@ -14,6 +14,7 @@
 	import { flushMapData } from '#lib/stores/data.ts';
 	import { flushHistory } from '#lib/stores/history.ts';
 	import { startMediaSession } from '#lib/stores/mediaSession.ts';
+	import { startConnect } from '#lib/stores/connectDesktop.ts';
 	import Titlebar from '#lib/components/Titlebar.svelte';
 	import QueuePanel from '#lib/components/QueuePanel.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
@@ -117,6 +118,8 @@
 		startKeybinds();
 		startSettingsSync();
 		startHitsounds();
+		// Your other devices (the web app on a phone): what plays there, controlled from here
+		startConnect();
 		// Invites to listening sessions: stosufynew://listen/CODE
 		const joinFromLink = (urls) => {
 			const link = urls?.find((url) => url.includes('listen/'));

@@ -13,6 +13,7 @@ import { currentMod, MODS } from './mods';
 import { listen, joinSession, songFor } from './listen';
 import { showToast } from './toast';
 import type { PlaybackMod } from '../types';
+import { connect } from './connect';
 
 export interface FriendsState {
 	status: 'idle' | 'loading' | 'ok' | 'needs-login' | 'error';
@@ -82,6 +83,8 @@ async function checkIn(force = false) {
 	const token = get(keyStore).access_token;
 	const shown = visibility();
 	if (shown === 'hidden' || !token || !get(user)?.id) return;
+	// Another of the user's devices plays (Stosufy Connect): that one tells what plays
+	if (get(connect).remote) return;
 	// "Only online": no song and no listening session
 	const playback = shown === 'all' ? nowPlaying() : null;
 	const room = get(listen);

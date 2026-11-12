@@ -8,6 +8,12 @@
 	import { isFavourite, toggleFavourite } from '../lib/stores/favourites';
 	import SongSwipe from './SongSwipe.svelte';
 	import { TABS, currentTab, openTab } from './navigation';
+	import { devicesOpen } from './connect';
+	import { connect, DEVICE_ICONS } from '../lib/stores/connect';
+
+	// Another device plays (Stosufy Connect): its name under the song, as in Spotify
+	let elsewhere = $derived($connect.remote && $connect.playback ? $connect.remoteDevice : null);
+	let hasOthers = $derived($connect.devices.length > 1);
 
 	let song = $derived($queue.songs[$queue.index] ?? null);
 	let progress = $derived($time.duration ? Math.min(1, $time.current / $time.duration) : 0);
@@ -37,13 +43,37 @@
 							/>
 							<span class="min-w-0 flex-1 pr-2">
 								<span class="block text-sm font-semibold truncate">{shown.title}</span>
-								<span class="block text-xs text-secondary-600 truncate">
-									{shown.artist}{$previewOnly && shown === song ? ' · preview' : ''}
-								</span>
+								{#if elsewhere && shown === song}
+									<span class="flex items-center gap-1 text-xs text-primary-400 truncate">
+										<span
+											class="{DEVICE_ICONS[elsewhere.kind] ??
+												DEVICE_ICONS.computer} size-3.5 shrink-0"
+										></span>
+										<span class="truncate">{elsewhere.name}</span>
+									</span>
+								{:else}
+									<span class="block text-xs text-secondary-600 truncate">
+										{shown.artist}{$previewOnly && shown === song ? ' · preview' : ''}
+									</span>
+								{/if}
 							</span>
 						</button>
 					{/snippet}
 				</SongSwipe>
+				{#if hasOthers || elsewhere}
+					<button
+						aria-label="Connect to a device"
+						class="size-10 shrink-0 grid place-items-center {elsewhere
+							? 'text-primary-400'
+							: 'text-secondary-600'}"
+						onclick={() => {
+							haptic();
+							devicesOpen.set(true);
+						}}
+					>
+						<span class="icon-[mingcute--device-line] size-[22px]"></span>
+					</button>
+				{/if}
 				<button
 					aria-label={$isFavourite(song) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
 					class="size-10 shrink-0 grid place-items-center"

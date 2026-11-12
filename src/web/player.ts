@@ -58,6 +58,7 @@ export function setSimilarSongs(find: typeof similarTo) {
  * time (with the screen locked, the next song has to be there already when one ends)
  */
 function topUp() {
+	if (elsewhere) return;
 	const { songs, index } = get(queue);
 	if (!get(autoplay) || get(repeat) !== 'off' || !similarTo || songs.length - index - 1 >= 2)
 		return;
@@ -202,14 +203,14 @@ function create() {
 	const mine = () => player === audio;
 	player.addEventListener('play', () => {
 		if (!mine()) return;
-		playing.set(true);
+		if (!elsewhere) playing.set(true);
 		turnedDown = false;
 		keepRunning();
 		holdAudio(true);
 	});
 	player.addEventListener('pause', () => {
 		if (!mine()) return;
-		playing.set(false);
+		if (!elsewhere) playing.set(false);
 		holdAudio(false);
 		// (not the app: it says who, so the log shows why a song stopped by itself)
 		if (!pausing && !player.ended)
@@ -229,7 +230,7 @@ function create() {
 		log(`playing ${current()?.title ?? ''}`);
 	});
 	player.addEventListener('timeupdate', () => {
-		if (!mine()) return;
+		if (!mine() || elsewhere) return;
 		const now = player.currentTime;
 		const duration = lengthOf(player);
 		time.set({ current: now, duration });
@@ -399,6 +400,7 @@ function load(at = 0) {
 
 /** Reads the next song's audio ahead if it's downloaded */
 async function readNext() {
+	if (elsewhere) return;
 	const { songs, index } = get(queue);
 	const upcoming = songs[index + 1] ?? (get(repeat) === 'all' ? songs[0] : null);
 	if (!upcoming) return;
@@ -712,6 +714,10 @@ export function play(
 	{ shuffled: shuffleThem = false, at = 0 }: { shuffled?: boolean; at?: number } = {}
 ) {
 	if (!songs.length) return;
+	if (elsewhere) {
+		const from = shuffleThem ? shuffled(songs) : songs;
+		return elsewhere.play(from, shuffleThem ? 0 : index);
+	}
 	wakeIfShown();
 	if (shuffleThem) shuffle.set(true);
 	ordered = songs.map(slim);
@@ -728,6 +734,7 @@ export function play(
 }
 
 export function toggle() {
+	if (elsewhere) return elsewhere.toggle();
 	const player = element();
 	wakeIfShown();
 	// After a start: the song of before, where it was
@@ -770,6 +777,7 @@ function playableAfter(songs: MapSet[], index: number, step = 1) {
 }
 
 export function next() {
+	if (elsewhere) return elsewhere.next();
 	wakeIfShown();
 	const { songs } = get(queue);
 	let { index } = get(queue);
@@ -794,6 +802,7 @@ export function next() {
 }
 
 export function previous() {
+	if (elsewhere) return elsewhere.previous();
 	wakeIfShown();
 	const { songs, index } = get(queue);
 	// A bit into the song: back to its start, else the one before
@@ -818,6 +827,10 @@ export function previous() {
 }
 
 export function seek(seconds: number) {
+	if (elsewhere) {
+		time.update((t) => ({ ...t, current: seconds }));
+		return elsewhere.seek(seconds);
+	}
 	// (only a jump to the start isn't the song's end: dragged to the very end, the song going
 	// round right after is its end)
 	seekedByHand = seconds < 2;
@@ -843,6 +856,7 @@ export function seek(seconds: number) {
 
 /** Plays the song at `index` of the queue */
 export function jumpTo(index: number) {
+	if (elsewhere) return elsewhere.jumpTo(index);
 	wakeIfShown();
 	queue.update((q) => ({ ...q, index }));
 	return load();
@@ -864,6 +878,7 @@ queue.subscribe(({ songs, index }) => {
 
 /** The song comes right after the one playing */
 export function playNext(song: MapSet) {
+	if (elsewhere) return elsewhere.queueSong(song, true);
 	if (!current()) return play([song]);
 	queue.update(({ songs, index }) => ({
 		songs: [...songs.slice(0, index + 1), asQueued(song), ...songs.slice(index + 1)],
@@ -876,6 +891,7 @@ export function playNext(song: MapSet) {
 /** The song comes after the one playing and the songs already put in the queue, before the
  * playlist goes on */
 export function addToQueue(song: MapSet) {
+	if (elsewhere) return elsewhere.queueSong(song, false);
 	if (!current()) return play([song]);
 	queue.update(({ songs, index }) => {
 		let at = index + 1;
@@ -888,6 +904,7 @@ export function addToQueue(song: MapSet) {
 
 /** A song coming up moves to another place among those coming up */
 export function moveInQueue(from: number, to: number) {
+	if (elsewhere) return elsewhere.cantChangeQueue();
 	const { index, songs } = get(queue);
 	if (from <= index || to <= index || from >= songs.length || to >= songs.length || from === to)
 		return;
@@ -902,6 +919,7 @@ export function moveInQueue(from: number, to: number) {
 }
 
 export function removeFromQueue(at: number) {
+	if (elsewhere) return elsewhere.cantChangeQueue();
 	// (nor in the order to go back to when shuffle is turned off)
 	const gone = get(queue).songs[at];
 	// (a song put in the queue by hand isn't in it: the playlist's own copy of it stays)
@@ -919,6 +937,7 @@ export function removeFromQueue(at: number) {
 }
 
 export function toggleShuffle() {
+	if (elsewhere) return elsewhere.setShuffle(!get(shuffle));
 	const on = !get(shuffle);
 	shuffle.set(on);
 	const song = current();
@@ -955,6 +974,7 @@ export function toggleAutoplay() {
 }
 
 export function cycleRepeat() {
+	if (elsewhere) return elsewhere.cycleRepeat();
 	repeat.update((mode) => (mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off'));
 	save();
 	readNext();
@@ -983,6 +1003,149 @@ if (typeof document !== 'undefined')
 // The loudness setting (the account's) applies at once
 if (typeof window !== 'undefined') userSettings.subscribe(() => applyNormalize());
 
+// --- Another device plays (Stosufy Connect, see connect.ts) ---------------------------------
+// The player shows what it plays (its song, queue, position, shuffle and repeat), and its
+// controls and the songs chosen go there. What played here is put aside meanwhile, and comes
+// back when this device plays its own again.
+
+export interface Elsewhere {
+	play(songs: MapSet[], index: number): void;
+	toggle(): void;
+	next(): void;
+	previous(): void;
+	seek(seconds: number): void;
+	jumpTo(index: number): void;
+	queueSong(song: MapSet, next: boolean): void;
+	setShuffle(on: boolean): void;
+	cycleRepeat(): void;
+	cantChangeQueue(): void;
+}
+
+export interface Shown {
+	songs: MapSet[];
+	index: number;
+	playing: boolean;
+	current: number;
+	duration: number;
+	shuffle: boolean;
+	repeat: Repeat;
+}
+
+/** The controls of the device that plays, while another one does */
+let elsewhere: Elsewhere | null = null;
+/** What this device played, put aside */
+let ownBefore: (Omit<Shown, 'playing'> & { ordered: MapSet[]; autoplay: boolean }) | null = null;
+
+/** Puts the queue, position, shuffle and repeat in place, to go on from there with play */
+function showPaused(shown: Omit<Shown, 'playing'>, kept: MapSet[] = shown.songs) {
+	queue.set({ songs: shown.songs, index: shown.index });
+	ordered = kept;
+	time.set({ current: shown.current, duration: shown.duration });
+	shuffle.set(shown.shuffle);
+	repeat.set(shown.repeat);
+	playing.set(false);
+}
+
+/** Another device plays: the player shows it (called again whenever it changes there) */
+export function showElsewhere(controls: Elsewhere, shown: Shown) {
+	if (!elsewhere) {
+		const player = audio;
+		ownBefore = {
+			...get(queue),
+			ordered,
+			current: loaded && player ? player.currentTime : get(time).current,
+			duration: (loaded && player && lengthOf(player)) || get(time).duration,
+			shuffle: get(shuffle),
+			repeat: get(repeat),
+			autoplay: get(autoplay)
+		};
+		save();
+		if (player && !player.paused) pauseHere('another device plays');
+		handing?.stop();
+		handing = null;
+		dropPrepared();
+		// (the song here starts again where it was, when it's this one's turn again)
+		loaded = null;
+		log('another device plays: showing it');
+	}
+	elsewhere = controls;
+	const now = get(queue);
+	if (now.songs !== shown.songs || now.index !== shown.index)
+		queue.set({ songs: shown.songs, index: shown.index });
+	if (get(playing) !== shown.playing) playing.set(shown.playing);
+	time.set({ current: shown.current, duration: shown.duration });
+	if (get(shuffle) !== shown.shuffle) shuffle.set(shown.shuffle);
+	if (get(repeat) !== shown.repeat) repeat.set(shown.repeat);
+}
+
+/**
+ * This device's own again: what it played before, or (`goOn`, the other device is gone) what
+ * the other one played last, paused, to play on here
+ */
+export function showOwn(goOn: Omit<Shown, 'playing'> | null = null) {
+	if (!elsewhere) return;
+	elsewhere = null;
+	const own = ownBefore;
+	ownBefore = null;
+	loaded = null;
+	if (goOn) showPaused(goOn);
+	else if (own) {
+		showPaused(own, own.ordered);
+		autoplay.set(own.autoplay);
+	} else
+		showPaused({ songs: [], index: -1, current: 0, duration: 0, shuffle: false, repeat: 'off' });
+	log(goOn ? 'the other device is gone: its song here' : 'this device plays its own again');
+	save();
+}
+
+/** The playback came over from another device: on here from `at` (playing or paused) */
+export function playHere(
+	songs: MapSet[],
+	index: number,
+	at: number,
+	start: boolean,
+	mode: Omit<Shown, 'songs' | 'index' | 'playing' | 'current'>
+) {
+	showOwn();
+	// (the order there stays: not shuffled again)
+	shuffle.set(false);
+	if (start) play(songs.map(slim), index, { at });
+	else
+		showPaused({
+			songs: songs.map(slim),
+			index,
+			current: at,
+			duration: mode.duration,
+			shuffle: false,
+			repeat: mode.repeat
+		});
+	shuffle.set(mode.shuffle);
+	repeat.set(mode.repeat);
+	save();
+}
+
+/** What plays here (not what's shown from another device), for the other devices */
+export function ownPlayback() {
+	if (elsewhere) return null;
+	const song = current();
+	if (!song) return null;
+	const player = loaded ? audio : null;
+	return {
+		song,
+		position: player ? player.currentTime : get(time).current,
+		duration: (player && lengthOf(player)) || get(time).duration || 0,
+		playing: !!player && !player.paused,
+		rate: player?.playbackRate || 1,
+		shuffle: get(shuffle),
+		repeat: get(repeat)
+	};
+}
+
+/** Another device plays now: stopped here (it shows that one next) */
+export function stopForElsewhere() {
+	if (audio && !audio.paused) pauseHere('another device plays now');
+}
+
 // Kept for the next start
 
 const KEY = 'stosufy-web-player';
@@ -992,6 +1155,8 @@ const saveSoon = () => (saveTimer ??= setTimeout(save, 5000));
 function save() {
 	if (saveTimer) clearTimeout(saveTimer);
 	saveTimer = null;
+	// (what another device plays isn't this one's to go on with)
+	if (elsewhere) return;
 	const { songs, index } = get(queue);
 	try {
 		localStorage.setItem(
