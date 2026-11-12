@@ -87,7 +87,7 @@ impl FfmpegState {
     }
 }
 
-fn binary_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn binary_path(app: &AppHandle) -> Result<PathBuf, String> {
     let name = if cfg!(windows) {
         "ffmpeg.exe"
     } else {
@@ -103,6 +103,21 @@ fn binary_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// ~/Stosufy/tmp/media, made if it isn't there
+/// ~/Stosufy: what the add-ons made there (downloads, conversions) is read as it is
+fn stosufy_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .home_dir()
+        .map_err(|e| e.to_string())?
+        .join("Stosufy"))
+}
+
+/// A file FFmpeg (and the page) may read: in ~/Stosufy, or one the user chose
+fn readable(app: &AppHandle, state: &FfmpegState, path: &str) -> Result<bool, String> {
+    Ok(inside(&stosufy_root(app)?, path)
+        || is_picked(&*state.picked.lock().map_err(|e| e.to_string())?, path))
+}
+
 fn work_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -266,15 +281,19 @@ fn is_picked(picked: &HashSet<PathBuf>, path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// FFmpeg's output in the work folder, its inputs there or chosen by the user, nothing read
-/// from elsewhere
-pub fn check_args(dir: &Path, picked: &HashSet<PathBuf>, args: &[String]) -> Result<(), String> {
+/// FFmpeg's output in the work folder, its inputs there or `readable` (chosen by the user, in
+/// ~/Stosufy), nothing read from elsewhere
+pub fn check_args(
+    dir: &Path,
+    readable: &dyn Fn(&str) -> bool,
+    args: &[String],
+) -> Result<(), String> {
     let output = args.last().ok_or("No output")?;
     if !inside(dir, output) {
         return Err("The output has to be in the work folder".into());
     }
     for pair in args.windows(2) {
-        if pair[0] == "-i" && !inside(dir, &pair[1]) && !is_picked(picked, &pair[1]) {
+        if pair[0] == "-i" && !inside(dir, &pair[1]) && !readable(&pair[1]) {
             return Err("The inputs have to be in the work folder".into());
         }
     }
@@ -399,11 +418,15 @@ pub async fn ffmpeg_run(
     if !binary.is_file() {
         return Err("FFmpeg isn't installed".into());
     }
-    check_args(
-        &work_dir(&app)?,
-        &*state.picked.lock().map_err(|e| e.to_string())?,
-        &args,
-    )?;
+    let root = stosufy_root(&app)?;
+    {
+        let picked = state.picked.lock().map_err(|e| e.to_string())?;
+        check_args(
+            &work_dir(&app)?,
+            &|path: &str| inside(&root, path) || is_picked(&picked, path),
+            &args,
+        )?;
+    }
     let running = state.running.clone();
     tauri::async_runtime::spawn_blocking(move || {
         run(&binary, &id, &args, duration, &running, |progress| {
@@ -437,8 +460,7 @@ pub async fn ffmpeg_probe(
     path: String,
 ) -> Result<String, String> {
     let binary = binary_path(&app)?;
-    let picked = is_picked(&*state.picked.lock().map_err(|e| e.to_string())?, &path);
-    if !picked && !inside(&work_dir(&app)?, &path) {
+    if !readable(&app, &state, &path)? && !inside(&work_dir(&app)?, &path) {
         return Err("The file has to be in the work folder".into());
     }
     tauri::async_runtime::spawn_blocking(move || probe(&binary, &path))
@@ -512,14 +534,15 @@ pub async fn files_pick(
     Ok(out)
 }
 
-/// A chosen file's bytes (a picture, a text: what the page reads itself)
+/// A chosen file's bytes, or one in ~/Stosufy (a picture, a text: what the page reads itself)
 #[tauri::command]
 pub async fn files_read(
+    app: AppHandle,
     state: State<'_, FfmpegState>,
     path: String,
 ) -> Result<tauri::ipc::Response, String> {
-    if !is_picked(&*state.picked.lock().map_err(|e| e.to_string())?, &path) {
-        return Err("Only a file that was chosen can be read".into());
+    if !readable(&app, &state, &path)? {
+        return Err("Only a file that was chosen, or in Stosufy, can be read".into());
     }
     let data = tauri::async_runtime::spawn_blocking(move || fs::read(path))
         .await
@@ -559,7 +582,7 @@ mod tests {
     #[test]
     fn only_the_work_folder() {
         let dir = temp_dir("args");
-        let none = HashSet::new();
+        let none = |_: &str| false;
         let inside_file = dir.join("in.wav");
         fs::write(&inside_file, b"x").unwrap();
         let input = inside_file.to_string_lossy().into_owned();
@@ -597,7 +620,8 @@ mod tests {
         fs::write(&elsewhere, b"x").unwrap();
         let chosen = elsewhere.to_string_lossy().into_owned();
         assert!(check_args(&dir, &none, &s(&["-i", &chosen, &output])).is_err());
-        let picked: HashSet<PathBuf> = [elsewhere.canonicalize().unwrap()].into();
+        let real = elsewhere.canonicalize().unwrap();
+        let picked = |path: &str| Path::new(path).canonicalize().ok().as_ref() == Some(&real);
         assert!(check_args(&dir, &picked, &s(&["-i", &chosen, &output])).is_ok());
         assert!(check_args(&dir, &picked, &s(&["-i", &input, &chosen])).is_err());
     }

@@ -4,7 +4,7 @@ const { chromium, start, saved } = require('./harness.cjs');
 
 // (those that were part of the app before there were add-ons, and all of them)
 const NAMES = ['DJ mode', 'Dash', 'Puzzle', 'World center'];
-const ALL = [...NAMES, 'File converter', 'File editor'];
+const ALL = [...NAMES, 'File converter', 'File editor', 'Downloader'];
 const results = [];
 function check(name, ok, detail = '') {
 	results.push(ok);

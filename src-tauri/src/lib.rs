@@ -2,6 +2,7 @@ use tauri::Manager;
 
 mod clipboard;
 mod ffmpeg;
+mod ytdlp;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -35,6 +36,7 @@ pub fn run() {
         .plugin(tauri_plugin_prevent_default::debug())
         .manage(ffmpeg::FfmpegState::default())
         .manage(clipboard::ClipboardState::default())
+        .manage(ytdlp::YtdlpState::default())
         .invoke_handler(tauri::generate_handler![
             ffmpeg::ffmpeg_status,
             ffmpeg::ffmpeg_install,
@@ -43,7 +45,13 @@ pub fn run() {
             ffmpeg::ffmpeg_cancel,
             ffmpeg::files_pick,
             ffmpeg::files_read,
-            clipboard::copy_files
+            clipboard::copy_files,
+            ytdlp::ytdlp_status,
+            ytdlp::ytdlp_install,
+            ytdlp::deno_install,
+            ytdlp::ytdlp_info,
+            ytdlp::ytdlp_download,
+            ytdlp::ytdlp_cancel
         ])
         .setup(|app| {
             // The login link (stosufynew://) opens the app. On Linux this needs the desktop's
@@ -63,6 +71,7 @@ pub fn run() {
             // (a conversion that's still running ends with the app)
             if let tauri::RunEvent::Exit = event {
                 app.state::<ffmpeg::FfmpegState>().stop_all();
+                app.state::<ytdlp::YtdlpState>().stop_all();
             }
         });
 }

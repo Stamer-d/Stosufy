@@ -35,6 +35,36 @@ function tauri({ online, writes }) {
 			if (cmd === 'plugin:drag|start_drag') return void (window.__dragged = args.item);
 			// (the system's file picker: what a test put in window.__pickable, read from there)
 			if (cmd === 'files_pick') return window.__pickable ?? null;
+			// (the computer's FFmpeg and yt-dlp: what a test put in window.__ffmpegStatus and
+			// window.__ytdlp)
+			if (cmd === 'ffmpeg_status') return window.__ffmpegStatus ?? null;
+			const yt = window.__ytdlp;
+			if (yt && cmd === 'ytdlp_status') return yt.status;
+			if (yt && cmd === 'ytdlp_install') return 'current';
+			if (yt && cmd === 'deno_install') return void (yt.denoInstalls = (yt.denoInstalls ?? 0) + 1);
+			if (yt && cmd === 'ytdlp_info') {
+				if (yt.errors?.[args.url]) throw yt.errors[args.url];
+				return JSON.stringify(yt.infos[args.url]);
+			}
+			if (yt && cmd === 'ytdlp_cancel') return void yt.cancel?.(args.id);
+			if (yt && cmd === 'ytdlp_download') {
+				(yt.requests ??= []).push(args.request);
+				if (args.request.url === yt.slow)
+					return new Promise(
+						(resolve) => (yt.cancel = () => resolve({ files: [], cancelled: true }))
+					);
+				const info = yt.infos[args.request.url];
+				const ext = args.request.kind === 'audio' ? args.request.format : args.request.format;
+				const path = `/home/tester/Stosufy/tmp/downloads/${args.id}/${info.title}.${ext}`;
+				written[path] = new Uint8Array(yt.file ?? [1, 2, 3]);
+				return { files: [{ path, size: written[path].length }], cancelled: false };
+			}
+			if (writes && cmd === 'plugin:fs|rename') {
+				written[args.newPath] = written[args.oldPath];
+				delete written[args.oldPath];
+				return null;
+			}
+			if (writes && cmd === 'plugin:fs|remove') return null;
 			if (cmd === 'files_read') {
 				(window.__read ??= []).push(args.path);
 				return new Uint8Array(window.__pickBytes[args.path]);

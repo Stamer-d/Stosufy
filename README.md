@@ -46,9 +46,15 @@ its button in the title bar.
   or slower, turn and mirror videos, turn, mirror and crop pictures, and save them in any format.
   Saved to `Stosufy/Edited`.
 
+- ⬇️ **Downloader.** Videos and their sound from YouTube, Twitch, TikTok, SoundCloud and hundreds
+  more (with [yt-dlp](https://github.com/yt-dlp/yt-dlp)): MP4 that plays everywhere or the best
+  quality there is, only the sound (MP3, M4A, Opus, FLAC, WAV), or just a part of a long stream,
+  without downloading the rest. Saved to `Stosufy/Downloads`, and on to the editor or converter.
+
 The file add-ons work on your computer, nothing is uploaded. For sound and video they use
 FFmpeg: the first time it's needed, a build of it for your computer (~20–30 MB) is downloaded
-once and checked; until then (or if it can't be) a slower one runs in the app.
+once and checked; until then (or if it can't be) a slower one runs in the app. The downloader
+fetches yt-dlp the same way (and keeps it up to date), and Deno for YouTube's links.
 
 ## Install
 
