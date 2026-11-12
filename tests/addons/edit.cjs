@@ -12,6 +12,13 @@ function check(name, ok, detail = '') {
 	console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${ok || !detail ? '' : `  (${detail})`}`);
 }
 const DIR = '/home/tester/Stosufy/Edited';
+/** The volume slider set (dB) */
+async function setVolume(page, db) {
+	await page.locator('input[aria-label="Volume"]').evaluate((input, value) => {
+		input.value = String(value);
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	}, db);
+}
 /** Exported in a format: chosen in the export bar, then Export */
 async function exportAs(page, id) {
 	await pick(page, 'Format', id);
@@ -98,7 +105,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.press('input[aria-label="Start time"]', 'Enter');
 	await page.fill('input[aria-label="End time"]', '1.5');
 	await page.press('input[aria-label="End time"]', 'Enter');
-	await pick(page, 'Fade in', '1');
+	await setVolume(page, -6);
 	await pick(page, 'Speed', '2');
 	check(
 		'the length shown: 1 s at 2× → 0:00.5',
@@ -123,7 +130,7 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.press('input[aria-label="Start time"]', 'Enter');
 	await page.fill('input[aria-label="End time"]', '2');
 	await page.press('input[aria-label="End time"]', 'Enter');
-	await pick(page, 'Fade in', '0');
+	await setVolume(page, 0);
 	await pick(page, 'Speed', '1');
 	const waveBox = await page
 		.locator('[role="slider"][aria-label="Start"]')
@@ -192,8 +199,29 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 		`${from} → ${await now()}`
 	);
 
+	// --- The very start: a click on the start handle there, Home and End --------------------
+	// (zoomed out again: the start in view)
+	while (await page.isEnabled('button[aria-label="Zoom out"]'))
+		await page.click('button[aria-label="Zoom out"]');
+	const startHandle = page.locator('[role="slider"][aria-label="Start"]');
+	const handleBox = await startHandle.boundingBox();
+	await page.mouse.click(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+	check(
+		'a click on the start handle (at the very start): there, the handle not moved',
+		(await now()) < 0.06 && (await startHandle.getAttribute('aria-valuenow')) === '0',
+		`${await now()} / ${await startHandle.getAttribute('aria-valuenow')}`
+	);
+	await page.keyboard.press('End');
+	const atEnd = await now();
+	await page.keyboard.press('Home');
+	check(
+		'End and Home: to its end and its very start',
+		Math.abs(atEnd - end) < 0.06 && (await now()) === 0,
+		`${atEnd} → ${await now()}`
+	);
+
 	// --- Another file while there are changes: said first ------------------------------------
-	await pick(page, 'Fade in', '1');
+	await setVolume(page, 3);
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'voice.webm', mimeType: 'audio/webm', buffer: fixture('voice.webm') }
 	]);
@@ -202,7 +230,8 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	check(
 		'changes not saved: asked first, and kept on a "Keep editing"',
 		(await page.locator('h2:has-text("tagged.mp3")').count()) === 1 &&
-			/1 s/.test(await page.innerText('[role="combobox"][aria-label^="Fade in:"]'))
+			(await page.inputValue('input[aria-label="Volume"]')) === '3' &&
+			/\+3 dB/.test(await page.innerText('label:has(input[aria-label="Volume"])'))
 	);
 	await page.setInputFiles('input[aria-label="Choose a file"]', [
 		{ name: 'voice.webm', mimeType: 'video/webm', buffer: fixture('voice.webm') }

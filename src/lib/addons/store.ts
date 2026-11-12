@@ -134,6 +134,8 @@ export async function installAddon(id: string) {
 			});
 		}
 		showToast(`${addon.name} installed`, 'icon-[mingcute--check-circle-line]');
+		// (what it needs, downloaded in the background now)
+		addon.prepare?.().catch((error) => console.warn(`Could not prepare ${id}:`, error));
 	} catch (error) {
 		console.error(`Could not install ${id}:`, error);
 		showToast(`Couldn't install ${addon.name}, try again`, 'icon-[mingcute--warning-line]');

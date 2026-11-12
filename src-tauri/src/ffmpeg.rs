@@ -277,33 +277,12 @@ async fn download(app: &AppHandle, build: &Build, target: &Path) -> Result<(), S
     let dir = target.parent().ok_or("no folder")?;
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let gz = dir.join("download.gz");
-    let mut response = reqwest::Client::new()
-        .get(build.url)
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't download it: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!("Couldn't download it ({})", response.status()));
-    }
-    let total = response.content_length().unwrap_or(build.size);
-    let mut file = File::create(&gz).map_err(|e| e.to_string())?;
-    let mut received = 0u64;
-    let mut reported = 0u64;
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| format!("The download broke off: {e}"))?
-    {
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
-        received += chunk.len() as u64;
-        if received - reported > total / 100 {
-            reported = received;
-            let _ = app.emit("ffmpeg-install", InstallProgress { received, total });
-        }
-    }
-    file.flush().map_err(|e| e.to_string())?;
-    drop(file);
-    let result = verify_and_unpack(&gz, build.sha256, target);
+    let app = app.clone();
+    let progress = crate::fetch::every_percent(move |received, total| {
+        let _ = app.emit("ffmpeg-install", InstallProgress { received, total });
+    });
+    let fetched = crate::fetch::fetch(build.url, &gz, build.size, progress).await;
+    let result = fetched.and_then(|_| verify_and_unpack(&gz, build.sha256, target));
     let _ = fs::remove_file(&gz);
     result
 }

@@ -16,5 +16,7 @@ export default {
 	category: 'tools',
 	icon: 'icon-[mingcute--download-3-line]',
 	colors: ['#e11d48', '#7c3aed'],
-	page: () => import('./Page.svelte')
+	page: () => import('./Page.svelte'),
+	// (yt-dlp, FFmpeg and YouTube's support downloaded at once: ready when it's first opened)
+	prepare: () => import('./ytdlp').then((tools) => tools.ensureTools())
 } satisfies Addon;

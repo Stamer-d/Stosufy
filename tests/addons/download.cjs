@@ -517,6 +517,55 @@ const formats = (vcodec, heights, fps = 30) =>
 		(await row('Test song').locator('button:has-text("Download again")').count()) === 1
 	);
 
+	// --- The first time: all it needs downloaded at once, as soon as it's installed ----------
+	{
+		const { page: fresh, errors: freshErrors } = await start(browser, {
+			stored: { settings: { addons: [] }, currentQueue: null },
+			writes: true
+		});
+		await fresh.evaluate(() => {
+			window.__ffmpegStatus = {
+				supported: true,
+				installed: true,
+				downloadSize: 0,
+				workDir: '/home/tester/Stosufy/tmp/media'
+			};
+			window.__ytdlp = {
+				status: { supported: true, installed: false, denoSupported: true, denoInstalled: false },
+				installDelay: 1500,
+				infos: {},
+				errors: {}
+			};
+		});
+		await fresh.click('header button[aria-label="Add-ons"]');
+		await fresh.waitForURL('**/addons');
+		await fresh
+			.locator('article[aria-label="Downloader"]')
+			.locator('button:has-text("Install")')
+			.click();
+		// (opened while it gets ready)
+		await fresh.locator('article[aria-label="Downloader"] button:has-text("Open")').click();
+		await fresh.waitForURL('**/addons/download');
+		await fresh.waitForSelector('text=Getting ready, the first time only');
+		check('the first time: getting ready, said so with how far', true);
+		await fresh.waitForFunction(() => window.__ytdlp.installs?.deno_install?.end, null, {
+			timeout: 15000
+		});
+		const installs = await fresh.evaluate(() => window.__ytdlp.installs);
+		check(
+			'yt-dlp and YouTube support downloaded at once (from the install on)',
+			installs.ytdlp_install &&
+				installs.deno_install &&
+				installs.deno_install.start < installs.ytdlp_install.end &&
+				installs.ytdlp_install.start < installs.deno_install.end,
+			JSON.stringify(installs)
+		);
+		await fresh.waitForSelector('text=Getting ready, the first time only', { state: 'detached' });
+		check('ready: the note gone', true);
+		check('no errors (the first time)', freshErrors.length === 0, freshErrors.join('\n'));
+		await fresh.context().close();
+	}
+
 	await browser.close();
 	console.log(`\n${results.filter(Boolean).length}/${results.length}`);
 	process.exit(results.every(Boolean) ? 0 : 1);

@@ -33,6 +33,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-websocket",
  "tauri-plugin-window-state",
+ "tokio",
  "trash",
  "zip",
 ]

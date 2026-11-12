@@ -154,7 +154,7 @@
 		const x = event.clientX;
 		let moved = false;
 		const move = (pointer) => {
-			// (the part: moved once the pointer has moved a little; a click goes there)
+			// (moved once the pointer has moved a little: a click goes there)
 			if (!moved && Math.abs(pointer.clientX - x) < 4) return;
 			moved = true;
 			const t = timeAt(pointer);
@@ -169,7 +169,9 @@
 		const up = () => {
 			window.removeEventListener('pointermove', move);
 			window.removeEventListener('pointerup', up);
-			if (!moved && what === 'part') onseek(grabbed);
+			// (a click, not a drag: there, as anywhere on the timeline; also on a handle, which
+			// sits right at the start of the song when nothing's cut there)
+			if (!moved) onseek(grabbed);
 		};
 		window.addEventListener('pointermove', move);
 		window.addEventListener('pointerup', up);

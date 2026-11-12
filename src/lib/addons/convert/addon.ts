@@ -16,5 +16,7 @@ export default {
 	category: 'tools',
 	icon: 'icon-[mingcute--transfer-line]',
 	colors: ['#f59e0b', '#ef4444'],
-	page: () => import('./Page.svelte')
+	page: () => import('./Page.svelte'),
+	// (the computer's own FFmpeg downloaded now: fast from the first file on)
+	prepare: () => import('../files/native').then((native) => native.nativeFfmpeg())
 } satisfies Addon;

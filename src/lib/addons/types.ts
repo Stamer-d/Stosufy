@@ -37,6 +37,11 @@ export interface Addon {
 		/** It covers everything: the app under it isn't drawn, and its beat effects rest */
 		hidesApp?: boolean;
 	};
+	/**
+	 * Getting ready in the background as soon as it's installed (what it needs downloaded, so
+	 * it's there when it's first opened)
+	 */
+	prepare?: () => Promise<unknown>;
 	/** A page of its own, at /addons/<id>, opened with its title bar button */
 	page?: () => Loaded<Component<any>>;
 	/** Widgets for the home screen */

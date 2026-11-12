@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod clipboard;
+mod fetch;
 mod ffmpeg;
 mod ytdlp;
 

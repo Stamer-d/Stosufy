@@ -70,11 +70,8 @@
 		['start', 'Start', 'I'],
 		['end', 'End', 'O']
 	];
-	const FADES = [0, 1, 3].map((s) => ({ value: s, label: s ? `${s} s` : 'Off' }));
-	const VOLUMES = [-6, -3, 0, 3, 6].map((db) => ({
-		value: db,
-		label: db ? `${db > 0 ? '+' : ''}${db} dB` : 'As is'
-	}));
+	/** Louder or quieter, as it's read: "+3 dB", "As is" */
+	const volumeText = (db) => (db ? `${db > 0 ? '+' : ''}${db} dB` : 'As is');
 	const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2].map((x) => ({ value: x, label: `${x}×` }));
 
 	let player = $state();
@@ -190,7 +187,11 @@
 			)
 				return;
 			if (event.ctrlKey || event.metaKey || event.altKey) return;
-			if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && duration) {
+			if ((event.key === 'Home' || event.key === 'End') && duration) {
+				// (the very start or end of it, whatever's cut)
+				event.preventDefault();
+				seek(event.key === 'Home' ? 0 : duration);
+			} else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && duration) {
 				// (a tenth of a second; with Shift, a second)
 				event.preventDefault();
 				const by = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1);
@@ -382,27 +383,27 @@
 	>
 		<div class="flex flex-wrap items-center gap-2" role="group" aria-label="Sound">
 			<span class="w-full text-xs font-bold uppercase tracking-wide text-white/55">Sound</span>
-			<Dropdown
-				label="Fade in"
-				prefix="Fade in"
-				options={FADES}
-				value={edit.fadeIn}
-				onchange={(value) => (edit.fadeIn = value)}
-			/>
-			<Dropdown
-				label="Fade out"
-				prefix="Fade out"
-				options={FADES}
-				value={edit.fadeOut}
-				onchange={(value) => (edit.fadeOut = value)}
-			/>
-			<Dropdown
-				label="Volume"
-				prefix="Volume"
-				options={VOLUMES}
-				value={edit.volume}
-				onchange={(value) => (edit.volume = value)}
-			/>
+			<!-- (louder or quieter, in decibels; a double-click: as it is) -->
+			<label
+				class="h-10 pl-3 pr-2.5 flex items-center gap-2.5 rounded-lg bg-secondary-300 text-sm font-medium"
+				title="Louder or quieter (double-click: as it is)"
+			>
+				<span class="icon-[mingcute--volume-line] size-4 text-secondary-600"></span>
+				<span class="text-secondary-600">Volume</span>
+				<input
+					type="range"
+					min="-12"
+					max="12"
+					step="1"
+					class="w-28 accent-violet-300 cursor-pointer"
+					aria-label="Volume"
+					aria-valuetext={volumeText(edit.volume)}
+					value={edit.volume}
+					oninput={(event) => (edit.volume = Number(event.currentTarget.value))}
+					ondblclick={() => (edit.volume = 0)}
+				/>
+				<span class="w-14 text-right tabular-nums">{volumeText(edit.volume)}</span>
+			</label>
 			<Dropdown
 				label="Speed"
 				prefix="Speed"

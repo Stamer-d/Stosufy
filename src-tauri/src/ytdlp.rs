@@ -18,19 +18,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const RELEASE: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/";
 pub const DENO_VERSION: &str = "2.9.8";
 
-/// yt-dlp's file for this computer (its release's name for it)
-fn ytdlp_asset() -> Option<&'static str> {
+/// yt-dlp for this computer: its release's ZIP of it unpacked (a program and its folder:
+/// it starts at once, not unpacked again each time it runs, nor checked again by the virus
+/// scanner), and the program's name in it
+fn ytdlp_build() -> Option<(&'static str, &'static str)> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("windows", "x86_64") => Some("yt-dlp.exe"),
-        ("macos", _) => Some("yt-dlp_macos"),
-        ("linux", "x86_64") => Some("yt-dlp_linux"),
-        ("linux", "aarch64") => Some("yt-dlp_linux_aarch64"),
+        ("windows", "x86_64") => Some(("yt-dlp_win.zip", "yt-dlp.exe")),
+        ("macos", _) => Some(("yt-dlp_macos.zip", "yt-dlp_macos")),
+        ("linux", "x86_64") => Some(("yt-dlp_linux.zip", "yt-dlp_linux")),
+        ("linux", "aarch64") => Some(("yt-dlp_linux_aarch64.zip", "yt-dlp_linux_aarch64")),
         _ => None,
     }
 }
@@ -119,8 +120,29 @@ fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_local_data_dir().map_err(|e| e.to_string())
 }
 
+/// yt-dlp's folder (the versions in it, and `current`: the one used, and its ZIP's SHA-256)
+fn ytdlp_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(tools_dir(app)?.join("yt-dlp"))
+}
+
+/// The version used: its folder's name and its ZIP's SHA-256
+fn current_ytdlp(dir: &Path) -> Option<(String, String)> {
+    let text = fs::read_to_string(dir.join("current")).ok()?;
+    let mut lines = text.lines();
+    Some((
+        lines.next()?.trim().to_string(),
+        lines.next()?.trim().to_string(),
+    ))
+}
+
 fn ytdlp_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(tools_dir(app)?.join("yt-dlp").join(format!("yt-dlp{EXE}")))
+    let dir = ytdlp_dir(app)?;
+    let (_, program) = ytdlp_build().ok_or("There's no yt-dlp for this computer")?;
+    Ok(match current_ytdlp(&dir) {
+        Some((version, _)) => dir.join(version).join(program),
+        // (none unpacked yet: the single file of before, if it's there)
+        None => dir.join(format!("yt-dlp{EXE}")),
+    })
 }
 
 fn deno_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -270,7 +292,7 @@ pub struct Status {
 #[tauri::command]
 pub fn ytdlp_status(app: AppHandle) -> Result<Status, String> {
     Ok(Status {
-        supported: ytdlp_asset().is_some(),
+        supported: ytdlp_build().is_some(),
         installed: ytdlp_path(&app)?.is_file(),
         deno_supported: deno_build().is_some(),
         deno_installed: deno_path(&app)?.is_file(),
@@ -286,30 +308,11 @@ struct InstallProgress {
     total: u64,
 }
 
-fn sha256_of(path: &Path) -> Result<String, String> {
-    let mut hasher = Sha256::new();
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
-    let mut buffer = vec![0u8; 1 << 16];
-    loop {
-        let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-/// HTTP with time limits: a connection that stalls ends with an error, not never
 fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(20))
-        .read_timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())
+    crate::fetch::client()
 }
 
-/// Downloads `url` to `to` (progress as `ytdlp-install` events); its SHA-256
+/// Downloads `url` to `to` (in pieces at once; progress as `ytdlp-install` events); its SHA-256
 async fn fetch(
     app: &AppHandle,
     what: &'static str,
@@ -317,40 +320,18 @@ async fn fetch(
     to: &Path,
     size: u64,
 ) -> Result<String, String> {
-    let mut response = client()?
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't download it: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!("Couldn't download it ({})", response.status()));
-    }
-    let total = response.content_length().unwrap_or(size);
-    let mut file = File::create(to).map_err(|e| e.to_string())?;
-    let mut hasher = Sha256::new();
-    let (mut received, mut reported) = (0u64, 0u64);
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| format!("The download broke off: {e}"))?
-    {
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
-        hasher.update(&chunk);
-        received += chunk.len() as u64;
-        if received - reported > total / 100 {
-            reported = received;
-            let _ = app.emit(
-                "ytdlp-install",
-                InstallProgress {
-                    what,
-                    received,
-                    total,
-                },
-            );
-        }
-    }
-    file.flush().map_err(|e| e.to_string())?;
-    Ok(format!("{:x}", hasher.finalize()))
+    let app = app.clone();
+    let progress = crate::fetch::every_percent(move |received, total| {
+        let _ = app.emit(
+            "ytdlp-install",
+            InstallProgress {
+                what,
+                received,
+                total,
+            },
+        );
+    });
+    crate::fetch::fetch(url, to, size, progress).await
 }
 
 fn make_runnable(path: &Path) -> Result<(), String> {
@@ -377,7 +358,7 @@ pub fn sum_for(sums: &str, asset: &str) -> Option<String> {
 /// (a download or lookup runs: its program can't be replaced under it, on Windows)
 #[tauri::command]
 pub async fn ytdlp_install(app: AppHandle, state: State<'_, YtdlpState>) -> Result<String, String> {
-    let asset = ytdlp_asset().ok_or("There's no yt-dlp for this computer")?;
+    let (asset, _) = ytdlp_build().ok_or("There's no yt-dlp for this computer")?;
     let _installing = Installing::start(&state.installing_ytdlp)?;
     let busy = !state.running.lock().map_err(|e| e.to_string())?.is_empty();
     if busy && ytdlp_path(&app)?.is_file() {
@@ -387,7 +368,8 @@ pub async fn ytdlp_install(app: AppHandle, state: State<'_, YtdlpState>) -> Resu
 }
 
 async fn install_ytdlp(app: &AppHandle, asset: &str) -> Result<String, String> {
-    let target = ytdlp_path(app)?;
+    let (_, program) = ytdlp_build().ok_or("There's no yt-dlp for this computer")?;
+    let dir = ytdlp_dir(app)?;
     let response = client()?
         .get(format!("{RELEASE}SHA2-256SUMS"))
         .send()
@@ -398,35 +380,94 @@ async fn install_ytdlp(app: &AppHandle, asset: &str) -> Result<String, String> {
     }
     let sums = response.text().await.map_err(|e| e.to_string())?;
     let wanted = sum_for(&sums, asset).ok_or("yt-dlp's release has no file for this computer")?;
-    let had = target.is_file();
-    if had && sha256_of(&target)? == wanted {
-        return Ok("current".into());
+    let had = current_ytdlp(&dir);
+    if let Some((version, sum)) = &had {
+        if *sum == wanted && dir.join(version).join(program).is_file() {
+            return Ok("current".into());
+        }
     }
-    let dir = target.parent().ok_or("no folder")?;
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let part = target.with_extension("part");
-    let hash = fetch(
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let zip = dir.join("download.zip");
+    let fetched = fetch(
         app,
         "yt-dlp",
         &format!("{RELEASE}{asset}"),
-        &part,
-        40_000_000,
+        &zip,
+        25_000_000,
     )
     .await;
-    let hash = hash.inspect_err(|_| {
-        let _ = fs::remove_file(&part);
-    })?;
-    if hash != wanted {
-        let _ = fs::remove_file(&part);
-        return Err("The download isn't the expected file (its checksum differs)".into());
+    let version = wanted[..16].to_string();
+    let unpacked = dir.join(format!("{version}.part"));
+    let result = match fetched {
+        Ok(hash) if hash == wanted => {
+            let _ = fs::remove_dir_all(&unpacked);
+            unzip_all(&zip, &unpacked).and_then(|_| make_runnable(&unpacked.join(program)))
+        }
+        Ok(_) => Err("The download isn't the expected file (its checksum differs)".into()),
+        Err(error) => Err(error),
+    };
+    let _ = fs::remove_file(&zip);
+    if let Err(error) = result {
+        let _ = fs::remove_dir_all(&unpacked);
+        return Err(error);
     }
-    make_runnable(&part)?;
-    fs::rename(&part, &target)
-        .inspect_err(|_| {
-            let _ = fs::remove_file(&part);
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(if had { "updated" } else { "installed" }.into())
+    let _ = fs::remove_dir_all(dir.join(&version));
+    fs::rename(&unpacked, dir.join(&version)).map_err(|e| e.to_string())?;
+    // (the current one named: written aside, then put in place at once)
+    let pointer = dir.join("current.part");
+    fs::write(&pointer, format!("{version}\n{wanted}\n")).map_err(|e| e.to_string())?;
+    fs::rename(&pointer, dir.join("current")).map_err(|e| e.to_string())?;
+    // The ones before (and the single file of before): gone, where nothing runs them
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == version || name == "current" {
+                continue;
+            }
+            if path.is_dir() {
+                let _ = fs::remove_dir_all(&path);
+            } else {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+    Ok(if had.is_some() {
+        "updated"
+    } else {
+        "installed"
+    }
+    .into())
+}
+
+/// A whole ZIP unpacked into `target` (nothing out of it: names that would lead elsewhere are
+/// left out), each file as runnable as it was
+pub fn unzip_all(zip: &Path, target: &Path) -> Result<(), String> {
+    let mut archive = zip::ZipArchive::new(File::open(zip).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Couldn't unpack it: {e}"))?;
+    fs::create_dir_all(target).map_err(|e| e.to_string())?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let Some(name) = entry.enclosed_name() else {
+            continue;
+        };
+        let path = target.join(name);
+        if entry.is_dir() {
+            fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut out = File::create(&path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| format!("Couldn't unpack it: {e}"))?;
+        #[cfg(unix)]
+        if let Some(mode) = entry.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(mode & 0o777));
+        }
+    }
+    Ok(())
 }
 
 /// The runtime for YouTube's challenges, downloaded (once)
@@ -1454,6 +1495,96 @@ mod tests {
         assert!(!args.contains("--cookies-from-browser"));
         assert!(check_browser(&Some("file".into())).is_ok());
         assert!(check_browser(&Some("netscape".into())).is_err());
+    }
+
+    /// A ZIP unpacked whole: its folders, a program runnable, nothing out of it
+    #[test]
+    fn a_zip_unpacked() {
+        use std::io::Write as _;
+        let dir = std::env::temp_dir().join(format!("stosufy-unzip-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let zip_path = dir.join("a.zip");
+        {
+            let mut zip = zip::ZipWriter::new(File::create(&zip_path).unwrap());
+            let file = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored)
+                .unix_permissions(0o755);
+            zip.add_directory("_internal/", file).unwrap();
+            zip.start_file("_internal/lib.so", file).unwrap();
+            zip.write_all(b"lib").unwrap();
+            zip.start_file("yt-dlp_linux", file).unwrap();
+            zip.write_all(b"program").unwrap();
+            zip.start_file("../outside.txt", file).unwrap();
+            zip.write_all(b"no").unwrap();
+            zip.finish().unwrap();
+        }
+        let target = dir.join("out");
+        unzip_all(&zip_path, &target).unwrap();
+        assert_eq!(fs::read(target.join("_internal/lib.so")).unwrap(), b"lib");
+        assert!(!dir.join("outside.txt").exists(), "nothing out of it");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(target.join("yt-dlp_linux"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "runnable");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The real yt-dlp release, in pieces at once (with STOSUFY_NET_TEST set): the same file
+    /// as its checksum says, unpacked (not run here)
+    #[test]
+    fn the_release_downloaded_in_pieces() {
+        if std::env::var("STOSUFY_NET_TEST").is_err() {
+            return;
+        }
+        let (asset, program) = ytdlp_build().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = std::env::temp_dir().join(format!("stosufy-fetch-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("yt.zip");
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counted = calls.clone();
+        let started = std::time::Instant::now();
+        let (sums, hash) = runtime.block_on(async {
+            let sums = crate::fetch::client()
+                .unwrap()
+                .get(format!("{RELEASE}SHA2-256SUMS"))
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+            let progress = crate::fetch::every_percent(move |_, _| {
+                counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            });
+            let hash = crate::fetch::fetch(&format!("{RELEASE}{asset}"), &zip, 1, progress)
+                .await
+                .unwrap();
+            (sums, hash)
+        });
+        println!("downloaded in {:?}", started.elapsed());
+        assert_eq!(Some(hash), sum_for(&sums, asset));
+        assert!(
+            calls.load(std::sync::atomic::Ordering::Relaxed) >= 50,
+            "its progress told"
+        );
+        unzip_all(&zip, &dir.join("out")).unwrap();
+        assert!(
+            dir.join("out").join(program).is_file(),
+            "its program unpacked"
+        );
+        assert!(dir.join("out").join("_internal").is_dir(), "and its folder");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

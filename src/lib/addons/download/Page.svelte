@@ -574,15 +574,32 @@
 				<p class="mt-1 text-sm text-white/70">
 					YouTube, Twitch and many more: a video, its sound, or just a part.
 				</p>
-				{#if $tools.status === 'downloading'}
-					<p class="mt-2 flex items-center gap-1.5 text-xs font-semibold text-rose-200/90">
-						<span class="icon-[mingcute--loading-line] size-3.5 animate-spin"></span>
-						{$tools.what === 'deno'
-							? 'Getting YouTube support ready'
-							: $tools.what === 'ffmpeg'
-								? 'Getting FFmpeg ready'
-								: 'Getting the downloader ready'}… {Math.round($tools.progress * 100)}%
-					</p>
+				{#if $tools.status === 'downloading' || $tools.denoDownloading}
+					<!-- (the first time: all it needs, downloaded at once) -->
+					<div class="mt-2 w-72 max-w-full" role="status">
+						<p class="flex items-center gap-1.5 text-xs font-semibold text-rose-100">
+							<span class="icon-[mingcute--loading-line] size-3.5 animate-spin"></span>
+							{$tools.status === 'downloading'
+								? 'Getting ready, the first time only'
+								: 'Getting YouTube support ready'}
+							<span class="ml-auto tabular-nums text-rose-100/80">
+								{Math.round($tools.received / 1e6)} of {Math.round($tools.total / 1e6)} MB
+							</span>
+						</p>
+						<div
+							class="mt-1 h-1 rounded-full bg-white/15 overflow-hidden"
+							role="progressbar"
+							aria-label="Getting ready"
+							aria-valuemin="0"
+							aria-valuemax="100"
+							aria-valuenow={Math.round($tools.progress * 100)}
+						>
+							<div
+								class="h-full rounded-full bg-rose-300 transition-[width] duration-300"
+								style="width: {$tools.progress * 100}%"
+							></div>
+						</div>
+					</div>
 				{:else if $tools.status === 'failed' || $tools.status === 'unavailable'}
 					<p class="mt-2 flex items-center gap-1.5 text-xs text-red-200">
 						<span class="icon-[mingcute--warning-line] size-3.5"></span>

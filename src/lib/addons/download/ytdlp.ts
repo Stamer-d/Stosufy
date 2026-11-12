@@ -1,7 +1,8 @@
-// yt-dlp for the downloader (see src-tauri/src/ytdlp.rs): downloaded when it's first needed and
-// brought up to date once a day (the sites it downloads from change all the time), Deno with
-// the first YouTube link, and FFmpeg (the file add-ons' own) for putting video and sound
-// together and cutting. What a link is, and its download with its progress.
+// yt-dlp for the downloader (see src-tauri/src/ytdlp.rs), Deno for YouTube, and FFmpeg (the
+// file add-ons' own) for putting video and sound together and cutting: the first time, all
+// three downloaded at once (as soon as the add-on is installed: ready when it's opened), yt-dlp
+// brought up to date once a day after that (the sites it downloads from change all the time).
+// What a link is, and its download with its progress.
 
 import { get, writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -9,22 +10,31 @@ import { listen } from '@tauri-apps/api/event';
 import { nativeFfmpeg, nativeState } from '../files/native';
 
 export type ToolStatus = 'unknown' | 'unavailable' | 'downloading' | 'ready' | 'failed';
+type Tool = 'yt-dlp' | 'deno' | 'ffmpeg';
 
 export interface ToolsState {
 	status: ToolStatus;
-	/** What's being downloaded, and how far (0–1) */
-	what: 'yt-dlp' | 'deno' | 'ffmpeg' | null;
+	/** What's being downloaded now */
+	what: Tool | null;
+	/** How far all that's being downloaded is (0–1), and in bytes */
 	progress: number;
+	received: number;
+	total: number;
 	error?: string;
 	/** YouTube support (Deno) there */
 	deno: boolean;
+	/** YouTube support still being downloaded (the rest is ready) */
+	denoDownloading: boolean;
 }
 
 export const tools = writable<ToolsState>({
 	status: 'unknown',
 	what: null,
 	progress: 0,
-	deno: false
+	received: 0,
+	total: 0,
+	deno: false,
+	denoDownloading: false
 });
 
 interface Status {
@@ -37,16 +47,46 @@ interface Status {
 const UPDATE_KEY = 'stosufy-ytdlp-checked';
 const DAY = 24 * 60 * 60 * 1000;
 
+/** What's being downloaded now (bytes received, of how many) */
+const downloading = new Map<Tool, { received: number; total: number }>();
+/** About how big each is, until its download says */
+const SIZES: Record<Tool, number> = { 'yt-dlp': 25e6, deno: 42e6, ffmpeg: 30e6 };
+
+function count(tool: Tool, received: number, total: number) {
+	downloading.set(tool, { received, total: total || SIZES[tool] });
+	told();
+}
+
+function finished(tool: Tool) {
+	downloading.delete(tool);
+	told();
+}
+
+/** How far it all is, told */
+function told() {
+	let received = 0;
+	let total = 0;
+	for (const part of downloading.values()) {
+		received += part.received;
+		total += part.total;
+	}
+	const what =
+		[...downloading.keys()].find((tool) => tool !== 'deno') ??
+		(downloading.has('deno') ? 'deno' : null);
+	tools.update((state) => ({
+		...state,
+		what,
+		received,
+		total,
+		progress: total ? Math.min(1, received / total) : 0
+	}));
+}
+
 let listening: Promise<unknown> | null = null;
 function listenToInstall() {
 	listening ??= listen<{ what: 'yt-dlp' | 'deno'; received: number; total: number }>(
 		'ytdlp-install',
-		({ payload }) =>
-			tools.update((state) => ({
-				...state,
-				what: payload.what,
-				progress: payload.total ? payload.received / payload.total : 0
-			}))
+		({ payload }) => count(payload.what, payload.received, payload.total)
 	).catch(() => (listening = null));
 	return listening;
 }
@@ -61,7 +101,10 @@ async function status(): Promise<Status | null> {
 
 let ready: Promise<boolean> | null = null;
 
-/** yt-dlp (and FFmpeg) there, downloaded if they aren't; whether they are */
+/**
+ * yt-dlp and FFmpeg there (and Deno started, for YouTube), downloaded at once if they aren't;
+ * whether they are
+ */
 export function ensureTools(): Promise<boolean> {
 	ready ??= (async () => {
 		const found = await status();
@@ -71,25 +114,30 @@ export function ensureTools(): Promise<boolean> {
 		}
 		tools.update((state) => ({ ...state, deno: found.denoInstalled }));
 		await listenToInstall();
+		// (YouTube's support at the same time: most links are YouTube's; the others don't wait)
+		if (found.denoSupported && !found.denoInstalled) void ensureDeno();
 		try {
-			if (!found.installed) {
-				tools.update((state) => ({ ...state, status: 'downloading', what: 'yt-dlp', progress: 0 }));
-				await invoke('ytdlp_install');
-				remember();
-			}
-			// (FFmpeg: the file add-ons' own, downloaded with its progress shown here too)
+			const ytdlp = found.installed
+				? Promise.resolve()
+				: (async () => {
+						tools.update((state) => ({ ...state, status: 'downloading' }));
+						count('yt-dlp', 0, 0);
+						await invoke('ytdlp_install');
+						remember();
+					})().finally(() => finished('yt-dlp'));
+			// (FFmpeg: the file add-ons' own, its progress counted with the rest)
 			const stop = nativeState.subscribe(($native) => {
-				if ($native.status === 'downloading')
-					tools.update((state) => ({
-						...state,
-						status: 'downloading',
-						what: 'ffmpeg',
-						progress: $native.progress
-					}));
+				if ($native.status !== 'downloading') return;
+				tools.update((state) => ({ ...state, status: 'downloading' }));
+				count('ffmpeg', $native.progress * $native.size, $native.size);
 			});
-			const ffmpeg = await nativeFfmpeg().finally(stop);
-			if (!ffmpeg) throw new Error("FFmpeg couldn't be downloaded");
-			tools.update((state) => ({ ...state, status: 'ready', what: null, error: undefined }));
+			const ffmpeg = nativeFfmpeg().finally(() => {
+				stop();
+				finished('ffmpeg');
+			});
+			const [, path] = await Promise.all([ytdlp, ffmpeg]);
+			if (!path) throw new Error("FFmpeg couldn't be downloaded");
+			tools.update((state) => ({ ...state, status: 'ready', error: undefined }));
 			void updateDaily();
 			return true;
 		} catch (error) {
@@ -97,7 +145,6 @@ export function ensureTools(): Promise<boolean> {
 			tools.update((state) => ({
 				...state,
 				status: 'failed',
-				what: null,
 				error: String((error as Error)?.message ?? error)
 			}));
 			return false;
@@ -150,16 +197,19 @@ export function ensureDeno(): Promise<boolean> {
 	if (get(tools).deno) return Promise.resolve(true);
 	deno ??= (async () => {
 		await listenToInstall();
-		tools.update((state) => ({ ...state, status: 'downloading', what: 'deno', progress: 0 }));
+		tools.update((state) => ({ ...state, denoDownloading: true }));
+		count('deno', 0, 0);
 		try {
 			await invoke('deno_install');
-			tools.update((state) => ({ ...state, status: 'ready', what: null, deno: true }));
+			tools.update((state) => ({ ...state, deno: true }));
 			return true;
 		} catch (error) {
 			deno = null;
 			denoError = `YouTube support couldn't be downloaded: ${(error as Error)?.message ?? error}`;
-			tools.update((state) => ({ ...state, status: 'ready', what: null }));
 			return false;
+		} finally {
+			finished('deno');
+			tools.update((state) => ({ ...state, denoDownloading: false }));
 		}
 	})();
 	return deno;

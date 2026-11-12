@@ -50,8 +50,14 @@ function tauri({ online, writes }) {
 			if (cmd === 'ffmpeg_status') return window.__ffmpegStatus ?? null;
 			const yt = window.__ytdlp;
 			if (yt && cmd === 'ytdlp_status') return yt.status;
-			if (yt && cmd === 'ytdlp_install') return 'current';
-			if (yt && cmd === 'deno_install') return void (yt.denoInstalls = (yt.denoInstalls ?? 0) + 1);
+			// (downloaded the first time: how long it takes, when each started and ended)
+			if (yt && (cmd === 'ytdlp_install' || cmd === 'deno_install')) {
+				const times = ((yt.installs ??= {})[cmd] = { start: Date.now() });
+				if (yt.installDelay) await new Promise((done) => setTimeout(done, yt.installDelay));
+				times.end = Date.now();
+				if (cmd === 'deno_install') return void (yt.denoInstalls = (yt.denoInstalls ?? 0) + 1);
+				return 'installed';
+			}
 			if (yt && cmd === 'ytdlp_info') {
 				(yt.looked ??= []).push({ url: args.url, cookies: args.cookies });
 				if (yt.locked?.includes(args.cookies))
