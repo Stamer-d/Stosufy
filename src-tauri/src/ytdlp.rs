@@ -130,6 +130,114 @@ fn deno_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(format!("deno{EXE}")))
 }
 
+/// The cookies file added (exported from a browser): a copy of it, in the app's own folder
+fn cookies_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(tools_dir(app)?.join("cookies.txt"))
+}
+
+/// What a cookies file holds: how many cookies, and whether YouTube's are among them
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CookiesInfo {
+    count: usize,
+    youtube: bool,
+    /// When it was added (Unix time, s)
+    added: u64,
+}
+
+/// The cookies of a cookies.txt (the Netscape format browsers' extensions export: seven
+/// fields a line, split by tabs); an error for anything else
+pub fn read_cookies(text: &str) -> Result<(usize, bool), String> {
+    let mut count = 0;
+    let mut youtube = false;
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        // (#HttpOnly_ marks a cookie; other lines with # are comments)
+        let line = line.strip_prefix("#HttpOnly_").unwrap_or(line);
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != 7 {
+            continue;
+        }
+        count += 1;
+        let domain = fields[0].trim_start_matches('.');
+        youtube |= domain == "youtube.com" || domain.ends_with(".youtube.com");
+    }
+    if count == 0 {
+        let json = text.trim_start().starts_with('[') || text.trim_start().starts_with('{');
+        return Err(if json {
+            "That's cookies as JSON: export them as cookies.txt (Netscape format)".into()
+        } else {
+            "That's not a cookies file: export your cookies as cookies.txt (Netscape format)".into()
+        });
+    }
+    Ok((count, youtube))
+}
+
+fn cookies_info_of(path: &Path) -> Option<CookiesInfo> {
+    let text = fs::read_to_string(path).ok()?;
+    let (count, youtube) = read_cookies(&text).ok()?;
+    let added = fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    Some(CookiesInfo {
+        count,
+        youtube,
+        added,
+    })
+}
+
+/// The cookies file added, if there's one
+#[tauri::command]
+pub fn cookies_info(app: AppHandle) -> Result<Option<CookiesInfo>, String> {
+    Ok(cookies_info_of(&cookies_path(&app)?))
+}
+
+/// A cookies file chosen (exported from a browser) and kept: what's in it; None if none was
+/// chosen
+#[tauri::command]
+pub async fn cookies_add(app: AppHandle) -> Result<Option<CookiesInfo>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app
+        .dialog()
+        .file()
+        .set_title("Your exported cookies (cookies.txt)")
+        .add_filter("Cookies", &["txt"]);
+    let chosen = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(chosen) = chosen else {
+        return Ok(None);
+    };
+    let path = chosen.into_path().map_err(|e| e.to_string())?;
+    if fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) > 20 * 1024 * 1024 {
+        return Err("That file is too big for cookies".into());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("Couldn't read it: {e}"))?;
+    read_cookies(&String::from_utf8_lossy(&bytes))?;
+    let target = cookies_path(&app)?;
+    if let Some(dir) = target.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&target, &bytes).map_err(|e| format!("Couldn't keep it: {e}"))?;
+    Ok(cookies_info_of(&target))
+}
+
+/// The cookies file added: forgotten
+#[tauri::command]
+pub fn cookies_remove(app: AppHandle) -> Result<(), String> {
+    let path = cookies_path(&app)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// ~/Stosufy/tmp/downloads/<id>: where a download is made (the page then moves it)
 fn download_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
@@ -398,6 +506,8 @@ const BROWSERS: [&str; 9] = [
     "brave", "chrome", "chromium", "edge", "firefox", "opera", "safari", "vivaldi", "whale",
 ];
 const KBPS: [u32; 6] = [96, 128, 160, 192, 256, 320];
+/// Signed in with the cookies file added (instead of a browser's name)
+pub const COOKIES_FILE: &str = "file";
 
 /// A link to a page (nothing that would be read as an option, a file or another protocol)
 pub fn check_url(url: &str) -> Result<(), String> {
@@ -409,6 +519,8 @@ pub fn check_url(url: &str) -> Result<(), String> {
 
 fn check_browser(cookies: &Option<String>) -> Result<(), String> {
     match cookies {
+        // (the cookies file added: see cookies_add)
+        Some(file) if file == COOKIES_FILE => Ok(()),
         Some(browser) if !BROWSERS.contains(&browser.as_str()) => {
             Err("Not a browser it knows".into())
         }
@@ -418,7 +530,12 @@ fn check_browser(cookies: &Option<String>) -> Result<(), String> {
 
 /// What every run gets: no configuration, plugins or updates of its own, UTF-8, our FFmpeg,
 /// Deno for YouTube, the browser's sign-in
-pub fn common_args(ffmpeg: &Path, deno: Option<&Path>, cookies: &Option<String>) -> Vec<String> {
+pub fn common_args(
+    ffmpeg: &Path,
+    deno: Option<&Path>,
+    cookies: &Option<String>,
+    cookies_file: &Path,
+) -> Vec<String> {
     let mut args: Vec<String> = [
         "--ignore-config",
         "--no-plugin-dirs",
@@ -437,9 +554,16 @@ pub fn common_args(ffmpeg: &Path, deno: Option<&Path>, cookies: &Option<String>)
         args.push("--js-runtimes".into());
         args.push(format!("deno:{}", deno.to_string_lossy()));
     }
-    if let Some(browser) = cookies {
-        args.push("--cookies-from-browser".into());
-        args.push(browser.clone());
+    match cookies.as_deref() {
+        Some(COOKIES_FILE) => {
+            args.push("--cookies".into());
+            args.push(cookies_file.to_string_lossy().into_owned());
+        }
+        Some(browser) => {
+            args.push("--cookies-from-browser".into());
+            args.push(browser.to_string());
+        }
+        None => {}
     }
     args
 }
@@ -877,6 +1001,13 @@ pub fn explain(log: &str) -> String {
     ]) {
         return "Your browser's sign-in couldn't be read: close the browser and try again, or choose Firefox".into();
     }
+    if has(&[
+        "cookies are no longer valid",
+        "cookies file",
+        "netscape format",
+    ]) {
+        return "The cookies file is out of date or broken: export it again and add it".into();
+    }
     if has(&["full disk access", "operation not permitted"]) && lower.contains("cookie") {
         return "Safari's sign-in can't be read without Full Disk Access for Stosufy (in the system settings)".into();
     }
@@ -963,7 +1094,7 @@ pub async fn ytdlp_info(
     check_url(&url)?;
     check_browser(&cookies)?;
     let (binary, ffmpeg, deno) = runtime(&app)?;
-    let mut args = common_args(&ffmpeg, deno.as_deref(), &cookies);
+    let mut args = common_args(&ffmpeg, deno.as_deref(), &cookies, &cookies_path(&app)?);
     args.extend(
         [
             "-J",
@@ -1098,6 +1229,7 @@ pub async fn ytdlp_download(
 ) -> Result<Downloaded, String> {
     let (binary, ffmpeg, deno) = runtime(&app)?;
     let out = download_dir(&app, &id)?;
+    let cookies_file = cookies_path(&app)?;
     // (checked now: what's asked for, before anything runs)
     download_args(&request, &out, &software_encoder())?;
     let running = state.running.clone();
@@ -1110,7 +1242,7 @@ pub async fn ytdlp_download(
             software_encoder()
         };
         let (ended, files) = loop {
-            let mut args = common_args(&ffmpeg, deno.as_deref(), &request.cookies);
+            let mut args = common_args(&ffmpeg, deno.as_deref(), &request.cookies, &cookies_file);
             args.extend(download_args(&request, &out, &encoder)?);
             let mut files: Vec<String> = Vec::new();
             let ended = run(&binary, &id, &args, &running, |line| {
@@ -1301,6 +1433,30 @@ mod tests {
     }
 
     #[test]
+    fn a_cookies_file_read() {
+        let file = "# Netscape HTTP Cookie File\n# made by an extension\n\n.youtube.com\tTRUE\t/\tTRUE\t1893456000\tSID\tabc\n#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t1893456000\tHSID\tdef\n.google.com\tTRUE\t/\tTRUE\t1893456000\tNID\tghi\r\n";
+        assert_eq!(read_cookies(file), Ok((3, true)));
+        assert_eq!(
+            read_cookies(".twitch.tv\tTRUE\t/\tTRUE\t0\tauth\tx\n"),
+            Ok((1, false))
+        );
+        assert!(read_cookies("[{\"name\": \"SID\"}]")
+            .unwrap_err()
+            .contains("JSON"));
+        assert!(read_cookies("hello world").is_err());
+        let args = joined(&common_args(
+            Path::new("/ff"),
+            None,
+            &Some(COOKIES_FILE.into()),
+            Path::new("/data/cookies.txt"),
+        ));
+        assert!(args.contains("--cookies /data/cookies.txt"), "{args}");
+        assert!(!args.contains("--cookies-from-browser"));
+        assert!(check_browser(&Some("file".into())).is_ok());
+        assert!(check_browser(&Some("netscape".into())).is_err());
+    }
+
+    #[test]
     fn sound_and_a_part() {
         let mut r = request("audio", "mp3");
         r.audio_kbps = Some(192);
@@ -1388,6 +1544,7 @@ mod tests {
             Path::new("/ff/ffmpeg"),
             Some(Path::new("/d/deno")),
             &Some("chrome".into()),
+            Path::new("/c"),
         ));
         assert!(args.starts_with("--ignore-config --no-plugin-dirs --no-update --encoding utf-8"));
         assert!(args.contains("--ffmpeg-location /ff/ffmpeg --js-runtimes deno:/d/deno"));
@@ -1522,7 +1679,7 @@ mod tests {
         r.url = url;
         r.sections = vec![[2.0, 5.0]];
         r.exact_cuts = true;
-        let mut args = common_args(Path::new("/usr/bin/ffmpeg"), None, &None);
+        let mut args = common_args(Path::new("/usr/bin/ffmpeg"), None, &None, Path::new("/c"));
         args.extend(download_args(&r, &out, &software_encoder()).unwrap());
         let running = Mutex::new(HashMap::new());
         let (mut percents, mut steps, mut files) = (vec![], vec![], vec![]);

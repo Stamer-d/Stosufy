@@ -406,6 +406,37 @@ const formats = (vcodec, heights, fps = 30) =>
 		JSON.stringify(tries) === '["chrome",null]',
 		JSON.stringify(tries)
 	);
+	// A cookies file exported from a browser: added, signed in with it, forgotten
+	await page.evaluate(() => {
+		window.__cookiesToAdd = { count: 12, youtube: true, added: 1794500000 };
+	});
+	await choose('Signed in as', 'add-file');
+	await page.waitForSelector('text=Cookies added: signed in with them');
+	check(
+		'a cookies file added: signed in with it',
+		/Cookies file/.test(await shown('Signed in as')),
+		await shown('Signed in as')
+	);
+	await link(TWITCH);
+	await page.waitForSelector('section[aria-label="What it is"] h2:has-text("Long stream")');
+	check(
+		'…looked at with it',
+		(await page.evaluate(() => window.__ytdlp.looked.at(-1).cookies)) === 'file'
+	);
+	const fileOptions = await optionsOf('Signed in as');
+	check(
+		'…to be forgotten, or another one added',
+		fileOptions.some((text) => text.startsWith('Cookies file 12 cookies')) &&
+			fileOptions.some((text) => text.startsWith('Another cookies file')) &&
+			fileOptions.some((text) => text.startsWith('Forget the cookies file')),
+		JSON.stringify(fileOptions)
+	);
+	await choose('Signed in as', 'forget-file');
+	check(
+		'forgotten: not signed in',
+		/Not signed in/.test(await shown('Signed in as')) &&
+			(await page.evaluate(() => window.__cookies)) === null
+	);
 	await choose('Signed in as', 'firefox');
 
 	// --- Only sound, stopped -----------------------------------------------------------------

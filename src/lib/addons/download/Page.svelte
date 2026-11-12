@@ -75,10 +75,14 @@
 			value: name.toLowerCase(),
 			label: `As in ${name}`,
 			hint: WINDOWS
-				? 'for age-restricted or members-only videos (Chrome and Edge lock theirs on Windows)'
+				? 'for age-restricted or members-only videos (Chrome and Edge lock theirs on Windows: add a cookies file instead)'
 				: 'for age-restricted or members-only videos'
 		}))
 	];
+	/** Signed in with the cookies file added; adding one; forgetting it */
+	const COOKIES_FILE = 'file';
+	const ADD_FILE = 'add-file';
+	const FORGET_FILE = 'forget-file';
 	/** Its sign-in couldn't be read (the browser locks it, or isn't there) */
 	const signInFailed = (message) => /sign-in couldn't be read|Full Disk Access/i.test(message);
 	const PHASES = {
@@ -116,7 +120,10 @@
 				...stored
 			};
 			// (a browser whose sign-in can't be read here: none)
-			const browser = BROWSERS.some((option) => option.value === cookies) ? cookies : null;
+			const browser =
+				cookies === COOKIES_FILE || BROWSERS.some((option) => option.value === cookies)
+					? cookies
+					: null;
 			return {
 				tab,
 				codec,
@@ -300,7 +307,7 @@
 				if (looked !== url) return;
 				result = await lookUp(url, null);
 				signedOut = (
-					BROWSERS.find((option) => option.value === options.cookies)?.label ?? 'the browser'
+					signIns.find((option) => option.value === options.cookies)?.label ?? 'the browser'
 				).replace(/^As in /, '');
 			}
 			if (looked !== url) return;
@@ -321,8 +328,79 @@
 
 	/** Signed in as in another browser: a link that couldn't be looked at, looked at again */
 	function signIn(value) {
+		if (value === ADD_FILE) return void addCookies();
+		if (value === FORGET_FILE) return void forgetCookies();
 		options.cookies = value;
 		if (found.state === 'failed' && isLink(link)) void look();
+	}
+
+	// --- A cookies file (exported from a browser, as cookies.txt): signed in with it --------
+
+	/** @type {{ count: number, youtube: boolean, added: number } | null} */
+	let cookiesFile = $state(null);
+
+	/** Not signed in, the cookies file (if there's one) and adding one, the browsers */
+	let signIns = $derived([
+		BROWSERS[0],
+		...(cookiesFile
+			? [
+					{
+						value: COOKIES_FILE,
+						label: 'Cookies file',
+						hint: `${cookiesFile.count} cookies${cookiesFile.youtube ? '' : ', none of YouTube'} · added ${new Date(cookiesFile.added * 1000).toLocaleDateString()}`
+					}
+				]
+			: []),
+		{
+			value: ADD_FILE,
+			label: cookiesFile ? 'Another cookies file…' : 'Add a cookies file…',
+			hint: 'a cookies.txt exported from your browser (with an extension like Get cookies.txt)'
+		},
+		...BROWSERS.slice(1),
+		...(cookiesFile
+			? [{ value: FORGET_FILE, label: 'Forget the cookies file', hint: 'not signed in with it' }]
+			: [])
+	]);
+
+	async function loadCookies() {
+		try {
+			cookiesFile = await invoke('cookies_info');
+		} catch {
+			cookiesFile = null;
+		}
+		// (signed in with a file that isn't there any more: not)
+		if (!cookiesFile && options.cookies === COOKIES_FILE) options.cookies = null;
+	}
+
+	async function addCookies() {
+		try {
+			const added = await invoke('cookies_add');
+			if (!added) return;
+			cookiesFile = added;
+			options.cookies = COOKIES_FILE;
+			showToast(
+				added.youtube
+					? `Cookies added: signed in with them`
+					: 'Cookies added (none of YouTube in them)',
+				'icon-[mingcute--check-circle-line]'
+			);
+			if (found.state === 'failed' && isLink(link)) {
+				looked = '';
+				void look();
+			}
+		} catch (error) {
+			showToast(String(error?.message ?? error), 'icon-[mingcute--warning-line]');
+		}
+	}
+
+	async function forgetCookies() {
+		try {
+			await invoke('cookies_remove');
+		} catch {
+			// (gone already)
+		}
+		cookiesFile = null;
+		if (options.cookies === COOKIES_FILE) options.cookies = null;
 	}
 
 	/** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -469,6 +547,7 @@
 	onMount(() => {
 		void ensureTools();
 		void checkFiles();
+		void loadCookies();
 		void offerClipboard();
 		// (copied in the browser, back in Stosufy: offered then)
 		const focused = () => void offerClipboard();
@@ -522,7 +601,7 @@
 				<Dropdown
 					label="Signed in as"
 					icon="icon-[mingcute--user-3-line]"
-					options={BROWSERS}
+					options={signIns}
 					value={options.cookies}
 					onchange={signIn}
 				/>

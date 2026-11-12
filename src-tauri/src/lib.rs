@@ -53,6 +53,9 @@ pub fn run() {
             ytdlp::deno_install,
             ytdlp::ytdlp_info,
             ytdlp::ytdlp_download,
+            ytdlp::cookies_info,
+            ytdlp::cookies_add,
+            ytdlp::cookies_remove,
             ytdlp::ytdlp_cancel
         ])
         .setup(|app| {

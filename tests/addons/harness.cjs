@@ -33,6 +33,10 @@ function tauri({ online, writes }) {
 			if (cmd === 'plugin:opener|reveal_item_in_dir') return (window.__revealed = args.paths);
 			if (cmd === 'copy_files') return void (window.__copied = args.paths);
 			if (cmd === 'clipboard_link') return window.__clipboardLink ?? null;
+			// (the cookies file: what a test put in window.__cookiesToAdd is chosen)
+			if (cmd === 'cookies_info') return window.__cookies ?? null;
+			if (cmd === 'cookies_add') return (window.__cookies = window.__cookiesToAdd ?? null);
+			if (cmd === 'cookies_remove') return void (window.__cookies = null);
 			if (writes && cmd === 'files_replace') {
 				written[args.to] = written[args.from];
 				delete written[args.from];
