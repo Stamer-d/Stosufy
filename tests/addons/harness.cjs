@@ -6,8 +6,11 @@ const API = 'https://api.stamer-d.de/v2/';
 const USER = { id: 1, username: 'tester', avatar_url: null };
 
 /** Runs in the page before the app: what the app asks Tauri for */
-function tauri(online) {
+function tauri({ online, writes }) {
 	let next = 1;
+	// (with `writes`: the files written, by path, to look at and to read again)
+	const written = (window.__written = {});
+	const pathOf = (options) => decodeURIComponent(options?.headers?.path ?? '');
 	window.__TAURI_INTERNALS__ = {
 		metadata: {
 			currentWindow: { label: 'main' },
@@ -16,10 +19,18 @@ function tauri(online) {
 		transformCallback: () => next++,
 		unregisterCallback() {},
 		convertFileSrc: (path) => 'asset://' + path,
-		async invoke(cmd) {
+		async invoke(cmd, args, options) {
 			if (cmd === 'plugin:event|listen') return next++;
+			if (writes && cmd === 'plugin:path|join') return args.paths.join('/');
+			if (writes && cmd === 'plugin:path|basename') return args.path.split('/').pop();
 			if (cmd.startsWith('plugin:path|')) return '/home/tester';
-			if (cmd === 'plugin:fs|exists') return false;
+			if (writes && cmd === 'plugin:fs|write_file') {
+				written[pathOf(options)] = new Uint8Array(args);
+				return null;
+			}
+			if (writes && cmd === 'plugin:fs|read_file' && written[args.path]) return written[args.path];
+			if (cmd === 'plugin:fs|exists') return !!(writes && written[args.path]);
+			if (cmd === 'plugin:opener|reveal_item_in_dir') return (window.__revealed = args.paths);
 			if (cmd === 'plugin:fs|read_dir') return [];
 			if (cmd === 'plugin:fs|mkdir') return null;
 			if (cmd.startsWith('plugin:fs|')) throw new Error('no file (mock)');
@@ -35,19 +46,21 @@ function tauri(online) {
  * new user. `account`: the settings saved in the account ({ settings, updatedAt }, or null for
  * none yet), with which the app starts online and syncs; without it the app starts offline.
  * Returns the page, its errors, and what was saved to the account since (`sent`). `scale`: 2
- * for sharp pictures of it.
+ * for sharp pictures of it. `writes`: files written are kept (window.__written), not refused.
+ * `allow`: the URLs that go out to the network (FFmpeg's core, say).
  */
-async function start(browser, { stored = null, account, scale = 1 } = {}) {
+async function start(browser, { stored = null, account, scale = 1, writes = false, allow } = {}) {
 	const online = account !== undefined;
 	const context = await browser.newContext({
 		viewport: { width: 1440, height: 900 },
 		deviceScaleFactor: scale
 	});
-	await context.addInitScript(tauri, online);
+	await context.addInitScript(tauri, { online, writes });
 	const sent = [];
 	let remote = account ?? null;
 	await context.route(/^https?:\/\/(?!127\.0\.0\.1)/, async (route) => {
 		const request = route.request();
+		if (allow?.test(request.url())) return route.continue();
 		if (!online || request.url() !== API) return route.abort();
 		const { query = '', variables = {} } = JSON.parse(request.postData() ?? '{}');
 		let data = null;

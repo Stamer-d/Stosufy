@@ -10,7 +10,7 @@ import type { WidgetDefinition } from '../widgets';
 
 type Loaded<T> = Promise<{ default: T }>;
 
-export type AddonCategory = 'music' | 'games' | 'world';
+export type AddonCategory = 'music' | 'games' | 'world' | 'tools';
 
 export interface Addon {
 	/** Its folder's name; what the settings keep of an installed add-on */

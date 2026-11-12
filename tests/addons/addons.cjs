@@ -2,7 +2,9 @@
 // are installed for a new user, for settings from before add-ons and across devices
 const { chromium, start, saved } = require('./harness.cjs');
 
+// (those that were part of the app before there were add-ons, and all of them)
 const NAMES = ['DJ mode', 'Dash', 'Puzzle', 'World center'];
+const ALL = [...NAMES, 'File converter'];
 const results = [];
 function check(name, ok, detail = '') {
 	results.push(ok);
@@ -20,7 +22,7 @@ const buttons = (page) =>
 				all
 					.map((button) => button.getAttribute('aria-label'))
 					.filter((label) => names.includes(label)),
-			NAMES
+			ALL
 		);
 const card = (page, name) => page.locator(`article[aria-label="${name}"]`);
 const install = (page, name) => card(page, name).locator('button:has-text("Install")').click();
@@ -53,7 +55,7 @@ const PLACED = [
 		await page.waitForURL('**/addons');
 		check(
 			'store: every add-on, each to install',
-			(await page.locator('article button:has-text("Install")').count()) === NAMES.length
+			(await page.locator('article button:has-text("Install")').count()) === ALL.length
 		);
 
 		await install(page, 'DJ mode');

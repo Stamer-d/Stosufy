@@ -6,13 +6,15 @@ import dj from './dj/addon';
 import dash from './dash/addon';
 import puzzle from './puzzle/addon';
 import world from './world/addon';
+import convert from './convert/addon';
 
-export const ADDONS: Addon[] = [dj, dash, puzzle, world];
+export const ADDONS: Addon[] = [dj, dash, puzzle, world, convert];
 
 export const ADDON_CATEGORIES: { id: AddonCategory; label: string }[] = [
 	{ id: 'music', label: 'Music' },
 	{ id: 'games', label: 'Games' },
-	{ id: 'world', label: 'World' }
+	{ id: 'world', label: 'World' },
+	{ id: 'tools', label: 'Tools' }
 ];
 
 export function addonById(id: string | null | undefined) {

@@ -38,6 +38,9 @@ its button in the title bar.
 - 🧩 **Puzzle.** Put a song's background back together, with leaderboards and a daily puzzle.
 - 🌍 **World center.** The weather with its radar, live lightning, storms, flights, earthquakes,
   departures, the ISS and webcams on one live map, and widgets of them for the home screen.
+- 🔁 **File converter.** Pictures, sound, video, data and text into other formats (PNG, JPG, WebP,
+  GIF, ICO, PDF, MP3, FLAC, Opus, MP4, WebM, JSON, YAML, TOML, CSV, XML, Markdown, HTML and more),
+  many files at once, ZIPs packed and unpacked. All on your computer, saved to `Stosufy/Converted`.
 
 ## Install
 
