@@ -83,6 +83,8 @@ async function pick(at, target) {
 	const uneven = fs.readFileSync(path.join(__dirname, 'fixtures', 'uneven.mp4'));
 	// (the clip as made for editing: Baseline, no B-frames, evenly timed)
 	const easy = fs.readFileSync(path.join(__dirname, 'fixtures', 'easy.mp4'));
+	// (exactly 60 fps, in an MKV: as YouTube's 1440p60)
+	const sixty = fs.readFileSync(path.join(__dirname, 'fixtures', 'sixty.mkv'));
 	// (2 s of a tone, titled "Tone" by "Stosufy", with a cover)
 	const tagged = fs.readFileSync(path.join(__dirname, 'fixtures', 'tagged.mp3'));
 	const mp3 = (name) => ({ name, mimeType: 'audio/mpeg', buffer: tagged });
@@ -105,6 +107,7 @@ async function pick(at, target) {
 		// (for Premiere: an MP4 easy to decode, repacked; one with B-frames (High), and an
 		// MKV's, made again: easy to decode, evenly timed)
 		[{ name: 'easy.mp4', mimeType: 'video/mp4', buffer: easy }, 'editing'],
+		[{ name: 'sixty.mkv', mimeType: 'video/x-matroska', buffer: sixty }, 'editing'],
 		[{ name: 'premiere.mp4', mimeType: 'video/mp4', buffer: clip }, 'editing'],
 		[{ name: 'premiere-mkv.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'editing'],
 		[
@@ -325,6 +328,13 @@ async function pick(at, target) {
 			// (its picture's time base: 60000ths of a second, each picture 1001 of them)
 			videoTimescale(file('uneven.mp4')) === 60000,
 		`${await said('uneven.mp4')} / ${videoTimescale(file('uneven.mp4'))}`
+	);
+	check(
+		'MP4 for editing, of exactly 60 fps: 60 fps (not 59.94), each picture 1/60 s',
+		videoTimescale(file('sixty.mp4')) % 60 === 0 &&
+			videoTimescale(file('sixty.mp4')) !== 60000 &&
+			profileOf(file('sixty.mp4')) === 66,
+		`timescale ${videoTimescale(file('sixty.mp4'))}`
 	);
 	check(
 		'MP4 for editing, of an MP4 made for editing (Baseline, evenly timed): repacked',

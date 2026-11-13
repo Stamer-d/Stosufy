@@ -128,7 +128,11 @@ const RATES: [number, string][] = [
 /** The standard rate a video's is (within half a percent), else its own rounded; null: unknown */
 export function standardRate(fps: number | undefined): { rate: string; fps: number } | null {
 	if (!fps || !Number.isFinite(fps) || fps < 1 || fps > 1000) return null;
-	const near = RATES.find(([value]) => Math.abs(value - fps) / value < 0.005);
+	// (the nearest: 60 is 60, not 59.94, a tenth of a percent from it and before it in the list)
+	const near = RATES.map(([value, rate]) => ({ value, rate, off: Math.abs(value - fps) / value }))
+		.filter(({ off }) => off < 0.005)
+		.sort((a, b) => a.off - b.off)
+		.map(({ value, rate }): [number, string] => [value, rate])[0];
 	if (near) return { rate: near[1], fps: near[0] };
 	const own = Math.round(fps * 1000) / 1000;
 	return { rate: String(own), fps: own };
