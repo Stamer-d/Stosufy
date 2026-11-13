@@ -25,6 +25,8 @@ import {
 	step,
 	type GravityPortal,
 	type InputEvent,
+	type Orb,
+	type OrbKind,
 	type PlayerState,
 	type Section,
 	type Solid,
@@ -44,7 +46,14 @@ const dbg = (...a: unknown[]) => roomsDebug('  rooms:', ...a);
 class Built {
 	solids: Solid[] = [];
 	hazards: object[] = [];
+	orbs: Orb[] = [];
 	constructor(private world: World) {}
+	orb(kind: OrbKind, x: number, y: number) {
+		const orb: Orb = { id: this.world.id(), kind, x, y, x0: x - 0.6, x1: x + 0.6 };
+		this.world.orbs.add(orb);
+		this.orbs.push(orb);
+		return orb;
+	}
 	solid(s: Solid) {
 		this.world.solids.add(s);
 		this.solids.push(s);
@@ -60,8 +69,11 @@ class Built {
 		const hazards = new Set(this.hazards);
 		this.world.solids.removeIf((o) => solids.has(o));
 		this.world.hazards.removeIf((h) => hazards.has(h));
+		const orbs = new Set<object>(this.orbs);
+		if (orbs.size) this.world.orbs.removeIf((o) => orbs.has(o));
 		this.solids = [];
 		this.hazards = [];
+		this.orbs = [];
 	}
 }
 
@@ -191,6 +203,8 @@ interface Visit {
 	/** How thick its platform is (0: the bare floor or ceiling) */
 	d: number;
 	solid: Solid | null;
+	/** It's got onto by an orb jump from the platform before on its side */
+	jump?: boolean;
 	/** The latest it may begin and the earliest it may end */
 	first: number;
 	last: number;
@@ -232,13 +246,42 @@ export function buildPlatforms(
 		times.push(t);
 	}
 	if (!times.length) return null;
+
+	// Orb jumps: from normal on, some presses keep to their side: an orb over a pit of spikes
+	// takes it onto the next platform of that side (as hand-built ball and spider parts have
+	// them, about one a second). Without the orb the press would go over to the other side, onto
+	// its spikes; without the press it rolls into the pit: every orb is needed. Where the presses
+	// come a beat apart, the jump takes two beats: the press between goes
+	const hops = new Set<number>();
+	if (preset.level >= 1) {
+		const pick = random(seed ^ 0x5bd1);
+		const share = [0, 0.18, 0.28, 0.33, 0.38][preset.level] * (0.7 + intensity * 0.6);
+		const air = spider ? 400 : 460;
+		// (the ball jumps high: only in a room with space over the jump)
+		const space = top - floor >= (spider ? 5 : 6);
+		for (let k = 1; k < times.length - 1; k++) {
+			if (!space || hops.has(k - 1) || pick() >= share) continue;
+			if (times[k + 1] - times[k] >= air) hops.add(k);
+			else if (k + 2 < times.length && times[k + 2] - times[k] >= air) {
+				if (times[k + 2] - times[k] > 1000) continue;
+				times.splice(k + 1, 1);
+				hops.add(k);
+			}
+		}
+	}
 	const events = taps(times, 90);
 
 	const room = sec.mini ? 2.4 : 3;
 	const built = new Built(world);
-	for (let attempt = 0; attempt < 4; attempt++) {
+	for (let attempt = 0, retries = 0; attempt < 4; attempt++) {
 		built.clear();
+		// (the last tries without orb jumps)
+		if (attempt >= 2) hops.clear();
 		const rng = random(seed + attempt);
+		/** Each platform's side: the floor's (0) or the ceiling's (1); a press goes over, a jump not */
+		const sides: (0 | 1)[] = [0];
+		for (let k = 0; k < times.length; k++)
+			sides.push(hops.has(k) ? sides[k] : ((1 - sides[k]) as 0 | 1));
 		// How long a press may be off and still get there (ms a side): the difficulty's room for a
 		// click, more with each try
 		const allow =
@@ -250,11 +293,15 @@ export function buildPlatforms(
 		// How thick each platform is: like stairs, a step up or down from the one before on its side
 		const thick: number[] = [0];
 		for (let v = 1; v <= times.length; v++) {
-			const before = thick[v - 2] ?? 1;
+			const same = sides.lastIndexOf(sides[v], v - 1);
+			const other = sides.lastIndexOf((1 - sides[v]) as 0 | 1, v - 1);
+			const before = (same >= 0 ? thick[same] : 1) || 1;
 			const turn = rng();
 			let d = Math.max(1, Math.min(3, before + (turn < 0.34 ? -1 : turn < 0.62 ? 0 : 1)));
 			if (preset.level === 0) d = 1;
-			while (d > 1 && top - floor - d - thick[v - 1] < room) d--;
+			// (a platform an orb jump leaves: room for the jump over it)
+			const need = room + (hops.has(v) || hops.has(v - 1) ? 1.5 : 0);
+			while (d > 1 && top - floor - d - (other >= 0 ? thick[other] : 0) < need) d--;
 			thick.push(d);
 		}
 
@@ -273,13 +320,22 @@ export function buildPlatforms(
 		];
 		let state = entry;
 		let ok = true;
+		let hopFailed = -1;
 		for (let k = 0; k < times.length && ok; k++) {
-			const side = ((k + 1) % 2) as 0 | 1;
+			const side = sides[k + 1];
+			const hop = hops.has(k);
 			const d = thick[k + 1];
 			const xc = world.xAt(times[k]);
 			const next = times[k + 1];
 			const x1 = next === undefined ? sec.x1 : ceilHalf(world.xAt(next) + late);
-			const from = spider ? xc - early : xc - 0.25;
+			const from = spider && !hop ? xc - early : xc - 0.25;
+			if (hop) {
+				// (the orb where it rolls: yellow, pink where the room is low for a full jump)
+				const on = visits[k];
+				const y = on.side ? top - on.d - box.h : floor + on.d + box.h;
+				const low = top - floor - on.d - (thick[sides.lastIndexOf((1 - on.side) as 0 | 1, k)] ?? 0);
+				built.orb(low < 6.5 || rng() < 0.3 ? 'pink' : 'yellow', xc, y);
+			}
 			const solid: Solid | null = d
 				? built.solid(
 						side
@@ -306,11 +362,12 @@ export function buildPlatforms(
 				visits[0].last = Math.max(visits[0].last, clear);
 			}
 			if (landing < 0) {
-				dbg('no landing after press', k, 'of', times.length);
+				dbg('no landing after press', k, 'of', times.length, hop ? '(orb jump)' : '');
+				if (hop) hopFailed = k;
 				ok = false;
 				break;
 			}
-			const x0 = floorHalf(spider ? from : Math.max(from, landing - early));
+			const x0 = floorHalf(spider && !hop ? from : Math.max(from, landing - early));
 			if (solid) solid.x0 = x0;
 			visits.push({
 				side,
@@ -318,16 +375,27 @@ export function buildPlatforms(
 				x1,
 				d,
 				solid,
+				jump: hop,
 				// (the latest it may begin, the earliest it may end: what a press may always be off)
-				first: (spider ? xc : landing) - least - box.w * 0.6,
+				first: (spider && !hop ? xc : landing) - least - box.w * 0.6,
 				last: next === undefined ? sec.x1 : world.xAt(next) + least
 			});
 		}
-		if (!ok) continue;
+		if (!ok) {
+			// (an orb jump that doesn't land: that press goes over as the others, the try again)
+			if (hopFailed >= 0 && retries++ < 12) {
+				hops.delete(hopFailed);
+				attempt--;
+			}
+			continue;
+		}
 		// Between two platforms of a side there's a pit, a block wide at least: where the presses
 		// come close together, the platforms give way (down to what a press may always be off)
 		for (let v = 2; v < visits.length; v++) {
-			const before = visits[v - 2];
+			let b = v - 1;
+			while (b >= 0 && visits[b].side !== visits[v].side) b--;
+			if (b < 0) continue;
+			const before = visits[b];
 			const after = visits[v];
 			let short = before.x1 + 1 - after.x0;
 			if (short <= 0) continue;
@@ -350,23 +418,31 @@ export function buildPlatforms(
 			const own = visits.filter((v) => v.side === side);
 			let at = startX;
 			let d = 0;
-			const gaps: { g0: number; g1: number; d: number }[] = [];
+			const gaps: { g0: number; g1: number; d: number; jump?: boolean }[] = [];
 			for (const v of own) {
-				if (v.x0 > at) gaps.push({ g0: at, g1: v.x0, d });
+				if (v.x0 > at) gaps.push({ g0: at, g1: v.x0, d, jump: v.jump });
 				if (v.x1 >= at) d = v.d;
 				at = Math.max(at, v.x1);
 			}
 			if (endX > at) gaps.push({ g0: at, g1: endX, d });
-			for (const { g0, g1, d } of gaps) {
-				const ledge = d ? Math.min(3, Math.floor(g1 - g0 + 1e-6)) : 0;
+			for (const { g0, g1, d, jump } of gaps) {
+				// (the pit an orb jumps over: no ledge and a block clear after the edge, where it
+				// rises, and half a block before the platform it lands on; who doesn't press falls
+				// off the edge into the spikes after that)
+				const ledge = d && !jump ? Math.min(3, Math.floor(g1 - g0 + 1e-6)) : 0;
+				const until = jump ? g1 - 0.5 : g1;
 				if (ledge)
 					built.solid(
 						side
 							? { x0: g0, x1: g0 + ledge, y0: top - d, y1: top, style: 2 }
 							: { x0: g0, x1: g0 + ledge, y0: floor, y1: floor + d, style: 2 }
 					);
-				const first = ledge || g1 - g0 < 2 ? g0 : Math.ceil(g0 - 1e-6);
-				for (let x = first; x + 1 <= g1 + 1e-6; x++) {
+				const first = jump
+					? Math.ceil(g0 + 1 - 1e-6)
+					: ledge || g1 - g0 < 2
+						? g0
+						: Math.ceil(g0 - 1e-6);
+				for (let x = first; x + 1 <= until + 1e-6; x++) {
 					// (where the music rests nothing threatens)
 					if (musicalRest(ctx.chart, world.timeAt(x + 0.5))) continue;
 					const up = x < g0 + ledge ? d : 0;
@@ -392,6 +468,7 @@ export function buildPlatforms(
 			);
 			continue;
 		}
+		dbg('platforms ok, orb jumps', built.orbs.length, 'of presses', times.length, 'try', attempt);
 		ctx.plan.push(...events);
 		return simulate(world, entry, sec.end, events);
 	}
@@ -507,13 +584,15 @@ export function buildTunnel(
 	// intense parts of the hard levels on every bar, else now and then on every other)
 	const turns: number[] = [];
 	if (preset.level >= 1 && gravityIn(ctx, sec.mode)) {
-		const dense = preset.level >= 3 && intensity >= 0.5;
+		// (the swing's own presses turn it: on every bar only on extreme)
+		const dense = preset.level >= (swing ? 4 : 3) && intensity >= 0.5;
 		const chance = dense ? 1 : preset.level >= 2 ? 0.55 : 0.3;
 		for (let t = sec.start + 1; t < sec.end;) {
 			const at = musicalPosition(chart, t);
 			const bar = at.point.beatLength * at.point.meter;
-			// (a short part of a chain, a bar or two, turns on its half bars too)
-			const short = dense && sec.end - sec.start < 3.2 * bar;
+			// (a short UFO part of a chain, a bar or two, turns on its half bars too; the swing's own
+			// presses turn it already)
+			const short = dense && !swing && sec.end - sec.start < 3.2 * bar;
 			const unit = short ? bar / 2 : bar;
 			const first = at.point.time + Math.ceil((t - at.point.time) / unit - 1e-6) * unit;
 			for (let b = first, n = 0; b < Math.min(sec.end, at.end + 1); b += unit, n++) {

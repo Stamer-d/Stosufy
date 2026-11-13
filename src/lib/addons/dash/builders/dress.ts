@@ -18,7 +18,8 @@ import {
 	type PlayerState,
 	type Section,
 	type Solid,
-	type World
+	type World,
+	wallAt
 } from '../physics';
 
 /** Columns of this width (blocks) */
@@ -119,6 +120,20 @@ export function dressFlight(ctx: Context, sec: Section, entry: PlayerState) {
 		}
 		return out;
 	});
+	/** Where sloped walls (a corridor of slopes) leave room between some places: lowest top,
+	 * highest bottom */
+	const between = (rx0: number, rx1: number) => {
+		let lo = -Infinity;
+		let hi = Infinity;
+		for (const w of world.walls.near(rx0, rx1))
+			for (let x = Math.max(rx0, w.x0); x <= Math.min(rx1, w.x1) + 1e-6; x += 0.25) {
+				const at = wallAt(w, x);
+				lo = Math.max(lo, at.lo);
+				hi = Math.min(hi, at.hi);
+			}
+		return { lo, hi };
+	};
+	const sloped = world.walls.near(sec.x0, sec.x1).length > 0;
 	const binOf = (x: number) => Math.max(0, Math.min(bins - 1, Math.floor((x - x0) / BIN)));
 	/** Whether a rectangle is clear of every way */
 	const clear = (rx0: number, rx1: number, ry0: number, ry1: number) => {
@@ -128,6 +143,8 @@ export function dressFlight(ctx: Context, sec: Section, entry: PlayerState) {
 	};
 	/** Whether a rectangle is clear of the world's blocks and hazards (and orbs, portals) */
 	const empty = (rx0: number, rx1: number, ry0: number, ry1: number, spare = 0.1) => {
+		const room = between(rx0 - spare, rx1 + spare);
+		if (ry0 - spare < room.lo || ry1 + spare > room.hi) return false;
 		if (world.solidAt(rx0 - spare, rx1 + spare, ry0 - spare, ry1 + spare)) return false;
 		for (const h of world.hazards.near(rx0 - 1, rx1 + 1)) {
 			const hb =
@@ -170,7 +187,8 @@ export function dressFlight(ctx: Context, sec: Section, entry: PlayerState) {
 	};
 
 	// --- The walls: spikes on the surfaces the room faces, where no way comes ----------------
-	const lining = LINING[level] * (0.75 + intensity * 0.35);
+	// (a corridor of slopes is deadly to touch already: no spikes on it)
+	const lining = sloped ? 0 : LINING[level] * (0.75 + intensity * 0.35);
 	if (lining > 0) {
 		/** The surfaces facing into the room, block by block: tops of floor blocks, undersides of
 		 * ceiling blocks, and the floor and ceiling themselves */
@@ -285,6 +303,9 @@ export function dressFlight(ctx: Context, sec: Section, entry: PlayerState) {
 			if (h.kind === 'saw') blocked.push([h.y - h.size, h.y + h.size]);
 			else blocked.push(h.dir === 1 ? [h.y, h.y + 1] : [h.y - 1, h.y]);
 		}
+		const room = between(fx0, fx1);
+		if (isFinite(room.lo)) blocked.push([floor - 100, room.lo]);
+		if (isFinite(room.hi)) blocked.push([room.hi, top + 100]);
 		blocked.sort((p, q) => p[0] - q[0]);
 		const way = taken[binOf((fx0 + fx1) / 2)];
 		const spots: { lo: number; hi: number; below: boolean; gap: number }[] = [];

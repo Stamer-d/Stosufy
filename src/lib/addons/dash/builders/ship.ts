@@ -6,7 +6,16 @@
 // and a bit above and below it, as a person steers), an orb also without it (then it must
 // crash), and kept, or the next one is tried. The ship's room: wider the easier and calmer.
 
-import { clamp, freshness, gravityIn, shuffleByWeight, used, type Context } from '../build';
+import {
+	clamp,
+	freshness,
+	gravityIn,
+	hash,
+	random,
+	shuffleByWeight,
+	used,
+	type Context
+} from '../build';
 import { flyShip, type ShipOrb } from './flight';
 import {
 	hitbox,
@@ -15,7 +24,8 @@ import {
 	type OrbKind,
 	type PlayerState,
 	type Section,
-	type Solid
+	type Solid,
+	type Walls
 } from '../physics';
 import { musicalRest } from '../composition';
 
@@ -34,6 +44,14 @@ interface Piece {
 	saw?: { x: number; y: number; radius: number };
 	orb?: { kind: OrbKind; time: number };
 	portals?: { x: number; gravity: 1 | -1; y: number }[];
+}
+
+/** A column of the corridor: its floor and ceiling (on the half-block grid, and as they are) */
+interface Column {
+	low: number;
+	high: number;
+	rawLow: number;
+	rawHigh: number;
 }
 
 interface Span {
@@ -93,6 +111,14 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 	// (a wall of a block at least below and above it)
 	const lowest = (H: number) => floor + 1 + H / 2;
 	const highest = (H: number) => top - 1 - H / 2;
+	/**
+	 * A corridor of slopes (from normal on, about every other part): its walls are lines along the
+	 * way's middle and height, deadly to touch, instead of blocks on the half-block grid, as
+	 * hand-built ship parts have them
+	 */
+	const sloped =
+		random(hash(`ship-slopes:${ctx.seed ?? 0}:${sec.index}`))() <
+		[0, 0.35, 0.45, 0.5, 0.55][preset.level];
 
 	// --- The pieces ------------------------------------------------------------------------
 	const straight = (s: Span, H = s.H): Piece => ({
@@ -317,7 +343,7 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 	if (beats.length < 3) return simulate(world, entry, sec.end, plan);
 
 	/** The walls: each column's floor and ceiling */
-	const columns = new Map<number, { low: number; high: number }>();
+	const columns = new Map<number, Column>();
 	const pieces: { xa: number; xb: number; piece: Piece }[] = [];
 	const shipOrbs: ShipOrb[] = [];
 	let c = clamp(entry.y, lowest(base), highest(base));
@@ -337,7 +363,7 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 
 	/** The columns of a piece (and those after it, straight on as it ends, to fly on) */
 	function columnsOf(piece: Piece, xa: number, xb: number, H: number) {
-		const out = new Map<number, { low: number; high: number }>();
+		const out = new Map<number, Column>();
 		for (let x = Math.ceil(xa); x < Math.min(Math.floor(endX), xb + speed * 0.5); x++) {
 			let low = Infinity;
 			let high = -Infinity;
@@ -351,18 +377,51 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 			}
 			let l = clamp(Math.floor(low * 2) / 2, floor, top);
 			let h = clamp(Math.ceil(high * 2) / 2, floor, top);
+			let rawLow = clamp(low, floor, top);
+			let rawHigh = clamp(high, floor, top);
 			for (const pillar of piece.pillars ?? [])
 				if (pillar.x === x) {
-					if (pillar.floor) l = Math.max(l, pillar.to);
-					else h = Math.min(h, pillar.to);
+					if (pillar.floor) l = rawLow = Math.max(l, pillar.to);
+					else h = rawHigh = Math.min(h, pillar.to);
 				}
-			out.set(x, { low: l, high: h });
+			out.set(x, { low: l, high: h, rawLow, rawHigh });
 		}
 		return out;
 	}
 
+	/** The sloped walls through the columns' middles (a corridor of slopes), a run of columns each */
+	function wallsOf(cols: Map<number, Column>): Walls[] {
+		const xs = [...cols.keys()].sort((a, b) => a - b);
+		const runs: number[][] = [];
+		for (const x of xs) {
+			const run = runs[runs.length - 1];
+			if (run && x === run[run.length - 1] + 1) run.push(x);
+			else runs.push([x]);
+		}
+		return runs.map((run) => ({
+			xs: run.map((x) => x + 0.5),
+			lo: run.map((x) => cols.get(x)!.rawLow),
+			hi: run.map((x) => cols.get(x)!.rawHigh),
+			x0: run[0],
+			x1: run[run.length - 1] + 1
+		}));
+	}
+	/** What's put up for some columns: blocks, or the slopes; how to take it out again */
+	function wallUp(cols: Map<number, Column>) {
+		if (sloped) {
+			const made = wallsOf(cols).map((w) => world.walls.add(w));
+			return () => {
+				for (const w of made) world.walls.remove(w);
+			};
+		}
+		const made = solidsOf(cols).map((b) => world.solids.add(b));
+		return () => {
+			for (const b of made) world.solids.remove(b);
+		};
+	}
+
 	/** Blocks for columns (runs of the same height) */
-	function solidsOf(cols: Map<number, { low: number; high: number }>) {
+	function solidsOf(cols: Map<number, Column>) {
 		const made: Solid[] = [];
 		const xs = [...cols.keys()].sort((a, b) => a - b);
 		for (const side of ['low', 'high'] as const) {
@@ -398,9 +457,9 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 			const col = columns.get(x);
 			if (col) near.set(x, col);
 		}
-		const temp = solidsOf(near).map((b) => world.solids.add(b));
+		const takeDown = wallUp(near);
 		const undo: (() => void)[] = [];
-		if (piece.spikes)
+		if (piece.spikes && !sloped)
 			for (const [x, col] of own) {
 				if (x < s.xa + 1 || x + 1 > s.xb - 1) continue;
 				const spike = world.spike(x + 0.5, col.low, 1, 'spike');
@@ -501,7 +560,7 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 			next = kept.end;
 			flownEvents = kept.events;
 		}
-		for (const b of temp) world.solids.remove(b);
+		takeDown();
 		if (!ok) {
 			for (const u of undo.reverse()) u();
 			return false;
@@ -588,7 +647,7 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 	}
 
 	// The walls, then the whole part flown once more (as it's played from its start)
-	for (const b of solidsOf(columns)) world.solids.add(b);
+	wallUp(columns);
 	const whole = flyShip(ctx, entry, sec.end, target, [], 0, shipOrbs);
 	let final = whole.events;
 	if (whole.end.dead) {

@@ -505,3 +505,21 @@ test('ship parts have orbs that must be used (and the old spider parts theirs)',
 	// to the older builder)
 	assert.ok(ship >= 1, `${ship} ship orbs, ${spider} spider orbs`);
 });
+
+test('ship parts are corridors of blocks or of slopes, both flown through', async () => {
+	let blocks = 0;
+	let slopes = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['normal', 'hard', 'insane', 'extreme'] as const) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			for (const s of w.sections) {
+				if (s.mode !== 'ship') continue;
+				const inside = (o: { x0: number; x1: number }) => o.x1 > s.x0 && o.x0 < s.x1;
+				if (w.walls.items.some(inside)) slopes++;
+				else if (w.solids.items.some((o) => inside(o) && o.style === 2)) blocks++;
+			}
+			assert.ok(!simulate(w, startState(w, l.start), l.end, l.plan).dead, `${name} ${difficulty}`);
+		}
+	assert.ok(slopes >= 2 && blocks >= 2, `${slopes} sloped, ${blocks} block ship parts`);
+});

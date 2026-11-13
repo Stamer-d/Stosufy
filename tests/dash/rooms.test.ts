@@ -72,3 +72,25 @@ test('the ball and the spider go from platform to platform: spikes right where o
 		assert.ok(needed >= presses * 0.9, `${difficulty}: ${needed} of ${presses} presses needed`);
 	}
 });
+
+test('the ball and the spider jump over pits by orbs now and then, and every orb is needed', async () => {
+	let orbs = 0;
+	for (const difficulty of ['normal', 'hard', 'extreme'] as const) {
+		const l = await level(['cube', 'ball', 'spider'], difficulty);
+		const w = l.world;
+		const run = simulate(w, startState(w, l.start), l.end, l.plan);
+		assert.ok(!run.dead, difficulty);
+		for (const o of w.orbs.items) {
+			const mode = w.sectionAt(w.timeAt(o.x)).mode;
+			if (mode !== 'ball' && mode !== 'spider') continue;
+			orbs++;
+			// (the plan takes it, and without it the same presses crash)
+			assert.ok(run.used.includes(o.id), `${difficulty}: an unused ${mode} orb`);
+			w.orbs.remove(o);
+			const without = simulate(w, startState(w, l.start), l.end, l.plan);
+			w.orbs.add(o);
+			assert.ok(without.dead, `${difficulty}: a ${mode} orb at ${o.x.toFixed(1)} not needed`);
+		}
+	}
+	assert.ok(orbs >= 4, `${orbs} orb jumps`);
+});
