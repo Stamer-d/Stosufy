@@ -113,12 +113,15 @@
 	/>
 
 	<!-- Header -->
-	<div class="relative overflow-hidden">
-		<div
-			class="absolute inset-0 opacity-60"
-			style="background: linear-gradient(120deg, #8b5cf6, #ec4899 55%, transparent)"
-		></div>
-		<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/30 to-transparent"></div>
+	<!-- (only its background cut off at its edges: its menus open out of it, over the page) -->
+	<div class="relative">
+		<div class="absolute inset-0 overflow-hidden">
+			<div
+				class="absolute inset-0 opacity-60"
+				style="background: linear-gradient(120deg, #8b5cf6, #ec4899 55%, transparent)"
+			></div>
+			<div class="absolute inset-0 bg-gradient-to-t from-panel via-panel/30 to-transparent"></div>
+		</div>
 		<div class="relative px-8 pt-7 pb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
 			<div class="min-w-0">
 				<h1 class="flex items-center gap-2.5 text-3xl font-extrabold tracking-tight">

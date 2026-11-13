@@ -183,6 +183,31 @@ async function pick(at, target) {
 	await page.waitForURL('**/addons/convert');
 	check('its title bar button opens its page', true);
 
+	// The menus up in the header: open out of it, under it, every option seen (not cut off by
+	// the header, one line high)
+	for (const label of ['Size limit', 'Quality']) {
+		await page.click(`[role="combobox"][aria-label^="${label}:"]`);
+		const list = page.locator(`[role="listbox"][aria-label="${label}"]`);
+		await list.waitFor();
+		const seen = await list.evaluate((ul) => {
+			const box = ul.getBoundingClientRect();
+			const button = ul.parentElement.getBoundingClientRect();
+			const options = [...ul.querySelectorAll('[role="option"]')];
+			const shown = options.filter((option) => {
+				const r = option.getBoundingClientRect();
+				const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+				return r.bottom <= box.bottom + 1 && option.contains(at);
+			});
+			return { below: box.top >= button.bottom, shown: shown.length, all: options.length };
+		});
+		check(
+			`the ${label} menu: under its button, all ${seen.all} options seen`,
+			seen.below && seen.shown === seen.all,
+			JSON.stringify(seen)
+		);
+		await page.keyboard.press('Escape');
+	}
+
 	await page.setInputFiles(
 		'input[aria-label="Choose files"]',
 		FILES.map(([file]) => file)
