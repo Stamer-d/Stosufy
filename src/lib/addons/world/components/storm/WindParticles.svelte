@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	// The wind as it blows: thousands of specks drifting with it, each with a short trail that
 	// fades, brighter and wider where it's stronger (like the wind maps of the weather apps).
 	// The wind between the grid's points and hours is smooth (see weatherField.ts); a moved map
@@ -193,7 +194,8 @@
 
 	onMount(() => {
 		let frame = requestAnimationFrame(function loop(now) {
-			step(now);
+			// (not under a view that covers the app, like Dash)
+			if (!$appHidden) step(now);
 			frame = requestAnimationFrame(loop);
 		});
 		return () => cancelAnimationFrame(frame);

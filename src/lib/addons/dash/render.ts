@@ -316,11 +316,17 @@ export function createDashRenderer(
 	let changedAt = 0;
 	/** When it last had to go down (going up again right after isn't worth it) */
 	let droppedAt = -Infinity;
+	/** How many of 60 frames were late before it last went down (to see whether that helped) */
+	let dropped: number | null = null;
+	/** Until when going down isn't tried again (it didn't help) */
+	let uselessUntil = -Infinity;
 
 	/**
-	 * Watches how long frames take: where more than a quarter of the last 60 take longer than
-	 * 20 ms (under 50 a second), a step less sharp (down to half); where 4 s go by with all of
-	 * them under 14 ms, a step sharper again (not within 20 s of having had to go down)
+	 * Watches how long frames take: where more than a quarter of the last 60 miss the screen's
+	 * refresh (take more than 1.6 times as long as the fast ones, between 9 and 20 ms: a screen
+	 * of 144 or 240 Hz shows a missed frame as a judder well before 50 a second), a step less
+	 * sharp (down to half); where 4 s go by with all of them on time, a step sharper again (not
+	 * within 20 s of having had to go down)
 	 */
 	function pace(interval: number, now: number) {
 		if (options.adaptive === false) return;
@@ -332,18 +338,36 @@ export function createDashRenderer(
 		intervals.push(interval);
 		if (intervals.length > 240) intervals.shift();
 		if (now - changedAt < 1500 || intervals.length < 60) return;
+		// (the screen's refresh: the fast frames, a tenth of them)
+		const refresh = [...intervals].sort((a, b) => a - b)[Math.floor(intervals.length * 0.1)];
+		const late = Math.max(9, Math.min(20, refresh * 1.6));
 		const last = intervals.slice(-60);
-		const slow = last.filter((t) => t > 20).length;
-		if (slow > 15 && quality < QUALITY.length - 1) {
+		const slow = last.filter((t) => t > late).length;
+		// (less sharp and no better: it's not the drawing that's slow, sharp again, and not
+		// tried for a minute)
+		if (dropped !== null) {
+			const helped = slow < dropped * 0.67;
+			const was = dropped;
+			dropped = null;
+			if (!helped && was > 15 && quality > 0) {
+				quality--;
+				changedAt = now;
+				uselessUntil = now + 60000;
+				intervals.length = 0;
+				return;
+			}
+		}
+		if (slow > 15 && quality < QUALITY.length - 1 && now >= uselessUntil) {
 			quality++;
 			changedAt = droppedAt = now;
+			dropped = slow;
 			intervals.length = 0;
 		} else if (
 			quality > 0 &&
 			now - changedAt > 4000 &&
 			now - droppedAt > 20000 &&
 			intervals.length >= 240 &&
-			intervals.every((t) => t < 14)
+			intervals.every((t) => t < Math.min(14, late * 0.8))
 		) {
 			quality--;
 			changedAt = now;
@@ -1028,10 +1052,15 @@ export function createDashRenderer(
 		const tint = tileTint(p);
 		const slab = y1 - y0 < 0.99;
 		const pillar = !slab && x1 - x0 <= 1.01 && y1 - y0 >= 1.99;
-		ctx.save();
-		ctx.beginPath();
-		ctx.rect(left, top, right - left, bottom - top);
-		ctx.clip();
+		// (cut to the block only where it doesn't end on whole tiles: a cut costs the graphics card)
+		const whole = (v: number) => Math.abs(v - Math.round(v)) < 1e-6;
+		const cut = !(whole(x0) && whole(x1) && whole(y0) && whole(y1));
+		if (cut) {
+			ctx.save();
+			ctx.beginPath();
+			ctx.rect(left, top, right - left, bottom - top);
+			ctx.clip();
+		}
 		const fromX = Math.max(Math.floor(x0), Math.floor(camX) - 1);
 		const toX = Math.min(Math.ceil(x1), Math.ceil(camX + width / scale) + 1);
 		for (let y = Math.floor(y0); y < y1; y++) {
@@ -1061,7 +1090,7 @@ export function createDashRenderer(
 				}
 			}
 		}
-		ctx.restore();
+		if (cut) ctx.restore();
 		// Floating platforms: chains holding them up
 		if (style === 1 && sprites()) {
 			for (let x = Math.ceil(x0) + 0.5; x < x1; x += 3) {

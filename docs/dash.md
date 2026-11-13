@@ -1740,3 +1740,17 @@ Einflug-Bewegung aus §33 (Blöcke, Spikes, Sägen, Pads und Orbs, die vor dem E
 unten an ihren Platz fliegen). Alles wird wieder dort gezeigt, wo es ist. Der Kick-Shake, die
 Portal-Tore, die Ship-Hindernisse, die Ball-Orbs und das Tempo nach dem Song bleiben.
 `GENERATOR_VERSION` ist `gd-4.5`, damit alte Level neu erzeugt werden.
+
+## 35. Flüssiger: die App unter Dash schläft, weniger Schnitte, Auflösung nach der Bildwiederholrate
+
+- Unter einer Ansicht, die alles verdeckt (Dash), war die App nur unsichtbar: Stile und Layout
+  wurden bei jeder Änderung weiter berechnet, und Widgets (Visualizer, Lyrics, Karten) zeichneten
+  jeden Frame. Jetzt hat sie `content-visibility: hidden`, und diese Schleifen zeichnen dort nicht.
+- Blöcke, die auf ganzen Kacheln enden (fast alle), werden nicht mehr auf ihre Fläche
+  zugeschnitten (`clip` kostet die Grafikkarte; gemessen 2,2 → 1,4 ms je Frame im Software-Pfad).
+- Die Auflösung passt sich an verpasste Frames der Bildwiederholrate an (bei 144 oder 240 Hz
+  ruckelt es lange vor 50 FPS), nicht mehr an feste 20 ms; wird es weniger scharf und nicht
+  besser, liegt es nicht am Zeichnen: wieder scharf, eine Minute kein neuer Versuch.
+- Versucht und verworfen: die Kachelwand im Hintergrund einmal vorzuzeichnen und zu verschieben
+  (das große halbtransparente Bild kostete mehr als ihre Rechtecke), die Spieluhr anders zu
+  glätten (sie läuft schon auf 1–3 % gleichmäßig).

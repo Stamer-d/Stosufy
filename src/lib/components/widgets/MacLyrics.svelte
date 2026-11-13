@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	// The line being sung now and the next one
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -15,6 +16,8 @@
 		lyricsWanted.update((n) => n + 1);
 		let frame;
 		const tick = () => {
+			// (under a view that covers the app, like Dash: not seen)
+			if ($appHidden) return void (frame = requestAnimationFrame(tick));
 			const audio = $songQueue.audio;
 			if (audio && lines) current = lineAt(lines, audio.currentTime + $lyricsOffset);
 			frame = requestAnimationFrame(tick);

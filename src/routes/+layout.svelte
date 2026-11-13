@@ -176,10 +176,12 @@
 			></div>
 		</div>
 	{/if}
-	<!-- Under a view that covers it all (Dash) the app isn't drawn at all (it stays laid out,
-	     scrolled where it was) -->
+	<!-- Under a view that covers it all (Dash) the app isn't drawn, nor its styles and layout
+	     worked out again while it changes (it stays laid out, scrolled where it was) -->
 	<div
-		class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'} {$appHidden ? 'invisible' : ''}"
+		class="h-screen flex flex-col {backgroundOn ? '' : 'bg-app'} {$appHidden
+			? 'invisible [content-visibility:hidden]'
+			: ''}"
 	>
 		<Titlebar />
 

@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	// The ISS where it is now over the world (worked out from its orbit), its path, and when it
 	// flies over you next
 	import { onMount } from 'svelte';
@@ -108,7 +109,8 @@
 			if (iss) centre = { lat: Math.max(-60, Math.min(60, iss.lat)), lon: iss.lon };
 		}, 5000);
 		let frame = requestAnimationFrame(function loop() {
-			draw();
+			// (not under a view that covers the app, like Dash)
+			if (!$appHidden) draw();
 			frame = requestAnimationFrame(loop);
 		});
 		return () => {

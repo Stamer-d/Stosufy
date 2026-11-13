@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	// Earthquakes around you (from the EMSC, live; see stores/quakes.ts): the quakes of the last
 	// week on a map, how many there were near you and the latest one. Click one for what it was.
 	import { onMount } from 'svelte';
@@ -102,7 +103,7 @@
 		let last = 0;
 		const loop = (t) => {
 			frame = requestAnimationFrame(loop);
-			if (!dirty && t - last < (pulsing ? 33 : 1000)) return;
+			if ($appHidden || (!dirty && t - last < (pulsing ? 33 : 1000))) return;
 			dirty = false;
 			last = t;
 			draw();

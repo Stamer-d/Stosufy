@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	// A flight radar: the planes around you live (ADS-B from the community networks, see
 	// flights.ts), moving smoothly between updates, coloured by height. Click one for its flight.
 	import { onMount } from 'svelte';
@@ -230,7 +231,7 @@
 		const loop = (t) => {
 			frame = requestAnimationFrame(loop);
 			// 30 frames a second are smooth enough for planes
-			if (t - last < 33) return;
+			if (t - last < 33 || $appHidden) return;
 			last = t;
 			draw();
 		};

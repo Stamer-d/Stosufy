@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	import { onMount } from 'svelte';
 	import TerminalWindow from './TerminalWindow.svelte';
 	import { songQueue, currentSong } from '#lib/stores/audio.ts';
@@ -24,6 +25,8 @@
 		let frame;
 		const data = new Uint8Array(64);
 		const tick = () => {
+			// (under a view that covers the app, like Dash: not seen)
+			if ($appHidden) return void (frame = requestAnimationFrame(tick));
 			if (analyser && $currentSong.isPlaying) {
 				analyser.getByteFrequencyData(data);
 				// Skip the highest frequencies, they are mostly empty

@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	// The rain radar on a map: every frame's tiles kept as pictures (see radarTiles.ts), the
 	// frame shown drawn on a canvas. The loop plays without flicker (each frame fades in over the
 	// one before, so the rain flows instead of jumping), a moved map draws at once, and there
@@ -229,7 +230,8 @@
 
 	onMount(() => {
 		let frame = requestAnimationFrame(function loop() {
-			draw();
+			// (not under a view that covers the app, like Dash)
+			if (!$appHidden) draw();
 			frame = requestAnimationFrame(loop);
 		});
 		return () => {

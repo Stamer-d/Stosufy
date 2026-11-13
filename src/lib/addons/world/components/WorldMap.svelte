@@ -1,4 +1,5 @@
 <script>
+	import { appHidden } from '#lib/addons/store.ts';
 	// The big map of the world center: drag to move, scroll to zoom, click to look at a place.
 	// Tile layers (radar, satellite) can have a lower top zoom than the map: their tiles are
 	// then shown bigger. The forecast's maps are drawn from a grid of points (smooth colours,
@@ -606,11 +607,14 @@
 
 	onMount(() => {
 		let frame = requestAnimationFrame(function loop() {
-			drawLightning();
-			drawFeatureLayer();
-			drawQuakeLayer();
-			drawMoverLayer();
-			drawPlanes();
+			// (not under a view that covers the app, like Dash)
+			if (!$appHidden) {
+				drawLightning();
+				drawFeatureLayer();
+				drawQuakeLayer();
+				drawMoverLayer();
+				drawPlanes();
+			}
 			frame = requestAnimationFrame(loop);
 		});
 		return () => cancelAnimationFrame(frame);
