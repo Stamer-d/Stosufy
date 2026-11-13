@@ -7,6 +7,8 @@ export function sectionPortals(before: Section | undefined, section: Section, y:
 	const result: Portal[] = [];
 	if (before.mode !== section.mode) result.push({ ...common, kind: 'mode', mode: section.mode });
 	if (before.mini !== section.mini) result.push({ ...common, kind: 'size', mini: section.mini });
+	if (!!before.mirror !== !!section.mirror)
+		result.push({ ...common, kind: 'mirror', mirrored: !!section.mirror });
 	if (before.speedIndex !== section.speedIndex)
 		result.push({ ...common, kind: 'speed', speedIndex: section.speedIndex });
 	return result;

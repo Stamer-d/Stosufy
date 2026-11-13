@@ -55,7 +55,7 @@ import { planLevel } from './plan';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-4.2';
+export const GENERATOR_VERSION = 'gd-4.3-orbs-mirror';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -846,6 +846,8 @@ export interface Part {
 	speedIndex?: number;
 	/** What the planner made it as (a long stretch, a duet, a size play, a chain, a burst) */
 	piece?: string;
+	/** Seen mirrored (a mirror portal at its start, another where that ends) */
+	mirror?: boolean;
 }
 
 /**
@@ -1316,7 +1318,8 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 			ceil,
 			palette,
 			kiai: part.kiai,
-			intensity: Math.round(part.intensity * 1000) / 1000
+			intensity: Math.round(part.intensity * 1000) / 1000,
+			...(part.mirror ? { mirror: true } : {})
 		});
 		x = x1;
 	});

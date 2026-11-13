@@ -190,6 +190,8 @@ export interface Section {
 	 * demanding the part is built (missing on older level data)
 	 */
 	intensity?: number;
+	/** Seen mirrored, right to left (only the look: the physics is the same) */
+	mirror?: boolean;
 }
 
 export interface SpeedSegment {
@@ -205,10 +207,12 @@ export interface InputEvent {
 }
 
 export interface Portal {
-	kind: 'mode' | 'speed' | 'size';
+	kind: 'mode' | 'speed' | 'size' | 'mirror';
 	mode?: Mode;
 	speedIndex?: number;
 	mini?: boolean;
+	/** A mirror portal: from here on mirrored (or back) */
+	mirrored?: boolean;
 	x: number;
 	y: number;
 	x0: number;

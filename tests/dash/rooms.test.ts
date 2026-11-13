@@ -73,8 +73,9 @@ test('the ball and the spider go from platform to platform: spikes right where o
 	}
 });
 
-test('the ball and the spider jump over pits by orbs now and then, and every orb is needed', async () => {
+test('the ball and the spider jump over pits by orbs and pads now and then, each needed', async () => {
 	let orbs = 0;
+	let pads = 0;
 	for (const difficulty of ['normal', 'hard', 'extreme'] as const) {
 		const l = await level(['cube', 'ball', 'spider'], difficulty);
 		const w = l.world;
@@ -91,6 +92,37 @@ test('the ball and the spider jump over pits by orbs now and then, and every orb
 			w.orbs.add(o);
 			assert.ok(without.dead, `${difficulty}: a ${mode} orb at ${o.x.toFixed(1)} not needed`);
 		}
+		for (const p of w.pads.items) {
+			const mode = w.sectionAt(w.timeAt(p.x)).mode;
+			if (mode !== 'ball' && mode !== 'spider') continue;
+			pads++;
+			assert.ok(run.used.includes(p.id), `${difficulty}: an unused ${mode} pad`);
+			w.pads.remove(p);
+			const without = simulate(w, startState(w, l.start), l.end, l.plan);
+			w.pads.add(p);
+			assert.ok(without.dead, `${difficulty}: a ${mode} pad at ${p.x.toFixed(1)} not needed`);
+		}
 	}
 	assert.ok(orbs >= 4, `${orbs} orb jumps`);
+	assert.ok(pads >= 2, `${pads} pad jumps`);
+});
+
+test('the UFO takes orbs on the drums now and then from hard on, each needed', async () => {
+	let orbs = 0;
+	for (const difficulty of ['hard', 'extreme'] as const) {
+		const l = await level(['cube', 'ufo'], difficulty);
+		const w = l.world;
+		const run = simulate(w, startState(w, l.start), l.end, l.plan);
+		assert.ok(!run.dead, difficulty);
+		for (const o of w.orbs.items) {
+			if (w.sectionAt(w.timeAt(o.x)).mode !== 'ufo') continue;
+			orbs++;
+			assert.ok(run.used.includes(o.id), `${difficulty}: an unused UFO orb`);
+			w.orbs.remove(o);
+			const without = simulate(w, startState(w, l.start), l.end, l.plan);
+			w.orbs.add(o);
+			assert.ok(without.dead, `${difficulty}: a UFO orb at ${o.x.toFixed(1)} not needed`);
+		}
+	}
+	assert.ok(orbs >= 2, `${orbs} UFO orbs`);
 });

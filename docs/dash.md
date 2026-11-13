@@ -1578,3 +1578,53 @@ Ship-Teil ist ein Korridor aus Blöcken wie vor 0.6.114 (`builders/ship.ts` auf 
 29), und tödliche schräge Wände gibt es in der Physik wieder nur für die Wave. Ein Test prüft,
 dass kein Ship-Teil solche Wände hat. Schrägen, an denen das Ship entlanggleiten kann, bräuchten
 eigene Physik für schräge Flächen; die gibt es noch nicht. `GENERATOR_VERSION` ist `gd-4.2`.
+
+## 32. Näher an den Leveln: Pads im Spider, blaue Pads im Cube, Orbs im UFO, Spiegel-Portale
+
+Noch einmal gegen die hochgeladenen Level gemessen, welche Orbs und Pads es je Modus gibt:
+
+| Modus  | in den Leveln (meiste Arten)                                      | bei uns vorher                 |
+| ------ | ----------------------------------------------------------------- | ------------------------------ |
+| Cube   | gelbe und **blaue Pads**, blaue, gelbe, **grüne** Orbs, rote Pads | gelbe/pinke/rote Pads und Orbs |
+| Spider | **pinke Pads** (in „niwa“ 36), schwarze Orbs, blaue Pads          | Orb-Sprünge (30)               |
+| UFO    | schwarze, grüne, gelbe Orbs                                       | keine                          |
+| Ball   | gelbe, pinke, rote, blaue Orbs                                    | Orb-Sprünge (30)               |
+
+Dazu **Spiegel-Portale** in zwei der vier Level (eine gespiegelte Strecke, hin und zurück).
+
+**Pad-Sprünge (Ball, Spider; `builders/rooms.ts`).** Ein Teil der Sprünge aus 30 geht jetzt
+über ein Pad statt ein Orb (Spider 55 %, Ball 35 % der Sprünge): Das Pad liegt am Ende der
+Plattform und nimmt den Beat von selbst, ohne Klick. Ohne Pad rollt der Spieler in die Grube; ein
+Test prüft jedes einzeln. Der Spider springt öfter (25 / 36 / 42 / 48 % seiner Klicks, Normal bis
+Extreme). Die Plattform, auf der er landet, beginnt erst nach dem Absprung (vorher stieß ein Pad-
+Sprung gegen ihre Kante).
+
+**Blaue Pads im Cube (`builders/blocks.ts`, neuer Baustein `upsidePads`, ab Hard).** Ein blaues
+Pad am Boden dreht die Schwerkraft auf dem Beat, ohne Klick, an eine Platte oben; dort zwei
+Sprünge über hängende Spikes; ein blaues Pad unter der Platte dreht zurück. Wer nicht gedreht
+wird, läuft unten in kleine Spikes. Das Kopfüber-Stück mit Orbs nimmt jetzt in 40 % der Fälle
+grüne statt blauer Orbs (sie drehen mit einem Sprung). 45 Bausteine für Cube und Robot (vorher 44).
+
+**Orbs im UFO (`builders/rooms.ts`, `buildTunnel`, ab Hard).** Die Wegsuche darf auf den
+Klicks des Schlagzeugs (den stärksten) statt eines Hüpfers ein Orb nehmen: gelb (großer Sprung)
+unten im Raum, schwarz (sofort nach unten) oben; höchstens eines je 1,2 s. Das Orb ist während der
+Suche nur für diesen Weg da. Danach wird jedes Orb nötig gemacht: Wo der Weg ohne Orb (gleiche
+Klicks) aus dem Raum hinausreicht, den alle geprüften Wege einnehmen, kommt eine Säge direkt an
+dessen Rand; sie bleibt, wenn alle Wege weiter durchkommen. Ein Orb, das so nicht nötig wird,
+entfernt die Schlussprüfung wie bisher.
+
+**Spiegel-Portale (`plan.ts`, `portals.ts`, `render.ts`).** Ab Hard ist eine Strecke gespiegelt
+(Hard in der Hälfte der Level eine, Insane eine, Extreme zwei): ab einem intensiven Wechsel (Drop)
+6–14 s lang, nie am Anfang oder Ende. Ein orangefarbenes Portal schaltet um (`MIRROR`,
+`MIRROR OFF`), die Welt klappt in einem Moment um, der Spieler läuft von rechts nach links; das
+HUD bleibt. Die Physik ist dieselbe (es ist nur die Ansicht). Im Browser mit dem echten Renderer
+angesehen.
+
+Geänderte Tests: Der Test, ob Cube und Robot lange nichts zu tun haben, zählt Pads mit (ein Pad
+nimmt seinen Beat wie ein Klick; sonst 17 % auf Extreme); der Test der Kopfüber-Strecken erkennt
+auch grüne Orbs und blaue Pads als Einstieg.
+
+Neue Tests: Pad-Sprünge kommen vor und jedes Pad ist nötig; UFO-Orbs kommen vor, werden genommen
+und sind nötig (`rooms.test.ts`); gespiegelte Strecken ab Hard, nicht auf Easy und Normal, ein
+Portal bei jedem Umschalten (`generate.test.ts`); 45 Cube-Bausteine (`blocks.test.ts`).
+`GENERATOR_VERSION` ist `gd-4.3-orbs-mirror`.

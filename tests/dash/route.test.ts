@@ -76,7 +76,14 @@ function turnedUnder(w: ReturnType<typeof world>, slab: { x0: number; x1: number
 	return (
 		w.gravityPortals.items.some(
 			(p) => p.gravity === -1 && p.x >= slab.x0 - 2 && p.x <= slab.x0 + 0.5
-		) || w.orbs.items.some((o) => o.kind === 'blue' && o.x >= slab.x0 - 2 && o.x <= slab.x0 + 0.5)
+		) ||
+		w.orbs.items.some(
+			(o) => (o.kind === 'blue' || o.kind === 'green') && o.x >= slab.x0 - 2 && o.x <= slab.x0 + 0.5
+		) ||
+		// (a blue pad on the ground before it: see the blue pads' stretch in builders/blocks.ts)
+		w.pads.items.some(
+			(p) => p.kind === 'blue' && p.dir === 1 && p.x >= slab.x0 - 2 && p.x <= slab.x0 + 0.5
+		)
 	);
 }
 

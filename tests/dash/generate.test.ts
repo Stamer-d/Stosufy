@@ -521,3 +521,28 @@ test('ship parts are corridors of blocks it may slide along, never walls that ki
 		}
 	assert.ok(ships >= 2, `${ships} ship parts`);
 });
+
+test('from hard on, a stretch or two seen mirrored, between mirror portals; the physics as ever', async () => {
+	let stretches = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['easy', 'normal', 'insane', 'extreme'] as const) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			const mirrored = w.sections.filter((s) => s.mirror);
+			if (difficulty === 'easy' || difficulty === 'normal')
+				assert.equal(mirrored.length, 0, `${name} ${difficulty}`);
+			// (never at the very start or end)
+			assert.ok(!w.sections[0].mirror && !w.sections[w.sections.length - 1].mirror);
+			const portals = l.portals.filter((p) => p.kind === 'mirror');
+			// (a portal wherever it turns: into the stretch and out of it again)
+			let was = false;
+			let turns = 0;
+			for (const s of w.sections) {
+				if (!!s.mirror !== was) turns++;
+				was = !!s.mirror;
+			}
+			assert.equal(portals.length, turns, `${name} ${difficulty}`);
+			stretches += turns / 2;
+		}
+	assert.ok(stretches >= 4, `${stretches} mirrored stretches`);
+});

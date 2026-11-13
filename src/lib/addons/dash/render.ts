@@ -232,6 +232,16 @@ export function createDashRenderer(
 	let height = 0;
 	let scale = 1;
 	let camX = 0;
+	/** How mirrored the view is (0 not, 1 right to left; between: it turns over) */
+	let mirror = 0;
+	/** The world drawn mirrored as far as it is (about the middle of the screen) */
+	const flip = (c: CanvasRenderingContext2D) => {
+		if (mirror < 0.001) return;
+		const k = Math.cos(mirror * Math.PI);
+		c.translate(width / 2, 0);
+		c.scale(Math.abs(k) < 0.02 ? 0.02 * Math.sign(k || 1) : k, 1);
+		c.translate(-width / 2, 0);
+	};
 	let camY = -2.2;
 	let lastTime = 0;
 	let lastFrame = 0;
@@ -596,6 +606,7 @@ export function createDashRenderer(
 		particles = particles.filter((p) => p.kind === 'ring' || p.kind === 'glow');
 		trail = [];
 		camX = state.x - (width * 0.3) / scale;
+		mirror = lookLevel?.world.sectionAt(state.time).mirror ? 1 : 0;
 		shake = 0;
 		shipAngle = 0;
 		lastMode = state.mode;
@@ -2240,6 +2251,10 @@ export function createDashRenderer(
 		else targetY = Math.max(-2.2, state.y - 7.2);
 		// (eased the same however many frames a second)
 		camY += (targetY - camY) * (1 - Math.exp(-dt * (section.ceil !== null ? 5 : 3.5)));
+		// (mirrored or back: turned over in a moment)
+		const mirrored = world.sectionAt(Math.max(time, level.start)).mirror ? 1 : 0;
+		mirror += (mirrored - mirror) * (1 - Math.exp(-dt * 9));
+		if (Math.abs(mirrored - mirror) < 0.002) mirror = mirrored;
 		const shaking = shake > 0 ? shake * scale * 0.12 : 0;
 		shake = Math.max(0, shake - dt * 3);
 
@@ -2257,12 +2272,14 @@ export function createDashRenderer(
 			}
 			ctx = farCtx;
 			ctx.setTransform(fw / width, 0, 0, fh / height, 0, 0);
+			flip(ctx);
 		}
 		const shakeX = shaking ? (Math.random() - 0.5) * shaking : 0;
 		const shakeY = shaking ? (Math.random() - 0.5) * shaking : 0;
 		if (!dense) {
 			ctx.save();
 			ctx.translate(shakeX, shakeY);
+			flip(ctx);
 		}
 		background(p, pulse, section.kiai);
 		decorations(p, time, pulse, section.kiai);
@@ -2281,6 +2298,7 @@ export function createDashRenderer(
 			ctx.imageSmoothingEnabled = false;
 			ctx.drawImage(far, -bleed, -bleed, width + bleed * 2, height + bleed * 2);
 			ctx.imageSmoothingEnabled = true;
+			flip(ctx);
 		}
 		if (section.ceil !== null) ground(p, section.ceil, -1, pulse, camX, 'edge');
 		ground(p, section.floor, 1, pulse, camX, 'edge');
@@ -2404,7 +2422,20 @@ export function createDashRenderer(
 					label,
 					portalItem.mini ? 'portalMini' : 'portalBig'
 				);
-			} else if (!level.portals.some((p) => p.x === portalItem.x && p.kind !== 'speed')) {
+			} else if (portalItem.kind === 'mirror') {
+				// (a step before the part's own portal, where there's one)
+				portal(
+					portalItem.x - 1.3,
+					Math.max(1.6, portalItem.y),
+					'#ff9b2f',
+					time,
+					portalItem.mirrored ? 'MIRROR' : 'MIRROR OFF'
+				);
+			} else if (
+				!level.portals.some(
+					(p) => p.x === portalItem.x && p.kind !== 'speed' && p.kind !== 'mirror'
+				)
+			) {
 				speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1, time);
 			}
 		}

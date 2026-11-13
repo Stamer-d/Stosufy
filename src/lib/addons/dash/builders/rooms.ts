@@ -27,6 +27,8 @@ import {
 	type InputEvent,
 	type Orb,
 	type OrbKind,
+	type Pad,
+	type PadKind,
 	type PlayerState,
 	type Section,
 	type Solid,
@@ -48,6 +50,13 @@ class Built {
 	hazards: object[] = [];
 	orbs: Orb[] = [];
 	constructor(private world: World) {}
+	pads: Pad[] = [];
+	pad(kind: PadKind, x: number, y: number, dir: 1 | -1) {
+		const pad: Pad = { id: this.world.id(), kind, x, y, dir, x0: x - 0.5, x1: x + 0.5 };
+		this.world.pads.add(pad);
+		this.pads.push(pad);
+		return pad;
+	}
 	orb(kind: OrbKind, x: number, y: number) {
 		const orb: Orb = { id: this.world.id(), kind, x, y, x0: x - 0.6, x1: x + 0.6 };
 		this.world.orbs.add(orb);
@@ -71,6 +80,9 @@ class Built {
 		this.world.hazards.removeIf((h) => hazards.has(h));
 		const orbs = new Set<object>(this.orbs);
 		if (orbs.size) this.world.orbs.removeIf((o) => orbs.has(o));
+		const pads = new Set<object>(this.pads);
+		if (pads.size) this.world.pads.removeIf((p) => pads.has(p));
+		this.pads = [];
 		this.solids = [];
 		this.hazards = [];
 		this.orbs = [];
@@ -253,9 +265,13 @@ export function buildPlatforms(
 	// its spikes; without the press it rolls into the pit: every orb is needed. Where the presses
 	// come a beat apart, the jump takes two beats: the press between goes
 	const hops = new Set<number>();
+	/** Of those, the ones a pad takes, without a press (on the beat by itself) */
+	const pads = new Set<number>();
 	if (preset.level >= 1) {
 		const pick = random(seed ^ 0x5bd1);
-		const share = [0, 0.18, 0.28, 0.33, 0.38][preset.level] * (0.7 + intensity * 0.6);
+		const share =
+			(spider ? [0, 0.25, 0.36, 0.42, 0.48] : [0, 0.18, 0.28, 0.33, 0.38])[preset.level] *
+			(0.7 + intensity * 0.6);
 		const air = spider ? 400 : 460;
 		// (the ball jumps high: only in a room with space over the jump)
 		const space = top - floor >= (spider ? 5 : 6);
@@ -268,15 +284,28 @@ export function buildPlatforms(
 				hops.add(k);
 			}
 		}
+		// (as hand-built spider parts have them, many pads: the spider's jumps more often by a
+		// pad than by an orb, the ball's less often)
+		for (const k of hops) if (pick() < (spider ? 0.55 : 0.35)) pads.add(k);
 	}
-	const events = taps(times, 90);
+	/** The presses: all but those a pad takes */
+	const pressesOf = () =>
+		taps(
+			times.filter((_, k) => !pads.has(k)),
+			90
+		);
+	let events = pressesOf();
 
 	const room = sec.mini ? 2.4 : 3;
 	const built = new Built(world);
 	for (let attempt = 0, retries = 0; attempt < 4; attempt++) {
 		built.clear();
 		// (the last tries without orb jumps)
-		if (attempt >= 2) hops.clear();
+		if (attempt >= 2) {
+			hops.clear();
+			pads.clear();
+		}
+		events = pressesOf();
 		const rng = random(seed + attempt);
 		/** Each platform's side: the floor's (0) or the ceiling's (1); a press goes over, a jump not */
 		const sides: (0 | 1)[] = [0];
@@ -328,13 +357,20 @@ export function buildPlatforms(
 			const xc = world.xAt(times[k]);
 			const next = times[k + 1];
 			const x1 = next === undefined ? sec.x1 : ceilHalf(world.xAt(next) + late);
-			const from = spider && !hop ? xc - early : xc - 0.25;
+			const from = spider && !hop ? xc - early : hop ? xc + 1.5 : xc - 0.25;
 			if (hop) {
-				// (the orb where it rolls: yellow, pink where the room is low for a full jump)
+				// (the orb where it rolls, or the pad it rolls over: yellow, pink where the room is
+				// low for a full jump)
 				const on = visits[k];
-				const y = on.side ? top - on.d - box.h : floor + on.d + box.h;
 				const low = top - floor - on.d - (thick[sides.lastIndexOf((1 - on.side) as 0 | 1, k)] ?? 0);
-				built.orb(low < 6.5 || rng() < 0.3 ? 'pink' : 'yellow', xc, y);
+				const kind = low < 6.5 || rng() < 0.3 ? 'pink' : 'yellow';
+				if (pads.has(k)) {
+					// (the pad on its platform, whole: the platform goes on under it)
+					built.pad(kind, xc, on.side ? top - on.d : floor + on.d, on.side ? -1 : 1);
+					on.x1 = Math.max(on.x1, ceilHalf(xc + 0.6));
+					on.last = Math.max(on.last, xc + 0.6);
+					if (on.solid) on.solid.x1 = on.x1;
+				} else built.orb(kind, xc, on.side ? top - on.d - box.h : floor + on.d + box.h);
 			}
 			const solid: Solid | null = d
 				? built.solid(
@@ -362,7 +398,7 @@ export function buildPlatforms(
 				visits[0].last = Math.max(visits[0].last, clear);
 			}
 			if (landing < 0) {
-				dbg('no landing after press', k, 'of', times.length, hop ? '(orb jump)' : '');
+				dbg('no landing after press', k, 'of', times.length, hop ? '(jump)' : '');
 				if (hop) hopFailed = k;
 				ok = false;
 				break;
@@ -385,6 +421,7 @@ export function buildPlatforms(
 			// (an orb jump that doesn't land: that press goes over as the others, the try again)
 			if (hopFailed >= 0 && retries++ < 12) {
 				hops.delete(hopFailed);
+				pads.delete(hopFailed);
 				attempt--;
 			}
 			continue;
@@ -468,7 +505,17 @@ export function buildPlatforms(
 			);
 			continue;
 		}
-		dbg('platforms ok, orb jumps', built.orbs.length, 'of presses', times.length, 'try', attempt);
+		dbg(
+			'platforms ok, jumps',
+			built.orbs.length,
+			'orbs',
+			built.pads.length,
+			'pads',
+			'of presses',
+			times.length,
+			'try',
+			attempt
+		);
 		ctx.plan.push(...events);
 		return simulate(world, entry, sec.end, events);
 	}
@@ -497,7 +544,9 @@ interface Way {
 	state: PlayerState;
 	score: number;
 	last: number;
-	taps: { time: number; before: Way['taps'] } | null;
+	taps: { time: number; orb?: Orb; before: Way['taps'] } | null;
+	/** When it last took an orb */
+	orbAt?: number;
 }
 
 export function buildTunnel(
@@ -637,10 +686,21 @@ export function buildTunnel(
 			const end = i + 1 < slots.length ? slots[i + 1].time - STEP : sec.end;
 			const next: Way[] = [];
 			for (const way of beam) {
-				for (const tap of [false, true]) {
+				for (const option of byOrb(slot, way) ? [0, 1, 2] : [0, 1]) {
+					const tap = option > 0;
 					if (tap && slot.time - way.last < apart) continue;
 					// (no press right at a portal: it turns there on its own)
 					if (tap && turns.some((t) => Math.abs(t - slot.time) < apart * 0.75)) continue;
+					// (an orb there, for this way only while it's played: black where it's high, down at
+					// once; yellow where it's low, a big jump)
+					let orb: Orb | undefined;
+					if (option === 2) {
+						const x = world.xAt(slot.time);
+						// (black: down at once where a press would go up; yellow low in the room)
+						const kind: OrbKind = way.state.y > floor + 3 ? 'black' : 'yellow';
+						orb = { id: world.id(), kind, x, y: way.state.y, x0: x - 0.6, x1: x + 0.6 };
+						world.orbs.add(orb);
+					}
 					const events = tap
 						? [
 								{ time: slot.time, down: true },
@@ -656,15 +716,19 @@ export function buildTunnel(
 						if (!inBand(s)) return (inside = false);
 						edge = Math.max(edge, Math.abs(s.y - centre(s.x)) / Math.min(reach, 4));
 					});
+					if (orb) world.orbs.remove(orb);
 					if (!inside || state.dead) continue;
+					// (an orb that wasn't taken is no orb way)
+					if (orb && !state.used.includes(orb.id)) continue;
 					const last = tap ? slot.time : way.last;
-					let score = way.score + (tap ? slot.weight : 0) - edge * edge * 0.12;
+					let score = way.score + (tap ? slot.weight : 0) + (orb ? 0.3 : 0) - edge * edge * 0.12;
 					if (end - last > idle) score -= 0.4;
 					next.push({
 						state,
 						score,
 						last,
-						taps: tap ? { time: slot.time, before: way.taps } : way.taps
+						orbAt: orb ? slot.time : way.orbAt,
+						taps: tap ? { time: slot.time, orb, before: way.taps } : way.taps
 					});
 				}
 			}
@@ -731,9 +795,26 @@ export function buildTunnel(
 		}
 		const best = beam[0];
 		const out: number[] = [];
-		for (let t = best.taps; t; t = t.before) out.push(t.time);
+		found = [];
+		for (let t = best.taps; t; t = t.before) {
+			out.push(t.time);
+			if (t.orb) found.push(t.orb);
+		}
 		return out.reverse();
 	};
+	/** The orbs of the way found */
+	let found: Orb[] = [];
+	/**
+	 * Whether a way may take an orb at a slot: the UFO from hard on, on the drums' presses (the
+	 * strongest), not two within 1.2 s (hand-built UFO parts have one every three seconds or so)
+	 */
+	const byOrb = (slot: Slot, way: Way) =>
+		!swing &&
+		preset.level >= 2 &&
+		slot.weight >= 1 &&
+		slot.time - (way.orbAt ?? -1e9) >= 1200 &&
+		slot.time > sec.start + 400 &&
+		slot.time < sec.end - 600;
 	let times: number[] | null = null;
 	// (a band around the phrase's height, wider if there's no way in it, at last the whole room)
 	for (const reach of swing ? [2.1, 2.9, 99] : preset.level <= 1 ? [99] : [2.3, 3.1, 99]) {
@@ -742,6 +823,9 @@ export function buildTunnel(
 	}
 	if (!times || !times.length) return (dbg('no presses'), null);
 	const events = taps(times, 60);
+	dbg('tunnel orbs', found.length, 'of presses', times.length);
+	// (the way's orbs in the world now: the tunnel is laid around the way that takes them)
+	for (const orb of found) world.orbs.add(orb);
 
 	// The room the way takes, per block: played on time, early, late, and each press alone off
 	const low = new Map<number, number>();
@@ -794,6 +878,7 @@ export function buildTunnel(
 
 	// The tunnel: blocks up to and down to that room, in runs of a few blocks
 	const built = new Built(world);
+	built.orbs.push(...found);
 	const clear = CLEAR[preset.level] * (1.15 - intensity * 0.3) * (sec.mini ? 0.8 : 1);
 	const run = preset.level <= 1 ? 3 : 2;
 	const x0 = Math.ceil(world.xAt(sec.start + 150));
@@ -848,10 +933,66 @@ export function buildTunnel(
 	};
 	if (preset.level >= 1 || swing) spikes();
 
+	/**
+	 * Each orb of the way needed: where the way without it goes (the same presses, the orb not
+	 * there), and no way that's played comes near, a saw; it stays if every way still gets
+	 * through. An orb no saw makes needed is left to the end (it goes there if it's not needed)
+	 */
+	function needOrbs() {
+		for (const orb of found) {
+			world.orbs.remove(orb);
+			const trace: { x: number; y: number; time: number }[] = [];
+			const run = simulate(world, entry, sec.end, events, { trace });
+			world.orbs.add(orb);
+			dbg(
+				'orb',
+				orb.kind,
+				'at',
+				(orb.x - sec.x0).toFixed(1),
+				'without it',
+				run.dead ? 'dead' : 'alive'
+			);
+			if (run.dead) continue;
+			// (a saw just outside the room the ways take, where the way without the orb reaches out of
+			// it: it catches that one, none of the others)
+			let made = false;
+			for (const p of trace) {
+				if (made) break;
+				if (p.x < orb.x + 1 || p.x > Math.min(sec.x1 - 2, orb.x + 12)) continue;
+				for (const r of [0.6, 0.45]) {
+					if (made) break;
+					const hit = r * 0.72;
+					for (const dir of [1, -1]) {
+						const y = p.y + dir * (box.h + hit - 0.06);
+						let clearOf = true;
+						for (let c = Math.floor(p.x - hit - 0.1); c <= Math.floor(p.x + hit + 0.1); c++) {
+							const lo = low.get(c);
+							const hi = high.get(c);
+							if (lo === undefined || hi === undefined) continue;
+							if (dir > 0 ? y - hit < hi + 0.06 : y + hit > lo - 0.06) clearOf = false;
+						}
+						if (!clearOf || y - r < floor + 0.2 || y + r > top - 0.2) continue;
+						if (world.solidAt(p.x - r, p.x + r, y - r, y + r)) continue;
+						const saw = world.saw(p.x, y, r);
+						if (fails(world, entry, sec.end, events, tolerance, seed, 0)) {
+							world.hazards.remove(saw);
+							continue;
+						}
+						built.hazards.push(saw);
+						dbg('orb made needed by a saw at', (p.x - sec.x0).toFixed(1));
+						made = true;
+						break;
+					}
+				}
+			}
+		}
+	}
+
 	// Played; where it's stopped: the spikes there go, then the blocks give half a block
 	for (let round = 0; round < 60; round++) {
 		const failed = fails(world, entry, sec.end, events, tolerance, seed, 0);
 		if (!failed) {
+			needOrbs();
 			ctx.plan.push(...events);
 			return simulate(world, entry, sec.end, events);
 		}

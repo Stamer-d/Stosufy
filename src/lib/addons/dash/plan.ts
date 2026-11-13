@@ -764,5 +764,27 @@ export function planLevel(
 			piece: c.piece
 		});
 	}
+
+	// --- Mirrored stretches: from hard on, on an intense change (a drop), for a few parts -------
+	// (as hand-built levels have them: one or two in a level, seen right to left a while)
+	const mirrors = level >= 4 ? 2 : level >= 3 ? 1 : level >= 2 && rng() < 0.5 ? 1 : 0;
+	const starts = parts
+		.map((p, i) => ({ p, i }))
+		.filter(({ p, i }) => i > 0 && i < parts.length - 2 && p.change && p.intensity >= 0.6)
+		.map((o) => ({ ...o, order: rng() }))
+		.sort((a, b) => a.order - b.order);
+	let made = 0;
+	for (const { i } of starts) {
+		if (made >= mirrors) break;
+		// (not next to another mirrored stretch)
+		if (parts.slice(Math.max(0, i - 2), i + 6).some((p) => p.mirror)) continue;
+		const target = 6000 + rng() * 8000;
+		let total = 0;
+		for (let j = i; j < parts.length - 1 && total < target; j++) {
+			parts[j].mirror = true;
+			total += parts[j].end - parts[j].start;
+		}
+		made++;
+	}
 	return parts;
 }

@@ -68,7 +68,7 @@ export interface Block {
 	/** Turns gravity around */
 	gravity?: boolean;
 	leaps?: Leap[];
-	upside?: 'orbs' | 'portal';
+	upside?: 'orbs' | 'portal' | 'pads';
 }
 
 const leap = (landing: Landing, more: Partial<Leap> = {}): Leap => ({ landing, ...more });
@@ -161,7 +161,9 @@ export const BLOCKS: Block[] = [
 	{ id: 'gaps3', level: 3, weight: 0.6, high: 1, leaps: [leap('gap'), leap('gap'), leap('gap')] },
 	// Upside down
 	{ id: 'upsideOrbs', level: 2, weight: 0.8, gravity: true, upside: 'orbs' },
-	{ id: 'upsidePortal', level: 1, weight: 0.8, gravity: true, upside: 'portal' }
+	{ id: 'upsidePortal', level: 1, weight: 0.8, gravity: true, upside: 'portal' },
+	// (in and out by blue pads, on the beat by themselves, as hand-built cube parts have many)
+	{ id: 'upsidePads', level: 2, weight: 0.9, gravity: true, upside: 'pads' }
 ];
 
 /** Whether a piece goes up (1), down (-1) or stays (0) */
@@ -685,6 +687,9 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 	function upside(kit: Kit, block: Block) {
 		const { a } = kit;
 		const byOrb = block.upside === 'orbs';
+		const byPad = block.upside === 'pads';
+		// (the orbs blue, or green now and then: it turns with a jump)
+		const orbKind = byOrb && rng() < 0.4 ? 'green' : 'blue';
 		const inAt = times[kit.at];
 		const at = downAt(state, inAt, withPlan(kit));
 		if (at.dead || !at.grounded || at.gravity !== 1) return false;
@@ -700,14 +705,20 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 				px
 			);
 		};
-		if (byOrb) a.orb('blue', half(x), h + box.h);
-		// (held till it's down, where the press comes just before)
-		kit.presses.push(...tap(inAt, hold + Math.max(0, at.time - inAt)));
-		kit.must.push(inAt);
+		if (byOrb) a.orb(orbKind, half(x), h + box.h);
+		if (byPad) {
+			// (a blue pad where it rolls on the click's beat: up without a press)
+			if (!world.surfaceAt(half(x) - 0.45, half(x) + 0.45, h, 1)) return false;
+			a.pad('blue', half(x), h, 1);
+		} else {
+			// (held till it's down, where the press comes just before)
+			kit.presses.push(...tap(inAt, hold + Math.max(0, at.time - inAt)));
+			kit.must.push(inAt);
+		}
 		// (the slab from where it turns, as long as it may be: shortened once it's known where it
 		// turns back)
 		let slab: Solid | null = null;
-		if (byOrb)
+		if (byOrb || byPad)
 			slab = a.solid({ x0: Math.floor(x) + 1, x1: exitX, y0: high, y1: high + 1, style: 1 });
 		else {
 			// (in at the top of the jump)
@@ -742,16 +753,19 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 			kit.must.push(times[c]);
 		}
 		let outAt: number;
-		if (byOrb) {
+		if (byOrb || byPad) {
 			const c = onSlab();
 			if (c < 0) return false;
 			kit.skipped += c - kit.at;
 			kit.at = c + 1;
 			outAt = times[c];
 			const s = simulate(world, state, outAt, withPlan(kit));
-			a.orb('blue', half(s.x), high - box.h);
-			kit.presses.push(...tap(outAt, hold));
-			kit.must.push(outAt);
+			if (byPad) a.pad('blue', half(s.x), high, -1);
+			else {
+				a.orb(orbKind, half(s.x), high - box.h);
+				kit.presses.push(...tap(outAt, hold));
+				kit.must.push(outAt);
+			}
 		} else {
 			// (once it's down from the last jump)
 			const trace: Point[] = [];
@@ -767,9 +781,9 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 		const endX = world.xAt(outAt);
 		if (endX + 6 > exitX) return false;
 		// (with orbs on past where it turns, with a spike that who doesn't turn runs into)
-		slab!.x1 = Math.ceil(endX) + (byOrb ? 4 : 2);
+		slab!.x1 = Math.ceil(endX) + (byOrb || byPad ? 4 : 2);
 		world.solids.touch();
-		if (byOrb) a.spike(Math.floor(endX + 3) + 0.5, high, -1, robot ? 'small' : 'spike');
+		if (byOrb || byPad) a.spike(Math.floor(endX + 3) + 0.5, high, -1, robot ? 'small' : 'spike');
 		a.spikes(Math.ceil(x + 2), Math.floor(endX - 1), h, 1, 'small');
 		// Down on the ground again: where
 		const trace: Point[] = [];

@@ -45,11 +45,12 @@ function level(name: string, difficulty: Difficulty, generator: 'blocks' | 'clas
 	return made.get(key)!;
 }
 
-test('56 building blocks: 44 for the cube and robot (6 with pads), 12 for the ship, each its own', () => {
-	assert.equal(BLOCKS.length, 44);
+test('57 building blocks: 45 for the cube and robot (6 with pads, one by blue pads), 12 for the ship, each its own', () => {
+	assert.equal(BLOCKS.length, 45);
+	assert.equal(BLOCKS.filter((b) => b.upside === 'pads').length, 1);
 	assert.equal(BLOCKS.filter((b) => b.leaps?.some((l) => l.pad)).length, 6);
 	assert.equal(SHIP_PIECES.length, 12);
-	assert.equal(new Set(BLOCKS.map((b) => b.id)).size, 44);
+	assert.equal(new Set(BLOCKS.map((b) => b.id)).size, 45);
 	assert.equal(new Set(SHIP_PIECES).size, 12);
 	// (easy has its own few, every level some more)
 	for (let level = 0; level <= 4; level++)
@@ -119,7 +120,11 @@ test('every press of a cube or robot part is needed, and there is always somethi
 			// Nothing to do for long while the music goes on: rare
 			let idle = 0;
 			let length = 0;
-			const downs = l.plan.filter((e) => e.down).map((e) => e.time);
+			// (a pad takes its beat by itself: it counts as something to do, as a press)
+			const downs = [
+				...l.plan.filter((e) => e.down).map((e) => e.time),
+				...w.pads.items.map((p) => w.timeAt(p.x))
+			].sort((a, b) => a - b);
 			for (const s of w.sections) {
 				if (s.mode !== 'cube' && s.mode !== 'robot') continue;
 				length += s.end - s.start;
