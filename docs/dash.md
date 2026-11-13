@@ -1517,3 +1517,54 @@ Mittel 3,6 s (vorher ~3 s; der Hindernis-Pass kostet 0,5–1 s pro Level). `npm 
   liegen schon eng am Weg, dort kommen vor allem Spikes an die Wände.
 - **Nicht gespielt**, nur gebaut, gemessen und als Bild angesehen (Tauri und osu!-Login fehlen
   hier). Ob sich die neuen Abschnitte gut anfühlen, zeigt erst das Spielen.
+
+## 30. Orb-Sprünge bei Ball und Spider, Ship-Korridore aus Schrägen, Spider stirbt an Sägen im Sprung
+
+Die offenen Punkte aus 29.4.
+
+**Orb-Sprünge (`builders/rooms.ts`, `buildPlatforms`).** Ab Normal werden einige Klicks eines
+Ball- oder Spider-Teils zu Orb-Sprüngen (Anteil 18 / 28 / 33 / 38 % der Klicks, Normal bis
+Extreme, mehr im Intensiven): Der Spieler bleibt auf seiner Seite und springt mit einem Orb
+über eine Grube voller Spikes auf die nächste Plattform derselben Seite. Gelb, pink, wo der Raum
+über dem Sprung niedrig ist. Ohne Orb ginge derselbe Klick auf die andere Seite, auf deren Spikes;
+ohne Klick rollt er in die Grube. Jedes Orb ist also nötig, und ein Test prüft das einzeln (Orb
+entfernt, gleiche Klicks: tot).
+
+- Liegen die Klicks nur einen Beat auseinander (zu kurz für den Bogen), nimmt der Sprung zwei
+  Beats, und der Klick dazwischen entfällt.
+- In der Grube bleiben der Block nach der Absprungkante und der halbe Block vor der Landung frei
+  (dort steigt bzw. sinkt der Bogen), und sie hat keine Stufe.
+- Die Plattformen um einen Sprung lassen 1,5 Blöcke mehr Raum. Der Ball springt nur in Räumen ab
+  6 Blöcken Höhe, der Spider ab 5.
+- Landet ein Sprung nicht, wird dieser Klick wieder ein normaler Wechsel; die letzten zwei
+  Versuche eines Teils bauen ganz ohne Sprünge.
+
+Gemessen (vier Testsongs): Spider 0,2–0,35 Orbs/s (vorher 0), Ball auf Hard 0,18/s; bei 3x und
+4x ist der Ball-Raum nur 5 Blöcke hoch, dort bleibt es bei Wechseln. Die Level haben im Ball etwa
+1 Orb/s, im Spider 1,3; das UFO hat weiter keine (die Level dort 0,35/s, meist schwarze und grüne).
+
+**Ship-Korridore aus Schrägen (`builders/ship.ts`, `physics.ts`).** Ab Normal ist etwa jeder
+zweite Ship-Teil (35 / 45 / 50 / 55 %) ein Korridor aus Schrägen: seine Wände sind Linien entlang
+der Mitte und Höhe der Bausteine (statt Blöcken auf dem Halbblock-Raster), Säulen werden zu
+Zacken. Wie die Wände der Wave sind sie tödlich (die Physik prüft die Wände jetzt auch für das
+Ship, mit 0,9 × seiner halben Höhe). Gebaut und geprüft wird wie bisher (auf dem Weg, 0,3 Blöcke
+darüber und darunter, Orbs nötig). Der Hindernis-Pass legt dort keine Spikes an die Wände und
+setzt Hindernisse nur zwischen die Linien. Auf den vier Testsongs: 16 Ship-Teile aus Schrägen,
+14 aus Blöcken.
+
+**Spider springt nicht mehr durch Sägen (`physics.ts`).** Rückmeldung: Der Spider teleportiert
+durch Sägen und Spikes, statt zu sterben. Sein Sprung auf die andere Seite (Klick oder
+Spider-Orb) geschieht in einem Physikschritt, und geprüft wurde nur die Stelle, an der er ankommt.
+Jetzt zählt die ganze Strecke des Sprungs: Eine Säge oder ein Spike darauf tötet. Der
+Hindernis-Pass hält diese Strecke frei (vorher sah er nur Anfang und Ende des Sprungs und konnte
+eine Säge mitten hineinsetzen). Test in `physics.test.ts`.
+
+**Swing.** Die Gravity-Portale auf halben Takten (29.2) gelten nur noch für das UFO, und auf
+Insane setzt der Swing Portale nur jeden zweiten Takt (jeden Takt erst auf Extreme): Die Klicks
+des Swing drehen ihn schon. Damit liegt er wieder unter 7 % Zeit ohne nötigen Klick; die
+Lockerung des Tests auf 10 % ist zurückgenommen.
+
+Neue Tests: Orb-Sprünge kommen vor, werden genutzt und sind nötig (`rooms.test.ts`); das Ship
+stirbt an Schrägen und fliegt dazwischen (`physics.test.ts`); Ship-Teile aus Blöcken und aus
+Schrägen kommen vor und werden durchflogen (`generate.test.ts`). `GENERATOR_VERSION` ist
+`gd-4.1-slopes`.

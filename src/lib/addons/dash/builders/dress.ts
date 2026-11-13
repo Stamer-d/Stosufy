@@ -103,11 +103,15 @@ export function dressFlight(ctx: Context, sec: Section, entry: PlayerState) {
 		if (run.dead && way === runs[0]) return;
 		if (run.dead) continue;
 		alive.push(way);
-		for (const p of trace) {
+		trace.forEach((p, n) => {
+			// (the spider's jump to the other side: all of the way between)
+			const before = trace[n - 1];
+			const y0 = before && Math.abs(before.y - p.y) > 1 ? Math.min(before.y, p.y) : p.y;
+			const y1 = before && Math.abs(before.y - p.y) > 1 ? Math.max(before.y, p.y) : p.y;
 			const a = Math.max(0, Math.floor((p.x - box.w - spareX - x0) / BIN));
 			const b = Math.min(bins - 1, Math.floor((p.x + box.w + spareX - x0) / BIN));
-			for (let k = a; k <= b; k++) reserved[k].push([p.y - box.h - spareY, p.y + box.h + spareY]);
-		}
+			for (let k = a; k <= b; k++) reserved[k].push([y0 - box.h - spareY, y1 + box.h + spareY]);
+		});
 	}
 	// (each column's taken stretches, merged)
 	const taken = reserved.map((list) => {

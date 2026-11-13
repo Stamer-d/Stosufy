@@ -55,7 +55,7 @@ import { planLevel } from './plan';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-4.0-pieces';
+export const GENERATOR_VERSION = 'gd-4.1-slopes';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {

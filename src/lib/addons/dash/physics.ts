@@ -812,12 +812,16 @@ export function step(world: World, s: PlayerState, time: number) {
 		return events;
 	}
 
-	// What kills
+	// What kills. The spider's jump to the other side (a press or a spider orb) is all of the way
+	// it jumps in this step: a saw or spike on that way kills, it doesn't jump through it
+	const jumped = s.teleport && s.teleport.time === time ? s.teleport : null;
+	const yLow = jumped ? Math.min(jumped.from, jumped.to) : s.y;
+	const yHigh = jumped ? Math.max(jumped.from, jumped.to) : s.y;
 	for (const hazard of world.hazards.near(player.x0 - 1, player.x1 + 1)) {
-		const p = { x0: s.x - box.w, x1: s.x + box.w, y0: s.y - box.h, y1: s.y + box.h };
+		const p = { x0: s.x - box.w, x1: s.x + box.w, y0: yLow - box.h, y1: yHigh + box.h };
 		if (hazard.kind === 'saw') {
 			const dx = Math.max(0, Math.abs(hazard.x - s.x) - box.w);
-			const dy = Math.max(0, Math.abs(hazard.y - s.y) - box.h);
+			const dy = Math.max(0, Math.max(yLow - hazard.y, hazard.y - yHigh) - box.h);
 			if (dx * dx + dy * dy < (hazard.size * 0.72) ** 2) s.dead = true;
 		} else if (overlaps(p, hazard.hit)) s.dead = true;
 		if (s.dead) break;

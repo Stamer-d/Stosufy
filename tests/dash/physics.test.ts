@@ -319,3 +319,21 @@ test('a corridor of slopes is deadly to the ship, as to the wave; between its wa
 	// (before the corridor it flies as ever)
 	assert.ok(!simulate(w, start, 1500, []).dead);
 });
+
+test("the spider's jump to the other side crashes into a saw or spike on its way", () => {
+	const w = world({ mode: 'spider', ceil: 8 });
+	const start = startState(w, 0);
+	// (a press at 500 ms: it's at the ceiling right away)
+	const free = simulate(w, start, 1000, tap(500));
+	assert.ok(!free.dead && free.gravity < 0, 'without anything on its way it gets over');
+	// (a saw in the middle of the room where it jumps)
+	const x = w.xAt(500 + 1000 / 240);
+	w.saw(x, 4, 0.7);
+	assert.ok(simulate(w, start, 1000, tap(500)).dead, 'through a saw');
+	w.hazards.removeIf(() => true);
+	// (a spike hanging down into its way, short of the ceiling)
+	w.solids.add({ x0: x - 1, x1: x + 1, y0: 5, y1: 6, style: 1 });
+	w.spike(x, 5, -1);
+	const run = simulate(w, start, 1000, tap(500));
+	assert.ok(run.dead, 'into a spike under a block on its way');
+});
