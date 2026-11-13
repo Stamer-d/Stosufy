@@ -46,14 +46,16 @@ import { buildWave } from './builders/wave';
 import { buildBlocks } from './builders/blocks';
 import { buildShip } from './builders/ship';
 import { buildCanopy } from './builders/canopy';
+import { dressFlight } from './builders/dress';
 import { buildPlatforms, buildTunnel, roomsDebug } from './builders/rooms';
 import { drumClicks } from './rhythm';
 import { alignTiming, songOffset } from './timing';
+import { planLevel } from './plan';
 
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-3.12-blocks';
+export const GENERATOR_VERSION = 'gd-4.0-pieces';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -481,7 +483,7 @@ function loudParts(chart: DashChart, start: number, end: number) {
 // --- Where the music changes -------------------------------------------------------------
 
 /** How much kick a stretch has (the bass's hits, all added up: 0 without them) */
-function kickiness(sound: SongSound | null | undefined, from: number, to: number) {
+export function kickiness(sound: SongSound | null | undefined, from: number, to: number) {
 	const kicks = sound?.kicks;
 	if (!kicks) return 0;
 	const a = Math.max(0, Math.floor(from / sound!.hop));
@@ -496,14 +498,19 @@ function kickiness(sound: SongSound | null | undefined, from: number, to: number
  * song, and how hard its kick (a drop has it where the build-up before it has none, however
  * many notes that stream has: the notes count half)
  */
-function energyOf(busy: number, loud: number, kick: number, sound: SongSound | null | undefined) {
+export function energyOf(
+	busy: number,
+	loud: number,
+	kick: number,
+	sound: SongSound | null | undefined
+) {
 	if (!sound) return busy;
 	if (!sound.kicks) return (busy + loud) / 2;
 	return (busy * 0.5 + loud + kick) / 2.5;
 }
 
 /** The beat nearest a time */
-function snapToBeat(chart: DashChart, time: number) {
+export function snapToBeat(chart: DashChart, time: number) {
 	const { point } = beatAt(chart.timing, time);
 	const beats = Math.round((time - point.time) / point.beatLength);
 	return Math.round(point.time + beats * point.beatLength);
@@ -671,7 +678,7 @@ export function musicalChanges(chart: DashChart, start: number, end: number): Mu
 export type Pace = 0 | 1 | 2;
 
 /** The speed of a pace on a difficulty */
-function speedIndexOf(
+export function speedIndexOf(
 	preset: Preset,
 	pace: Pace,
 	/** What the music is like there: how intense, its beats a minute, how much it rests */
@@ -817,7 +824,7 @@ export function songTurn(chart: DashChart, time: number, span: number) {
 
 // --- The parts of the song ---------------------------------------------------------------
 
-interface Part {
+export interface Part {
 	start: number;
 	end: number;
 	mode: Mode;
@@ -835,6 +842,10 @@ interface Part {
 	change: boolean;
 	/** How much of it the music rests */
 	rest: number;
+	/** Its speed (plan.ts sets it; else from the pace) */
+	speedIndex?: number;
+	/** What the planner made it as (a long stretch, a duet, a size play, a chain, a burst) */
+	piece?: string;
 }
 
 /**
@@ -1249,7 +1260,11 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	);
 	// No kiai in the map: the song's loudest stretches are its drops
 	if (!chart.kiai.length && chart.sound) chart = { ...chart, kiai: loudParts(chart, start, end) };
-	const parts = planParts(chart, start, end, preset, rng);
+	// (the levels from building blocks are planned as set pieces, see plan.ts; the older ones as
+	// they were)
+	const parts = blocks
+		? planLevel(chart, start, end, preset, rng)
+		: planParts(chart, start, end, preset, rng);
 
 	const world = new World();
 	let x = 0;
@@ -1257,11 +1272,13 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	parts.forEach((part, index) => {
 		// Its pace (see `paces`: faster in the kiai, at a drop and a higher tempo, slower where
 		// it's calm; changing only where the music does)
-		const speedIndex = speedIndexOf(preset, part.pace, {
-			energy: part.energy,
-			bpm: 60000 / beatAt(chart.timing, (part.start + part.end) / 2).point.beatLength,
-			rest: part.rest
-		});
+		const speedIndex =
+			part.speedIndex ??
+			speedIndexOf(preset, part.pace, {
+				energy: part.energy,
+				bpm: 60000 / beatAt(chart.timing, (part.start + part.end) / 2).point.beatLength,
+				rest: part.rest
+			});
 		// (the small wave, twice as steep, not at the top speeds: there it's the big one, the speed
 		// stays the music's)
 		if (part.mode === 'wave' && part.mini && speedIndex > (preset.level >= 4 ? 3 : 2))
@@ -1431,8 +1448,12 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		const earlier = new Set(entryPlan);
 		for (let k = plan.length - 1; k >= 0; k--)
 			if (!earlier.has(plan[k]) && plan[k].down && plan[k].time >= sec.end - 1) plan.splice(k, 1);
-		const constructed = world.hazards.items.filter((h) => !oldHazards.has(h));
 		plan.sort((a, b) => a.time - b.time);
+		// (the flying parts' walls lined with spikes and obstacles in the room, around the way:
+		// see builders/dress.ts)
+		if (blocks && sec.mode !== 'cube' && sec.mode !== 'robot' && sec.mode !== 'wave')
+			dressFlight(ctx, sec, entry);
+		const constructed = world.hazards.items.filter((h) => !oldHazards.has(h));
 		state = repair(world, plan, entry, sec);
 		// (the flying parts are checked as a person plays them, each press a bit early or late on
 		// its own, by their builder: see builders/flight.ts. Taking things out of them here

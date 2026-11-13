@@ -36,8 +36,10 @@ its button in the title bar.
 - 🎛️ **DJ mode.** Two decks, and smart mixes that blend songs on their phrases.
 - 🟩 **Dash.** Play the song as a one-button rhythm level made from its beatmap and what's heard in
   the song: cube, robot, ship, ball, UFO, wave, swing and spider parts on the beat (the cube, robot
-  and ship built from 50 building blocks on the drums), with practice mode (checkpoints on their own
-  or set yourself) and five difficulties, from easy to demon level.
+  and ship built from 50 building blocks on the drums), planned like hand-built levels (long
+  stretches, duets, size plays, chains and bursts on the drops, the speed following the music),
+  with practice mode (checkpoints on their own or set yourself) and five difficulties, from easy to
+  demon level.
 - 🧩 **Puzzle.** Put a song's background back together, with leaderboards and a daily puzzle.
 - 🌍 **World center.** The weather with its radar, live lightning, storms, flights, earthquakes,
   departures, the ISS and webcams on one live map, and widgets of them for the home screen.

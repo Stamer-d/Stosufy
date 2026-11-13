@@ -120,7 +120,9 @@ test('from hard on the UFO and swing rarely go long without a press that is need
 	const swing = await idleOf(['swing']);
 	assert.ok(ufo.parts >= 6 && swing.parts >= 6, `${ufo.parts} UFO, ${swing.parts} swing parts`);
 	assert.ok(ufo.idle < 0.17, `UFO ${(100 * ufo.idle).toFixed(0)}% idle (${ufo.worstAt})`);
-	assert.ok(swing.idle < 0.07, `swing ${(100 * swing.idle).toFixed(0)}% idle (${swing.worstAt})`);
+	// (the swing now comes at 2x too, where the ways a press early or late goes spread wider
+	// after a gravity portal: a little more of it can be left out there, see docs/dash.md §29)
+	assert.ok(swing.idle < 0.1, `swing ${(100 * swing.idle).toFixed(0)}% idle (${swing.worstAt})`);
 	assert.ok(swing.needed >= 0.72, `swing ${(100 * swing.needed).toFixed(0)}% of turns needed`);
 });
 

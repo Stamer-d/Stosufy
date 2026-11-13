@@ -1377,3 +1377,143 @@ der Toleranz (engstes 54 ms bei 24 ms Toleranz). `npm run test:dash`: 191 Tests 
 - Zwei bestehende Tests angepasst: „Orbs in Ship und Spider“ verlangt nur noch Ship-Orbs (und nur
   einen: welche Teile ein Level bekommt, hat sich mit dem Zufallsstrom verschoben); der
   Gravity-Test im Kiai verlangt ein Portal je 3,2 s statt 2,76 s Flugzeit (gemessen 28 in 79 s).
+
+## 29. Neue Levelplanung aus handgebauten Leveln: Set-Pieces, Tempo, Flugteile
+
+Auftrag: die Dash-Generierung grundlegend überarbeiten, abgeleitet aus vier hochgeladenen,
+von Hand gebauten Leveln (`.gmd`/`.gdlvl`; nicht im Repo).
+
+### 29.1 Analyse der Level
+
+Gelesen wurden die Leveldaten (Base64 + gzip, Objekte mit ID, Position, Drehung, Skalierung).
+Welche Objekt-ID was ist (Block, Spike, Säge, Schräge, Deko), stammt aus der Objekttabelle des
+Python-Pakets `gmdkit` (Hitboxen von ~4100 Objekten); Portale, Orbs, Pads und Tempo-Portale aus
+`gd.py`. Die Zeit entlang des Levels ergibt sich aus den Tempo-Portalen (8,4 / 10,4 / 12,9 /
+15,6 / 19,2 Blöcke/s). Grenzen: Bewegungs-Trigger und Teleport-Portale sind nicht nachgespielt;
+das Level „niwa“ besteht fast nur aus solchen Effekten und zählt bei Korridoren und Strukturen
+nicht mit.
+
+| Level              | Länge | Moduswechsel/min | Abschnitt (Median) | Tempowechsel/min | Mini |
+| ------------------ | ----- | ---------------- | ------------------ | ---------------- | ---- |
+| „Robtop Level Mix“ | 175 s | 5,5              | 10,7 s             | 2,7              | 15 % |
+| „Future Funk“      | 260 s | 12,2             | 4,0 s              | 7,6              | 45 % |
+| „CraZy III“        | 150 s | 18,4             | 1,6 s              | 14,0             | 36 % |
+| „niwa“             | 60 s  | 81,5             | 0,55 s             | 12,9             | 29 % |
+
+Was daraus folgt (über alle vier):
+
+- **Abschnittslängen sind gemischt, nicht gleich:** je Modus p10/Median/p90 Cube 0,5 / 1,6 /
+  12,9 s, Ship 0,7 / 2,0 / 9,0 s, Wave 0,3 / 0,7 / 4,0 s, Spider 0,3 / 0,6 / 3,0 s. Lange
+  Strecken wechseln mit kurzen Einschüben (eine Wave von einem Takt, dann zurück) und Ketten
+  kurzer Teile. Wave und Spider sind fast immer kurz.
+- **Das Tempo wechselt oft und nicht nur am Modusportal:** 3–14 Tempowechsel pro Minute; nur
+  ~30 % fallen mit einem Moduswechsel zusammen. Die Level liegen meist bei 0,5x–2x
+  („Future Funk“: 17 % 0,5x, 43 % 1x, 28 % 2x, 12 % 3x), schneller nur in Spitzen.
+- **Größe:** 30–45 % der Zeit klein, oft als Wechsel klein/groß desselben Modus.
+- **Gravity:** in Ship und UFO etwa alle 3,3 s ein Portal, in der Wave alle 7 s.
+- **Orbs und Pads** in den Flugteilen: Ball 1,0 Orbs/s, Spider 1,3 Orbs und 2,4 Pads/s, UFO
+  und Ship 0,35 Orbs/s; im Cube 0,8 Orbs und 0,6 Pads/s.
+- **Korridore** (Höhe des freien Raums um den Weg, Median): Ship 4,4 (klein 3,1), UFO 4,1,
+  Wave 3,0, Ball 4,5, Spider 5,7 Blöcke. Wände sind meist mit Spikes ausgekleidet (Ship: 46 %
+  der Spalten oben und unten, 27 % auf einer Seite). Dazu Hindernisse frei im Raum, um die der Weg
+  herumführt, und Wave-Korridore aus Schrägen.
+
+Gemessen am Generator vor dieser Version (vier Testsongs, Extreme): Moduswechsel 11/min, fast
+alle Abschnitte gleich lang (p10/Median/p90 2,8 / 3,75 / 7,9 s), 1,4 Tempowechsel/min, 39 % der
+Zeit 4x; Ball, UFO, Spider und Swing ohne Orbs; Ship- und UFO-Räume weit und leer.
+
+### 29.2 Was geändert wurde
+
+**Levelplanung neu (`plan.ts`, für den Standard-Generator; „Classic“ bleibt beim alten).**
+
+- Der Song wird in Phrasen von zwei Takten geschnitten (vier bei sehr schnellen, einer bei sehr
+  langsamen Songs). Jede Phrase hat ihre eigene Musik (Dichte, Lautstärke, Kick, Kiai,
+  Slider-Velocity, Tempo) und ihr eigenes Tempo in vier Stufen: ruhig, normal, intensiv,
+  Spitze. Die Stufe wechselt wie bisher nur, wo sich die Musik ändert (`paces`), jetzt aber
+  Phrase für Phrase. Spitze ist ein intensiver Abschnitt, der lauter und dichter ist als die
+  Hälfte der intensiven, oder die ersten zwei Phrasen eines Drops.
+- **Geschwindigkeit je Stufe** (ruhig / normal / intensiv / Spitze): Easy 1x; Normal 0,5x / 1x /
+  2x / 2x; Hard 1x / 2x / 3x / 3x; Insane 1x / 2x / 3x / 4x; Extreme 2x / 3x / 3x / 4x. Songs
+  unter 100 BPM ohne 4x. Ein Tempowechsel kann jetzt auch ohne neuen Modus kommen (ein
+  Tempo-Portal allein), wie in den Leveln.
+- **Set-Pieces:** Zwischen zwei musikalischen Wechseln liegt ein Segment; jedes Segment wird in
+  Blöcke von höchstens 11–32 s geteilt (je nach Schwierigkeit), und jeder Block bekommt eine
+  Form, gewichtet nach Schwierigkeit und Tempostufe:
+  - _Strecke:_ ein Modus über eine Weile (Easy 14–30 s, Extreme 3–7,5 s; ruhig länger, an der
+    Spitze kürzer), dann ein anderer. Eine Wave nie länger als 5–7 s.
+  - _Duett:_ zwei Modi, die sich Phrase für Phrase abwechseln, aus Paaren, die zusammen
+    vorkommen (Cube–Ship, Ball–UFO, Wave–Ship, Robot–Spider …).
+  - _Größenspiel:_ ein Modus, Phrase für Phrase klein und groß; auf Extreme an der Spitze Takt
+    für Takt.
+  - _Kette:_ jede Phrase in kurze Teile (Extreme ab ~1,1 s, Insane ab 1,5 s, Hard ab 2,2 s),
+    jeder ein neuer Modus; schnelle Modi (Wave, UFO, Ball, Spider) bevorzugt.
+  - _Burst:_ ein Grundmodus (Cube, Robot, Ship, UFO oder Ball), und auf den Phrasen mit einem
+    Fill am Ende oder einer Wendung danach die letzten Beats als kurzer Einschub eines anderen
+    Modus (gern Wave, wo die Musik streamt), danach zurück.
+  - Pausen bleiben großer Cube; der erste Block ist eine Strecke (Aufwärmen); das Level beginnt
+    und endet auf dem Cube.
+- Die Moduswahl folgt der Musik wie bisher (gehaltene Noten fliegen, Streams werden Wave) und
+  meidet Wiederholung; Ship und Swing nicht in Teilen unter 1,5 s. Kein Modus läuft länger als
+  1,25 × die längste Strecke der Schwierigkeit; danach wechselt er an einer Phrasengrenze.
+
+**Flugteile ausgekleidet und bestückt (`builders/dress.ts`, neu).** Nach dem Bau von Ship, UFO,
+Swing, Ball und Spider (ab Normal):
+
+- Der Teil wird gespielt wie bisher geprüft (pünktlich, alle früh, alle spät, sechsmal jeder
+  etwas daneben, und jeder Klick allein um die ganze Toleranz früh und spät); um jeden dieser Wege
+  bleibt ein Abstand frei (Ship 0,9, sonst 0,5–0,55 Blöcke über die Hitbox hinaus).
+- **Wände:** auf jeder Fläche, die in den Raum zeigt (Boden, Decke, Blöcke), ein Spike, sonst ein
+  kleiner, wo kein Weg hinkommt (Normal 40 % der Spalten, Extreme 90 %, intensiver mehr).
+- **Im Raum:** auf den Beats (mindestens 2,5 Blöcke auseinander) eine schwebende Säge oder ein
+  Block mit Spike zum Weg hin, direkt neben dem Weg auf der Seite mit Platz (Normal 18 %,
+  Extreme 50 % der Beats).
+- Danach wird alles noch einmal mit allen Wegen gespielt; was im Weg ist, geht, und klappt es
+  nicht, bleibt nichts davon.
+
+**Weiteres.**
+
+- UFO und Swing: In kurzen, intensiven Teilen (unter 3,2 Takten, ab Insane) können
+  Gravity-Portale auch auf halben Takten liegen, sonst hätten die Teile einer Kette keine.
+- Wave: Ab Hard mindestens so viel Raum wie bisher bei 3x (die Level fahren jetzt öfter
+  langsamer, der Korridor in Blöcken wäre sonst enger geworden).
+- `GENERATOR_VERSION` ist `gd-4.0-pieces`.
+
+### 29.3 Gemessen
+
+Vier Testsongs (90, 128, 140 mit Build-up und Drop, 174 BPM; mit Audio), je Schwierigkeit
+zusammengezählt; vorher → nachher:
+
+| Stufe   | Moduswechsel/min | Teillänge p10 / Median / p90 (s)      | Tempowechsel/min | Tempo-Anteile nachher                      |
+| ------- | ---------------- | ------------------------------------- | ---------------- | ------------------------------------------ |
+| easy    | 3,4 → 3,2        | 6,9 / 14,8 / 23,1 → 6,9 / 13,7 / 30,0 | 0 → 0            | 1x                                         |
+| normal  | 4,1 → 5,9        | 6,9 / 12,0 / 19,6 → 3,6 / 8,3 / 16,5  | 1,0 → 1,3        | 0,5x 38 %, 1x 18 %, 2x 44 %                |
+| hard    | 6,7 → 8,9        | 3,4 / 7,5 / 12,0 → 2,8 / 3,8 / 10,7   | 1,5 → 1,3        | 1x 38 %, 2x 18 %, 3x 44 % (vorher 4x 37 %) |
+| insane  | 8,9 → 13,6       | 2,8 / 5,3 / 8,9 → 1,7 / 3,4 / 6,3     | 1,4 → 3,5        | 1x 38 %, 2x 18 %, 3x 19 %, 4x 25 %         |
+| extreme | 11,2 → 16,2      | 2,8 / 3,75 / 7,9 → 1,4 / 2,8 / 5,3    | 1,4 → 3,4        | 2x 38 %, 3x 37 %, 4x 25 % (vorher 4x 39 %) |
+
+Extreme liegt damit zwischen „Future Funk“ (12/min) und „CraZy III“ (18/min). Die Testsongs
+ändern sich innerhalb ihrer Teile kaum; auf echten Songs mit mehr Wendungen kommen mehr
+Tempowechsel.
+
+40 Level (vier Songs × fünf Stufen × zwei Seeds): alle durchspielbar, kein Klick mit weniger
+Spielraum als die Toleranz (engstes Fenster 62 ms bei Extreme, Toleranz 24 ms). Generierung im
+Mittel 3,6 s (vorher ~3 s; der Hindernis-Pass kostet 0,5–1 s pro Level). `npm run test:dash`:
+191 Tests grün; `npm run check`: 0 Fehler.
+
+### 29.4 Geänderte Tests und Grenzen
+
+- `busy.test.ts`: Zweimal derselbe Modus in derselben Größe hintereinander ist erlaubt, wenn sich
+  das Tempo ändert (ein Tempo-Portal allein, wie in den Leveln). Gravity-Portale im Kiai:
+  mindestens eines je 4,2 s Flugzeit statt je 3,2 s (gemessen 21 in 81 s; die Level haben je
+  Modus eines alle 3,3–7 s, und kurze Teile einer Kette haben für eines kaum Platz).
+- `surfaces.test.ts`: Der Swing darf 10 % statt 7 % seiner Zeit in Lücken ohne nötigen Klick
+  verbringen (gemessen 9 %): Er kommt jetzt auch bei 2x vor, wo die Wege eines etwas zu frühen oder
+  späten Klicks nach einem Gravity-Portal weiter auseinandergehen; dort darf kein Spike hin.
+- **Orbs in Ball, UFO und Spider** fehlen weiter (die Level haben dort 0,35–1,3 Orbs/s). Jedes Orb
+  muss nötig sein; dafür müsste der Weg mit dem Orb gebaut werden, nicht danach dazugelegt.
+- **Schrägen** gibt es nur im Wave (die Physik kennt keine schrägen Blöcke für die anderen
+  Modi); Ship-Korridore steigen weiter in Halbblock-Stufen.
+- Schwebende Hindernisse passen nur, wo der Raum um den Weg Platz hat: UFO- und Swing-Tunnel
+  liegen schon eng am Weg, dort kommen vor allem Spikes an die Wände.
+- **Nicht gespielt**, nur gebaut, gemessen und als Bild angesehen (Tauri und osu!-Login fehlen
+  hier). Ob sich die neuen Abschnitte gut anfühlen, zeigt erst das Spielen.

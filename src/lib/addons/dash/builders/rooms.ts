@@ -512,12 +512,15 @@ export function buildTunnel(
 		for (let t = sec.start + 1; t < sec.end;) {
 			const at = musicalPosition(chart, t);
 			const bar = at.point.beatLength * at.point.meter;
-			const first = at.point.time + Math.ceil((t - at.point.time) / bar - 1e-6) * bar;
-			for (let b = first, n = 0; b < Math.min(sec.end, at.end + 1); b += bar, n++) {
-				if (b < slots[0].time + 700 || b > sec.end - 1000) continue;
+			// (a short part of a chain, a bar or two, turns on its half bars too)
+			const short = dense && sec.end - sec.start < 3.2 * bar;
+			const unit = short ? bar / 2 : bar;
+			const first = at.point.time + Math.ceil((t - at.point.time) / unit - 1e-6) * unit;
+			for (let b = first, n = 0; b < Math.min(sec.end, at.end + 1); b += unit, n++) {
+				if (b < slots[0].time + (short ? 450 : 700) || b > sec.end - (short ? 750 : 1000)) continue;
 				if (!dense && Math.round((b - at.point.time) / bar) % 2 !== 0) continue;
 				if (musicalRest(chart, b) || rng() > chance) continue;
-				if (turns.length && b - turns[turns.length - 1] < bar * 0.9) continue;
+				if (turns.length && b - turns[turns.length - 1] < unit * 0.9) continue;
 				turns.push(Math.round(b));
 			}
 			t = Math.max(t + 1, at.end + 1);

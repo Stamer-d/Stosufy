@@ -28,7 +28,12 @@ export function buildWave(ctx: Context, section: Section, notes: DashNote[], ent
 	// The small wave is steeper already (twice as far up or down for a moment late): a bit
 	// wider, and fewer turns
 	// (and the faster, the wider: the same mistake is further off there)
-	const fast = 1 + Math.max(0, section.speedIndex - 1) * 0.1;
+	// (from hard on as roomy as at 3x at least: the levels go slower in their usual parts now, the
+	// wave keeps the room it had there)
+	const fast =
+		1 +
+		Math.max(0, (preset.level >= 2 ? Math.max(3, section.speedIndex) : section.speedIndex) - 1) *
+			0.1;
 	const width = preset.wave * (section.mini ? 1.55 : 1) * fast;
 	const gap = preset.waveGap * (section.mini ? 2.2 : 1) * (section.speedIndex >= 3 ? 1.15 : 1);
 

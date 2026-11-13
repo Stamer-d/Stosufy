@@ -33,17 +33,23 @@ async function level(difficulty: Difficulty, seed: string) {
 const inKiai = (l: Level) =>
 	l.world.sections.filter((s) => s.end > KIAI[0] + 100 && s.start < KIAI[1] - 100);
 
-test('on extreme the kind changes every few bars in the kiai, never the same part twice', async () => {
+test('on extreme the kind changes every few bars in the kiai, never the same part twice (only its speed)', async () => {
 	for (const seed of ['a', 'b']) {
 		const l = await level('extreme', seed);
 		const parts = inKiai(l);
-		const shown = parts.map((s) => `${s.start}:${s.mode}${s.mini ? '·' : ''}`).join(' ');
+		const shown = parts
+			.map((s) => `${s.start}:${s.mode}${s.mini ? '·' : ''}${s.speedIndex}`)
+			.join(' ');
 		// (45 s of kiai: four bars are 5.5 s)
 		assert.ok(parts.length >= 7, `${seed}: ${shown}`);
 		for (const s of parts.slice(1, -1)) assert.ok(s.end - s.start <= 6000, `${seed}: ${shown}`);
 		for (let i = 1; i < parts.length; i++)
+			// (the same kind and size again only with another speed: a speed portal, as levels made
+			// by hand have them, often without a new kind)
 			assert.ok(
-				parts[i].mode !== parts[i - 1].mode || parts[i].mini !== parts[i - 1].mini,
+				parts[i].mode !== parts[i - 1].mode ||
+					parts[i].mini !== parts[i - 1].mini ||
+					parts[i].speedIndex !== parts[i - 1].speedIndex,
 				`${seed}: the same part twice: ${shown}`
 			);
 		assert.equal(simulate(l.world, startState(l.world, l.start), l.end, l.plan).dead, false);
@@ -72,9 +78,10 @@ test('on extreme gravity turns on the bars and accents of the kiai, and pads tak
 	}
 	// (about one turn every two bars there: a bar is 1.38 s; a pad now and then)
 	assert.ok(flying > 20, `${flying} s of flying parts`);
-	// (a portal that would turn nothing where the way gets to it isn't put: a few less than one
-	// every two bars)
-	assert.ok(portals >= flying / 3.2, `${portals} gravity portals in ${flying.toFixed(0)} s`);
+	// (a portal that would turn nothing where the way gets to it isn't put. Levels made by hand
+	// have one about every 3.3 s in the ship and UFO, every 7 s in the wave (docs/dash.md §29); the
+	// kiai's parts are short now, a chain's part of a bar or two has room for one or none)
+	assert.ok(portals >= flying / 4.2, `${portals} gravity portals in ${flying.toFixed(0)} s`);
 	assert.ok(pads >= 8, `${pads} pads`);
 });
 
