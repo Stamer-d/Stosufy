@@ -81,6 +81,8 @@ async function pick(at, target) {
 	const clipMkv = fs.readFileSync(path.join(__dirname, 'fixtures', 'clip.mkv'));
 	// (59.94 fps converted from an MKV by an earlier version: 19001ths of a second, unevenly)
 	const uneven = fs.readFileSync(path.join(__dirname, 'fixtures', 'uneven.mp4'));
+	// (the clip as made for editing: Baseline, no B-frames, evenly timed)
+	const easy = fs.readFileSync(path.join(__dirname, 'fixtures', 'easy.mp4'));
 	// (2 s of a tone, titled "Tone" by "Stosufy", with a cover)
 	const tagged = fs.readFileSync(path.join(__dirname, 'fixtures', 'tagged.mp3'));
 	const mp3 = (name) => ({ name, mimeType: 'audio/mpeg', buffer: tagged });
@@ -100,7 +102,9 @@ async function pick(at, target) {
 		[{ name: 'boxed.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'mp4'],
 		// (an MP4 made from an MKV before, unevenly timed: for editing, made again)
 		[{ name: 'uneven.mp4', mimeType: 'video/mp4', buffer: uneven }, 'editing'],
-		// (for Premiere: an MP4's, evenly timed, repacked; an MKV's made again, evenly)
+		// (for Premiere: an MP4 easy to decode, repacked; one with B-frames (High), and an
+		// MKV's, made again: easy to decode, evenly timed)
+		[{ name: 'easy.mp4', mimeType: 'video/mp4', buffer: easy }, 'editing'],
 		[{ name: 'premiere.mp4', mimeType: 'video/mp4', buffer: clip }, 'editing'],
 		[{ name: 'premiere-mkv.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'editing'],
 		[
@@ -289,6 +293,11 @@ async function pick(at, target) {
 	check('PNG → JPG', starts('logo.jpg', [0xff, 0xd8, 0xff]));
 	const said = (name) => page.locator(`li[aria-label="${name}"]`).innerText();
 	const box = (name) => file(name).subarray(4, 8).toString();
+	/** An MP4's H.264 profile (its avcC's: 66 Baseline, 100 High) */
+	const profileOf = (data) => {
+		const at = data.indexOf('avcC');
+		return at < 0 ? 0 : data[at + 5];
+	};
 	/** An MP4's first track's (its picture's) time base: its mdhd's timescale */
 	const videoTimescale = (data) => {
 		const at = data.indexOf('mdhd');
@@ -318,15 +327,21 @@ async function pick(at, target) {
 		`${await said('uneven.mp4')} / ${videoTimescale(file('uneven.mp4'))}`
 	);
 	check(
-		'MP4 for editing, of an evenly timed MP4: repacked',
-		/Repacked as it was/.test(await said('premiere.mp4')) &&
-			file('premiere.mp4').subarray(4, 8).toString() === 'ftyp'
+		'MP4 for editing, of an MP4 made for editing (Baseline, evenly timed): repacked',
+		/Repacked as it was/.test(await said('easy.mp4')) && box('easy.mp4') === 'ftyp'
+	);
+	check(
+		'MP4 for editing, of an MP4 with B-frames (High): made again, easy to decode (Baseline)',
+		!/Repacked/.test(await said('premiere.mp4')) &&
+			box('premiere.mp4') === 'ftyp' &&
+			profileOf(file('premiere.mp4')) === 66,
+		`${await said('premiere.mp4')} / ${profileOf(file('premiere.mp4'))}`
 	);
 	check(
 		'MP4 for editing, of an MKV (timed in milliseconds): made again, not repacked',
 		!/Repacked/.test(await said('premiere-mkv.mkv')) &&
 			file('premiere-mkv.mp4').subarray(4, 8).toString() === 'ftyp' &&
-			file('premiere-mkv.mp4').length > 1000,
+			profileOf(file('premiere-mkv.mp4')) === 66,
 		await said('premiere-mkv.mkv')
 	);
 	check('PNG → ICO', starts('icon.ico', [0, 0, 1, 0]));

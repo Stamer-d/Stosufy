@@ -51,6 +51,8 @@ export interface Probe {
 	/** The video's and the sound's codecs (h264, vp9, aac, opus, …; '' if none or unknown) */
 	videoCodec: string;
 	audioCodec: string;
+	/** The video codec's profile, as FFmpeg says it (High, Main, Constrained Baseline, …; '') */
+	videoProfile: string;
 	/** The video's pixel format (yuv420p, yuv420p10le, …; '') */
 	pixelFormat: string;
 	/** The video's time base, as FFmpeg says it ("1k": MKV's and WebM's milliseconds; '') */
@@ -370,6 +372,7 @@ export function parseProbe(text: string): Probe {
 		sampleRate: +(/Audio:.*?(\d{4,6}) Hz/.exec(text)?.[1] ?? 0),
 		fps: +(/(\d+(?:\.\d+)?)\s*fps/.exec(moving[0] ?? '')?.[1] ?? 0),
 		videoCodec: /Video:\s*(\w+)/.exec(moving[0] ?? '')?.[1] ?? '',
+		videoProfile: /Video:\s*\w+\s*\(([^)]+)\)/.exec(moving[0] ?? '')?.[1] ?? '',
 		audioCodec: /Audio:\s*(\w+)/.exec(streams.find((line) => /Audio:/.test(line)) ?? '')?.[1] ?? '',
 		pixelFormat:
 			/Video:[^,]*,\s*(?:\w+\s+)?\(?((?:yuv|yuvj|rgb|gbr|nv|p0|gray)\w*)/.exec(

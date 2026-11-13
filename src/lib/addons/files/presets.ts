@@ -150,6 +150,7 @@ const HOLDS: Record<string, { video: string[]; audio: string[] }> = {
 /** What a video is, for `canRepack` (from its probe) */
 export interface VideoSource {
 	videoCodec: string;
+	videoProfile?: string;
 	audioCodec: string;
 	audio: boolean;
 	height: number;
@@ -172,7 +173,13 @@ export function canRepack(target: string, source: VideoSource | null, height = 0
 	if (height && source.height > height) return false;
 	// MP4 and MOV go into editors (Premiere stutters on uneven pictures): repacked only where
 	// they're evenly timed; MKV and WebM as they come
-	if (target === 'editing') return evenlyTimed(source) && /^yuvj?420p$/.test(source.pixelFormat);
+	// (for editing also easy to decode: Baseline, without B-frames and CABAC, as made for it)
+	if (target === 'editing')
+		return (
+			evenlyTimed(source) &&
+			/^yuvj?420p$/.test(source.pixelFormat) &&
+			/Baseline/i.test(source.videoProfile ?? '')
+		);
 	if (target === 'mp4' || target === 'mov') return evenlyTimed(source);
 	return true;
 }
@@ -260,16 +267,18 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 		'-bufsize',
 		`${Math.round(kbps * 2)}k`
 	];
-	// (for editing: as good as it gets, whatever quality's chosen; a little slower for it)
+	// For editing: easy to decode, whatever quality's chosen. x264's ultrafast leaves out what
+	// costs the most to play back (B-frames, CABAC, more than one reference picture): bigger,
+	// but Premiere plays 1440p60 of it smoothly, where it stutters on veryfast's (with no
+	// graphics card decoding it): as cutters made for Premiere do, at CRF 18
 	const editing = target === 'editing';
-	const crf = editing ? '16' : { small: '30', balanced: '23', best: '18' }[quality];
+	const crf = editing ? '18' : { small: '30', balanced: '23', best: '18' }[quality];
 	const h264 = [
 		'-c:v',
 		'libx264',
 		'-preset',
-		editing ? 'fast' : 'veryfast',
+		editing ? 'ultrafast' : 'veryfast',
 		...(videoKbps ? rate(videoKbps) : ['-crf', crf]),
-		...(editing ? ['-profile:v', 'high'] : []),
 		'-pix_fmt',
 		'yuv420p'
 	];
