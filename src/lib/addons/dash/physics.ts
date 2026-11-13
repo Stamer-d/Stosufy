@@ -826,13 +826,11 @@ export function step(world: World, s: PlayerState, time: number) {
 		} else if (overlaps(p, hazard.hit)) s.dead = true;
 		if (s.dead) break;
 	}
-	if (!s.dead && (s.mode === 'wave' || s.mode === 'ship')) {
-		// (the ship's corridors of slopes too: their walls are deadly to touch)
-		const reach = box.h * (s.mode === 'wave' ? 1.35 : 0.9);
+	if (!s.dead && s.mode === 'wave') {
 		for (const walls of world.walls.near(s.x, s.x)) {
 			const at = wallAt(walls, s.x);
 			// Along a slope the wave touches it a bit before its middle gets there
-			if (s.y - reach < at.lo || s.y + reach > at.hi) s.dead = true;
+			if (s.y - box.h * 1.35 < at.lo || s.y + box.h * 1.35 > at.hi) s.dead = true;
 		}
 	}
 	if (s.dead) {

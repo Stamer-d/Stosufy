@@ -1568,3 +1568,13 @@ Neue Tests: Orb-Sprünge kommen vor, werden genutzt und sind nötig (`rooms.test
 stirbt an Schrägen und fliegt dazwischen (`physics.test.ts`); Ship-Teile aus Blöcken und aus
 Schrägen kommen vor und werden durchflogen (`generate.test.ts`). `GENERATOR_VERSION` ist
 `gd-4.1-slopes`.
+
+## 31. Ship wieder aus Blöcken
+
+Rückmeldung zu 0.6.114: Das Ship ist komisch, an manchen Stellen darf es die Blöcke nicht
+berühren. Das waren die Korridore aus Schrägen (30): Sie sahen aus wie Blöcke, töteten aber bei
+Berührung, während man beim Ship an Blöcken entlangfliegen kann. Sie sind wieder entfernt: Jeder
+Ship-Teil ist ein Korridor aus Blöcken wie vor 0.6.114 (`builders/ship.ts` auf dem Stand von
+29), und tödliche schräge Wände gibt es in der Physik wieder nur für die Wave. Ein Test prüft,
+dass kein Ship-Teil solche Wände hat. Schrägen, an denen das Ship entlanggleiten kann, bräuchten
+eigene Physik für schräge Flächen; die gibt es noch nicht. `GENERATOR_VERSION` ist `gd-4.2`.

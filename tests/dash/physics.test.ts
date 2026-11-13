@@ -307,19 +307,6 @@ test('the same presses, the same run', () => {
 	assert.deepEqual(a, b);
 });
 
-test('a corridor of slopes is deadly to the ship, as to the wave; between its walls it flies on', () => {
-	const w = world({ mode: 'ship' });
-	// (from 20 to 40 blocks a corridor from 3 to 7 blocks up)
-	w.walls.add({ xs: [20, 40], lo: [3, 3], hi: [7, 7], x0: 20, x1: 40 });
-	const start = startState(w, 0, 5);
-	// (let go: it sinks into the floor slope)
-	assert.ok(simulate(w, start, 4000, []).dead);
-	// (holding on: it rises into the ceiling slope)
-	assert.ok(simulate(w, start, 4000, [{ time: 0, down: true }]).dead);
-	// (before the corridor it flies as ever)
-	assert.ok(!simulate(w, start, 1500, []).dead);
-});
-
 test("the spider's jump to the other side crashes into a saw or spike on its way", () => {
 	const w = world({ mode: 'spider', ceil: 8 });
 	const start = startState(w, 0);
