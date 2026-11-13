@@ -135,7 +135,7 @@ export function detectFormat(file: { name: string; type?: string; size?: number 
 // (each in the order they're offered: the most wanted first)
 const IMAGE_TARGETS = ['png', 'jpg', 'webp', 'pdf', 'ico', 'gif', 'bmp', 'tiff'];
 const AUDIO_TARGETS = ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'opus', 'aiff'];
-const VIDEO_TARGETS = ['mp4', 'gif', 'webm', 'mov', 'mkv', 'avi'];
+const VIDEO_TARGETS = ['mp4', 'editing', 'gif', 'webm', 'mov', 'mkv', 'avi'];
 const DATA_TARGETS = ['json', 'csv', 'yaml', 'xml', 'toml', 'tsv'];
 const TEXT_TARGETS: Record<string, string[]> = {
 	md: ['html', 'txt'],
@@ -147,6 +147,8 @@ function target(id: string, group: string): Target {
 	if (id === 'base64') return { id, label: 'Base64', extension: 'txt', group };
 	if (id === 'zip') return { id, label: 'ZIP', extension: 'zip', group };
 	if (id === 'unzip') return { id, label: 'Unpack', extension: '', group };
+	// (an MP4 Premiere, After Effects and Resolve play smoothly: see presets.ts)
+	if (id === 'editing') return { id, label: 'MP4 for editing', extension: 'mp4', group };
 	const format = formatById.get(id)!;
 	return { id, label: format.label, extension: format.extensions[0], group };
 }

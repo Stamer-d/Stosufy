@@ -28,6 +28,7 @@
 		FOLDER as CONVERTED,
 		saveAllAsZip
 	} from './jobs.ts';
+	import { REPACKED } from './convert.ts';
 
 	/** How many formats are buttons; the rest are under "More" */
 	const QUICK = 5;
@@ -455,7 +456,13 @@
 								{job.error}
 							</p>
 						{/if}
-						{#if job.status === 'done' && job.note}
+						{#if job.status === 'done' && job.note === REPACKED}
+							<!-- (good news, not a warning) -->
+							<p class="basis-full pl-14 flex items-center gap-1.5 text-xs text-emerald-300/90">
+								<span class="icon-[mingcute--check-circle-line] size-3.5"></span>
+								{job.note}
+							</p>
+						{:else if job.status === 'done' && job.note}
 							<p class="basis-full pl-14 flex items-center gap-1.5 text-xs text-amber-200/90">
 								<span class="icon-[mingcute--information-line] size-3.5"></span>
 								{job.note}

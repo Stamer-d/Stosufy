@@ -77,6 +77,8 @@ async function pick(at, target) {
 	zip.file('../escape.txt', 'kept inside');
 	const png = fs.readFileSync(path.join(root, 'static', 'logo.png'));
 	const clip = fs.readFileSync(path.join(__dirname, 'fixtures', 'clip.mp4'));
+	// (the same H.264 and AAC in an MKV: timed in milliseconds, as yt-dlp's are)
+	const clipMkv = fs.readFileSync(path.join(__dirname, 'fixtures', 'clip.mkv'));
 	// (2 s of a tone, titled "Tone" by "Stosufy", with a cover)
 	const tagged = fs.readFileSync(path.join(__dirname, 'fixtures', 'tagged.mp3'));
 	const mp3 = (name) => ({ name, mimeType: 'audio/mpeg', buffer: tagged });
@@ -90,6 +92,11 @@ async function pick(at, target) {
 		[{ name: 'tone.wav', mimeType: 'audio/wav', buffer: wav() }, 'mp3'],
 		[{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: clip }, 'gif'],
 		[{ name: 'sound.mp4', mimeType: 'video/mp4', buffer: clip }, 'opus'],
+		// (repacked: its H.264 and AAC fit an MP4 as they are)
+		[{ name: 'repack.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'mp4'],
+		// (for Premiere: an MP4's, evenly timed, repacked; an MKV's made again, evenly)
+		[{ name: 'premiere.mp4', mimeType: 'video/mp4', buffer: clip }, 'editing'],
+		[{ name: 'premiere-mkv.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'editing'],
 		[
 			text('data.json', 'application/json', '{"name":"Stosufy","tags":["osu","music"],"n":3}'),
 			'yaml'
@@ -202,8 +209,8 @@ async function pick(at, target) {
 	);
 	const video = await offered(row('clip.mp4'));
 	check(
-		'an MP4: MP3 first, then GIF, WebM…',
-		video.slice(0, 3).join() === 'mp3,gif,webm',
+		'an MP4: MP3 first, then MP4 for editing, GIF, WebM…',
+		video.slice(0, 4).join() === 'mp3,editing,gif,webm',
 		video.join()
 	);
 	check(
@@ -249,6 +256,29 @@ async function pick(at, target) {
 	const asText = (name) => file(name).toString('utf8');
 
 	check('PNG → JPG', starts('logo.jpg', [0xff, 0xd8, 0xff]));
+	const said = (name) => page.locator(`li[aria-label="${name}"]`).innerText();
+	check(
+		'MKV (H.264, AAC) → MP4: repacked, said so, the picture as it was',
+		/Repacked as it was/.test(await said('repack.mkv')) &&
+			starts('repack.mp4', [0, 0, 0]) &&
+			file('repack.mp4').subarray(4, 8).toString() === 'ftyp' &&
+			file('repack.mp4').includes(
+				clip.subarray(clip.indexOf('mdat') + 4, clip.indexOf('mdat') + 200)
+			),
+		await said('repack.mkv')
+	);
+	check(
+		'MP4 for editing, of an evenly timed MP4: repacked',
+		/Repacked as it was/.test(await said('premiere.mp4')) &&
+			file('premiere.mp4').subarray(4, 8).toString() === 'ftyp'
+	);
+	check(
+		'MP4 for editing, of an MKV (timed in milliseconds): made again, not repacked',
+		!/Repacked/.test(await said('premiere-mkv.mkv')) &&
+			file('premiere-mkv.mp4').subarray(4, 8).toString() === 'ftyp' &&
+			file('premiere-mkv.mp4').length > 1000,
+		await said('premiere-mkv.mkv')
+	);
 	check('PNG → ICO', starts('icon.ico', [0, 0, 1, 0]));
 	check(
 		'PNG → PDF',

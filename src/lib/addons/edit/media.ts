@@ -226,7 +226,8 @@ function argsFor(
 		mute: !sound,
 		height: fit.height,
 		videoKbps: fit.videoKbps,
-		audioKbps: fit.audioKbps
+		audioKbps: fit.audioKbps,
+		fps: info.fps
 	};
 
 	// One piece: read from its start for its length (fast), the filters on it

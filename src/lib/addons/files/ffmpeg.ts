@@ -46,6 +46,15 @@ export interface Probe {
 	height: number;
 	/** Of the sound (Hz), 0 if unknown */
 	sampleRate: number;
+	/** The video's pictures a second, 0 if unknown */
+	fps: number;
+	/** The video's and the sound's codecs (h264, vp9, aac, opus, …; '' if none or unknown) */
+	videoCodec: string;
+	audioCodec: string;
+	/** The video's pixel format (yuv420p, yuv420p10le, …; '') */
+	pixelFormat: string;
+	/** The video's time base, as FFmpeg says it ("1k": MKV's and WebM's milliseconds; '') */
+	timeBase: string;
 }
 
 /** What was stopped (by its id): stopped wherever it is, also before FFmpeg runs */
@@ -358,7 +367,15 @@ export function parseProbe(text: string): Probe {
 		cover: videos.some((line) => /attached pic/.test(line)),
 		width: size ? +size[1] : 0,
 		height: size ? +size[2] : 0,
-		sampleRate: +(/Audio:.*?(\d{4,6}) Hz/.exec(text)?.[1] ?? 0)
+		sampleRate: +(/Audio:.*?(\d{4,6}) Hz/.exec(text)?.[1] ?? 0),
+		fps: +(/(\d+(?:\.\d+)?)\s*fps/.exec(moving[0] ?? '')?.[1] ?? 0),
+		videoCodec: /Video:\s*(\w+)/.exec(moving[0] ?? '')?.[1] ?? '',
+		audioCodec: /Audio:\s*(\w+)/.exec(streams.find((line) => /Audio:/.test(line)) ?? '')?.[1] ?? '',
+		pixelFormat:
+			/Video:[^,]*,\s*(?:\w+\s+)?\(?((?:yuv|yuvj|rgb|gbr|nv|p0|gray)\w*)/.exec(
+				moving[0] ?? ''
+			)?.[1] ?? '',
+		timeBase: /([\d.]+k?)\s*tbn/.exec(moving[0] ?? '')?.[1] ?? ''
 	};
 }
 

@@ -103,14 +103,128 @@ export interface VideoOptions {
 	 * it), and its picture's and sound's labels
 	 */
 	graph?: { filter: string; video: string; audio?: string };
+	/** The source's pictures a second: made constant at the standard rate nearest to it */
+	fps?: number;
+}
+
+/** The video rates editors know (NTSC's exactly: 60000/1001, not 59.94) */
+const RATES: [number, string][] = [
+	[24000 / 1001, '24000/1001'],
+	[24, '24'],
+	[25, '25'],
+	[30000 / 1001, '30000/1001'],
+	[30, '30'],
+	[48, '48'],
+	[50, '50'],
+	[60000 / 1001, '60000/1001'],
+	[60, '60'],
+	[100, '100'],
+	[120000 / 1001, '120000/1001'],
+	[120, '120'],
+	[144, '144'],
+	[240, '240']
+];
+
+/** The standard rate a video's is (within half a percent), else its own rounded; null: unknown */
+export function standardRate(fps: number | undefined): { rate: string; fps: number } | null {
+	if (!fps || !Number.isFinite(fps) || fps < 1 || fps > 1000) return null;
+	const near = RATES.find(([value]) => Math.abs(value - fps) / value < 0.005);
+	if (near) return { rate: near[1], fps: near[0] };
+	const own = Math.round(fps * 1000) / 1000;
+	return { rate: String(own), fps: own };
+}
+
+/** The video codecs and sound codecs each container holds as they are (repacked, not made again) */
+const HOLDS: Record<string, { video: string[]; audio: string[] }> = {
+	mp4: { video: ['h264', 'hevc', 'av1'], audio: ['aac', 'mp3', 'alac'] },
+	mov: { video: ['h264', 'hevc', 'prores'], audio: ['aac', 'alac', 'pcm_s16le', 'pcm_s24le'] },
+	mkv: {
+		video: ['h264', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4'],
+		audio: ['aac', 'opus', 'vorbis', 'mp3', 'flac', 'ac3', 'eac3']
+	},
+	webm: { video: ['vp8', 'vp9', 'av1'], audio: ['opus', 'vorbis'] },
+	// (what Premiere and After Effects read without trouble: H.264, 8 bits, AAC)
+	editing: { video: ['h264'], audio: ['aac'] }
+};
+
+/** What a video is, for `canRepack` (from its probe) */
+export interface VideoSource {
+	videoCodec: string;
+	audioCodec: string;
+	audio: boolean;
+	height: number;
+	fps: number;
+	pixelFormat: string;
+	timeBase: string;
+}
+
+/**
+ * Whether a video can be put into `target` as it is (in seconds, nothing lost): its picture's
+ * and sound's codecs fit, it isn't to be made smaller. For editing also with evenly spaced
+ * pictures at a standard rate, in 8 bits: an MKV's or WebM's (timed in milliseconds, unevenly)
+ * is made again, so that Premiere doesn't stutter.
+ */
+export function canRepack(target: string, source: VideoSource | null, height = 0) {
+	const holds = HOLDS[target];
+	if (!holds || !source?.videoCodec) return false;
+	if (!holds.video.includes(source.videoCodec)) return false;
+	if (source.audio && !holds.audio.includes(source.audioCodec)) return false;
+	if (height && source.height > height) return false;
+	if (target === 'editing') {
+		const standard = standardRate(source.fps);
+		return (
+			!!standard &&
+			Math.abs(standard.fps - source.fps) < 0.01 &&
+			source.timeBase !== '1k' &&
+			/^yuvj?420p$/.test(source.pixelFormat)
+		);
+	}
+	return true;
+}
+
+/** FFmpeg's arguments for a video put into `target` as it is (repacked) */
+export function repackArgs(target: string, source: VideoSource) {
+	const mp4 = target === 'mp4' || target === 'mov' || target === 'editing';
+	return [
+		'-map',
+		'0:v:0',
+		'-map',
+		'0:a:0?',
+		'-sn',
+		'-dn',
+		'-c',
+		'copy',
+		// (HEVC as Apple and Adobe want it marked)
+		...(mp4 && source.videoCodec === 'hevc' ? ['-tag:v', 'hvc1'] : []),
+		...(mp4 ? ['-movflags', '+faststart'] : [])
+	];
 }
 
 /** FFmpeg's arguments for a video in this format */
 export function videoArgs(target: string, quality: Quality, options: VideoOptions = {}) {
 	const { height = 0, videoKbps, audioKbps: aKbps, mute } = options;
 	const vf = [options.videoFilters, scale(height)].filter(Boolean).join(',');
-	const af = options.audioFilters ? ['-af', options.audioFilters] : [];
+	// (the sound kept with the picture where the source's has gaps or starts late: stretched
+	// or filled, from 0; editors like Premiere stutter on such files otherwise)
+	const af = [
+		'-af',
+		['aresample=async=1:first_pts=0', options.audioFilters].filter(Boolean).join(',')
+	];
 	const { graph } = options;
+	// A constant frame rate, a standard one, with a keyframe every 2 s: a file editors (Premiere,
+	// After Effects, Resolve) play smoothly, whatever its timestamps were (a stream cut out,
+	// MKV's in milliseconds)
+	const standard = standardRate(options.fps);
+	const constant = standard
+		? [
+				'-fps_mode',
+				'cfr',
+				'-r',
+				standard.rate,
+				'-g',
+				String(Math.max(1, Math.round(standard.fps * 2)))
+			]
+		: [];
 	const maps = graph
 		? [
 				'-filter_complex',
@@ -122,7 +236,7 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 			]
 		: ['-map', '0:v:0', ...(mute ? ['-an'] : ['-map', '0:a:0?', ...af]), '-sn'];
 	/** The picture's filters (in the graph, if there's one) */
-	const pic = graph ? [] : ['-vf', vf];
+	const pic = [...(graph ? [] : ['-vf', vf]), ...constant];
 	const sound = (codec: string[], fallback: number) =>
 		mute ? [] : [...codec, '-b:a', `${Math.round(aKbps ?? fallback)}k`];
 	const rate = (kbps: number) => [
@@ -133,18 +247,35 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 		'-bufsize',
 		`${Math.round(kbps * 2)}k`
 	];
-	const crf = { small: '30', balanced: '23', best: '18' }[quality];
+	// (for editing: as good as it gets, whatever quality's chosen; a little slower for it)
+	const editing = target === 'editing';
+	const crf = editing ? '16' : { small: '30', balanced: '23', best: '18' }[quality];
 	const h264 = [
 		'-c:v',
 		'libx264',
 		'-preset',
-		'veryfast',
+		editing ? 'fast' : 'veryfast',
 		...(videoKbps ? rate(videoKbps) : ['-crf', crf]),
+		...(editing ? ['-profile:v', 'high'] : []),
 		'-pix_fmt',
 		'yuv420p'
 	];
-	const aac = sound(['-c:a', 'aac'], { small: 128, balanced: 160, best: 192 }[quality]);
+	const aac = sound(
+		['-c:a', 'aac', '-ar', '48000'],
+		{ small: 128, balanced: 160, best: 192 }[quality]
+	);
 	switch (target) {
+		case 'editing':
+			return [
+				...maps,
+				...pic,
+				// (a constant rate even where the source's is unknown)
+				...(constant.length ? [] : ['-fps_mode', 'cfr']),
+				...h264,
+				...sound(['-c:a', 'aac', '-ar', '48000'], 320),
+				'-movflags',
+				'+faststart'
+			];
 		case 'mp4':
 		case 'mov':
 			return [...maps, ...pic, ...h264, ...aac, '-movflags', '+faststart'];

@@ -21,6 +21,8 @@ import {
 	gifArgs,
 	GIF_QUALITY,
 	LOSSY_AUDIO,
+	canRepack,
+	repackArgs,
 	videoArgs,
 	type Quality
 } from '../files/presets';
@@ -55,6 +57,8 @@ export interface Converted {
 }
 
 const IMAGE_QUALITY: Record<Quality, number> = { small: 0.7, balanced: 0.86, best: 0.95 };
+/** Said of a video put into another format as it was */
+export const REPACKED = 'Repacked as it was: nothing re-encoded, nothing lost';
 
 const MB = 1024 * 1024;
 /** The most the WebAssembly FFmpeg can hold (the file and what it makes, in its memory) */
@@ -188,8 +192,9 @@ export async function convertFile(
 				const native = await nativeFfmpeg();
 				if (!native && file.size > WASM_LIMIT)
 					throw new Error('Too big to convert here (at most 1.5 GB)');
-				// (how long it is: for the progress of the native one, and for a size limit)
-				const info = native || limit ? await probe(file, extension, id) : null;
+				// (how long it is: for the progress of the native one, and for a size limit; what's
+				// in a video: whether it can be repacked as it is)
+				const info = native || limit || kind === 'video' ? await probe(file, extension, id) : null;
 				const run: RunOptions = { progress, duration: info?.duration, id };
 				const audioOnly = kind === 'audio' || target.group === 'Only the sound';
 				if (audioOnly) return sound(info, run, kind === 'audio');
@@ -244,11 +249,28 @@ export async function convertFile(
 	}
 
 	async function video(info: Probe | null, run: RunOptions) {
+		// Its picture and sound fit as they are: repacked, in seconds, nothing lost (made again
+		// if FFmpeg can't)
+		if (!limit && info && canRepack(target.id, info, options.videoHeight)) {
+			try {
+				const made = await runFfmpeg(
+					file,
+					extension,
+					repackArgs(target.id, info),
+					target.extension,
+					run
+				);
+				return one(made, REPACKED);
+			} catch (error) {
+				if (error instanceof Error && error.name === 'Cancelled') throw error;
+				stopIfCancelled(id);
+			}
+		}
 		if (!limit || !info?.duration) {
 			const made = await runFfmpeg(
 				file,
 				extension,
-				videoArgs(target.id, options.quality, { height: options.videoHeight }),
+				videoArgs(target.id, options.quality, { height: options.videoHeight, fps: info?.fps }),
 				target.extension,
 				run
 			);
@@ -271,7 +293,12 @@ export async function convertFile(
 			made = await runFfmpeg(
 				file,
 				extension,
-				videoArgs(target.id, options.quality, { height, videoKbps, audioKbps: audio || undefined }),
+				videoArgs(target.id, options.quality, {
+					height,
+					videoKbps,
+					audioKbps: audio || undefined,
+					fps: info.fps
+				}),
 				target.extension,
 				run
 			);
