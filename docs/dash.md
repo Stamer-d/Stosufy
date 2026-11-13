@@ -1732,3 +1732,11 @@ Vergleich zählt). Gefunden und geändert (`render.ts`, `physics.ts`):
 Nicht geprüft: auf einer echten Grafikkarte (hier nur Software-Zeichnen). Ob es auf deinem PC
 flüssig läuft, zeigt erst das Spielen; die FPS-Anzeige (F) zeigt auch, ob die adaptive Auflösung
 herunterregelt.
+
+## 34. Teleport-Portale und Einflug-Bewegung wieder raus
+
+Auf Wunsch entfernt: die Teleport-Portale (Erzeugung, Physik, Speicherformat, Zeichnung) und die
+Einflug-Bewegung aus §33 (Blöcke, Spikes, Sägen, Pads und Orbs, die vor dem Erreichen von oben oder
+unten an ihren Platz fliegen). Alles wird wieder dort gezeigt, wo es ist. Der Kick-Shake, die
+Portal-Tore, die Ship-Hindernisse, die Ball-Orbs und das Tempo nach dem Song bleiben.
+`GENERATOR_VERSION` ist `gd-4.5`, damit alte Level neu erzeugt werden.

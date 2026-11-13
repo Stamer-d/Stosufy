@@ -15,7 +15,6 @@ import {
 	STEP,
 	World,
 	cubeAt,
-	hitbox,
 	simulate,
 	startState,
 	type GravityPortal,
@@ -56,7 +55,7 @@ import { planLevel } from './plan';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-4.4-motion';
+export const GENERATOR_VERSION = 'gd-4.5';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -1366,33 +1365,6 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 				x1: sec.x0 + 0.6
 			});
 			state = simulate(world, startState(world, start), sec.start + STEP, plan);
-		}
-		// Teleport portals (from insane on, the levels from building blocks): where the part before
-		// left the player far from where this one begins (a flying part high up, a cube part on the
-		// floor), a portal takes it there at once, as hand-built levels do at their changes
-		if (blocks && preset.level >= 3 && sec.index > 0 && state.gravity > 0 && !state.dead) {
-			const box = hitbox(sec.mode, sec.mini);
-			const grounded = ['cube', 'robot', 'ball', 'spider'].includes(sec.mode);
-			const target = grounded
-				? sec.floor + box.h
-				: sec.ceil !== null
-					? Math.round((sec.floor + sec.ceil) / 2)
-					: null;
-			// (where it's far: down from high up, or up into a flying part's middle; now and then,
-			// more on extreme)
-			const far = Math.abs(state.y - target) >= (grounded ? 3 : 3.5);
-			const now =
-				random(hash(`${options.seed}:teleport:${sec.index}`))() < (preset.level >= 4 ? 0.6 : 0.45);
-			if (target !== null && far && now) {
-				world.teleports.add({
-					x: sec.x0,
-					y: state.y,
-					to: target,
-					x0: sec.x0 - 0.6,
-					x1: sec.x0 + 0.6
-				});
-				state = simulate(world, startState(world, start), sec.start + STEP, plan);
-			}
 		}
 		const before = world.sections[sec.index - 1];
 		portals.push(...sectionPortals(before, sec, state.y));

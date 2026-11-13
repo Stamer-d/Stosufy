@@ -158,20 +158,6 @@ export interface GravityPortal {
 	x1: number;
 }
 
-/**
- * A teleport portal: the player going through it at its place is at once at another height (the
- * exit portal's), its speed up or down gone; as hand-built levels take the player from one part to
- * the next where that one begins
- */
-export interface Teleport {
-	x: number;
-	/** Where it's gone into, and where it comes out */
-	y: number;
-	to: number;
-	x0: number;
-	x1: number;
-}
-
 /** The sloped walls of a wave part: lines through (xs, lo) below and (xs, hi) above */
 export interface Walls {
 	xs: number[];
@@ -298,7 +284,6 @@ export class World {
 	pads = new Lane<Pad>();
 	walls = new Lane<Walls>();
 	gravityPortals = new Lane<GravityPortal>();
-	teleports = new Lane<Teleport>();
 	sections: Section[] = [];
 	segments: SpeedSegment[] = [];
 	private nextId = 1;
@@ -733,15 +718,6 @@ export function step(world: World, s: PlayerState, time: number) {
 			s.gravity = portal.gravity;
 			s.vy = s.vy / 2;
 			events.push('gravity');
-		}
-	}
-
-	// Teleport portals
-	for (const portal of world.teleports.near(prevX, s.x)) {
-		if (portal.x > prevX && portal.x <= s.x) {
-			s.y = portal.to;
-			s.vy = 0;
-			events.push('teleport');
 		}
 	}
 

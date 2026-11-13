@@ -324,14 +324,3 @@ test("the spider's jump to the other side crashes into a saw or spike on its way
 	const run = simulate(w, start, 1000, tap(500));
 	assert.ok(run.dead, 'into a spike under a block on its way');
 });
-
-test('a teleport portal takes the player to its exit at once, on at the same place and speed', () => {
-	const w = world({ mode: 'ufo' });
-	w.teleports.add({ x: 20, y: 1, to: 6, x0: 19.4, x1: 20.6 });
-	const start = startState(w, 0, 1);
-	const before = simulate(w, start, w.timeAt(19.9), []);
-	const after = simulate(w, start, w.timeAt(20.2), []);
-	assert.ok(before.y < 2, `before: ${before.y}`);
-	assert.ok(Math.abs(after.y - 6) < 0.2, `after: ${after.y}`);
-	assert.ok(!after.dead);
-});

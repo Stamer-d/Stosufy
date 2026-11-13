@@ -547,31 +547,6 @@ test('from hard on, a stretch or two seen mirrored, between mirror portals; the 
 	assert.ok(stretches >= 4, `${stretches} mirrored stretches`);
 });
 
-test('from insane on, teleport portals take the player where a part begins; kept from the worker', async () => {
-	let teleports = 0;
-	for (const name of Object.keys(SONGS))
-		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
-			const l = await level(name, difficulty);
-			const w = l.world;
-			if (difficulty === 'hard') assert.equal(w.teleports.items.length, 0, name);
-			for (const t of w.teleports.items) {
-				teleports++;
-				// (on the line where a part begins, to its floor or the middle of its room)
-				const sec = w.sections.find((s) => Math.abs(s.x0 - t.x) < 1e-6);
-				assert.ok(sec, `${name} ${difficulty}: a teleport between parts`);
-				assert.ok(t.to >= sec.floor && (sec.ceil === null || t.to <= sec.ceil));
-			}
-			const back = levelFromData(JSON.parse(JSON.stringify(levelData(l))));
-			assert.equal(back.world.teleports.items.length, w.teleports.items.length);
-			assert.equal(
-				simulate(back.world, startState(back.world, back.start), back.end, back.plan).dead,
-				false,
-				`${name} ${difficulty}`
-			);
-		}
-	assert.ok(teleports >= 4, `${teleports} teleports`);
-});
-
 test('ship parts weave between obstacles in the room now and then', async () => {
 	let floating = 0;
 	for (const name of Object.keys(SONGS))
