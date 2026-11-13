@@ -160,9 +160,9 @@ export interface VideoSource {
 
 /**
  * Whether a video can be put into `target` as it is (in seconds, nothing lost): its picture's
- * and sound's codecs fit, it isn't to be made smaller. For editing also with evenly spaced
- * pictures at a standard rate, in 8 bits: an MKV's or WebM's (timed in milliseconds, unevenly)
- * is made again, so that Premiere doesn't stutter.
+ * and sound's codecs fit, it isn't to be made smaller. Into an MP4 or MOV also only evenly
+ * timed (`evenlyTimed`), for editing also in 8 bits: an MKV's or WebM's (timed in
+ * milliseconds, unevenly) is made again, so that Premiere doesn't stutter.
  */
 export function canRepack(target: string, source: VideoSource | null, height = 0) {
 	const holds = HOLDS[target];
@@ -170,16 +170,29 @@ export function canRepack(target: string, source: VideoSource | null, height = 0
 	if (!holds.video.includes(source.videoCodec)) return false;
 	if (source.audio && !holds.audio.includes(source.audioCodec)) return false;
 	if (height && source.height > height) return false;
-	if (target === 'editing') {
-		const standard = standardRate(source.fps);
-		return (
-			!!standard &&
-			Math.abs(standard.fps - source.fps) < 0.01 &&
-			source.timeBase !== '1k' &&
-			/^yuvj?420p$/.test(source.pixelFormat)
-		);
-	}
+	// MP4 and MOV go into editors (Premiere stutters on uneven pictures): repacked only where
+	// they're evenly timed; MKV and WebM as they come
+	if (target === 'editing') return evenlyTimed(source) && /^yuvj?420p$/.test(source.pixelFormat);
+	if (target === 'mp4' || target === 'mov') return evenlyTimed(source);
 	return true;
+}
+
+/**
+ * Whether a video's pictures are evenly timed at a standard rate: each a whole number of its
+ * time base's ticks long, as a camera's or an editor's are; not an MKV's milliseconds, nor
+ * 19001ths of a second for 59.94 fps (as a file converted from an MKV before had)
+ */
+export function evenlyTimed(source: VideoSource) {
+	const standard = standardRate(source.fps);
+	if (!standard || Math.abs(standard.fps - source.fps) > 0.01) return false;
+	const each = ticksOf(source.timeBase) / standard.fps;
+	return each >= 1 && Math.abs(each - Math.round(each)) < 1e-6;
+}
+
+/** A time base as FFmpeg says it ("15360", "1k", "90k"): its ticks a second (0: unknown) */
+function ticksOf(timeBase: string) {
+	const match = /^(\d+(?:\.\d+)?)(k?)$/.exec(timeBase);
+	return match ? Number(match[1]) * (match[2] ? 1000 : 1) : 0;
 }
 
 /** FFmpeg's arguments for a video put into `target` as it is (repacked) */

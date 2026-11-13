@@ -79,6 +79,8 @@ async function pick(at, target) {
 	const clip = fs.readFileSync(path.join(__dirname, 'fixtures', 'clip.mp4'));
 	// (the same H.264 and AAC in an MKV: timed in milliseconds, as yt-dlp's are)
 	const clipMkv = fs.readFileSync(path.join(__dirname, 'fixtures', 'clip.mkv'));
+	// (59.94 fps converted from an MKV by an earlier version: 19001ths of a second, unevenly)
+	const uneven = fs.readFileSync(path.join(__dirname, 'fixtures', 'uneven.mp4'));
 	// (2 s of a tone, titled "Tone" by "Stosufy", with a cover)
 	const tagged = fs.readFileSync(path.join(__dirname, 'fixtures', 'tagged.mp3'));
 	const mp3 = (name) => ({ name, mimeType: 'audio/mpeg', buffer: tagged });
@@ -92,8 +94,12 @@ async function pick(at, target) {
 		[{ name: 'tone.wav', mimeType: 'audio/wav', buffer: wav() }, 'mp3'],
 		[{ name: 'clip.mp4', mimeType: 'video/mp4', buffer: clip }, 'gif'],
 		[{ name: 'sound.mp4', mimeType: 'video/mp4', buffer: clip }, 'opus'],
-		// (repacked: its H.264 and AAC fit an MP4 as they are)
-		[{ name: 'repack.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'mp4'],
+		// (repacked: its H.264 and AAC fit an MKV as they are)
+		[{ name: 'repack.mp4', mimeType: 'video/mp4', buffer: clip }, 'mkv'],
+		// (an MKV's H.264 into an MP4: made again, evenly timed, not repacked as it's timed)
+		[{ name: 'boxed.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'mp4'],
+		// (an MP4 made from an MKV before, unevenly timed: for editing, made again)
+		[{ name: 'uneven.mp4', mimeType: 'video/mp4', buffer: uneven }, 'editing'],
 		// (for Premiere: an MP4's, evenly timed, repacked; an MKV's made again, evenly)
 		[{ name: 'premiere.mp4', mimeType: 'video/mp4', buffer: clip }, 'editing'],
 		[{ name: 'premiere-mkv.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'editing'],
@@ -282,15 +288,34 @@ async function pick(at, target) {
 
 	check('PNG → JPG', starts('logo.jpg', [0xff, 0xd8, 0xff]));
 	const said = (name) => page.locator(`li[aria-label="${name}"]`).innerText();
+	const box = (name) => file(name).subarray(4, 8).toString();
+	/** An MP4's first track's (its picture's) time base: its mdhd's timescale */
+	const videoTimescale = (data) => {
+		const at = data.indexOf('mdhd');
+		if (at < 0) return 0;
+		return data[at + 4] === 1 ? data.readUInt32BE(at + 24) : data.readUInt32BE(at + 16);
+	};
 	check(
-		'MKV (H.264, AAC) → MP4: repacked, said so, the picture as it was',
-		/Repacked as it was/.test(await said('repack.mkv')) &&
-			starts('repack.mp4', [0, 0, 0]) &&
-			file('repack.mp4').subarray(4, 8).toString() === 'ftyp' &&
-			file('repack.mp4').includes(
-				clip.subarray(clip.indexOf('mdat') + 4, clip.indexOf('mdat') + 200)
+		'MP4 (H.264, AAC) → MKV: repacked, said so, the picture as it was',
+		/Repacked as it was/.test(await said('repack.mp4')) &&
+			starts('repack.mkv', [0x1a, 0x45, 0xdf, 0xa3]) &&
+			file('repack.mkv').includes(
+				clip.subarray(clip.indexOf('mdat') + 8, clip.indexOf('mdat') + 200)
 			),
-		await said('repack.mkv')
+		await said('repack.mp4')
+	);
+	check(
+		'MKV (H.264, timed in milliseconds) → MP4: made again, evenly, not repacked',
+		!/Repacked/.test(await said('boxed.mkv')) && box('boxed.mp4') === 'ftyp',
+		await said('boxed.mkv')
+	);
+	check(
+		'MP4 for editing, of an MP4 converted from an MKV before (59.94 in 19001ths): made again',
+		!/Repacked/.test(await said('uneven.mp4')) &&
+			box('uneven.mp4') === 'ftyp' &&
+			// (its picture's time base: 60000ths of a second, each picture 1001 of them)
+			videoTimescale(file('uneven.mp4')) === 60000,
+		`${await said('uneven.mp4')} / ${videoTimescale(file('uneven.mp4'))}`
 	);
 	check(
 		'MP4 for editing, of an evenly timed MP4: repacked',
