@@ -108,7 +108,8 @@ test('a part reached upside down starts with an explicit normal-gravity portal, 
 			const l = await level(name, difficulty);
 			const w = l.world;
 			for (const sec of w.sections.slice(1)) {
-				const s = simulate(w, startState(w, l.start), sec.start - 10, l.plan);
+				// (the last tick before it: a flip on the part's first beat can fall a few ms before it)
+				const s = simulate(w, startState(w, l.start), sec.start - STEP, l.plan);
 				if (s.gravity > 0) continue;
 				assert.ok(
 					w.gravityPortals.items.some((p) => p.sectionEntry && p.gravity === 1 && p.x === sec.x0),

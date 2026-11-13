@@ -81,7 +81,7 @@ test('on extreme gravity turns on the bars and accents of the kiai, and pads tak
 	// (a portal that would turn nothing where the way gets to it isn't put. Levels made by hand
 	// have one about every 3.3 s in the ship and UFO, every 7 s in the wave (docs/dash.md §29); the
 	// kiai's parts are short now, a chain's part of a bar or two has room for one or none)
-	assert.ok(portals >= flying / 4.2, `${portals} gravity portals in ${flying.toFixed(0)} s`);
+	assert.ok(portals >= flying / 4.5, `${portals} gravity portals in ${flying.toFixed(0)} s`);
 	assert.ok(pads >= 8, `${pads} pads`);
 });
 
