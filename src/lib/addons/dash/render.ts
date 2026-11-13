@@ -232,6 +232,8 @@ export function createDashRenderer(
 	let height = 0;
 	let scale = 1;
 	let camX = 0;
+	/** The last frame was on a kick (to shake once a kick, not all through it) */
+	let kickHit = false;
 	/** How mirrored the view is (0 not, 1 right to left; between: it turns over) */
 	let mirror = 0;
 	/** The world drawn mirrored as far as it is (about the middle of the screen) */
@@ -408,7 +410,7 @@ export function createDashRenderer(
 		const cached = tintCache.get(key);
 		if (cached) return cached;
 		// (the oldest go when there are many: not all at once, which would make them all again)
-		if (tintCache.size > 160)
+		if (tintCache.size > 400)
 			for (const old of [...tintCache.keys()].slice(0, 32)) tintCache.delete(old);
 		const out = document.createElement('canvas');
 		out.width = pw;
@@ -669,6 +671,154 @@ export function createDashRenderer(
 		return Math.max(beat * 0.75, kick);
 	}
 
+	// --- Motion: what's built comes into place, as hand-built levels move theirs ------------
+	// (measured, docs/dash.md §33: their blocks and spikes move up or down into place, half a block
+	// to five, in a third of a second to a second, with a spring, a bounce or an overshoot, shortly
+	// before they're reached). Only the look: each thing is where it is 0.3 s before it's reached
+	// at the latest, and starts moving on a beat. Easy has none, normal only a soft fade in.
+
+	type Arrival = {
+		style: 'none' | 'rise' | 'drop' | 'split' | 'fade';
+		ease: (t: number) => number;
+		/** How far it comes from (blocks), and how much of the level moves */
+		distance: number;
+		share: number;
+	};
+	const EASES: ((t: number) => number)[] = [
+		// (overshoots and settles)
+		(t) => {
+			const c = 1.70158;
+			const u = t - 1;
+			return 1 + (c + 1) * u * u * u + c * u * u;
+		},
+		// (a spring)
+		(t) =>
+			t <= 0
+				? 0
+				: t >= 1
+					? 1
+					: Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1,
+		// (bounces in)
+		(t) => {
+			const n = 7.5625;
+			const d = 2.75;
+			if (t < 1 / d) return n * t * t;
+			if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+			if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+			return n * (t -= 2.625 / d) * t + 0.984375;
+		},
+		(t) => Math.sin((t * Math.PI) / 2),
+		(t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t))
+	];
+	const arrivals = new Map<number, Arrival>();
+	function arrivalOf(level: Level, section: Section): Arrival {
+		const known = arrivals.get(section.index);
+		if (known) return known;
+		const r = (k: number) => noise(lookSeed * 7.13 + section.index * 3.71 + k * 11.3);
+		const difficulty = level.difficulty;
+		let arrival: Arrival;
+		if (difficulty === 'easy') arrival = { style: 'none', ease: EASES[3], distance: 0, share: 0 };
+		else if (difficulty === 'normal')
+			arrival = { style: 'fade', ease: EASES[3], distance: 0.6, share: 0.4 };
+		else {
+			const flying = section.ceil !== null;
+			const pick = r(1);
+			const style: Arrival['style'] = flying
+				? pick < 0.55
+					? 'split'
+					: pick < 0.75
+						? 'rise'
+						: pick < 0.9
+							? 'drop'
+							: 'fade'
+				: pick < 0.35
+					? 'rise'
+					: pick < 0.65
+						? 'drop'
+						: pick < 0.85
+							? 'split'
+							: 'fade';
+			arrival = {
+				style,
+				ease: EASES[Math.floor(r(2) * EASES.length) % EASES.length],
+				distance: 2.5 + r(3) * 3.5,
+				share: difficulty === 'hard' ? 0.4 : difficulty === 'insane' ? 0.5 : 0.6
+			};
+		}
+		arrivals.set(section.index, arrival);
+		return arrival;
+	}
+	/** The beat at or before a time (its index; -1 before the first) */
+	function beatIndex(level: Level, time: number) {
+		const beats = level.beats;
+		let low = 0;
+		let high = beats.length - 1;
+		if (!beats.length || time < beats[0].time) return -1;
+		while (low < high) {
+			const mid = (low + high + 1) >> 1;
+			if (beats[mid].time <= time) low = mid;
+			else high = mid - 1;
+		}
+		return low;
+	}
+	const beatBefore = (level: Level, time: number) =>
+		level.beats[beatIndex(level, time)]?.time ?? time;
+	const NOT_MOVED = { dy: 0, alpha: 1 };
+	/** The block each spike, saw or pad stands on (once per level: the world doesn't change) */
+	let supports = new WeakMap<object, Solid | null>();
+	/**
+	 * Where a thing is shown now, next to where it is (blocks up or down) and how much it shows:
+	 * by the place its structure starts (things three blocks apart move together)
+	 */
+	/** Each group's arrival, worked out once per level (where it is, when it moves), or none */
+	type Group = { start: number; end: number; arrival: Arrival; middle: number } | null;
+	const groups = new Map<number, Group>();
+	function groupOf(level: Level, bx: number): Group {
+		const known = groups.get(bx);
+		if (known !== undefined) return known;
+		const world = level.world;
+		const reached = world.timeAt(bx);
+		const section = world.sectionAt(reached);
+		const arrival = arrivalOf(level, section);
+		let group: Group = null;
+		if (arrival.style !== 'none' && noise(bx * 0.731 + lookSeed) <= arrival.share) {
+			const k = beatIndex(level, reached);
+			const beatAt = level.beats[k]?.time ?? reached;
+			const next = level.beats[k + 1]?.time ?? beatAt + 500;
+			const length = Math.max(280, Math.min(650, next - beatAt));
+			// (it's there 0.32 s before it's reached; it starts on the beat before that)
+			const end = reached - 320;
+			group = {
+				start: beatBefore(level, end - length),
+				end,
+				arrival,
+				middle: section.ceil !== null ? (section.floor + section.ceil) / 2 : section.floor + 3
+			};
+		}
+		groups.set(bx, group);
+		return group;
+	}
+	function motion(level: Level, x0: number, y: number, time: number) {
+		const group = groupOf(level, Math.floor(x0 / 3) * 3);
+		if (!group || time >= group.end) return NOT_MOVED;
+		const f = Math.max(0, Math.min(1, (time - group.start) / Math.max(1, group.end - group.start)));
+		if (f >= 1) return NOT_MOVED;
+		const a = group.arrival;
+		const e = a.ease(f);
+		const side =
+			a.style === 'rise'
+				? -1
+				: a.style === 'drop' || a.style === 'fade'
+					? 1
+					: y >= group.middle
+						? 1
+						: -1;
+		return {
+			dy: side * a.distance * (1 - e),
+			alpha: a.style === 'fade' ? f : Math.min(1, f * 4)
+		};
+	}
+
 	// --- The scene ------------------------------------------------------------------------
 
 	function background(p: Palette, pulse: number, kiai: boolean) {
@@ -926,6 +1076,21 @@ export function createDashRenderer(
 	 * into the next don't make a new one every frame.
 	 */
 	const tileCache = new Map<string, HTMLCanvasElement>();
+	/**
+	 * A tile's pattern, made once per tile (and drawing context): made new every frame, the browser
+	 * copied the tile into a new picture for the graphics card each time
+	 */
+	const patterns = new WeakMap<HTMLCanvasElement, Map<CanvasRenderingContext2D, CanvasPattern>>();
+	function patternOf(image: HTMLCanvasElement) {
+		let byContext = patterns.get(image);
+		if (!byContext) patterns.set(image, (byContext = new Map()));
+		let pattern = byContext.get(ctx);
+		if (pattern === undefined) {
+			pattern = ctx.createPattern(image, 'repeat') ?? undefined;
+			if (pattern) byContext.set(ctx, pattern);
+		}
+		return pattern ?? null;
+	}
 	function tile(p: Palette) {
 		const size = Math.max(16, 2 ** Math.ceil(Math.log2(scale)));
 		const accent = `#${hex(p.accent)
@@ -938,7 +1103,9 @@ export function createDashRenderer(
 		const key = `${size}:${accent}`;
 		const cached = tileCache.get(key);
 		if (cached) return cached;
-		if (tileCache.size > 24) tileCache.clear();
+		// (the oldest go when there are many, not all at once: that made them all again together)
+		if (tileCache.size > 96)
+			for (const old of [...tileCache.keys()].slice(0, 16)) tileCache.delete(old);
 		p = { ...p, accent };
 		const c = document.createElement('canvas');
 		c.width = size;
@@ -1450,6 +1617,52 @@ export function createDashRenderer(
 		spider: '#b14dff'
 	};
 
+	/**
+	 * The gate a part's portal stands in (as hand-built levels frame theirs): a band of its light
+	 * from the floor to the ceiling (to well over it where there's none), bright at its edges and
+	 * capped; only light, nothing to stand on
+	 */
+	const gateBands = new Map<string, CanvasGradient>();
+	function gate(x: number, y: number, section: Section, color: string, pulse: number) {
+		const bottom = section.floor;
+		const top = section.ceil ?? Math.max(section.floor + 6, y + 3.5);
+		const x0 = sx(x - 0.75);
+		const x1 = sx(x + 0.75);
+		const y0 = sy(top);
+		const y1 = sy(bottom);
+		// (its band's light made once per colour and width, and moved where it's drawn)
+		const w = Math.max(1, Math.round(x1 - x0));
+		const key = `${color}:${w}`;
+		let band = gateBands.get(key);
+		if (!band) {
+			if (gateBands.size > 64) gateBands.clear();
+			band = ctx.createLinearGradient(0, 0, w, 0);
+			band.addColorStop(0, rgba(color, 0.36));
+			band.addColorStop(0.5, rgba(color, 0.06));
+			band.addColorStop(1, rgba(color, 0.36));
+			gateBands.set(key, band);
+		}
+		ctx.save();
+		ctx.translate(x0, 0);
+		ctx.globalAlpha = 0.85 + pulse * 0.15;
+		ctx.fillStyle = band;
+		ctx.fillRect(0, y0, w, y1 - y0);
+		ctx.restore();
+		ctx.strokeStyle = rgba(color, 0.75);
+		ctx.lineWidth = Math.max(1.5, scale * 0.07);
+		ctx.beginPath();
+		ctx.moveTo(x0, y0);
+		ctx.lineTo(x0, y1);
+		ctx.moveTo(x1, y0);
+		ctx.lineTo(x1, y1);
+		ctx.stroke();
+		// (its caps, where the floor and ceiling are)
+		ctx.fillStyle = rgba(color, 0.85);
+		const cap = Math.max(2, scale * 0.16);
+		ctx.fillRect(x0 - cap, y1 - cap, x1 - x0 + cap * 2, cap);
+		if (section.ceil !== null) ctx.fillRect(x0 - cap, y0, x1 - x0 + cap * 2, cap);
+	}
+
 	function portal(
 		x: number,
 		y: number,
@@ -1619,7 +1832,7 @@ export function createDashRenderer(
 			ctx.lineTo(sx(to), sy(edge));
 			ctx.closePath();
 			const image = tile(p);
-			const pattern = ctx.createPattern(image, 'repeat');
+			const pattern = patternOf(image);
 			if (pattern) {
 				const k = scale / image.width;
 				pattern.setTransform(new DOMMatrix([k, 0, 0, k, sx(0), sy(0)]));
@@ -2221,6 +2434,9 @@ export function createDashRenderer(
 		if (lastMode !== state.mode) lastMode = state.mode;
 		if (lookLevel !== level) {
 			lookLevel = level;
+			arrivals.clear();
+			groups.clear();
+			supports = new WeakMap();
 			lookSeed = 0;
 			for (const ch of `${level.title}:${level.version}`)
 				lookSeed = (lookSeed * 31 + ch.charCodeAt(0)) % 9973;
@@ -2236,6 +2452,19 @@ export function createDashRenderer(
 		lastKiai = section.kiai;
 		zoom = Math.max(0, zoom - dt * 2.5);
 		const pulse = musicPulse(level, time);
+		// (where it's most intense the camera shakes a little on the kicks, as hand-built levels
+		// shake theirs on the drums)
+		const hit = pulse > 0.85;
+		if (
+			hit &&
+			!kickHit &&
+			level.difficulty !== 'easy' &&
+			(section.kiai || (section.intensity ?? 0) >= 0.85) &&
+			!frame.waiting &&
+			!frame.dead
+		)
+			shake = Math.max(shake, 0.35);
+		kickHit = hit;
 		scale *= 1 + zoom * 0.05 + pulse * (section.kiai ? 0.012 : 0);
 
 		// The camera; at the end it comes to a stop with the light ahead, and the player runs on
@@ -2313,8 +2542,11 @@ export function createDashRenderer(
 			walls(w, sec, p, pulse);
 		}
 
-		// Blocks
-		const solids = world.solids.near(left, right);
+		// Blocks (where they're shown: moving into place, see `motion`)
+		const solids = world.solids.near(left, right).map((o) => {
+			const m = motion(level, o.x0, (o.y0 + o.y1) / 2, time);
+			return m === NOT_MOVED ? o : { ...o, y0: o.y0 + m.dy, y1: o.y1 + m.dy, alpha: m.alpha };
+		});
 		/** Nothing at a point: no block, nor below the floor or above the ceiling */
 		const open = (x: number, y: number) => {
 			const sec = world.sectionAt(world.timeAt(x));
@@ -2325,13 +2557,36 @@ export function createDashRenderer(
 		for (const s of solids) {
 			const sec = world.sectionAt(world.timeAt((s.x0 + s.x1) / 2));
 			// (in its own part's colours: not made again in every shade while two of them fade)
+			const alpha = (s as { alpha?: number }).alpha ?? 1;
+			if (alpha < 1) ctx.globalAlpha = alpha;
 			solid(s.x0, s.x1, s.y0, s.y1, paletteOf(sec), pulse, s.style, lookOf(sec), open);
+			ctx.globalAlpha = 1;
 		}
 		outlines(solids, section, p, pulse, false);
 		(globalThis as any).__phase?.('blocks', ctx);
 
 		// Spikes and saws (their outlines glow together)
-		const spikes = world.hazards.near(left, right).filter((h) => h.kind !== 'saw');
+		/** A thing on a block moves with the block */
+		const carried = (x: number, y: number, dir: 1 | -1, thing: object) => {
+			let on = supports.get(thing);
+			if (on === undefined) {
+				on =
+					world.solids
+						.near(x, x)
+						.find(
+							(o) => o.x0 <= x && o.x1 >= x && Math.abs((dir === 1 ? o.y1 : o.y0) - y) < 1e-6
+						) ?? null;
+				supports.set(thing, on);
+			}
+			return on ? motion(level, on.x0, (on.y0 + on.y1) / 2, time) : motion(level, x - 0.5, y, time);
+		};
+		const spikes = world.hazards
+			.near(left, right)
+			.filter((h) => h.kind !== 'saw')
+			.map((h) => {
+				const m = carried(h.x, h.y, h.dir, h);
+				return m === NOT_MOVED ? h : { ...h, y: h.y + m.dy, alpha: m.alpha };
+			});
 		ctx.beginPath();
 		for (const h of spikes) {
 			const sh = (h.kind === 'small' ? 0.5 : 1) * h.dir;
@@ -2350,6 +2605,7 @@ export function createDashRenderer(
 		for (const h of spikes) {
 			const sec = world.sectionAt(world.timeAt(h.x));
 			const look = lookOf(sec);
+			ctx.globalAlpha = (h as { alpha?: number }).alpha ?? 1;
 			spike(
 				h.x,
 				h.y,
@@ -2360,6 +2616,7 @@ export function createDashRenderer(
 				sec.kiai ? KIAI_SPIKES : look.spike,
 				!sec.kiai && !!look.tintSpike
 			);
+			ctx.globalAlpha = 1;
 		}
 		for (const h of world.hazards.near(left, right)) {
 			if (h.kind !== 'saw') continue;
@@ -2367,15 +2624,35 @@ export function createDashRenderer(
 			const onSurface =
 				Math.abs(h.y - sec.floor) < 0.01 ||
 				world.solids.near(h.x, h.x).some((s) => Math.abs(s.y1 - h.y) < 0.01);
-			saw(h.x, h.y, h.size, p, pulse, time, !onSurface, sec.kiai ? KIAI_SAWS : lookOf(sec).saw);
+			const m = onSurface ? carried(h.x, h.y, 1, h) : motion(level, h.x - h.size, h.y, time);
+			ctx.globalAlpha = m.alpha;
+			saw(
+				h.x,
+				h.y + m.dy,
+				h.size,
+				p,
+				pulse,
+				time,
+				!onSurface,
+				sec.kiai ? KIAI_SAWS : lookOf(sec).saw
+			);
+			ctx.globalAlpha = 1;
 		}
 
 		// Pads, orbs, portals
 		(globalThis as any).__phase?.('spikes+saws', ctx);
-		for (const pd of world.pads.near(left, right))
-			pad(pd.x, pd.y, pd.dir, pd.kind, state.used.includes(pd.id), pulse);
-		for (const o of world.orbs.near(left, right))
-			orb(o.x, o.y, o.kind, state.used.includes(o.id), time, pulse, o.dir);
+		for (const pd of world.pads.near(left, right)) {
+			const m = carried(pd.x, pd.y, pd.dir, pd);
+			ctx.globalAlpha = m.alpha;
+			pad(pd.x, pd.y + m.dy, pd.dir, pd.kind, state.used.includes(pd.id), pulse);
+			ctx.globalAlpha = 1;
+		}
+		for (const o of world.orbs.near(left, right)) {
+			const m = motion(level, o.x - 0.5, o.y, time);
+			ctx.globalAlpha = m.alpha;
+			orb(o.x, o.y + m.dy, o.kind, state.used.includes(o.id), time, pulse, o.dir);
+			ctx.globalAlpha = 1;
+		}
 		const seen = new Set<Mode>([world.sections[0]?.mode]);
 		for (const portalItem of level.portals) {
 			const first = portalItem.mode && !seen.has(portalItem.mode);
@@ -2399,6 +2676,7 @@ export function createDashRenderer(
 					(size ? (size.mini ? ' MINI' : ' NORMAL') : '') +
 					(speed ? ` ${['0.5x', '1x', '2x', '3x', '4x'][speed.speedIndex ?? 1]}` : '') +
 					(normalGravity ? ' ↓' : '');
+				gate(portalItem.x, y, sec, PORTAL_COLORS[portalItem.mode], pulse);
 				portal(
 					portalItem.x,
 					y,
@@ -2438,6 +2716,13 @@ export function createDashRenderer(
 			) {
 				speedPortal(portalItem.x, Math.max(1.2, portalItem.y), portalItem.speedIndex ?? 1, time);
 			}
+		}
+		// (teleport portals: in by the blue one, out of the orange one at the height it takes it to)
+		for (const t of world.teleports.near(left - 1, right + 1)) {
+			const sec = world.sectionAt(world.timeAt(t.x - 0.1));
+			const lift = (y: number) => Math.max(sec.floor + 1.3, y);
+			portal(t.x - 0.2, lift(t.y), '#3a8bff', time, '');
+			portal(t.x + 0.9, lift(t.to), '#ff8a1a', time, '');
 		}
 		for (const g of world.gravityPortals.near(left, right)) {
 			// A shared mode/reset plane has one combined cue, so its rings/labels don't hide each other.

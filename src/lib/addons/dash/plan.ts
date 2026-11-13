@@ -150,6 +150,8 @@ interface Chunk {
 	piece: PieceKind;
 	/** The first of a segment where the music changes */
 	change: boolean;
+	/** Its own speed, where it's not its phrase's (a fill faster, the run-up to a drop slower) */
+	speed?: number;
 }
 
 export function planLevel(
@@ -730,12 +732,58 @@ export function planLevel(
 			}
 		i = j;
 	}
+	// --- The speed on the song's moments (from hard on): as hand-built levels change theirs far
+	// more often than at a new kind (8 to 14 times a minute, docs/dash.md §29), on what the music
+	// does there
+	if (level >= 2) {
+		const fastest = (p: Phrase) =>
+			tempoAt((p.from + p.to) / 2) < 100 ? Math.min(palette[3], 3) : palette[3];
+		/** A speed set: the small wave isn't at the top speeds (see generate.ts) */
+		const setSpeed = (c: Chunk, speed: number) => {
+			c.speed = speed;
+			if (c.mode === 'wave' && c.mini && speed > (level >= 4 ? 3 : 2)) c.mini = false;
+		};
+		// (a fill: the burst at a phrase's end a step faster, where it isn't calm and the song has
+		// one there: its last bar clearly busier, or it turns right after)
+		chunks.forEach((c) => {
+			if (c.piece !== 'burst' || c.from <= c.phrase.from || c.phrase.pace < 1) return;
+			const next = phrases[phrases.indexOf(c.phrase) + 1];
+			if (c.phrase.fill < 1.3 && (next?.turn ?? 0) < 0.55) return;
+			setSpeed(c, Math.min(fastest(c.phrase), c.phrase.speedIndex + 1));
+		});
+		// (the run-up to a drop: its last bar a step slower, and the drop hits at its own speed)
+		for (let i = 1; i < chunks.length; i++) {
+			const c = chunks[i];
+			const change = c.phrase.change;
+			if (!c.change || !change?.up || change.kind === 'tempo' || c.phrase.rest >= 0.5) continue;
+			const before = chunks[i - 1];
+			if (before.piece === 'rest') continue;
+			// (only where the song draws back before it: its last bar clearly thinner, or resting)
+			const lastBar = Math.max(before.from, c.from - before.phrase.bar);
+			if (before.phrase.fill > 0.6 && !musicalRest(chart, (lastBar + c.from) / 2)) continue;
+			const running = before.speed ?? before.phrase.speedIndex;
+			const brake = Math.max(palette[0], running - 1);
+			if (brake >= running || brake >= c.phrase.speedIndex) continue;
+			const bar = before.phrase.bar;
+			// (a bar of a slow song is a long stretch to hold back: there it stays as it was)
+			if (bar > 2000) continue;
+			if (before.to - before.from < 2 * bar - 1) {
+				setSpeed(before, brake);
+				continue;
+			}
+			const last: Chunk = { ...before, from: Math.round(before.to - bar), change: false };
+			before.to = last.from;
+			setSpeed(last, brake);
+			chunks.splice(i, 0, last);
+			i++;
+		}
+	}
 	const merged = chunks;
 	// (two neighbours that ended up alike, after the merging: one part)
 	const parts: Part[] = [];
 	for (const c of merged) {
 		const last = parts[parts.length - 1];
-		const speedIndex = c.phrase.speedIndex;
+		const speedIndex = c.speed ?? c.phrase.speedIndex;
 		if (
 			last &&
 			last.mode === c.mode &&

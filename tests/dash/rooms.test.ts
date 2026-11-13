@@ -103,8 +103,9 @@ test('the ball and the spider jump over pits by orbs and pads now and then, each
 			assert.ok(without.dead, `${difficulty}: a ${mode} pad at ${p.x.toFixed(1)} not needed`);
 		}
 	}
-	assert.ok(orbs >= 4, `${orbs} orb jumps`);
-	assert.ok(pads >= 2, `${pads} pad jumps`);
+	// (a jump by an orb or by a pad: about half each in the spider, fewer pads in the ball)
+	assert.ok(orbs >= 2, `${orbs} orb jumps`);
+	assert.ok(pads >= 2 && orbs + pads >= 6, `${orbs} orb, ${pads} pad jumps`);
 });
 
 test('the UFO takes orbs on the drums now and then from hard on, each needed', async () => {

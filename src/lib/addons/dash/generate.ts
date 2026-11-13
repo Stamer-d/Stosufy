@@ -15,6 +15,7 @@ import {
 	STEP,
 	World,
 	cubeAt,
+	hitbox,
 	simulate,
 	startState,
 	type GravityPortal,
@@ -55,7 +56,7 @@ import { planLevel } from './plan';
 export { DIFFICULTIES, type Difficulty };
 
 /** Changes when physics/generation semantics change; also separates cached levels. */
-export const GENERATOR_VERSION = 'gd-4.3-orbs-mirror';
+export const GENERATOR_VERSION = 'gd-4.4-motion';
 
 /** How tall the parts with a ceiling are (blocks) */
 export const BOUNDS: Record<Exclude<Mode, 'cube' | 'robot'>, number> = {
@@ -1366,6 +1367,33 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 			});
 			state = simulate(world, startState(world, start), sec.start + STEP, plan);
 		}
+		// Teleport portals (from insane on, the levels from building blocks): where the part before
+		// left the player far from where this one begins (a flying part high up, a cube part on the
+		// floor), a portal takes it there at once, as hand-built levels do at their changes
+		if (blocks && preset.level >= 3 && sec.index > 0 && state.gravity > 0 && !state.dead) {
+			const box = hitbox(sec.mode, sec.mini);
+			const grounded = ['cube', 'robot', 'ball', 'spider'].includes(sec.mode);
+			const target = grounded
+				? sec.floor + box.h
+				: sec.ceil !== null
+					? Math.round((sec.floor + sec.ceil) / 2)
+					: null;
+			// (where it's far: down from high up, or up into a flying part's middle; now and then,
+			// more on extreme)
+			const far = Math.abs(state.y - target) >= (grounded ? 3 : 3.5);
+			const now =
+				random(hash(`${options.seed}:teleport:${sec.index}`))() < (preset.level >= 4 ? 0.6 : 0.45);
+			if (target !== null && far && now) {
+				world.teleports.add({
+					x: sec.x0,
+					y: state.y,
+					to: target,
+					x0: sec.x0 - 0.6,
+					x1: sec.x0 + 0.6
+				});
+				state = simulate(world, startState(world, start), sec.start + STEP, plan);
+			}
+		}
 		const before = world.sections[sec.index - 1];
 		portals.push(...sectionPortals(before, sec, state.y));
 		const inside = notes.filter((n) => n.time >= sec.start && n.time < sec.end);
@@ -1536,6 +1564,9 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 	// turns checked once more on what's left)
 	uselessPortals(world, plan, start, end, true);
 	widenSwingWindows(world, plan, start, end, preset.tolerance);
+	// (what those rounds turned can leave a part reached upside down, where it was built the right
+	// way up: its normal-gravity portal at its start, as when it was built)
+	entryPortals(world, plan, start);
 	playThrough(world, plan, start, end);
 	// (a spike whose block went in that last round hangs on nothing)
 	removeUnsupportedSpikes(world);
@@ -1568,6 +1599,26 @@ export function generateLevel(chart: DashChart, options: LevelOptions): Level {
 		creator: chart.creator,
 		version: chart.version
 	};
+}
+
+/** Every part reached upside down gets its normal-gravity portal where it begins */
+function entryPortals(world: World, plan: InputEvent[], start: number) {
+	let state = startState(world, start);
+	for (const sec of world.sections.slice(1)) {
+		state = simulate(world, state, sec.start - STEP, plan);
+		if (state.dead) return;
+		if (state.gravity > 0) continue;
+		if (world.gravityPortals.items.some((g) => g.sectionEntry && Math.abs(g.x - sec.x0) < 1e-6))
+			continue;
+		world.gravityPortals.add({
+			x: sec.x0,
+			y: Math.max(1.6, state.y),
+			gravity: 1,
+			sectionEntry: true,
+			x0: sec.x0 - 0.6,
+			x1: sec.x0 + 0.6
+		});
+	}
 }
 
 /**

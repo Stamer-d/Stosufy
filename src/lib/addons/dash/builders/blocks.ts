@@ -266,7 +266,10 @@ export function buildBlocks(ctx: Context, sec: Section, clicks: number[], entry:
 				!(ctx.simplify && (b.level > 1 || b.gravity)) &&
 				(b.high === undefined || height >= b.high) &&
 				(!b.held || sustain >= beat * 0.6) &&
-				(!b.gravity || gravityIn(ctx, sec.mode))
+				(!b.gravity || gravityIn(ctx, sec.mode)) &&
+				// (a stretch upside down needs its room: not in a part's last seconds, where it doesn't
+				// get back down and the part is built again without it, empty at its end)
+				(!b.upside || time < sec.end - 3500)
 		);
 		const key = motifKey(i);
 		const remembered = ctx.motifs.get(key)?.[0];

@@ -32,6 +32,8 @@ interface Piece {
 	pillars?: { x: number; floor: boolean; to: number }[];
 	spikes?: boolean;
 	saw?: { x: number; y: number; radius: number };
+	/** Obstacles in the room to weave around: a saw, or a block with a spike up and one down */
+	obstacles?: { x: number; y: number; kind: 'saw' | 'cross' }[];
 	orb?: { kind: OrbKind; time: number };
 	portals?: { x: number; gravity: 1 | -1; y: number }[];
 }
@@ -69,7 +71,8 @@ export const SHIP_PIECES = [
 	'orbDown',
 	'gravity',
 	'spikes',
-	'funnel'
+	'funnel',
+	'weave'
 ] as const;
 
 /** 0 to 1, smoothly */
@@ -300,6 +303,45 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 					end: mid
 				};
 			}
+		},
+		{
+			// (as hand-built ship parts have them: a wider room with things floating in it on the
+			// beats, above the way and then below it, and the way weaves between them)
+			id: 'weave',
+			level: 2,
+			weight: 0.9,
+			beats: 4,
+			make: (s) => {
+				const W = s.H + 3;
+				const mid = room(s.c, W);
+				if (W > top - floor - 1) return null;
+				const [b1, , b3] = s.beats.slice(1);
+				if (b1 === undefined || b3 === undefined) return null;
+				const swing = Math.min(1.25, (W - 1) / 2 - 0.9);
+				// (each turn as steep as the ship climbs: the swap from one side to the other twice as long)
+				const length = Math.min((b3 - b1) * 0.29, 1.3 / slope);
+				const first = rng() < 0.5 ? 1 : -1;
+				const middle = (p: number) => s.c + (mid - s.c) * ramp((p - s.xa) / 1.5);
+				// (by one obstacle on the far side, round the next one the other way)
+				const path = (p: number) =>
+					middle(p) +
+					first *
+						swing *
+						(-ramp((p - (b1 - length)) / length) +
+							2 * ramp((p - (b1 + length * 0.4)) / (2 * length)) -
+							ramp((p - (b3 + length * 0.4)) / length));
+				const kind = (): 'saw' | 'cross' => (rng() < 0.5 ? 'saw' : 'cross');
+				return {
+					path,
+					middle,
+					height: (p) => s.H + (W - s.H) * ramp((p - s.xa) / 1.5),
+					end: mid,
+					obstacles: [
+						{ x: b1, y: mid + first * (swing + 0.2), kind: kind() },
+						{ x: b3, y: mid - first * (swing + 0.2), kind: kind() }
+					]
+				};
+			}
 		}
 	];
 
@@ -413,6 +455,25 @@ export function buildShip(ctx: Context, sec: Section, clicks: number[], entry: P
 		if (piece.saw) {
 			const saw = world.saw(piece.saw.x, piece.saw.y, piece.saw.radius);
 			undo.push(() => world.hazards.remove(saw));
+		}
+		for (const o of piece.obstacles ?? []) {
+			if (o.kind === 'saw') {
+				const saw = world.saw(o.x, o.y, 0.7);
+				undo.push(() => world.hazards.remove(saw));
+			} else {
+				// (a block, a spike on it and one under it)
+				const y0 = Math.round(o.y * 2) / 2 - 0.5;
+				const x0 = Math.round(o.x - 0.5);
+				const block: Solid = { x0, x1: x0 + 1, y0, y1: y0 + 1, style: 1 };
+				world.solids.add(block);
+				const up = world.spike(x0 + 0.5, y0 + 1, 1, 'small');
+				const down = world.spike(x0 + 0.5, y0, -1, 'small');
+				undo.push(
+					() => world.solids.remove(block),
+					() => world.hazards.remove(up),
+					() => world.hazards.remove(down)
+				);
+			}
 		}
 		for (const p of piece.portals ?? []) {
 			const portal = world.gravityPortals.add({

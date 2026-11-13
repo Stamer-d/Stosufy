@@ -14,6 +14,7 @@ export type LevelData = Omit<Level, 'world'> & {
 		pads: World['pads']['items'];
 		walls: World['walls']['items'];
 		gravityPortals: World['gravityPortals']['items'];
+		teleports?: World['teleports']['items'];
 	};
 };
 
@@ -29,7 +30,8 @@ export function levelData(level: Level): LevelData {
 			orbs: w.orbs.items,
 			pads: w.pads.items,
 			walls: w.walls.items,
-			gravityPortals: w.gravityPortals.items
+			gravityPortals: w.gravityPortals.items,
+			teleports: w.teleports.items
 		}
 	};
 }
@@ -44,6 +46,7 @@ export function levelFromData(data: LevelData): Level {
 	for (const p of data.world.pads) world.pads.add(p);
 	for (const w of data.world.walls) world.walls.add(w);
 	for (const g of data.world.gravityPortals ?? []) world.gravityPortals.add(g);
+	for (const t of data.world.teleports ?? []) world.teleports.add(t);
 	world.solids.touch();
 	world.hazards.touch();
 	return { ...data, world };

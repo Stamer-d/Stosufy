@@ -546,3 +546,47 @@ test('from hard on, a stretch or two seen mirrored, between mirror portals; the 
 		}
 	assert.ok(stretches >= 4, `${stretches} mirrored stretches`);
 });
+
+test('from insane on, teleport portals take the player where a part begins; kept from the worker', async () => {
+	let teleports = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
+			const l = await level(name, difficulty);
+			const w = l.world;
+			if (difficulty === 'hard') assert.equal(w.teleports.items.length, 0, name);
+			for (const t of w.teleports.items) {
+				teleports++;
+				// (on the line where a part begins, to its floor or the middle of its room)
+				const sec = w.sections.find((s) => Math.abs(s.x0 - t.x) < 1e-6);
+				assert.ok(sec, `${name} ${difficulty}: a teleport between parts`);
+				assert.ok(t.to >= sec.floor && (sec.ceil === null || t.to <= sec.ceil));
+			}
+			const back = levelFromData(JSON.parse(JSON.stringify(levelData(l))));
+			assert.equal(back.world.teleports.items.length, w.teleports.items.length);
+			assert.equal(
+				simulate(back.world, startState(back.world, back.start), back.end, back.plan).dead,
+				false,
+				`${name} ${difficulty}`
+			);
+		}
+	assert.ok(teleports >= 4, `${teleports} teleports`);
+});
+
+test('ship parts weave between obstacles in the room now and then', async () => {
+	let floating = 0;
+	for (const name of Object.keys(SONGS))
+		for (const difficulty of ['hard', 'insane', 'extreme'] as const) {
+			const w = (await level(name, difficulty)).world;
+			for (const s of w.sections) {
+				if (s.mode !== 'ship') continue;
+				const inside = (x: number) => x > s.x0 && x < s.x1;
+				floating += w.hazards.items.filter(
+					(h) => h.kind === 'saw' && inside(h.x) && h.y > s.floor + 1 && h.y < s.ceil! - 1
+				).length;
+				floating += w.solids.items.filter(
+					(o) => o.style === 1 && inside(o.x0) && o.y0 > s.floor + 0.5 && o.y1 < s.ceil! - 0.5
+				).length;
+			}
+		}
+	assert.ok(floating >= 3, `${floating} obstacles in the ship parts' rooms`);
+});

@@ -1628,3 +1628,107 @@ Neue Tests: Pad-Sprünge kommen vor und jedes Pad ist nötig; UFO-Orbs kommen vo
 und sind nötig (`rooms.test.ts`); gespiegelte Strecken ab Hard, nicht auf Easy und Normal, ein
 Portal bei jedem Umschalten (`generate.test.ts`); 45 Cube-Bausteine (`blocks.test.ts`).
 `GENERATOR_VERSION` ist `gd-4.3-orbs-mirror`.
+
+## 33. Bewegung, Tempo nach dem Song, Portal-Tore, Ship-Hindernisse, Ball-Orbs, Teleport-Portale
+
+### 33.1 Was sich in den Leveln bewegt (gemessen)
+
+Die Trigger der vier Level, gezählt und ausgewertet (Ziel, Weg, Dauer, Kurve, wann im Verhältnis
+zum Spieler):
+
+| Trigger             | „Future Funk“ | „niwa“ | „CraZy III“ | was sie tun                              |
+| ------------------- | ------------- | ------ | ----------- | ---------------------------------------- |
+| Bewegen (Move)      | 2070          | 1366   | 1593        | Spikes und Blöcke an ihren Platz, Wippen |
+| Ein/Aus, Ausblenden | 946           | 52     | 611         | Teile erscheinen                         |
+| Drehen              | 331           | 49     | 434         | Sägen drehen, Spikes/Orbs wackeln 4–20°  |
+| Puls (Farbe)        | –             | –      | 1503        | auf dem Beat, alle 0,06–0,36 s           |
+| Wackeln (Shake)     | 3             | 90     | 135         | kurze Serien in den intensiven Stellen   |
+
+Die Bewegungen: meist senkrecht (Median 0,4–1 Block, bis 5), 0,3–1 s lang, mit Kurven, die
+nachschwingen, federn oder abprallen; Ziel meist Spikes und Blöcke; ausgelöst 0–2 s bevor der
+Spieler dort ist (Median 0,1–1 s). Viele Gruppen wippen auf dem Beat (alle 0,2–0,6 s).
+
+### 33.2 Was geändert wurde
+
+**Bewegung (`render.ts`, nur die Ansicht).** Blöcke, Spikes, Sägen, Orbs und Pads kommen in
+Gruppen (je drei Blöcke) an ihren Platz: von unten, von oben, nach außen geteilt (über dem Weg von
+oben, darunter von unten) oder eingeblendet, 2,5–6 Blöcke weit, mit einer der Kurven aus den
+Leveln (nachschwingen, federn, abprallen, weich, schnell). Was auf einem Block steht, bewegt sich
+mit ihm. Jede Bewegung beginnt auf einem Beat und ist 0,32 s bevor der Spieler dort ist fertig; die
+Physik sieht immer den echten Platz. Je Teil eine Art, aus dem Look des Levels (dasselbe Level sieht
+immer gleich aus); Easy ohne, Normal nur sanft eingeblendet, Hard 40 %, Insane 50 %, Extreme 60 %
+der Gruppen. Dazu wackelt die Kamera in den intensivsten Stellen (Kiai, Intensität ab 0,85) kurz
+auf den Kicks.
+
+**Tempo nach dem Song (`plan.ts`, ab Hard).** Ein Burst auf einem Fill am Phrasenende läuft eine
+Stufe schneller (wo es nicht ruhig ist); der letzte Takt vor einem Drop eine Stufe langsamer, der
+Drop dann wieder in seinem Tempo. Auf den Testsongs: Tempowechsel pro Minute Hard 1,3 → 2,4,
+Insane 3,5 → 4,5, Extreme 3,4 → 4,3 (die Testsongs haben wenige Fills und Drops).
+
+**Portal-Tore (`render.ts`).** Jedes Modusportal steht in einem Tor aus seinem Licht: ein Band vom
+Boden bis zur Decke, an den Rändern hell, mit Kappen. Nur Licht, nichts zum Stehen; es sieht nicht
+wie ein Block aus, durch den man fliegt.
+
+**Ship mit Hindernissen (`builders/ship.ts`, neues Stück `weave`, ab Hard).** Ein weiterer Raum
+mit zwei Hindernissen auf den Beats, das erste über dem Weg, das zweite darunter (oder umgekehrt):
+eine Säge oder ein Spike-Kreuz (ein Block mit einem kleinen Spike oben und unten). Der Weg
+schlängelt sich so steil, wie das Ship steigt, dazwischen durch; geprüft wie jedes Stück. 13
+Ship-Stücke.
+
+**Ball-Orbs auch in niedrigen Räumen (`builders/rooms.ts`).** Bei 3x und 4x ist der Ball-Raum 5
+Blöcke hoch; dort springt er jetzt auch, mit pinken Orbs und Pads (flacher Bogen). Gelingt
+selten: Die Ball-Teile bei 4x brauchen schon ohne Sprünge oft mehrere Versuche (bekannt seit 28).
+
+**Teleport-Portale (`physics.ts`, `generate.ts`, `render.ts`, ab Insane).** Wo ein Teil den
+Spieler weit weg von dort lässt, wo der nächste beginnt (ein Flugteil oben, ein Cube-Teil am
+Boden; ab 3 Blöcken, in einen Flugteil ab 3,5), nimmt ihn an der Grenze ein blaues Portal auf, und
+er kommt sofort aus einem orangen auf der richtigen Höhe (Boden, oder die Mitte des Raums), ohne
+Geschwindigkeit nach oben oder unten. In 45 % (Insane) bzw. 60 % (Extreme) dieser Fälle. Gemessen:
+Insane 7, Extreme 9 in 2 Minuten. Die Physik kennt sie (`World.teleports`), sie gehen mit dem Level
+aus dem Worker.
+
+Neue Tests: Teleport in der Physik (`physics.test.ts`); Teleports ab Insane, zwischen Teilen, auf
+gültiger Höhe, über den Worker erhalten; Hindernisse in den Ship-Räumen (`generate.test.ts`); 13
+Ship-Stücke (`blocks.test.ts`). Im Browser mit dem echten Renderer angesehen: Bewegung, Tor,
+Teleport. `GENERATOR_VERSION` ist `gd-4.4-motion`.
+
+### 33.3 Danach: Sprünge in Ball und Spider nötig, Tempo-Akzente nur mit der Musik
+
+- **Tempo-Akzente streng an der Musik:** Der Schub auf einem Fill kommt nur, wo der letzte Takt der
+  Phrase deutlich dichter ist (× 1,3) oder sich der Song danach dreht; die Bremse vor einem Drop nur,
+  wo der Takt davor deutlich dünner ist (× 0,6) oder pausiert, und nur bei Takten bis 2 s. Ein Song,
+  der gleich bleibt, bleibt so auf einem Tempo; nach einem Tempowechsel wird es nicht wieder
+  langsamer (beides prüften die bestehenden Tests, und beides schlug zuerst fehl).
+- **Orb-Sprünge wirklich nötig:** Nach dem Bau wird jeder Orb-Sprung geprüft (ohne den Klick, und
+  mit dem Klick ohne das Orb: beides muss scheitern); einer, der so nicht nötig ist, wird ein
+  normaler Wechsel. Gruben eines Sprungs bekommen Spikes ab einem halben Block nach der Kante (die
+  ersten klein), eine schmale Grube einen kleinen Spike in der Mitte. In den niedrigen Ball-Räumen nur
+  Pads. Im Spider 45 % der Sprünge über Pads, im Ball 30 %.
+- **Rücksetz-Portal am Ende geprüft:** Die Aufräumrunden am Ende (Portale ohne Wirkung umdrehen)
+  konnten einen Teil kopfüber erreichbar machen, der richtig herum gebaut war, ohne sichtbares
+  Rücksetz-Portal davor. Ein letzter Durchgang setzt es jetzt an jedem Teilanfang, den man kopfüber
+  erreicht (gefunden vom bestehenden Test, nach einem Swing-Teil).
+- **Kopfüber-Stücke nicht in den letzten 3,5 s eines Teils:** Dort kamen sie nicht mehr herunter,
+  und der Teil wurde ohne sie neu gebaut, mit 4 s ohne Klick am Ende (gefunden am Ende des ruhigen
+  Testsongs).
+
+### 33.4 FPS
+
+Rückmeldung: Es ruckelt teils, auch auf einem schnellen PC. Gemessen im Browser mit dem echten
+Renderer (ein Extreme-Level, jeder Frame mit erzwungenem Zeichnen; ohne Grafikkarte, daher nur der
+Vergleich zählt). Gefunden und geändert (`render.ts`, `physics.ts`):
+
+- **Wände der Wave:** Ihr Kachelmuster wurde in jedem Frame für jede Wand neu erzeugt; der Browser
+  kopiert dabei die Kachel jedes Mal in ein neues Bild für die Grafikkarte. Jetzt einmal je Kachel.
+- **Kachel-Cache:** Ab 24 Kacheln wurde er ganz geleert und alles neu gemacht (bei vielen
+  Farbwelten immer wieder, ein Hänger jedes Mal). Jetzt bis 96, die ältesten gehen einzeln; der
+  Cache der eingefärbten Sprites fasst 400 statt 160.
+- **`World.timeAt`** suchte linear durch alle Abschnitte und wird für jedes gezeichnete Ding in
+  jedem Frame aufgerufen; mit der neuen Planung haben Level doppelt so viele Abschnitte. Jetzt per
+  Halbierung (auch die Generierung profitiert).
+- **Bewegung:** Wann eine Gruppe ankommt, wird einmal je Level ausgerechnet, der Block unter einem
+  Spike einmal gesucht; die Lichtbänder der Portal-Tore werden je Farbe einmal angelegt.
+
+Nicht geprüft: auf einer echten Grafikkarte (hier nur Software-Zeichnen). Ob es auf deinem PC
+flüssig läuft, zeigt erst das Spielen; die FPS-Anzeige (F) zeigt auch, ob die adaptive Auflösung
+herunterregelt.

@@ -45,13 +45,13 @@ function level(name: string, difficulty: Difficulty, generator: 'blocks' | 'clas
 	return made.get(key)!;
 }
 
-test('57 building blocks: 45 for the cube and robot (6 with pads, one by blue pads), 12 for the ship, each its own', () => {
+test('58 building blocks: 45 for the cube and robot (6 with pads, one by blue pads), 13 for the ship, each its own', () => {
 	assert.equal(BLOCKS.length, 45);
 	assert.equal(BLOCKS.filter((b) => b.upside === 'pads').length, 1);
 	assert.equal(BLOCKS.filter((b) => b.leaps?.some((l) => l.pad)).length, 6);
-	assert.equal(SHIP_PIECES.length, 12);
+	assert.equal(SHIP_PIECES.length, 13);
 	assert.equal(new Set(BLOCKS.map((b) => b.id)).size, 45);
-	assert.equal(new Set(SHIP_PIECES).size, 12);
+	assert.equal(new Set(SHIP_PIECES).size, 13);
 	// (easy has its own few, every level some more)
 	for (let level = 0; level <= 4; level++)
 		assert.ok(BLOCKS.filter((b) => b.level === level).length > 0 || level === 4);
