@@ -12,6 +12,24 @@ function check(name, ok, detail = '') {
 	console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${ok || !detail ? '' : `  (${detail})`}`);
 }
 const DIR = '/home/tester/Stosufy/Edited';
+/**
+ * A start or end typed into its fields (minutes, seconds and, for a file under a minute, tenths;
+ * hours from an hour on), then Enter
+ */
+async function setTime(page, label, text) {
+	const tenths = Math.round(text.split(':').reduce((sum, part) => sum * 60 + Number(part), 0) * 10);
+	const parts = {
+		hours: Math.floor(tenths / 36000),
+		minutes: Math.floor(tenths / 600) % 60,
+		seconds: String(Math.floor(tenths / 10) % 60).padStart(2, '0'),
+		tenths: tenths % 10
+	};
+	for (const [unit, value] of Object.entries(parts)) {
+		const field = `input[aria-label="${label} ${unit}"]`;
+		if (await page.locator(field).count()) await page.fill(field, String(value));
+	}
+	await page.press(`input[aria-label="${label} seconds"]`, 'Enter');
+}
 /** The volume slider set (dB) */
 async function setVolume(page, db) {
 	await page.locator('input[aria-label="Volume"]').evaluate((input, value) => {
@@ -101,10 +119,8 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	await page.waitForSelector('[role="slider"][aria-label="End"]');
 	const end = Number(await page.getAttribute('[role="slider"][aria-label="End"]', 'aria-valuenow'));
 	check('its length is read (2 s)', Math.abs(end - 2) < 0.15, String(end));
-	await page.fill('input[aria-label="Start time"]', '0:00.5');
-	await page.press('input[aria-label="Start time"]', 'Enter');
-	await page.fill('input[aria-label="End time"]', '1.5');
-	await page.press('input[aria-label="End time"]', 'Enter');
+	await setTime(page, 'Start', '0:00.5');
+	await setTime(page, 'End', '1.5');
 	await setVolume(page, -6);
 	await pick(page, 'Speed', '2');
 	check(
@@ -126,10 +142,8 @@ const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name)
 	check('its title and cover kept', mp3.includes('Tone') && mp3.includes('APIC'));
 
 	// --- Parts: split, one taken out; each saved apart; undone and redone ---------------------
-	await page.fill('input[aria-label="Start time"]', '0');
-	await page.press('input[aria-label="Start time"]', 'Enter');
-	await page.fill('input[aria-label="End time"]', '2');
-	await page.press('input[aria-label="End time"]', 'Enter');
+	await setTime(page, 'Start', '0');
+	await setTime(page, 'End', '2');
 	await setVolume(page, 0);
 	await pick(page, 'Speed', '1');
 	const waveBox = await page

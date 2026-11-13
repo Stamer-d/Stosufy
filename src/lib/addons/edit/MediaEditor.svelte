@@ -41,7 +41,8 @@
 		saveMedia,
 		togglePart
 	} from './media.ts';
-	import { clock, parseClock, waveform } from './waveform.ts';
+	import { clock, waveform } from './waveform.ts';
+	import TimeField from './TimeField.svelte';
 
 	/**
 	 * @type {{
@@ -294,21 +295,32 @@
 	}
 
 	function setStart() {
-		edit.start = Math.min(time, edit.end - 0.1);
+		typed('start', time);
 	}
 	function setEnd() {
-		edit.end = Math.max(time, edit.start + 0.1);
+		typed('end', time);
 	}
 	/** A cut where it plays now: the parts on both sides can be taken out, or saved apart */
 	function split() {
 		addCut(edit, time, duration);
 	}
 
-	function typed(which, text) {
-		const seconds = parseClock(text);
-		if (seconds === null) return;
-		if (which === 'start') edit.start = Math.min(Math.max(0, seconds), edit.end - 0.1);
-		else edit.end = Math.max(Math.min(duration, seconds), edit.start + 0.1);
+	/**
+	 * The start or the end set: a start at or after the end takes the end along (as long as it
+	 * was), an end at or before the start the start
+	 */
+	function typed(which, seconds) {
+		if (!Number.isFinite(seconds)) return;
+		const length = Math.max(1, edit.end - edit.start);
+		if (which === 'start') {
+			const start = Math.min(Math.max(0, seconds), Math.max(0, duration - 0.1));
+			if (start > edit.end - 0.1) edit.end = Math.min(duration, start + length);
+			edit.start = Math.min(start, edit.end - 0.1);
+		} else {
+			const end = Math.max(Math.min(duration, seconds), Math.min(0.1, duration));
+			if (end < edit.start + 0.1) edit.start = Math.max(0, end - length);
+			edit.end = Math.max(end, edit.start + 0.1);
+		}
 	}
 
 	/** The video's picture as it's turned (px) */
@@ -621,11 +633,11 @@
 			{#each MARKS as [which, label, key] (which)}
 				<div class="h-10 pl-3 pr-1 flex items-center gap-1 rounded-lg bg-secondary-300">
 					<span class="text-white/50">{label}</span>
-					<input
-						class="w-[4.5rem] h-8 px-1 bg-transparent tabular-nums font-semibold outline-none rounded-md focus:bg-white/10"
-						aria-label="{label} time"
-						value={clock(edit[which])}
-						onchange={(event) => typed(which, event.currentTarget.value)}
+					<TimeField
+						{label}
+						{duration}
+						value={edit[which]}
+						onset={(seconds) => typed(which, seconds)}
 					/>
 					<button
 						class="size-8 grid place-items-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 cursor-pointer transition disabled:opacity-30 disabled:cursor-default"

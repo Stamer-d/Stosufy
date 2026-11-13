@@ -84,13 +84,19 @@
 		if (time < from || time > from + span) from = clamp(time - span * 0.1, 0, duration - span);
 	});
 
+	/** The canvas's size last set (set again only when it changes: that clears and reallocates it) */
+	let sized = '';
 	$effect(() => {
 		if (!canvas || !width) return;
 		const scale = window.devicePixelRatio || 1;
-		canvas.width = Math.round(width * scale);
-		canvas.height = Math.round(HEIGHT * scale);
+		const size = `${Math.round(width * scale)}x${Math.round(HEIGHT * scale)}`;
+		if (size !== sized) {
+			sized = size;
+			canvas.width = Math.round(width * scale);
+			canvas.height = Math.round(HEIGHT * scale);
+		}
 		const context = canvas.getContext('2d');
-		context.scale(scale, scale);
+		context.setTransform(scale, 0, 0, scale, 0, 0);
 		context.clearRect(0, 0, width, HEIGHT);
 		if (frames) drawFrames(context);
 		const top = frames ? 10 + STRIP + 4 : 10;
@@ -114,6 +120,7 @@
 	 * (on a grid that halves as it's zoomed in: those taken are used again), outside what's kept
 	 * darker
 	 */
+	let wanted = '';
 	function drawFrames(context) {
 		if (!frames) return;
 		void frames.version;
@@ -127,7 +134,12 @@
 			const t = from + (i + 0.5) * per;
 			times.push(clamp(Math.round(t / grid) * grid, 0, Math.max(0, duration - 0.05)));
 		}
-		frames.want(times);
+		// (asked for again only when the view moved: else the pictures still to take start over)
+		const key = times.join();
+		if (key !== wanted) {
+			wanted = key;
+			frames.want(times);
+		}
 		times.forEach((time, i) => {
 			const picture = frames.get(time);
 			if (picture) context.drawImage(picture, i * tile, 10, tile, STRIP);
