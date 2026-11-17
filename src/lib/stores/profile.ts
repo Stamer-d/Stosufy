@@ -260,6 +260,59 @@ export async function userPlaylists(osuId: number): Promise<Playlist[]> {
 }
 
 /** A country's flag as an emoji */
+/** An osu! player as the search and the friend list show them */
+export interface OsuPlayer {
+	id: number;
+	username: string;
+	avatarUrl: string | null;
+	countryCode: string | null;
+	online: boolean;
+	globalRank: number | null;
+	pp: number | null;
+	/** Whether they have the user as a friend too (only in the friend list) */
+	mutual: boolean;
+}
+
+function player(user: any, mutual = false): OsuPlayer {
+	const stats = user.statistics ?? user.statistics_rulesets?.[user.playmode ?? 'osu'] ?? {};
+	return {
+		id: user.id,
+		username: user.username,
+		avatarUrl: user.avatar_url ?? null,
+		countryCode: user.country_code ?? user.country?.code ?? null,
+		online: !!user.is_online,
+		globalRank: stats.global_rank ?? null,
+		pp: stats.pp ?? null,
+		mutual
+	};
+}
+
+/** osu! players whose name matches the query, the best match first */
+export async function searchPlayers(
+	query: string
+): Promise<{ players: OsuPlayer[]; total: number }> {
+	const text = query.trim();
+	if (!text) return { players: [], total: 0 };
+	const result = await osuApi(`search?mode=user&query=${encodeURIComponent(text)}`);
+	const data = result?.user?.data ?? [];
+	return {
+		players: data.map((user: any) => player(user)),
+		total: result?.user?.total ?? data.length
+	};
+}
+
+/**
+ * The user's friends on osu! (all of them, not only those using Stosufy); needs the
+ * friends.read permission, which older logins don't have (osu! answers 401 or 403 then)
+ */
+export async function osuFriends(): Promise<OsuPlayer[]> {
+	const result = await osuApi('friends');
+	// Newer API versions give the relation with the user in it
+	return (result ?? []).map((entry: any) =>
+		entry?.target ? player(entry.target, !!entry.mutual) : player(entry)
+	);
+}
+
 export function flag(code: string | undefined | null) {
 	if (!code || code.length !== 2) return '';
 	return String.fromCodePoint(

@@ -216,6 +216,15 @@
 		{/if}
 	</div>
 
+	<button
+		class="mx-2 flex items-center gap-2 h-9 px-3 rounded-md text-sm font-semibold text-secondary-600 hover:text-white hover:bg-white/[0.06] cursor-pointer transition"
+		onclick={() => goto('/friends')}
+	>
+		<span class="icon-[mingcute--group-line] size-[18px]"></span>
+		All osu! friends
+		<span class="icon-[mingcute--right-line] size-4 ms-auto"></span>
+	</button>
+
 	<div class="m-2 p-3 rounded-lg bg-white/[0.04]">
 		<h3 class="mb-2 text-sm font-semibold">What your friends see</h3>
 		<VisibilityPicker />

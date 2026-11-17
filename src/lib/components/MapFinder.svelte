@@ -19,6 +19,7 @@
 	import { user, userSettings, updateUserSettings } from '#lib/stores/user.ts';
 	import { keyStore } from '#lib/stores/auth.ts';
 	import Beatmap from './Beatmap.svelte';
+	import PlayerResults from './PlayerResults.svelte';
 	import SongCover from './SongCover.svelte';
 	import { get } from 'svelte/store';
 	import { searchQuery, matchesQuery } from '#lib/stores/search.ts';
@@ -678,6 +679,7 @@
 				{/if}
 			</section>
 		{/if}
+		<PlayerResults query={search} />
 		{@render discoverSection()}
 	</div>
 {:else if homeSettings.layout === 'desktop'}

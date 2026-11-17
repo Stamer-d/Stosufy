@@ -329,13 +329,24 @@
 					</p>
 				{/if}
 			</div>
-			<button
-				class="mb-2 flex items-center gap-2 h-9 px-4 rounded-full bg-black/40 backdrop-blur ring-1 ring-white/15 text-sm font-semibold hover:bg-black/60 cursor-pointer transition"
-				onclick={() => open(`https://osu.ppy.sh/users/${id}`)}
-			>
-				<span class="icon-[mingcute--external-link-line] size-4"></span>
-				osu! website
-			</button>
+			<div class="mb-2 flex items-center gap-2">
+				{#if mine}
+					<button
+						class="flex items-center gap-2 h-9 px-4 rounded-full bg-black/40 backdrop-blur ring-1 ring-white/15 text-sm font-semibold hover:bg-black/60 cursor-pointer transition"
+						onclick={() => goto('/friends')}
+					>
+						<span class="icon-[mingcute--group-line] size-4"></span>
+						Friends
+					</button>
+				{/if}
+				<button
+					class="flex items-center gap-2 h-9 px-4 rounded-full bg-black/40 backdrop-blur ring-1 ring-white/15 text-sm font-semibold hover:bg-black/60 cursor-pointer transition"
+					onclick={() => open(`https://osu.ppy.sh/users/${id}`)}
+				>
+					<span class="icon-[mingcute--external-link-line] size-4"></span>
+					osu! website
+				</button>
+			</div>
 		</div>
 	</div>
 
