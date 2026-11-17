@@ -48,3 +48,8 @@ export function difficultyColor(stars: number) {
 	}
 	return 'rgb(0 0 0)';
 }
+
+/** Text color readable on a star rating's color: osu!'s yellow on the dark (hard) ones */
+export function difficultyTextColor(stars: number) {
+	return stars >= 6.5 ? 'rgb(255 217 102)' : 'rgb(0 0 0 / 0.8)';
+}

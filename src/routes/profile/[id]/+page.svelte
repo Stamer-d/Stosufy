@@ -23,7 +23,7 @@
 		libraryStats,
 		BEATMAP_LISTS
 	} from '#lib/stores/profile.ts';
-	import { difficultyColor } from '#lib/beatmapStatus.ts';
+	import { difficultyColor, difficultyTextColor } from '#lib/beatmapStatus.ts';
 	import PlaylistCover from '#lib/components/PlaylistCover.svelte';
 	import Beatmap from '#lib/components/Beatmap.svelte';
 	import MapperLink from '#lib/components/MapperLink.svelte';
@@ -665,8 +665,10 @@
 									</p>
 									<p class="flex items-center gap-2 text-sm text-secondary-600 min-w-0">
 										<span
-											class="shrink-0 px-1.5 rounded-full text-[11px] font-bold text-black"
-											style="background: {difficultyColor(score.beatmap.stars)}"
+											class="shrink-0 px-1.5 rounded-full text-[11px] font-bold ring-1 ring-white/15"
+											style="background: {difficultyColor(
+												score.beatmap.stars
+											)}; color: {difficultyTextColor(score.beatmap.stars)}"
 											>★ {score.beatmap.stars.toFixed(2)}</span
 										>
 										<span class="truncate">{score.beatmap.version}</span>

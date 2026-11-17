@@ -60,7 +60,7 @@
 					onclick={() => choose(map.id)}
 				>
 					<span
-						class="size-2.5 shrink-0 rounded-full"
+						class="size-2.5 shrink-0 rounded-full ring-1 ring-white/25"
 						style="background-color: {difficultyColor(map.difficulty_rating)}"
 					></span>
 					<span class="truncate text-sm font-semibold">{map.version}</span>

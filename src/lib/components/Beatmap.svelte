@@ -126,7 +126,7 @@
 					>
 						{#each sortedBeatmaps.slice(0, 8) as beatmap (beatmap.id)}
 							<span
-								class="w-1.5 h-3 rounded-full ring-1 ring-black/30"
+								class="w-1.5 h-3 rounded-full ring-1 ring-white/25"
 								style="background-color: {beatmap.difficultyColor}"
 								title="{beatmap.version} ({beatmap.difficulty_rating?.toFixed(2)}★)"
 							></span>

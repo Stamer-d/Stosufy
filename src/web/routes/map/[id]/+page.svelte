@@ -243,7 +243,7 @@
 						}}
 					>
 						<span
-							class="size-3 shrink-0 rounded-full ring-1 ring-black/30"
+							class="size-3 shrink-0 rounded-full ring-1 ring-white/25"
 							style="background-color: {difficultyColor(beatmap.difficulty_rating)}"
 						></span>
 						<span class="flex-1 min-w-0 truncate font-semibold">{beatmap.version}</span>
