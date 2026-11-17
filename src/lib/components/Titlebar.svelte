@@ -20,6 +20,7 @@
 	import { friendsPanelOpen } from '#lib/stores/friends.ts';
 	import { logout } from '#lib/stores/account.ts';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { notify } from '#lib/stores/notifications.ts';
 
 	const appWindow = getCurrentWindow();
 	// macOS has its own window buttons (top left, over the bar): room for them, no others
@@ -69,6 +70,35 @@
 			updateModal.hasUpdate = false;
 		}
 	}
+
+	// Looks for a new version a moment after starting and every few hours: tells once per version
+	let toldVersion = null;
+	$effect(() => {
+		const look = async () => {
+			if ($offline) return;
+			try {
+				const update = await check();
+				if (!update?.available || update.version === toldVersion) return;
+				toldVersion = update.version;
+				notify({
+					kind: 'updates',
+					title: 'Update available',
+					body: `Stosufy ${update.version} is ready to install.`,
+					icon: 'icon-[mingcute--refresh-2-line]',
+					action: { label: 'Update', run: () => updateModal.open() },
+					duration: 15000
+				});
+			} catch (error) {
+				console.warn('Could not look for updates:', error);
+			}
+		};
+		const first = setTimeout(look, 20_000);
+		const timer = setInterval(look, 6 * 60 * 60 * 1000);
+		return () => {
+			clearTimeout(first);
+			clearInterval(timer);
+		};
+	});
 
 	async function updateApp() {
 		const update = await check();

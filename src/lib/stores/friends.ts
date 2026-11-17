@@ -12,6 +12,8 @@ import { currentSong, songQueue, setSongQueue, setPlaybackMod, queuePanelOpen } 
 import { currentMod, MODS } from './mods';
 import { listen, joinSession, songFor } from './listen';
 import { showToast } from './toast';
+import { notify, notificationsOn } from './notifications';
+import { goto } from '$app/navigation';
 import type { PlaybackMod } from '../types';
 import { connect } from './connect';
 
@@ -27,6 +29,8 @@ export const friendActivity = writable<FriendsState>({ status: 'idle', friends: 
 export const friendsPanelOpen = writable(false);
 
 const POLL = 30 * 1000;
+/** With the panel closed, still asked this often for the notifications */
+const BACKGROUND_POLL = 60 * 1000;
 /** Checked in this often, so friends see you online and at the right position */
 const HEARTBEAT = 60 * 1000;
 
@@ -123,6 +127,7 @@ export async function loadFriendActivity() {
 		const sentAt = Date.now();
 		const { friends, serverTime } = await api.getFriendActivity(token);
 		const offset = (sentAt + Date.now()) / 2 - serverTime;
+		notifyChanges(friends);
 		friendActivity.set({ status: 'ok', friends, offset });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -134,6 +139,77 @@ export async function loadFriendActivity() {
 	} finally {
 		loading = false;
 	}
+}
+
+// --- Notifications ------------------------------------------------------------------
+
+/** What was known of each friend at the last load; null before the first one */
+let known: Map<number, { online: boolean; roomCode: string | null }> | null = null;
+
+/** Notifies who came online, went offline or started a listening session since the last load */
+function notifyChanges(friends: api.FriendActivity[]) {
+	const before = known;
+	known = new Map(
+		friends.map((friend) => [friend.osuId, { online: friend.online, roomCode: friend.roomCode }])
+	);
+	// (the first load after starting tells nothing new)
+	if (!before) return;
+	const profile = (friend: api.FriendActivity) => () => goto(`/profile/${friend.osuId}`);
+	for (const friend of friends) {
+		const was = before.get(friend.osuId);
+		const playback = friend.playback;
+		if (friend.online && !was?.online) {
+			notify({
+				kind: 'friendOnline',
+				title: `${friend.username} is online`,
+				body: playback?.playing ? `Listening to ${playback.title} – ${playback.artist}` : undefined,
+				image: friend.avatarUrl,
+				round: true,
+				icon: 'icon-[mingcute--user-3-line]',
+				tone: 'text-green-400',
+				open: profile(friend),
+				action:
+					playback?.playing && !friend.roomCode
+						? { label: 'Listen along', run: () => listenAlong(friend) }
+						: undefined
+			});
+		} else if (!friend.online && was?.online) {
+			notify({
+				kind: 'friendOffline',
+				title: `${friend.username} went offline`,
+				body: playback ? `Last played ${playback.title} – ${playback.artist}` : undefined,
+				image: friend.avatarUrl,
+				round: true,
+				icon: 'icon-[mingcute--user-3-line]',
+				tone: 'text-secondary-600',
+				open: profile(friend),
+				duration: 4000
+			});
+		}
+		const code = friend.roomCode;
+		if (code && code !== was?.roomCode && code !== get(listen).code) {
+			notify({
+				kind: 'sessions',
+				title: `${friend.username} started a listening session`,
+				body: playback ? `${playback.title} – ${playback.artist}` : undefined,
+				image: friend.avatarUrl,
+				round: true,
+				icon: 'icon-[mingcute--headphone-line]',
+				open: profile(friend),
+				action: { label: 'Join', run: () => joinSession(code) },
+				duration: 10000
+			});
+		}
+	}
+}
+
+/** Whether a notification of the friends could show, so they are asked for with the panel closed */
+function friendNotificationsOn() {
+	return (
+		notificationsOn('friendOnline') ||
+		notificationsOn('friendOffline') ||
+		notificationsOn('sessions')
+	);
 }
 
 /** Where a friend is in their song now, in seconds */
@@ -210,13 +286,22 @@ if (typeof window !== 'undefined') {
 	friendsPanelOpen.subscribe((isOpen) => isOpen && queuePanelOpen.set(false));
 	queuePanelOpen.subscribe((isOpen) => isOpen && friendsPanelOpen.set(false));
 
-	// Load the friends while the panel is open
+	// Load the friends often while the panel is open, else now and then for the notifications
 	let timer: ReturnType<typeof setInterval> | null = null;
 	friendsPanelOpen.subscribe((isOpen) => {
 		if (timer) clearInterval(timer);
-		timer = null;
-		if (!isOpen) return;
-		loadFriendActivity();
-		timer = setInterval(loadFriendActivity, POLL);
+		if (isOpen) {
+			loadFriendActivity();
+			timer = setInterval(loadFriendActivity, POLL);
+		} else
+			timer = setInterval(() => {
+				if (friendNotificationsOn() && get(friendActivity).status !== 'needs-login')
+					loadFriendActivity();
+			}, BACKGROUND_POLL);
+	});
+	// The first load (to know who is online already) a moment after logging in
+	user.subscribe((current) => {
+		if (current?.id) setTimeout(() => known || loadFriendActivity(), 5000);
+		else known = null;
 	});
 }

@@ -3,6 +3,7 @@
 
 import { writable, get } from 'svelte/store';
 import { fetch } from '@tauri-apps/plugin-http';
+import { notify, dismiss } from './notifications';
 
 export const offline = writable(typeof navigator !== 'undefined' ? !navigator.onLine : false);
 
@@ -29,9 +30,31 @@ export function whenOnline(callback: () => void) {
 	return () => listeners.delete(callback);
 }
 
+/** The "You're offline" notification, taken away once back online */
+let offlineNotice: number | null = null;
+
 function setOffline(value: boolean) {
 	if (get(offline) === value) return;
 	offline.set(value);
+	if (offlineNotice !== null) dismiss(offlineNotice);
+	offlineNotice = notify(
+		value
+			? {
+					kind: 'connection',
+					title: "You're offline",
+					body: 'Your downloaded songs still play.',
+					icon: 'icon-[mingcute--wifi-off-line]',
+					tone: 'text-amber-300',
+					duration: 8000
+				}
+			: {
+					kind: 'connection',
+					title: 'Back online',
+					icon: 'icon-[mingcute--wifi-line]',
+					tone: 'text-green-400',
+					duration: 3000
+				}
+	);
 	if (value) {
 		// Checks every 20 s whether the connection is back
 		checking ??= setInterval(check, 20_000);

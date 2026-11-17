@@ -21,6 +21,7 @@ import {
 } from './audio';
 import { librarySong } from './radio';
 import { showToast } from './toast';
+import { notify } from './notifications';
 import type { MapSet, PlaybackMod } from '../types';
 
 export interface ListenMember {
@@ -206,9 +207,40 @@ function receive(room: {
 		playback: room.playback,
 		isHost
 	});
+	if (before.status === 'live' && before.code === room.code)
+		notifyMembers(before.members, room.members, me);
 	// Just became the host (the host left): send what's playing here
 	if (isHost && !before.isHost && before.status === 'live') sendPlayback();
 	if (!isHost) follow();
+}
+
+/** Notifies who joined or left the session (not the user themselves) */
+function notifyMembers(before: ListenMember[], now: ListenMember[], me: number | undefined) {
+	const ids = (members: ListenMember[]) => new Set(members.map((member) => member.osuId));
+	const had = ids(before);
+	const has = ids(now);
+	for (const member of now)
+		if (!had.has(member.osuId) && member.osuId !== me)
+			notify({
+				kind: 'sessions',
+				title: `${member.username} joined the session`,
+				image: member.avatarUrl,
+				round: true,
+				icon: 'icon-[mingcute--headphone-line]',
+				tone: 'text-green-400',
+				duration: 4000
+			});
+	for (const member of before)
+		if (!has.has(member.osuId) && member.osuId !== me)
+			notify({
+				kind: 'sessions',
+				title: `${member.username} left the session`,
+				image: member.avatarUrl,
+				round: true,
+				icon: 'icon-[mingcute--headphone-line]',
+				tone: 'text-secondary-600',
+				duration: 4000
+			});
 }
 
 // --- Host: send the playback ----------------------------------------------------------

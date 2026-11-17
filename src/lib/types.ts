@@ -241,6 +241,16 @@ export interface Settings {
 	lyricsOffsets?: Record<string, number>;
 	/** Changed keyboard shortcuts, by scope and action (null: none); see keybinds.ts */
 	keybinds?: Partial<Record<'app' | 'global', Record<string, string | null>>>;
+	/** The notifications in the app: all of them, and each kind (on unless false) */
+	notifications?: {
+		enabled?: boolean;
+		kinds?: Partial<
+			Record<
+				'friendOnline' | 'friendOffline' | 'sessions' | 'downloads' | 'connection' | 'updates',
+				boolean
+			>
+		>;
+	};
 	/** What osu! friends see: online status and song, only the status, or nothing */
 	activityVisibility?: 'all' | 'online' | 'hidden';
 	/** Before activityVisibility: false hid the user */

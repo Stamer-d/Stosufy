@@ -21,6 +21,7 @@ import { getPlaylistSongs } from './playlist';
 import { songQueue, updateSongQueue } from './audio';
 import { addSong } from '../api';
 import { showToast } from './toast';
+import { notify, notificationsOn } from './notifications';
 import type { Beatmap, DownloadState, MapSet, SearchFilters, StoredMapSet } from '../types';
 import { offscreenCanvas } from '../canvas';
 
@@ -456,16 +457,35 @@ async function runDownload(
 		saveLocalImage(setId, 'thumbnail').catch((error) =>
 			console.warn('Could not save the cover of', setId, error)
 		);
+		// (the download queue tells about its downloads at the end)
+		if (!quiet)
+			notify({
+				kind: 'downloads',
+				title: `Downloaded ${mapSetData.title ?? 'the song'}`,
+				body: mapSetData.artist,
+				image: `https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`,
+				icon: 'icon-[mingcute--download-2-line]',
+				tone: 'text-green-400',
+				duration: 4000
+			});
 		return audio;
 	} catch (error) {
 		console.error('Error downloading beatmap:', error);
 		// The download queue shows its own errors, and a missing key gets asked for
-		if (!quiet && !(error instanceof Error && error.message.startsWith(NO_KEY)))
-			showToast(
-				`Download failed: ${error instanceof Error ? error.message : error}`,
-				'icon-[mingcute--warning-line]',
-				7000
-			);
+		if (!quiet && !(error instanceof Error && error.message.startsWith(NO_KEY))) {
+			const message = error instanceof Error ? error.message : String(error);
+			// (with the download notifications off, it's still told)
+			if (notificationsOn('downloads'))
+				notify({
+					kind: 'downloads',
+					title: `Couldn't download ${mapSetData.title ?? 'the song'}`,
+					body: message,
+					icon: 'icon-[mingcute--warning-line]',
+					tone: 'text-red-400',
+					duration: 9000
+				});
+			else showToast(`Download failed: ${message}`, 'icon-[mingcute--warning-line]', 7000);
+		}
 		delete downloadWorkers[setId];
 		downloads.update((state) => {
 			const newState = { ...state };

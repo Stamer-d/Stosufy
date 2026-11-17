@@ -2,7 +2,8 @@
 // with a pause in between, waiting out osu!'s rate limit instead of failing.
 
 import { get, writable } from 'svelte/store';
-import { keyStore } from './auth';
+import { keyStore, sessionKeyNeeded } from './auth';
+import { notify } from './notifications';
 import { downloadBeatmap, isSongDownloaded } from './data';
 import type { MapSet } from '../types';
 
@@ -85,7 +86,18 @@ async function run() {
 					} else outcome = 'failed';
 				}
 			}
-			if (outcome === 'stop') break;
+			if (outcome === 'stop') {
+				notify({
+					kind: 'downloads',
+					title: 'Downloads stopped',
+					body: get(downloadQueue).error ?? undefined,
+					icon: 'icon-[mingcute--warning-line]',
+					tone: 'text-red-400',
+					action: { label: 'Add session key', run: () => sessionKeyNeeded.set(true) },
+					duration: 12000
+				});
+				break;
+			}
 			if (outcome === 'retry') {
 				// osu! limits the downloads: wait a minute, then try the same one again
 				downloadQueue.update((state) => ({ ...state, pausedUntil: Date.now() + RATE_LIMIT_PAUSE }));
@@ -100,10 +112,28 @@ async function run() {
 				failed: state.failed + (outcome === 'failed' ? 1 : 0)
 			}));
 			if (get(downloadQueue).items.length) await wait(PAUSE_BETWEEN);
+			else notifyDone();
 		}
 	} finally {
 		running = false;
 	}
+}
+
+/** Tells how the batch went, once the queue is empty */
+function notifyDone() {
+	const { done, failed } = get(downloadQueue);
+	if (!done && !failed) return;
+	const songs = (count: number) => `${count} ${count === 1 ? 'song' : 'songs'}`;
+	notify({
+		kind: 'downloads',
+		title: failed && !done ? 'Downloads failed' : 'Downloads finished',
+		body: [done && `${songs(done)} downloaded`, failed && `${songs(failed)} failed`]
+			.filter(Boolean)
+			.join(', '),
+		icon: failed ? 'icon-[mingcute--warning-line]' : 'icon-[mingcute--download-2-line]',
+		tone: failed ? 'text-amber-300' : 'text-green-400',
+		duration: 8000
+	});
 }
 
 /** Continues after the queue stopped, e.g. once the user logged in again */

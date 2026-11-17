@@ -25,6 +25,7 @@
 	import { profileImportOpen } from '#lib/stores/osuProfile.ts';
 	import { keyStore, sessionKeyNeeded, freshToken } from '#lib/stores/auth.ts';
 	import { showToast } from '#lib/stores/toast.ts';
+	import { NOTIFICATION_KINDS, notify } from '#lib/stores/notifications.ts';
 	import VisibilityPicker from './VisibilityPicker.svelte';
 	import KeybindSettings from './KeybindSettings.svelte';
 	import HitsoundSettings from './HitsoundSettings.svelte';
@@ -57,6 +58,7 @@
 		{ id: 'appearance', label: 'Appearance', icon: 'icon-[mingcute--palette-line]' },
 		{ id: 'playback', label: 'Playback', icon: 'icon-[mingcute--play-circle-line]' },
 		{ id: 'library', label: 'Library', icon: 'icon-[mingcute--folder-open-line]' },
+		{ id: 'notifications', label: 'Notifications', icon: 'icon-[mingcute--notification-line]' },
 		{ id: 'shortcuts', label: 'Shortcuts', icon: 'icon-[mingcute--keyboard-line]' }
 	];
 
@@ -101,6 +103,12 @@
 	let home = $derived(homeSettings($userSettings.settings?.home));
 	let appearance = $derived({ ...DEFAULT_APPEARANCE, ...$userSettings.settings?.appearance });
 	let pinnedSong = $derived(home.pinnedSetId ? $mapDataStore[home.pinnedSetId] : null);
+
+	let notificationSettings = $derived($userSettings.settings?.notifications ?? {});
+
+	function setNotifications(change) {
+		updateUserSettings({ notifications: { ...notificationSettings, ...change } });
+	}
 
 	function moveSection(index, direction) {
 		const sections = [...home.sections];
@@ -555,6 +563,47 @@
 						<span class="block mb-2 font-semibold text-white">What your friends see</span>
 						<VisibilityPicker />
 					</div>
+				</section>
+			{:else if $settingsTab === 'notifications'}
+				<section>
+					{@render heading('Notifications')}
+					{@render toggle(
+						'Show notifications',
+						'Small cards at the top right, e.g. when a friend comes online or a download is done.',
+						notificationSettings.enabled !== false,
+						(checked) => setNotifications({ enabled: checked })
+					)}
+				</section>
+				<section
+					class={notificationSettings.enabled === false ? 'opacity-50 pointer-events-none' : ''}
+				>
+					{@render heading('What to tell you about')}
+					{#each NOTIFICATION_KINDS as kind (kind.id)}
+						{@render toggle(
+							kind.label,
+							kind.description,
+							notificationSettings.kinds?.[kind.id] !== false,
+							(checked) =>
+								setNotifications({ kinds: { ...notificationSettings.kinds, [kind.id]: checked } })
+						)}
+					{/each}
+				</section>
+				<section>
+					<Button
+						type="normal"
+						disabled={notificationSettings.enabled === false}
+						onclick={() =>
+							notify({
+								kind: 'updates',
+								always: true,
+								title: 'This is a notification',
+								body: 'They show up here and go away by themselves.',
+								icon: 'icon-[mingcute--notification-line]',
+								duration: 5000
+							})}
+					>
+						Show a test notification
+					</Button>
 				</section>
 			{:else if $settingsTab === 'shortcuts'}
 				<KeybindSettings />

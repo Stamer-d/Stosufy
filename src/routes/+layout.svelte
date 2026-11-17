@@ -21,6 +21,7 @@
 	import SessionKeyModal from '#lib/components/SessionKeyModal.svelte';
 	import OsuProfileImport from '#lib/components/OsuProfileImport.svelte';
 	import FriendsPanel from '#lib/components/FriendsPanel.svelte';
+	import Notifications from '#lib/components/Notifications.svelte';
 	import { friendsPanelOpen, goOffline } from '#lib/stores/friends.ts';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { startKeybinds } from '#lib/stores/keybinds.ts';
@@ -251,6 +252,7 @@
 		</div>
 	{/if}
 	<Toasts />
+	<Notifications />
 	<SettingsModal />
 	<SessionKeyModal />
 	<OsuProfileImport />
