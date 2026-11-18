@@ -8,7 +8,7 @@
 	// its sound, its format and quality, maybe only a part), and it's downloaded to
 	// ~/Stosufy/Downloads, to be copied, dragged out, edited or converted from there. What was
 	// chosen last is chosen again (where a link has it), else the best there is.
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { fade } from 'svelte/transition';
 	import { showToast } from '#lib/stores/toast.ts';
@@ -165,6 +165,10 @@
 	/** @type {{ state: 'idle' | 'loading' | 'ready' | 'failed', info?: import('./ytdlp.ts').LinkInfo, error?: string }} */
 	let found = $state({ state: 'idle' });
 	let part = $state({ on: false, start: 0, end: 0 });
+	/** The file's name, without its extension (empty: the video's title) */
+	let fileName = $state('');
+	/** @type {HTMLButtonElement | undefined} */
+	let downloadButton = $state();
 	/** The sign-in of the browser chosen couldn't be read: looked at (and downloaded) without it */
 	let signedOut = $state('');
 	/** Which of a playlist's videos (null: all) */
@@ -318,6 +322,7 @@
 		found = { state: 'loading' };
 		lookSteps = [];
 		signedOut = '';
+		fileName = '';
 		try {
 			let result;
 			try {
@@ -450,21 +455,16 @@
 		}
 	}
 
-	/**
-	 * Downloads what's chosen. `asked`: what a download link asked for instead (see link.ts):
-	 * the video (not only its sound, whatever was chosen last), its part, the file's name
-	 * @param {{ sections: [number, number][], title: string | null } | null} asked
-	 */
-	function start(asked = null) {
+	function start() {
 		if (!info) return;
-		const audio = asked ? !info.video : tab === 'audio';
+		const audio = tab === 'audio';
 		/** @type {[number, number][]} */
-		const sections = asked
-			? asked.sections
-			: part.on && !playlist && info.duration && (part.start > 0 || part.end < info.duration)
+		const sections =
+			part.on && !playlist && info.duration && (part.start > 0 || part.end < info.duration)
 				? [[part.start, part.end]]
 				: [];
-		const title = asked?.title ?? null;
+		// (the name given; a playlist's videos keep their own)
+		const title = (!playlist && fileName.replace(/\s+/g, ' ').trim()) || null;
 		const snapshot = $state.snapshot(info);
 		addDownload(title ? { ...snapshot, title } : snapshot, {
 			url: info.url,
@@ -484,11 +484,12 @@
 		// (ready for the next link)
 		link = '';
 		looked = '';
+		fileName = '';
 		found = { state: 'idle' };
 	}
 
 	// --- A download link opened (stosufynew://download?…, see link.ts): its video looked at,
-	// its part chosen, and downloaded at once, one link after the other --------------------
+	// its part and the file's name filled in, ready to be downloaded (with Download, or Enter)
 
 	let takingLinks = false;
 	const warn = (message) => showToast(message, 'icon-[mingcute--warning-line]', 6000);
@@ -517,23 +518,21 @@
 		if (found.state !== 'ready' || !found.info || looked !== wanted.url) return;
 		const video = found.info;
 		if (video.kind === 'playlist') return warn("That link is a playlist's: it needs one video");
-		// Where the link says (else where the video's link says to start: "?t=…"), within the video
+		fileName = wanted.title ?? '';
+		// (the video, not only its sound, whatever was chosen last)
+		if (video.video) options.tab = 'video';
+		// The part where the link says, within the video (none asked for: where the video's own
+		// link says to start, "?t=…", as for any link)
 		const length = video.duration;
-		const within = (time) => (length ? Math.min(time, length) : time);
-		const from = within(wanted.start ?? fromLink);
-		const to = within(wanted.end ?? length);
-		// (no part asked for, or one that's all of it)
-		const whole =
-			(wanted.start === null && wanted.end === null && !fromLink) ||
-			(from <= 0 && length > 0 && to >= length);
-		if (!whole && !(to > from))
-			return warn(
-				length && from >= length
-					? `The part isn't in the video (it's ${short(length)} long)`
-					: 'The link needs to say where the part ends (end=…)'
-			);
-		part = whole ? { on: false, start: 0, end: length } : { on: true, start: from, end: to };
-		start({ sections: whole ? [] : [[from, to]], title: wanted.title });
+		if (wanted.start !== null || wanted.end !== null) {
+			const from = Math.min(wanted.start ?? 0, length);
+			const to = Math.min(wanted.end ?? length, length);
+			if (!length) warn("The video's length isn't known, so its part can't be chosen: all of it");
+			else if (!(to > from)) warn(`The part isn't in the video (it's ${short(length)} long)`);
+			else part = { on: from > 0 || to < length, start: from, end: to };
+		}
+		await tick();
+		downloadButton?.focus();
 	}
 
 	$effect(() => {
@@ -936,6 +935,23 @@
 						{/if}
 					</div>
 
+					{#if !playlist}
+						<!-- (empty: the video's title; a download link fills it in) -->
+						<label
+							class="h-10 px-3 flex items-center gap-2 rounded-lg bg-secondary-300 ring-1 ring-transparent focus-within:ring-rose-300/60 transition"
+						>
+							<span class="icon-[mingcute--file-line] size-4 text-white/55 shrink-0"></span>
+							<span class="text-sm text-white/55 shrink-0">File name</span>
+							<input
+								class="flex-1 min-w-0 h-full bg-transparent text-sm outline-none placeholder:text-white/35"
+								placeholder={info.title}
+								maxlength="200"
+								bind:value={fileName}
+								onkeydown={(event) => event.key === 'Enter' && start()}
+							/>
+						</label>
+					{/if}
+
 					<div class="flex flex-wrap items-center gap-2">
 						{#if !playlist && info.duration}
 							<Toggle
@@ -964,7 +980,8 @@
 							/>
 						{/if}
 						<button
-							class="ml-auto h-11 px-6 flex items-center gap-2 rounded-full text-base font-bold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition"
+							class="ml-auto h-11 px-6 flex items-center gap-2 rounded-full text-base font-bold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-300"
+							bind:this={downloadButton}
 							onclick={() => start()}
 						>
 							<span class="icon-[mingcute--download-3-line] size-5"></span>

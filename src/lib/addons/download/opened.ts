@@ -1,5 +1,5 @@
-// Download links opened (see link.ts): kept, in order, until the downloader's page takes them
-// one by one (it's opened for them, see addons/links.ts). One that's wrong is said so.
+// Download links opened (see link.ts): kept until the downloader's page takes the last one and
+// fills itself in with it (it's opened for it, see addons/links.ts). One that's wrong is said so.
 
 import { get, writable } from 'svelte/store';
 import { showToast } from '../../stores/toast';
@@ -44,11 +44,12 @@ export function receive(text: string): boolean {
 	return true;
 }
 
-/** The next link to download (what's waited too long left out), taken off the list */
+/**
+ * The link to fill the page in with: the last one opened (each fills in what the one before
+ * did), unless it waited too long; the list emptied
+ */
 export function takeLink(): OpenedLink | null {
-	const now = Date.now();
-	const fresh = get(openedLinks).filter((link) => now - link.at < FRESH);
-	const [next = null, ...rest] = fresh;
-	openedLinks.set(rest);
-	return next;
+	const newest = get(openedLinks).at(-1) ?? null;
+	openedLinks.set([]);
+	return newest && Date.now() - newest.at < FRESH ? newest : null;
 }

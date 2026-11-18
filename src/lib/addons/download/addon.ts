@@ -17,7 +17,7 @@ export default {
 	icon: 'icon-[mingcute--download-3-line]',
 	colors: ['#e11d48', '#7c3aed'],
 	page: () => import('./Page.svelte'),
-	// (stosufynew://download?url=…&start=…&end=…&title=…: that part downloaded at once, see link.ts)
+	// (stosufynew://download?url=…&start=…&end=…&title=…: filled in with that part, see link.ts)
 	link: {
 		host: 'download',
 		open: (url) => import('./opened').then((opened) => opened.receive(url))

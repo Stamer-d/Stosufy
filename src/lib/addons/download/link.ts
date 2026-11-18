@@ -1,5 +1,5 @@
-// A link that opens the downloader and downloads (a part of) a video at once, from another app
-// or a web page (a VOD analyzer, say):
+// A link that opens the downloader filled in with (a part of) a video, ready to be downloaded,
+// from another app or a web page (a VOD analyzer, say):
 //
 //   stosufynew://download?url={url}&start={start}&end={end}&title={title}
 //
