@@ -44,6 +44,15 @@ export interface Addon {
 	prepare?: () => Promise<unknown>;
 	/** A page of its own, at /addons/<id>, opened with its title bar button */
 	page?: () => Loaded<Component<any>>;
+	/**
+	 * Links that open it, from another app or a web page: stosufynew://<host>?… (see links.ts).
+	 * `open` keeps what the link asks for (its page then takes it), and says whether it could;
+	 * its page is opened for it then.
+	 */
+	link?: {
+		host: string;
+		open: (url: string) => Promise<boolean>;
+	};
 	/** Widgets for the home screen */
 	widgets?: {
 		/** What they are, for the widget store while the add-on isn't installed */

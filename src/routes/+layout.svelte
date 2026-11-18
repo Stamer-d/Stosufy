@@ -32,6 +32,7 @@
 	import PlayOverlay from '#lib/components/PlayOverlay.svelte';
 	import { openOverlay } from '#lib/addons/overlay.ts';
 	import { activeOverlay, overlayViews, appHidden } from '#lib/addons/store.ts';
+	import { openAddonLinks, appStarted } from '#lib/addons/links.ts';
 	import FocusView from '#lib/components/desktop/FocusView.svelte';
 	import { userSettings, DEFAULT_APPEARANCE } from '#lib/stores/user.ts';
 	import BeatmapBackground from '#lib/components/BeatmapBackground.svelte';
@@ -122,12 +123,17 @@
 		startConnect();
 		// Invites to listening sessions: stosufynew://listen/CODE
 		const joinFromLink = (urls) => {
-			const link = urls?.find((url) => url.includes('listen/'));
+			const link = urls?.find((url) => /^stosufynew:\/*listen\//i.test(url));
 			if (link) joinSession(link.split('listen/')[1]);
 		};
-		onOpenUrl(joinFromLink).catch(() => {});
+		// …and the add-ons' links: stosufynew://download?… (see addons/links.ts)
+		const fromLinks = (urls) => {
+			joinFromLink(urls);
+			void openAddonLinks(urls);
+		};
+		onOpenUrl(fromLinks).catch(() => {});
 		getCurrent()
-			.then(joinFromLink)
+			.then(fromLinks)
 			.catch(() => {});
 		// Friends see you go offline right away instead of after a few minutes
 		getCurrentWindow()
@@ -144,6 +150,11 @@
 		if (page.url) {
 			updateShowUI();
 		}
+	});
+
+	// (started: logged in, the pages shown; an add-on's page a link opened goes on from there)
+	$effect(() => {
+		if (showUI) appStarted();
 	});
 
 	/** A narrow window: the side panels (queue, friends) over the page, not next to it */

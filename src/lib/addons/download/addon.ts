@@ -17,6 +17,11 @@ export default {
 	icon: 'icon-[mingcute--download-3-line]',
 	colors: ['#e11d48', '#7c3aed'],
 	page: () => import('./Page.svelte'),
+	// (stosufynew://download?url=…&start=…&end=…&title=…: that part downloaded at once, see link.ts)
+	link: {
+		host: 'download',
+		open: (url) => import('./opened').then((opened) => opened.receive(url))
+	},
 	// (yt-dlp, FFmpeg and YouTube's support downloaded at once: ready when it's first opened)
 	prepare: () => import('./ytdlp').then((tools) => tools.ensureTools())
 } satisfies Addon;

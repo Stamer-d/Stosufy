@@ -26,6 +26,7 @@
 	import { ms } from '../files/motion.ts';
 	import PartPicker from './PartPicker.svelte';
 	import { ensureTools, isYouTube, lookUp, tools } from './ytdlp.ts';
+	import { openedLinks, takeLink } from './opened.ts';
 	import {
 		FOLDER,
 		addDownload,
@@ -449,15 +450,23 @@
 		}
 	}
 
-	function start() {
+	/**
+	 * Downloads what's chosen. `asked`: what a download link asked for instead (see link.ts):
+	 * the video (not only its sound, whatever was chosen last), its part, the file's name
+	 * @param {{ sections: [number, number][], title: string | null } | null} asked
+	 */
+	function start(asked = null) {
 		if (!info) return;
-		const audio = tab === 'audio';
+		const audio = asked ? !info.video : tab === 'audio';
 		/** @type {[number, number][]} */
-		const sections =
-			part.on && !playlist && info.duration && (part.start > 0 || part.end < info.duration)
+		const sections = asked
+			? asked.sections
+			: part.on && !playlist && info.duration && (part.start > 0 || part.end < info.duration)
 				? [[part.start, part.end]]
 				: [];
-		addDownload($state.snapshot(info), {
+		const title = asked?.title ?? null;
+		const snapshot = $state.snapshot(info);
+		addDownload(title ? { ...snapshot, title } : snapshot, {
 			url: info.url,
 			kind: audio ? 'audio' : 'video',
 			format: audio ? options.audioFormat : (choice?.container ?? 'mp4'),
@@ -469,13 +478,67 @@
 			sponsorblock: youtube && options.sponsorblock && !sections.length,
 			playlist,
 			playlistItems: playlist ? items : null,
-			cookies: signedOut ? null : options.cookies
+			cookies: signedOut ? null : options.cookies,
+			fileName: title
 		});
 		// (ready for the next link)
 		link = '';
 		looked = '';
 		found = { state: 'idle' };
 	}
+
+	// --- A download link opened (stosufynew://download?…, see link.ts): its video looked at,
+	// its part chosen, and downloaded at once, one link after the other --------------------
+
+	let takingLinks = false;
+	const warn = (message) => showToast(message, 'icon-[mingcute--warning-line]', 6000);
+
+	async function takeLinks() {
+		if (takingLinks) return;
+		takingLinks = true;
+		try {
+			for (let next = takeLink(); next; next = takeLink()) await fromOpenedLink(next);
+		} finally {
+			takingLinks = false;
+		}
+	}
+
+	/** @param {import('./opened.ts').OpenedLink} wanted */
+	async function fromOpenedLink(wanted) {
+		clearTimeout(typing);
+		offered = null;
+		link = wanted.url;
+		// (looked at again, also if it's the link that's there already)
+		looked = '';
+		await look(wanted.url);
+		// (another link typed in meanwhile: that one's looked at, not this one)
+		if (link !== wanted.url) return;
+		if (found.state === 'failed') return warn(`Couldn't open the link: ${found.error}`);
+		if (found.state !== 'ready' || !found.info || looked !== wanted.url) return;
+		const video = found.info;
+		if (video.kind === 'playlist') return warn("That link is a playlist's: it needs one video");
+		// Where the link says (else where the video's link says to start: "?t=…"), within the video
+		const length = video.duration;
+		const within = (time) => (length ? Math.min(time, length) : time);
+		const from = within(wanted.start ?? fromLink);
+		const to = within(wanted.end ?? length);
+		// (no part asked for, or one that's all of it)
+		const whole =
+			(wanted.start === null && wanted.end === null && !fromLink) ||
+			(from <= 0 && length > 0 && to >= length);
+		if (!whole && !(to > from))
+			return warn(
+				length && from >= length
+					? `The part isn't in the video (it's ${short(length)} long)`
+					: 'The link needs to say where the part ends (end=…)'
+			);
+		part = whole ? { on: false, start: 0, end: length } : { on: true, start: from, end: to };
+		start({ sections: whole ? [] : [[from, to]], title: wanted.title });
+	}
+
+	$effect(() => {
+		if ($openedLinks.length) void takeLinks();
+	});
 
 	async function show(path) {
 		try {
@@ -902,7 +965,7 @@
 						{/if}
 						<button
 							class="ml-auto h-11 px-6 flex items-center gap-2 rounded-full text-base font-bold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition"
-							onclick={start}
+							onclick={() => start()}
 						>
 							<span class="icon-[mingcute--download-3-line] size-5"></span>
 							Download

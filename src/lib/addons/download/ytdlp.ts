@@ -474,6 +474,8 @@ export interface DownloadRequest {
 	/** Which of a playlist's videos ("1-10"; null: all) */
 	playlistItems: string | null;
 	cookies: string | null;
+	/** The file's name, without its extension (a download link's title); null: the video's title */
+	fileName?: string | null;
 }
 
 export interface Progress {

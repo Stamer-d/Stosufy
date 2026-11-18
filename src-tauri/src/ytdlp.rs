@@ -541,6 +541,55 @@ pub struct DownloadRequest {
     pub playlist_items: Option<String>,
     /// Signed in as in this browser
     pub cookies: Option<String>,
+    /// The file's name, without its extension (a download link's title; none: the video's
+    /// title). Not for a playlist, whose videos would all take it
+    #[serde(default)]
+    pub file_name: Option<String>,
+}
+
+/// The longest name a file gets (bytes; its extension comes on top)
+const NAME_BYTES: usize = 150;
+
+/// A file's name the page chose, as yt-dlp's output template: only a name (no folder, so
+/// nothing outside the download's folder), one every system allows, at most `NAME_BYTES`, its
+/// `%` as `%%` (else read as a field); None if nothing's left of it
+pub fn file_stem(name: &str) -> Option<String> {
+    let mut clean = String::with_capacity(name.len());
+    for c in name.chars() {
+        match c {
+            '/' | '\\' | '|' => clean.push('-'),
+            // (also what would make it another kind of template: "thumbnail:…")
+            ':' => clean.push_str(" -"),
+            '"' => clean.push('\''),
+            '<' | '>' | '?' | '*' => {}
+            c if c.is_control() => clean.push(' '),
+            c => clean.push(c),
+        }
+    }
+    let spaced = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    // (no dots or spaces at its ends: Windows drops them, and a dot first hides it elsewhere)
+    let ends = |c: char| c == '.' || c == ' ';
+    let mut stem = spaced.trim_matches(ends).to_string();
+    if stem.len() > NAME_BYTES {
+        let mut end = NAME_BYTES;
+        while !stem.is_char_boundary(end) {
+            end -= 1;
+        }
+        stem.truncate(end);
+        stem = stem.trim_end_matches(ends).to_string();
+    }
+    if stem.is_empty() {
+        return None;
+    }
+    // Windows' device names (CON, NUL, COM1, …) aren't a file's
+    let base = stem.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let numbered = (base.starts_with("COM") || base.starts_with("LPT"))
+        && base.len() == 4
+        && base.as_bytes()[3].is_ascii_digit();
+    if numbered || matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        stem.insert(0, '_');
+    }
+    Some(stem.replace('%', "%%"))
 }
 
 const BROWSERS: [&str; 9] = [
@@ -752,6 +801,19 @@ pub fn download_args(
 ) -> Result<Vec<String>, String> {
     check_url(&request.url)?;
     check_browser(&request.cookies)?;
+    // The name chosen (a download link's), else the video's title; a playlist's videos
+    // numbered: two of the same title don't take each other's name
+    let named = match request.file_name.as_deref() {
+        Some(name) if !request.playlist => file_stem(name).map(|stem| format!("{stem}.%(ext)s")),
+        _ => None,
+    };
+    let output = named.unwrap_or_else(|| {
+        if request.playlist {
+            "%(playlist_index)03d %(title).140B.%(ext)s".into()
+        } else {
+            "%(title).150B.%(ext)s".into()
+        }
+    });
     let mut args: Vec<String> = Vec::new();
     let mut push = |items: &[&str]| args.extend(items.iter().map(|s| s.to_string()));
     push(&[
@@ -764,12 +826,7 @@ pub fn download_args(
         "-O",
         "after_move:[done] %(filepath)s",
         "-o",
-        // (a playlist's videos numbered: two of the same title don't take each other's name)
-        if request.playlist {
-            "%(playlist_index)03d %(title).140B.%(ext)s"
-        } else {
-            "%(title).150B.%(ext)s"
-        },
+        &output,
         "--windows-filenames",
         "--no-mtime",
         "--embed-metadata",
@@ -1484,11 +1541,70 @@ mod tests {
             playlist: false,
             playlist_items: None,
             cookies: None,
+            file_name: None,
         }
     }
 
     fn joined(args: &[String]) -> String {
         args.join(" ")
+    }
+
+    /// The output template it's given (what follows -o)
+    fn output_of(args: &[String]) -> &str {
+        let at = args.iter().position(|arg| arg == "-o").expect("an -o");
+        &args[at + 1]
+    }
+
+    #[test]
+    fn a_name_chosen_names_the_file() {
+        let mut r = request("video", "mp4");
+        r.sections = vec![[83.5, 125.0]];
+        r.file_name = Some("Funny moment".into());
+        let args = download_args(&r, Path::new("/tmp/x"), &software_encoder()).unwrap();
+        assert_eq!(output_of(&args), "Funny moment.%(ext)s");
+        assert!(joined(&args).contains("--download-sections *83.500-125.000"));
+        // (none, or nothing left of it: the video's title)
+        r.file_name = None;
+        let args = download_args(&r, Path::new("/tmp/x"), &software_encoder()).unwrap();
+        assert_eq!(output_of(&args), "%(title).150B.%(ext)s");
+        r.file_name = Some(" ./.. ".into());
+        let args = download_args(&r, Path::new("/tmp/x"), &software_encoder()).unwrap();
+        assert_eq!(output_of(&args), "%(title).150B.%(ext)s");
+        // (a playlist's videos keep their own)
+        r.sections = vec![];
+        r.playlist = true;
+        r.file_name = Some("Clip".into());
+        let args = download_args(&r, Path::new("/tmp/x"), &software_encoder()).unwrap();
+        assert_eq!(output_of(&args), "%(playlist_index)03d %(title).140B.%(ext)s");
+    }
+
+    #[test]
+    fn a_name_chosen_is_only_a_name() {
+        // (no folder: nothing outside the download's)
+        assert_eq!(file_stem("../../etc/passwd").as_deref(), Some("-..-etc-passwd"));
+        assert_eq!(file_stem("C:\\Windows\\x").as_deref(), Some("C -Windows-x"));
+        assert_eq!(file_stem("/abs/path").as_deref(), Some("-abs-path"));
+        // (allowed everywhere, and no other kind of template: "thumbnail:…")
+        assert_eq!(file_stem("Wait: what?!").as_deref(), Some("Wait - what!"));
+        assert_eq!(file_stem("thumbnail:x").as_deref(), Some("thumbnail -x"));
+        assert_eq!(file_stem("say \"hi\" <3 *").as_deref(), Some("say 'hi' 3"));
+        assert_eq!(file_stem("a\tb\nc\u{0}d").as_deref(), Some("a b c d"));
+        // (its % not read as a field)
+        assert_eq!(file_stem("100% %(id)s").as_deref(), Some("100%% %%(id)s"));
+        // (no dots or spaces at its ends; Windows' device names not as they are)
+        assert_eq!(file_stem("  .hidden. ").as_deref(), Some("hidden"));
+        assert_eq!(file_stem("con").as_deref(), Some("_con"));
+        assert_eq!(file_stem("COM1.part").as_deref(), Some("_COM1.part"));
+        assert_eq!(file_stem("Console").as_deref(), Some("Console"));
+        assert_eq!(file_stem("").as_deref(), None);
+        assert_eq!(file_stem("...").as_deref(), None);
+        // (at most 150 bytes, at a whole letter)
+        let long = "ä".repeat(100);
+        let stem = file_stem(&long).unwrap();
+        assert!(stem.len() <= NAME_BYTES && stem.chars().all(|c| c == 'ä'));
+        assert_eq!(stem.len(), 150);
+        assert_eq!(file_stem(&"x".repeat(400)).unwrap().len(), 150);
+        assert_eq!(file_stem("Ünïcödé 日本語 🎵").as_deref(), Some("Ünïcödé 日本語 🎵"));
     }
 
     #[test]
