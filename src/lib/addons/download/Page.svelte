@@ -27,6 +27,7 @@
 	import PartPicker from './PartPicker.svelte';
 	import { ensureTools, isYouTube, lookUp, tools } from './ytdlp.ts';
 	import { openedLinks, takeLink } from './opened.ts';
+	import { sceneTitle } from './link.ts';
 	import {
 		FOLDER,
 		addDownload,
@@ -35,6 +36,7 @@
 		downloads,
 		removeDownload,
 		retry,
+		startReady,
 		stop
 	} from './jobs.ts';
 
@@ -176,6 +178,8 @@
 	let items = $state(null);
 	let looked = '';
 
+	/** The scenes on the list, to be started */
+	let readyCount = $derived($downloads.filter((job) => job.status === 'ready').length);
 	let canEdit = $derived($installedAddons.some((addon) => addon.id === 'edit'));
 	let canConvert = $derived($installedAddons.some((addon) => addon.id === 'convert'));
 	let info = $derived(found.info);
@@ -469,29 +473,50 @@
 		// (the name given; a playlist's videos keep their own)
 		const title = (!playlist && fileName.replace(/\s+/g, ' ').trim()) || null;
 		const snapshot = $state.snapshot(info);
-		// (for editing: the best there is, whatever its codec)
-		const forEditing = !audio && choice?.id === 'editing';
-		addDownload(title ? { ...snapshot, title } : snapshot, {
-			url: info.url,
-			kind: audio ? 'audio' : 'video',
-			format: audio ? options.audioFormat : (choice?.container ?? 'mp4'),
-			codec: audio ? null : choice && choice.id !== 'editing' ? choice.id : 'any',
-			height: audio ? null : height,
-			audioKbps: audio ? kbps : null,
-			sections,
-			exactCuts: options.exactCuts,
-			editing: forEditing,
-			sponsorblock: youtube && options.sponsorblock && !sections.length,
-			playlist,
-			playlistItems: playlist ? items : null,
-			cookies: signedOut ? null : options.cookies,
-			fileName: title
-		});
+		addDownload(
+			title ? { ...snapshot, title } : snapshot,
+			requestOf(snapshot, {
+				audio,
+				video: choice,
+				height,
+				sections,
+				title,
+				playlist,
+				items,
+				cookies: signedOut ? null : options.cookies
+			})
+		);
 		// (ready for the next link)
 		link = '';
 		looked = '';
 		fileName = '';
 		found = { state: 'idle' };
+	}
+
+	/**
+	 * What's asked of yt-dlp: the video (in `video`'s codec, at most `height` high) or its
+	 * sound, as chosen, maybe only its `sections`, named `title`
+	 * @returns {import('./ytdlp.ts').DownloadRequest}
+	 */
+	function requestOf(info, { audio, video, height, sections, title, playlist, items, cookies }) {
+		// (for editing: the best there is, whatever its codec)
+		const forEditing = !audio && video?.id === 'editing';
+		return {
+			url: info.url,
+			kind: /** @type {'audio' | 'video'} */ (audio ? 'audio' : 'video'),
+			format: audio ? options.audioFormat : (video?.container ?? 'mp4'),
+			codec: audio ? null : video && video.id !== 'editing' ? video.id : 'any',
+			height: audio ? null : height,
+			audioKbps: audio ? kbps : null,
+			sections,
+			exactCuts: options.exactCuts,
+			editing: forEditing,
+			sponsorblock: isYouTube(info.url) && options.sponsorblock && !sections.length,
+			playlist,
+			playlistItems: playlist ? items : null,
+			cookies,
+			fileName: title
+		};
 	}
 
 	// --- A download link opened (stosufynew://download?…, see link.ts): its video looked at,
@@ -512,6 +537,7 @@
 
 	/** @param {import('./opened.ts').OpenedLink} wanted */
 	async function fromOpenedLink(wanted) {
+		if (wanted.scenes?.length) return fromScenes(wanted);
 		clearTimeout(typing);
 		offered = null;
 		link = wanted.url;
@@ -539,6 +565,105 @@
 		}
 		await tick();
 		downloadButton?.focus();
+	}
+
+	/** Looked at, without the browser's sign-in if that can't be read */
+	async function lookAt(url) {
+		try {
+			return await lookUp(url, options.cookies);
+		} catch (error) {
+			if (!options.cookies || !signInFailed(String(error?.message ?? error))) throw error;
+			return lookUp(url, null);
+		}
+	}
+
+	/** Scenes being put on the list (how many) */
+	let gettingScenes = $state(0);
+
+	/**
+	 * A clip of several scenes: each one's own download on the list, named after the title with
+	 * its number, as chosen last (format, quality), not started: checked, then started by hand
+	 */
+	async function fromScenes(wanted) {
+		const count = wanted.scenes.length;
+		gettingScenes = count;
+		/** @type {Map<string, Promise<import('./ytdlp.ts').LinkInfo>>} (each video looked at once) */
+		const infos = new Map();
+		/** @type {[import('./ytdlp.ts').LinkInfo, import('./ytdlp.ts').DownloadRequest][]} */
+		const ready = [];
+		try {
+			for (const [i, scene] of wanted.scenes.entries()) {
+				const name = `Scene ${i + 1}`;
+				if (!infos.has(scene.url)) infos.set(scene.url, lookAt(scene.url));
+				let video;
+				try {
+					video = $state.snapshot(await infos.get(scene.url));
+				} catch (error) {
+					warn(`${name}: couldn't open its video (${error?.message ?? error})`);
+					continue;
+				}
+				if (video.kind === 'playlist' || video.live) {
+					warn(`${name}: its video can't be downloaded (a playlist, or live)`);
+					continue;
+				}
+				const length = video.duration;
+				const end = length ? Math.min(scene.end, length) : scene.end;
+				if (!(end > scene.start)) {
+					warn(`${name} isn't in its video (it's ${short(length)} long)`);
+					continue;
+				}
+				const sections = length && scene.start <= 0 && end >= length ? [] : [[scene.start, end]];
+				// (as chosen last: the codec where the video has it, else its first; the height
+				// chosen, else the highest under it)
+				const audio = !video.video;
+				const choice = video.videos.find((v) => v.id === options.codec) ?? video.videos[0] ?? null;
+				const heights = choice?.qualities.length
+					? choice.qualities
+					: HEIGHTS.map((height) => ({ height }));
+				const height = options.height
+					? (heights.find((quality) => quality.height <= options.height)?.height ?? null)
+					: null;
+				const title = sceneTitle(wanted.title, i, count);
+				ready.push([
+					title ? { ...video, title } : video,
+					requestOf(video, {
+						audio,
+						video: choice,
+						height,
+						sections,
+						title,
+						playlist: false,
+						items: null,
+						cookies: options.cookies
+					})
+				]);
+			}
+		} finally {
+			gettingScenes = 0;
+		}
+		// (on the list in their order, the first on top: the newest is put first)
+		for (const [video, request] of [...ready].reverse()) addDownload(video, request, true);
+		const added = ready.length;
+		if (added)
+			showToast(
+				`${added} ${added === 1 ? 'scene' : 'scenes'} on the list: check, then download`,
+				'icon-[mingcute--scissors-line]',
+				5000
+			);
+	}
+
+	/** A scene on the list, changed: filled in above (and off the list), as a link would */
+	function changeScene(job) {
+		const [from, to] = job.request.sections[0] ?? [null, null];
+		removeDownload(job.id);
+		void fromOpenedLink({
+			url: job.request.url,
+			start: from,
+			end: to,
+			title: job.request.fileName ?? null,
+			scenes: [],
+			at: Date.now()
+		});
 	}
 
 	$effect(() => {
@@ -1032,18 +1157,36 @@
 			</div>
 		{/if}
 
+		{#if gettingScenes}
+			<p class="flex items-center gap-1.5 text-sm text-white/70" role="status">
+				<span class="icon-[mingcute--loading-line] size-4 animate-spin shrink-0"></span>
+				Getting {gettingScenes === 1 ? 'the scene' : `the ${gettingScenes} scenes`} ready…
+			</p>
+		{/if}
+
 		<!-- The downloads -->
 		{#if $downloads.length}
 			<div class="flex items-center justify-between mt-2">
 				<h2 class="text-sm font-bold uppercase tracking-wide text-white/50">Downloads</h2>
-				{#if $downloads.some((job) => job.status === 'done' || job.status === 'failed')}
-					<button
-						class="h-8 px-3 rounded-full text-sm font-semibold text-white/50 hover:text-white hover:bg-white/10 cursor-pointer transition"
-						onclick={clearFinished}
-					>
-						Clear finished
-					</button>
-				{/if}
+				<div class="flex items-center gap-1">
+					{#if readyCount > 1}
+						<button
+							class="h-8 px-3 flex items-center gap-1.5 rounded-full text-sm font-semibold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition"
+							onclick={() => startReady()}
+						>
+							<span class="icon-[mingcute--download-3-line] size-4"></span>
+							Download all {readyCount}
+						</button>
+					{/if}
+					{#if $downloads.some((job) => job.status === 'done' || job.status === 'failed')}
+						<button
+							class="h-8 px-3 rounded-full text-sm font-semibold text-white/50 hover:text-white hover:bg-white/10 cursor-pointer transition"
+							onclick={clearFinished}
+						>
+							Clear finished
+						</button>
+					{/if}
+				</div>
 			</div>
 			<ul class="flex flex-col gap-2" aria-label="Downloads">
 				{#each $downloads as job (job.id)}
@@ -1080,7 +1223,23 @@
 						</div>
 
 						<div class="flex flex-wrap items-center justify-end gap-2 text-sm">
-							{#if job.status === 'waiting'}
+							{#if job.status === 'ready'}
+								<!-- (a clip's scene: filled in, started by hand) -->
+								<button
+									class="h-8 px-3 rounded-full font-semibold text-white/70 hover:text-white bg-white/[0.08] hover:bg-white/15 cursor-pointer transition"
+									title="Fill it in above, to change its part, name or format"
+									onclick={() => changeScene(job)}
+								>
+									Change
+								</button>
+								<button
+									class="h-8 px-3 flex items-center gap-1.5 rounded-full font-semibold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition"
+									onclick={() => startReady([job.id])}
+								>
+									<span class="icon-[mingcute--download-3-line] size-4"></span>
+									Download
+								</button>
+							{:else if job.status === 'waiting'}
 								<span class="text-white/50">Waiting…</span>
 							{:else if job.status === 'working'}
 								<div class="w-64 flex flex-col gap-1">

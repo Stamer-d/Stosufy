@@ -778,6 +778,133 @@ const formats = (vcodec, heights, fps = 30) =>
 		await edit.close();
 	}
 
+	// --- A download link: filled in, not started; a clip of several scenes, each on the list --
+	{
+		const { page: linked, errors: linkErrors } = await start(browser, {
+			stored: { settings: { addons: ['download'] }, currentQueue: null },
+			writes: true
+		});
+		const NOW = 'https://www.youtube.com/watch?v=abc123def45';
+		const OLD = 'https://www.youtube.com/watch?v=old000strm1';
+		await linked.evaluate(
+			({ NOW, OLD, yt }) => {
+				window.__ffmpegStatus = {
+					supported: true,
+					installed: true,
+					downloadSize: 0,
+					workDir: '/home/tester/Stosufy/tmp/media'
+				};
+				const video = (title, url, duration) => ({
+					_type: 'video',
+					title,
+					duration,
+					extractor_key: 'Youtube',
+					webpage_url: url,
+					formats: yt
+				});
+				window.__ytdlp = {
+					status: { supported: true, installed: true, denoSupported: true, denoInstalled: true },
+					infos: { [NOW]: video('Stream today', NOW, 7200), [OLD]: video('Old stream', OLD, 5400) }
+				};
+			},
+			{ NOW, OLD, yt: formats('avc1.640028', [1080, 720], 60) }
+		);
+		const open = (url) =>
+			linked.evaluate((url) => window.__emit('deep-link://new-url', [url]), url);
+		const rows = linked.locator('ul[aria-label="Downloads"] > li');
+		const asked = () => linked.evaluate(() => window.__ytdlp.requests ?? []);
+		await linked.waitForSelector('header button[aria-label="Downloader"]', { timeout: 60000 });
+
+		// One part, by its video's id and h:mm:ss: filled in, the page opened, nothing started
+		await open(
+			`stosufynew://download?video=abc123def45&startTime=0:01:39&endTime=0:01:57&title=${encodeURIComponent('Big fail')}`
+		);
+		await linked.waitForURL('**/addons/download');
+		await linked.waitForSelector('section[aria-label="What it is"] h2:has-text("Stream today")');
+		await linked.waitForFunction(
+			() =>
+				document.querySelector('section[aria-label="What it is"] input[maxlength="200"]')?.value ===
+				'Big fail'
+		);
+		check(
+			'a link: its video, part and name filled in, not downloaded',
+			(await linked
+				.locator(
+					'section[aria-label="What it is"] button[aria-pressed="true"]:has-text("Only a part")'
+				)
+				.count()) === 1 && (await asked()).length === 0
+		);
+
+		// Several scenes (one from an older stream): each its own download, numbered, not started
+		const scenes = 'abc123def45:99-117,old000strm1:3264-3287,abc123def45:200-215.5';
+		await open(
+			`stosufynew://download?url=&start=&end=&title=${encodeURIComponent('Flashback clip')}&scenes=${encodeURIComponent(scenes)}`
+		);
+		await linked.waitForFunction(
+			() =>
+				document.querySelectorAll('ul[aria-label="Downloads"] > li[data-status="ready"]').length ===
+				3
+		);
+		const names = await rows.evaluateAll((all) => all.map((li) => li.getAttribute('aria-label')));
+		check(
+			'scenes: each on the list, named with its number, in order',
+			JSON.stringify(names) === '["Flashback clip 1","Flashback clip 2","Flashback clip 3"]',
+			JSON.stringify(names)
+		);
+		check('scenes: none started by itself', (await asked()).length === 0);
+		check(
+			'scenes: each says its part',
+			/1:39–1:57/.test(await rows.nth(0).innerText()) &&
+				/54:24–54:47/.test(await rows.nth(1).innerText()),
+			await rows.nth(1).innerText()
+		);
+		check(
+			'scenes: "Download all 3" to start them',
+			(await linked.locator('button:has-text("Download all 3")').count()) === 1
+		);
+		// One started by hand: only that one, only its part
+		await rows.nth(1).locator('button:has-text("Download")').click();
+		await linked.waitForFunction(() => (window.__ytdlp.requests ?? []).length === 1);
+		const second = (await asked())[0];
+		check(
+			'a scene started: only it, only its part, from its own video, with its name',
+			second.url === OLD &&
+				JSON.stringify(second.sections) === '[[3264,3287]]' &&
+				second.fileName === 'Flashback clip 2',
+			JSON.stringify(second)
+		);
+		// "Change": filled in above, off the list
+		await rows.nth(2).locator('button:has-text("Change")').click();
+		await linked.waitForFunction(
+			() =>
+				document.querySelector('section[aria-label="What it is"] input[maxlength="200"]')?.value ===
+				'Flashback clip 3'
+		);
+		check(
+			'"Change": the scene filled in above, off the list',
+			(await linked
+				.locator('ul[aria-label="Downloads"] > li[aria-label="Flashback clip 3"]')
+				.count()) === 0
+		);
+		await linked.locator('button:has-text("Download all")').waitFor({ state: 'detached' });
+		await rows
+			.filter({ hasText: 'Flashback clip 1' })
+			.locator('button:has-text("Download")')
+			.click();
+		await linked.waitForFunction(() => (window.__ytdlp.requests ?? []).length === 2);
+		check(
+			'the other started too: the first scene',
+			JSON.stringify((await asked())[1].sections) === '[[99,117]]'
+		);
+		// A link whose scenes are wrong: said so, nothing on the list
+		const before = await rows.count();
+		await open('stosufynew://download?title=x&scenes=abc123def45:50-40');
+		await linked.waitForSelector('text=/scene 1 ends before it starts/');
+		check('wrong scenes: said so, nothing added', (await rows.count()) === before);
+		check('no errors (links)', linkErrors.length === 0, linkErrors.join('\n'));
+		await linked.close();
+	}
+
 	// --- The first time: all it needs downloaded at once, as soon as it's installed ----------
 	{
 		const { page: fresh, errors: freshErrors } = await start(browser, {

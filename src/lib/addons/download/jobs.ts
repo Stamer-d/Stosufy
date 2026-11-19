@@ -32,7 +32,8 @@ const PARALLEL = 2;
 const KEPT = 50;
 const STORE_KEY = 'stosufy-downloads';
 
-export type Status = 'waiting' | 'working' | 'done' | 'failed';
+/** "ready": on the list, filled in (a clip's scene), started by hand */
+export type Status = 'ready' | 'waiting' | 'working' | 'done' | 'failed';
 
 export interface DownloadJob {
 	id: string;
@@ -67,7 +68,7 @@ function load(): DownloadJob[] {
 		return kept
 			.filter((job) => job?.id && job.info && job.request)
 			.map((job) =>
-				job.status === 'done' || job.status === 'failed'
+				job.status === 'done' || job.status === 'failed' || job.status === 'ready'
 					? job
 					: {
 							...job,
@@ -123,15 +124,18 @@ function change(id: string, patch: Partial<DownloadJob>) {
 	downloads.update((all) => all.map((job) => (job.id === id ? { ...job, ...patch } : job)));
 }
 
-/** Asks for a download (it starts when it's its turn) */
-export function addDownload(info: LinkInfo, request: DownloadRequest) {
+/**
+ * Asks for a download (it starts when it's its turn); `ready`: only put on the list, to be
+ * started by hand (`startReady`)
+ */
+export function addDownload(info: LinkInfo, request: DownloadRequest, ready = false) {
 	const id = `dl-${Date.now().toString(36)}-${nextId++}`;
 	downloads.update((all) => [
 		{
 			id,
 			info,
 			request,
-			status: 'waiting',
+			status: ready ? 'ready' : 'waiting',
 			phase: 'download',
 			percent: null,
 			stream: null,
@@ -143,8 +147,18 @@ export function addDownload(info: LinkInfo, request: DownloadRequest) {
 		},
 		...all
 	]);
-	void run();
+	if (!ready) void run();
 	return id;
+}
+
+/** Ready ones started (these, else all of them), in the order they're on the list */
+export function startReady(ids?: string[]) {
+	downloads.update((all) =>
+		all.map((job) =>
+			job.status === 'ready' && (!ids || ids.includes(job.id)) ? { ...job, status: 'waiting' } : job
+		)
+	);
+	run();
 }
 
 function run() {
@@ -359,6 +373,8 @@ export function removeDownload(id: string) {
 
 export function clearFinished() {
 	downloads.update((all) =>
-		all.filter((job) => job.status === 'working' || job.status === 'waiting')
+		all.filter(
+			(job) => job.status === 'working' || job.status === 'waiting' || job.status === 'ready'
+		)
 	);
 }

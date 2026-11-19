@@ -1,13 +1,18 @@
 // A link that opens the downloader filled in with (a part of) a video, ready to be downloaded,
 // from another app or a web page (a VOD analyzer, say):
 //
-//   stosufynew://download?url={url}&start={start}&end={end}&title={title}
+//   stosufynew://download?url={url}&start={start}&end={end}&title={title}&scenes={scenes}
 //
 //   url                 the video's link (YouTube's, or any other the downloader knows)
 //   video               or only a YouTube video's id, instead of `url`
 //   start, end          where the part starts and ends (s, "83.5")
 //   startTime, endTime  the same as h:mm:ss ("1:02:03"), where start and end aren't given
 //   title               the file's name (without its extension)
+//   scenes              a clip of several scenes (a flashback from an older stream, say): each
+//                       as video:start-end (a YouTube video's id, seconds), separated by commas,
+//                       "abc123def45:99-117,abc123def45:3264-3287". Each is a download of its
+//                       own, named after the title with its number ("Title 1", "Title 2", …);
+//                       url, start and end aren't needed then (and are left aside)
 //
 // Each value URL-encoded. Without a start and an end: all of it. Nothing here but reading it:
 // what's done with it is in opened.ts and the page.
@@ -15,7 +20,16 @@
 export const SCHEME = 'stosufynew';
 const HOST = 'download';
 
+/** A scene of a clip: a part of a video */
+export interface Scene {
+	url: string;
+	/** s */
+	start: number;
+	end: number;
+}
+
 export interface DownloadLink {
+	/** The video ('' where only scenes are given) */
 	url: string;
 	/** s; null: from the start (or from where the video's link says) */
 	start: number | null;
@@ -23,7 +37,12 @@ export interface DownloadLink {
 	end: number | null;
 	/** The file's name; null: the video's title */
 	title: string | null;
+	/** The clip's scenes, each downloaded on its own (none: just `url`, from `start` to `end`) */
+	scenes: Scene[];
 }
+
+/** The most scenes a link has */
+const SCENES = 50;
 
 /** A YouTube video's id: 11 letters, digits, - and _ */
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -86,6 +105,11 @@ function readUrl(value: string | null): string | null {
 export function parseDownloadLink(text: string | null | undefined): DownloadLink | null {
 	if (!isDownloadLink(text)) return null;
 	const params = new URL(text!.trim()).searchParams;
+	const title = (params.get('title') ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_LENGTH);
+
+	// A clip of several scenes: each one's own download (the rest not needed then)
+	const scenes = readScenes(params.get('scenes'));
+	if (scenes.length) return { url: '', start: null, end: null, title: title || null, scenes };
 
 	const given = params.get('url');
 	const id = params.get('video')?.trim() ?? '';
@@ -108,6 +132,34 @@ export function parseDownloadLink(text: string | null | undefined): DownloadLink
 	const end = time('end', 'endTime');
 	if (end !== null && end <= (start ?? 0)) throw new Error('Its part ends before it starts');
 
-	const title = (params.get('title') ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_LENGTH);
-	return { url, start, end, title: title || null };
+	return { url, start, end, title: title || null, scenes: [] };
+}
+
+/**
+ * A clip's scenes: "id:start-end,id:start-end" (a YouTube video's id, and seconds, or
+ * h:mm:ss); none for none (an empty value: a clip of one scene, in url, start and end)
+ */
+export function readScenes(value: string | null | undefined): Scene[] {
+	const parts = (value ?? '')
+		.split(',')
+		.map((part) => part.trim())
+		.filter(Boolean);
+	if (parts.length > SCENES) throw new Error(`It has more than ${SCENES} scenes`);
+	return parts.map((part, i) => {
+		const match = /^([A-Za-z0-9_-]{11}):([\d:.]+)-([\d:.]+)$/.exec(part);
+		if (!match) throw new Error(`Its scene ${i + 1} isn't video:start-end: ${part}`);
+		const [, id, from, to] = match;
+		const start = readTime(from);
+		const end = readTime(to);
+		if (start === null || end === null || Number.isNaN(start) || Number.isNaN(end))
+			throw new Error(`Its scene ${i + 1} has no time it knows: ${part}`);
+		if (end <= start) throw new Error(`Its scene ${i + 1} ends before it starts`);
+		return { url: `https://www.youtube.com/watch?v=${id}`, start, end };
+	});
+}
+
+/** A scene's file name: the title with its number ("Title 2"); null: the video's own title */
+export function sceneTitle(title: string | null, index: number, count: number): string | null {
+	if (!title) return null;
+	return count > 1 ? `${title} ${index + 1}` : title;
 }
