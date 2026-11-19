@@ -1,6 +1,6 @@
 [package]
 name = "Stosfy"
-version = "0.6.122"
+version = "0.6.123"
 description = "A Osu Music Player"
 authors = ["Stamer"]
 edition = "2021"
