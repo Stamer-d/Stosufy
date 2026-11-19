@@ -169,9 +169,9 @@ const formats = (vcodec, heights, fps = 30) =>
 		text.split(' ').slice(0, 3).join(' ')
 	);
 	check(
-		'every codec it has, to choose (and the best of all, as MKV)',
+		'every codec it has, to choose (and the best of all: as MKV, and for Premiere)',
 		JSON.stringify(codecs) ===
-			JSON.stringify(['MP4 · H.264', 'MP4 · AV1', 'WebM · VP9', 'MKV · Best']),
+			JSON.stringify(['MP4 · H.264', 'MP4 · AV1', 'WebM · VP9', 'MKV · Best', 'MP4 for Premiere']),
 		JSON.stringify(codecs)
 	);
 	check(
@@ -409,7 +409,7 @@ const formats = (vcodec, heights, fps = 30) =>
 	);
 	check(
 		"a playlist's codecs: all of them (not known one by one)",
-		(await optionsOf('Video format')).length === 5
+		(await optionsOf('Video format')).length === 6
 	);
 	await choose('Which videos', '1');
 	await page.click('section[aria-label="What it is"] button:has-text("Download")');
@@ -564,6 +564,198 @@ const formats = (vcodec, heights, fps = 30) =>
 		'a file not there any more: said so, to download again',
 		(await row('Test song').locator('button:has-text("Download again")').count()) === 1
 	);
+
+	// --- For Premiere: the best there is, made an MP4 for editing right after; a part, as cut -
+	{
+		const { page: edit, errors: editErrors } = await start(browser, {
+			stored: { settings: { addons: ['download'] }, currentQueue: null },
+			writes: true
+		});
+		await edit.evaluate(
+			({ YOUTUBE, TWITCH, yt, tw }) => {
+				window.__ffmpegStatus = {
+					supported: true,
+					installed: true,
+					downloadSize: 0,
+					workDir: '/home/tester/Stosufy/tmp/media'
+				};
+				// (what FFmpeg says the download is: 1440p60 VP9 and Opus, 3:35)
+				window.__ffmpeg = {
+					hold: 400,
+					probe: [
+						"Input #0, matroska,webm, from 'in.mkv':",
+						'  Duration: 00:03:35.00, start: 0.000000, bitrate: 9000 kb/s',
+						'  Stream #0:0: Video: vp9 (Profile 0), yuv420p(tv, bt709), 2560x1440, SAR 1:1 DAR 16:9, 60 fps, 60 tbr, 1k tbn (default)',
+						'  Stream #0:1(eng): Audio: opus, 48000 Hz, stereo, fltp (default)'
+					].join('\n')
+				};
+				window.__ytdlp = {
+					status: { supported: true, installed: true, denoSupported: true, denoInstalled: true },
+					infos: {
+						[YOUTUBE]: {
+							_type: 'video',
+							title: 'Test song',
+							duration: 215,
+							extractor_key: 'Youtube',
+							webpage_url: YOUTUBE,
+							formats: yt
+						},
+						[TWITCH]: {
+							_type: 'video',
+							title: 'Long stream',
+							duration: 3 * 3600 + 120,
+							extractor_key: 'TwitchVod',
+							webpage_url: TWITCH,
+							formats: tw
+						}
+					}
+				};
+			},
+			{
+				YOUTUBE,
+				TWITCH,
+				yt: [
+					...formats('avc1.640028', [1080, 720], 60),
+					...formats('vp09.00.50.08', [1440, 1080], 60)
+				],
+				tw: formats('avc1.4D401F', [1080, 720], 60)
+			}
+		);
+		const box = (label) => edit.locator(`[role="combobox"][aria-label^="${label}:"]`);
+		const editRow = (title) =>
+			edit.locator(`ul[aria-label="Downloads"] > li[aria-label="${title}"]`);
+		const pickIn = async (label, value) => {
+			await box(label).click();
+			await edit.click(
+				`[role="listbox"][aria-label="${label}"] [role="option"][data-value="${value}"]`
+			);
+		};
+		await edit.click('header button[aria-label="Downloader"]');
+		await edit.waitForURL('**/addons/download');
+		await edit.fill('input[aria-label="Link"]', YOUTUBE);
+		await edit.press('input[aria-label="Link"]', 'Enter');
+		await edit.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
+		await pickIn('Video format', 'editing');
+		await box('Quality').click();
+		const heights = await edit
+			.locator('[role="listbox"][aria-label="Quality"] [role="option"]')
+			.allInnerTexts();
+		await edit.keyboard.press('Escape');
+		const section = await edit.locator('section[aria-label="What it is"]').innerText();
+		check(
+			'for Premiere: its best quality (1440p60, whatever the codec), no size guessed',
+			/1440p60/.test(heights[1] ?? '') &&
+				!heights.some((text) => /≈/.test(text)) &&
+				/nothing to convert after/.test(section) &&
+				!/≈/.test(
+					await edit
+						.locator('section[aria-label="What it is"] button:has-text("Download")')
+						.innerText()
+				),
+			section
+		);
+		await edit.click('section[aria-label="What it is"] button:has-text("Download")');
+		await editRow('Test song').locator('text=/Making it ready for Premiere/').waitFor();
+		check('downloaded, then made ready for Premiere: said so, with how far', true);
+		await editRow('Test song').locator('text=Test song.mp4').waitFor();
+		const asked = await edit.evaluate(() => window.__ytdlp.requests[0]);
+		check(
+			'asked for: the best there is, whatever its codec, for editing',
+			asked.editing === true &&
+				asked.codec === 'any' &&
+				asked.format === 'mp4' &&
+				!asked.sections.length,
+			JSON.stringify(asked)
+		);
+		const run = (await edit.evaluate(() => window.__ffmpeg.runs))[0].join(' ');
+		check(
+			'made an MP4 for editing: H.264 Baseline at its best, 60 fps steady, AAC at 48 kHz',
+			/-preset ultrafast -x264-params aq-mode=1 -crf 16 -pix_fmt yuv420p/.test(run) &&
+				/-fps_mode cfr -r 60 -g 120/.test(run) &&
+				/-c:a aac -ar 48000/.test(run) &&
+				run.endsWith('.mp4'),
+			run
+		);
+		check(
+			'saved as an MP4 in Stosufy/Downloads (not the MKV)',
+			(await edit.evaluate(
+				() => !!window.__written['/home/tester/Stosufy/Downloads/Test song.mp4']
+			)) && /MP4 for Premiere/.test(await editRow('Test song').innerText()),
+			await editRow('Test song').innerText()
+		);
+		// Stopped while it's made ready: off the list
+		await edit.evaluate(() => (window.__ffmpeg.hold = 30000));
+		await edit.fill('input[aria-label="Link"]', YOUTUBE + '&x=1');
+		await edit.evaluate(
+			(url) => (window.__ytdlp.infos[url] = window.__ytdlp.infos[url.split('&')[0]]),
+			YOUTUBE + '&x=1'
+		);
+		await edit.press('input[aria-label="Link"]', 'Enter');
+		await edit.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
+		await edit.click('section[aria-label="What it is"] button:has-text("Download")');
+		await edit
+			.locator('ul[aria-label="Downloads"] > li >> text=/Making it ready for Premiere/')
+			.waitFor();
+		await edit
+			.locator('ul[aria-label="Downloads"] > li')
+			.first()
+			.locator('button[aria-label^="Stop"]')
+			.click();
+		await edit.waitForFunction(
+			() => document.querySelectorAll('ul[aria-label="Downloads"] > li').length === 1
+		);
+		check('stopped while made ready: off the list', true);
+		// It couldn't be made ready: kept as downloaded, said so
+		await edit.evaluate(() =>
+			Object.assign(window.__ffmpeg, { hold: 0, fail: 'Error while decoding stream' })
+		);
+		await edit.fill('input[aria-label="Link"]', YOUTUBE + '&x=2');
+		await edit.evaluate(
+			(url) => (window.__ytdlp.infos[url] = window.__ytdlp.infos[url.split('&')[0]]),
+			YOUTUBE + '&x=2'
+		);
+		await edit.press('input[aria-label="Link"]', 'Enter');
+		await edit.waitForSelector('section[aria-label="What it is"] h2:has-text("Test song")');
+		await edit.click('section[aria-label="What it is"] button:has-text("Download")');
+		const kept = edit.locator('ul[aria-label="Downloads"] > li').first();
+		await kept.locator("text=/Couldn't make it ready for Premiere/").waitFor();
+		check(
+			"couldn't be made ready: kept as downloaded, said so",
+			(await kept.getAttribute('data-status')) === 'done' &&
+				/Error while decoding stream/.test(await kept.innerText()),
+			await kept.innerText()
+		);
+		// A part: cut exactly, made for editing as it's cut (nothing made again after)
+		const runs = (await edit.evaluate(() => window.__ffmpeg.runs)).length;
+		// (a link to an hour in: only the part from there)
+		const at = `${TWITCH}?t=1h00m00s`;
+		await edit.evaluate(
+			(at) => (window.__ytdlp.infos[at] = window.__ytdlp.infos[at.split('?')[0]]),
+			at
+		);
+		await edit.fill('input[aria-label="Link"]', at);
+		await edit.press('input[aria-label="Link"]', 'Enter');
+		await edit.waitForSelector('section[aria-label="What it is"] h2:has-text("Long stream")');
+		check(
+			'a part for Premiere: no "Exact cut" to choose (always exact)',
+			(await edit
+				.locator('section[aria-label="What it is"] button:has-text("Exact cut")')
+				.count()) === 0
+		);
+		await edit.click('section[aria-label="What it is"] button:has-text("Download")');
+		await editRow('Long stream').locator('text=Long stream.mp4').waitFor();
+		const part = await edit.evaluate(() => window.__ytdlp.requests.at(-1));
+		check(
+			'a part for Premiere: cut exactly, as it is made, nothing made again after',
+			part.editing &&
+				part.exactCuts &&
+				part.sections.length === 1 &&
+				(await edit.evaluate(() => window.__ffmpeg.runs.length)) === runs,
+			JSON.stringify(part)
+		);
+		check('no errors (for Premiere)', editErrors.length === 0, editErrors.join('\n'));
+		await edit.close();
+	}
 
 	// --- The first time: all it needs downloaded at once, as soon as it's installed ----------
 	{

@@ -234,9 +234,10 @@ export interface Quality {
 	bytes: number | null;
 }
 
-/** A way to download the video: a codec in a container, and the qualities it comes in */
+/** A way to download the video: a codec in a container, and the qualities it comes in; or
+ * ("editing") the best there is, made an MP4 for editing (Premiere, After Effects, Resolve) */
 export interface VideoChoice {
-	id: Codec;
+	id: Codec | 'editing';
 	/** mp4, webm or mkv */
 	container: 'mp4' | 'webm' | 'mkv';
 	label: string;
@@ -404,6 +405,15 @@ export function readInfo(raw: RawInfo, url: string): LinkInfo {
 			hint: known ? 'the best there is, whatever its codec' : 'the best there is',
 			qualities: qualitiesOf(pictures, duration)
 		});
+		// The best there is (whatever its codec: 1440p, 4K), made once into an MP4 Premiere,
+		// After Effects and Resolve play smoothly: no converting after
+		videos.push({
+			id: 'editing',
+			container: 'mp4',
+			label: 'MP4 for Premiere',
+			hint: 'the best quality there is, ready to edit (Premiere, After Effects, Resolve)',
+			qualities: qualitiesOf(pictures, duration)
+		});
 	}
 	const sounds = formats
 		.filter((format) => format.acodec && format.acodec !== 'none' && format.vcodec === 'none')
@@ -476,6 +486,11 @@ export interface DownloadRequest {
 	cookies: string | null;
 	/** The file's name, without its extension (a download link's title); null: the video's title */
 	fileName?: string | null;
+	/**
+	 * For editing (Premiere, …): the best there is, made an MP4 for editing after the download
+	 * (see jobs.ts); a part made so as it's cut (see ytdlp.rs)
+	 */
+	editing?: boolean;
 }
 
 export interface Progress {

@@ -1,11 +1,21 @@
 // The downloads: what's been asked for, two at a time, their progress, and what they made,
 // moved to ~/Stosufy/Downloads. Leaving the page stops nothing; the list is kept for the next
-// time Stosufy opens (what was still downloading then: stopped, to try again).
+// time Stosufy opens (what was still downloading then: stopped, to try again). A video for
+// editing (Premiere, …), downloaded whole, is made an MP4 for editing right after, once.
 
 import { get, writable } from 'svelte/store';
 import { exists, remove } from '@tauri-apps/plugin-fs';
 import { saveFile, type SavedFile } from '../files/save';
 import { notifyDone } from '../files/notify';
+import {
+	cancel as cancelFfmpeg,
+	forgetCancelled,
+	probe,
+	runFfmpeg,
+	type Made
+} from '../files/ffmpeg';
+import { PickedFile } from '../files/picked';
+import { videoArgs } from '../files/presets';
 import {
 	download,
 	stopDownload,
@@ -29,7 +39,8 @@ export interface DownloadJob {
 	info: LinkInfo;
 	request: DownloadRequest;
 	status: Status;
-	/** "download", or what's done after it (Merger, ExtractAudio, …) */
+	/** "download", or what's done after it (Merger, ExtractAudio, …; "editing": made an MP4 for
+	 * editing) */
 	phase: string;
 	/** 0–100 of what's downloaded now: the picture or the sound, which of a playlist's videos */
 	percent: number | null;
@@ -169,6 +180,11 @@ async function work(job: DownloadJob) {
 		}
 		await finish(job, result);
 	} catch (error) {
+		// (stopped while it was made ready for editing)
+		if ((error as Error)?.name === 'Cancelled') {
+			downloads.update((all) => all.filter((other) => other.id !== job.id));
+			return;
+		}
 		console.warn('Could not download:', error);
 		change(job.id, {
 			status: 'failed',
@@ -176,6 +192,7 @@ async function work(job: DownloadJob) {
 		});
 	} finally {
 		stopped.delete(job.id);
+		forgetCancelled(job.id);
 	}
 }
 
@@ -228,25 +245,81 @@ function downloadIt(job: DownloadJob) {
 	);
 }
 
-/** What was downloaded moved to Stosufy/Downloads */
+/** Whether what's downloaded is made an MP4 for editing after (a part's made so as it's cut) */
+const madeAfter = (request: DownloadRequest) =>
+	!!request.editing && request.kind === 'video' && !request.sections.length;
+
+/**
+ * A video downloaded whole made an MP4 for editing (Premiere, After Effects, Resolve): H.264
+ * as editors play it smoothly, at its best (see presets.ts), its progress told
+ */
+async function forEditing(
+	job: DownloadJob,
+	file: { path: string; size: number },
+	name: string,
+	index: number,
+	count: number
+): Promise<Made> {
+	const extension = name.split('.').pop() ?? '';
+	const input = new PickedFile(file.path, name, file.size);
+	const told = (percent: number) =>
+		change(job.id, {
+			phase: 'editing',
+			step: null,
+			percent,
+			speed: null,
+			eta: null,
+			index: count > 1 ? index : null,
+			count: count > 1 ? count : null
+		});
+	told(0);
+	const info = await probe(input, extension, job.id);
+	return runFfmpeg(input, extension, videoArgs('editing', 'best', { fps: info.fps }), 'mp4', {
+		id: job.id,
+		duration: info.duration,
+		progress: (share) => told(Math.min(100, Math.max(0, share * 100)))
+	});
+}
+
+/** What was downloaded moved to Stosufy/Downloads (made an MP4 for editing first, if asked) */
 async function finish(job: DownloadJob, result: Downloaded) {
 	if (!result.files.length) throw new Error(result.error ?? 'Nothing was downloaded');
 	// (a playlist's videos in a folder of its own)
 	const folder = job.request.playlist ? `${job.info.title.replace(/[\\/]/g, '_')}/` : '';
 	const saved: SavedFile[] = [];
-	for (const file of result.files) {
-		const name = file.path.split(/[\\/]/).pop()!;
-		saved.push(await saveFile(FOLDER, folder + name, { path: file.path, size: file.size }));
-	}
-	// (its folder in tmp, now empty)
+	// (its folder in tmp: taken away after, whatever happened)
 	const tmp = result.files[0].path.replace(/[\\/][^\\/]+$/, '');
-	await remove(tmp, { recursive: true }).catch(() => {});
+	let failed = '';
+	try {
+		for (const [i, file] of result.files.entries()) {
+			const name = file.path.split(/[\\/]/).pop()!;
+			if (madeAfter(job.request)) {
+				try {
+					const made = await forEditing(job, file, name, i + 1, result.files.length);
+					saved.push(await saveFile(FOLDER, folder + name.replace(/\.[^.]+$/, '.mp4'), made));
+					continue;
+				} catch (error) {
+					if ((error as Error)?.name === 'Cancelled') throw error;
+					// (not made ready: kept as it was downloaded, not lost, said so)
+					console.warn('Could not make it ready for editing:', error);
+					failed = String((error as Error)?.message ?? error);
+				}
+			}
+			saved.push(await saveFile(FOLDER, folder + name, { path: file.path, size: file.size }));
+		}
+	} finally {
+		await remove(tmp, { recursive: true }).catch(() => {});
+	}
 	change(job.id, {
 		status: 'done',
 		saved,
 		percent: 100,
-		// (what went wrong with some, else that it was without the sign-in)
-		note: result.error ?? get(downloads).find((other) => other.id === job.id)?.note
+		phase: 'download',
+		// (it couldn't be made ready for editing; what went wrong with some; else that it was
+		// without the sign-in)
+		note: failed
+			? `Couldn't make it ready for Premiere (kept as downloaded): ${failed}`
+			: (result.error ?? get(downloads).find((other) => other.id === job.id)?.note)
 	});
 	finished++;
 }
@@ -257,6 +330,8 @@ export function stop(id: string) {
 	if (job?.status === 'working') {
 		stopped.add(id);
 		void stopDownload(id);
+		// (being made ready for editing: that stopped)
+		if (job.phase === 'editing') void cancelFfmpeg(id);
 	} else downloads.update((all) => all.filter((other) => other.id !== id));
 }
 

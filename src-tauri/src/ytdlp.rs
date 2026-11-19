@@ -545,6 +545,11 @@ pub struct DownloadRequest {
     /// title). Not for a playlist, whose videos would all take it
     #[serde(default)]
     pub file_name: Option<String>,
+    /// A video for editing (Premiere, After Effects, Resolve): the best there is, whatever its
+    /// codec (not HDR, where there's more), as MKV to be made an MP4 for editing by the page;
+    /// a part of it cut exactly, made that MP4 as it's cut (see `editing_encoder`)
+    #[serde(default)]
+    pub editing: bool,
 }
 
 /// The longest name a file gets (bytes; its extension comes on top)
@@ -689,6 +694,13 @@ pub fn software_encoder() -> Vec<String> {
     .map(|s| s.to_string())
     .collect()
 }
+
+/// H.264 and AAC as editors (Premiere, After Effects, Resolve) play them smoothly, at a high
+/// quality: x264's ultrafast (no B-frames, no CABAC: easy to decode, 1440p60 too), with its
+/// adaptive quantization on (no blocks in dark and flat parts, nothing more to decode), at
+/// CRF 16, in 8 bits; a constant frame rate, a keyframe every 2 s, the sound at 48 kHz and
+/// kept with the picture. As the page's "MP4 for editing" at its best (see presets.ts)
+pub const EDITING_ENCODER: &str = "-c:v libx264 -preset ultrafast -crf 16 -x264-params aq-mode=1 -pix_fmt yuv420p -fps_mode cfr -force_key_frames expr:gte(t,n_forced*2) -c:a aac -b:a 320k -ar 48000 -af aresample=async=1:first_pts=0 -movflags +faststart";
 
 /// The graphics card's H.264 encoders there may be, the likeliest first
 fn hardware_encoders() -> Vec<Vec<&'static str>> {
@@ -841,6 +853,21 @@ pub fn download_args(
         None => String::new(),
     };
     match (request.kind.as_str(), request.format.as_str()) {
+        ("video", "mp4") if request.editing => {
+            // The best there is, whatever its codec: in SDR where there's also HDR (an editor's
+            // 8 bits of HDR's picture would look washed out)
+            let sdr = "[dynamic_range!~=?'HDR|HLG|DV']";
+            let selector =
+                format!("bv*{sdr}{height}+ba/bv*{height}+ba/b{height}/bv*+ba/b");
+            push(&["-f", &selector]);
+            if request.sections.is_empty() {
+                // (put together as it is, made an MP4 for editing by the page after)
+                push(&["--merge-output-format", "mkv", "--embed-chapters"]);
+            } else {
+                // (a part: made the MP4 for editing as it's cut, below)
+                push(&["--merge-output-format", "mp4"]);
+            }
+        }
         ("video", container @ ("mp4" | "webm" | "mkv")) => {
             let codec = codec_filter(request.codec.as_deref().unwrap_or("any"))?;
             // (the sound that goes with the container: AAC in an MP4, Opus in a WebM)
@@ -903,9 +930,13 @@ pub fn download_args(
     // Cut exactly (a video's picture made again where it's cut: with the fastest encoder there
     // is, at a high quality); else the streams as they are, cut at the keyframes (fast, and as
     // good as the original). Sound is cut exactly as it is.
-    if !request.sections.is_empty() && request.exact_cuts && request.kind == "video" {
+    // For editing, a part's always cut exactly: it's made again anyway, once, as it's cut.
+    let editing = request.editing && request.kind == "video";
+    if !request.sections.is_empty() && (request.exact_cuts || editing) && request.kind == "video" {
         push(&["--force-keyframes-at-cuts"]);
-        let output = if request.format == "webm" {
+        let output = if editing {
+            EDITING_ENCODER.to_string()
+        } else if request.format == "webm" {
             "-c:v libvpx-vp9 -deadline realtime -cpu-used 8 -row-mt 1 -crf 30 -b:v 0 -c:a libopus -b:a 160k"
                 .to_string()
         } else {
@@ -1435,7 +1466,11 @@ pub async fn ytdlp_download(
     download_args(&request, &out, &software_encoder())?;
     let running = state.running.clone();
     let playlist = request.playlist;
-    let cuts = request.kind == "video" && request.exact_cuts && !request.sections.is_empty();
+    // (for editing: x264, made for it, not the fastest encoder there is)
+    let cuts = request.kind == "video"
+        && request.exact_cuts
+        && !request.editing
+        && !request.sections.is_empty();
     tauri::async_runtime::spawn_blocking(move || {
         let mut encoder = if cuts {
             fast_encoder(&ffmpeg)
@@ -1542,6 +1577,7 @@ mod tests {
             playlist_items: None,
             cookies: None,
             file_name: None,
+            editing: false,
         }
     }
 
@@ -1670,6 +1706,55 @@ mod tests {
             webm.contains("ffmpeg_o:-c:v libvpx-vp9 -deadline realtime"),
             "{webm}"
         );
+    }
+
+    #[test]
+    fn a_video_for_editing() {
+        let mut r = request("video", "mp4");
+        r.codec = Some("any".into());
+        r.editing = true;
+        r.height = Some(1440);
+        let whole = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
+        // (the best there is, whatever its codec, in SDR where there's HDR too)
+        assert!(
+            whole.contains("-f bv*[dynamic_range!~=?'HDR|HLG|DV'][height<=1440]+ba/bv*[height<=1440]+ba/b[height<=1440]/bv*+ba/b"),
+            "{whole}"
+        );
+        // (as it is, in an MKV: the page makes it the MP4 for editing)
+        assert!(whole.contains("--merge-output-format mkv"), "{whole}");
+        assert!(!whole.contains("--remux-video"), "{whole}");
+        assert!(!whole.contains("--embed-thumbnail"), "{whole}");
+        assert!(!whole.contains("--downloader-args"), "{whole}");
+        // A part: cut exactly (also without "exact cut"), made the MP4 for editing as it's cut
+        r.sections = vec![[60.0, 90.0]];
+        r.exact_cuts = false;
+        let part = joined(&download_args(&r, Path::new("/out"), &fast_encoder_stub()).unwrap());
+        assert!(part.contains("--merge-output-format mp4"), "{part}");
+        assert!(part.contains("--force-keyframes-at-cuts"), "{part}");
+        assert!(
+            part.contains(&format!("--downloader-args ffmpeg_o:{EDITING_ENCODER}")),
+            "{part}"
+        );
+        assert!(!part.contains("h264_nvenc"), "{part}");
+    }
+
+    /// A graphics card's encoder, as `fast_encoder` may find one
+    fn fast_encoder_stub() -> Vec<String> {
+        ["-c:v", "h264_nvenc", "-preset", "p4"].iter().map(|s| s.to_string()).collect()
+    }
+
+    /// What's made for editing is made by this FFmpeg: H.264 in 8 bits, Baseline, evenly timed
+    #[test]
+    fn the_editing_encoder_works() {
+        let ffmpeg = Path::new("/usr/bin/ffmpeg");
+        if !ffmpeg.is_file() {
+            return;
+        }
+        let encoder: Vec<&str> = EDITING_ENCODER
+            .split(' ')
+            .filter(|arg| *arg != "-movflags" && *arg != "+faststart")
+            .collect();
+        assert!(encodes(ffmpeg, &encoder));
     }
 
     /// The fastest encoder found works (the processor's at least, with this FFmpeg)

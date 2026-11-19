@@ -96,7 +96,8 @@
 		ModifyChapters: 'Taking out the sponsors',
 		SponsorBlock: 'Finding the sponsors',
 		FixupM3u8: 'Tidying it up',
-		MoveFiles: 'Almost done'
+		MoveFiles: 'Almost done',
+		editing: 'Making it ready for Premiere'
 	};
 	/** What it does before the download (or while it looks at a link), said */
 	const STEPS = {
@@ -188,6 +189,8 @@
 	let choice = $derived(
 		info?.videos.find((video) => video.id === options.codec) ?? info?.videos[0] ?? null
 	);
+	/** The best there is, made an MP4 for editing (Premiere, …): its size not known before */
+	let editing = $derived(tab === 'video' && choice?.id === 'editing');
 	/** The heights it comes in, in that codec (a playlist's: the usual ones, not known) */
 	let qualities = $derived(
 		choice?.qualities.length
@@ -227,7 +230,7 @@
 			value: video.id,
 			label: video.label,
 			hint: video.hint,
-			side: playlist ? '' : about(videoBytes(video.qualities[0]))
+			side: playlist || video.id === 'editing' ? '' : about(videoBytes(video.qualities[0]))
 		}))
 	);
 	let qualityOptions = $derived([
@@ -235,13 +238,13 @@
 			value: null,
 			label: 'Best',
 			hint: qualities[0] ? `the highest there is: ${heightLabel(qualities[0].height)}` : '',
-			side: playlist ? '' : about(videoBytes(qualities[0]))
+			side: playlist || editing ? '' : about(videoBytes(qualities[0]))
 		},
 		...qualities.map((quality) => ({
 			value: quality.height,
 			label: `${heightLabel(quality.height)}${quality.fps > 30 ? quality.fps : ''}`,
 			hint: playlist ? 'or the highest under it' : '',
-			side: about(videoBytes(quality))
+			side: editing ? '' : about(videoBytes(quality))
 		}))
 	]);
 	let audioOptions = $derived(
@@ -277,7 +280,7 @@
 	);
 	/** How big it'd be, all of it, for the download button */
 	let total = $derived(
-		!info || playlist
+		!info || playlist || editing
 			? ''
 			: tab === 'video'
 				? about(videoBytes(height ? qualities.find((q) => q.height === height) : qualities[0]))
@@ -466,15 +469,19 @@
 		// (the name given; a playlist's videos keep their own)
 		const title = (!playlist && fileName.replace(/\s+/g, ' ').trim()) || null;
 		const snapshot = $state.snapshot(info);
+		// (for editing: the best there is, whatever its codec; a part of it cut exactly, as it's
+		// made again anyway)
+		const forEditing = !audio && choice?.id === 'editing';
 		addDownload(title ? { ...snapshot, title } : snapshot, {
 			url: info.url,
 			kind: audio ? 'audio' : 'video',
 			format: audio ? options.audioFormat : (choice?.container ?? 'mp4'),
-			codec: audio ? null : (choice?.id ?? 'any'),
+			codec: audio ? null : choice && choice.id !== 'editing' ? choice.id : 'any',
 			height: audio ? null : height,
 			audioKbps: audio ? kbps : null,
 			sections,
-			exactCuts: options.exactCuts,
+			exactCuts: forEditing || options.exactCuts,
+			editing: forEditing,
 			sponsorblock: youtube && options.sponsorblock && !sections.length,
 			playlist,
 			playlistItems: playlist ? items : null,
@@ -555,10 +562,13 @@
 
 	function summary(job) {
 		const r = job.request;
+		const video = r.editing
+			? 'MP4 for Premiere'
+			: (job.info.videos.find((v) => v.id === r.codec)?.label ?? r.format.toUpperCase());
 		const what =
 			r.kind === 'audio'
 				? `${AUDIO_FORMATS.find((f) => f.value === r.format)?.label ?? r.format}${r.audioKbps ? ` · ${r.audioKbps} kbps` : ''}`
-				: `${job.info.videos.find((v) => v.id === r.codec)?.label ?? r.format.toUpperCase()}${r.height ? ` · ${heightLabel(r.height)}` : ''}`;
+				: `${video}${r.height ? ` · ${heightLabel(r.height)}` : ''}`;
 		const cut = r.sections.length ? ` · ${short(r.sections[0][0])}–${short(r.sections[0][1])}` : '';
 		const videos = !r.playlist
 			? ''
@@ -572,8 +582,16 @@
 
 	/** What a download is doing now */
 	function doing(job) {
-		if (job.phase !== 'download') return `${PHASES[job.phase] ?? 'Finishing'}…`;
 		const of = job.count > 1 && job.index ? `Video ${job.index} of ${job.count}` : '';
+		// (downloaded, made an MP4 for editing: how far)
+		if (job.phase === 'editing')
+			return [
+				of,
+				`${PHASES.editing}${job.percent === null ? '…' : ` · ${Math.round(job.percent)}%`}`
+			]
+				.filter(Boolean)
+				.join(' · ');
+		if (job.phase !== 'download') return `${PHASES[job.phase] ?? 'Finishing'}…`;
 		// (a part: FFmpeg cuts it out of the stream, as fast as it says)
 		if (job.step === 'cut')
 			return [
@@ -961,7 +979,7 @@
 								title="Only the part chosen is downloaded"
 								onclick={() => (part.on = !part.on)}
 							/>
-							{#if part.on}
+							{#if part.on && !editing}
 								<Toggle
 									label="Exact cut"
 									pressed={options.exactCuts}
@@ -991,6 +1009,13 @@
 							{/if}
 						</button>
 					</div>
+					{#if editing}
+						<p class="-mt-1 flex items-center gap-1.5 text-xs text-white/55">
+							<span class="icon-[mingcute--information-line] size-3.5 shrink-0"></span>
+							The best quality there is, made once into an MP4 Premiere plays smoothly (H.264, a steady
+							frame rate){part.on ? ', the part cut exactly' : ''}: nothing to convert after.
+						</p>
+					{/if}
 					{#if part.on && !playlist && info.duration}
 						<PartPicker duration={info.duration} bind:start={part.start} bind:end={part.end} />
 					{/if}
@@ -1067,7 +1092,7 @@
 										aria-valuenow={job.percent === null ? undefined : Math.round(job.percent)}
 										aria-valuetext={doing(job)}
 									>
-										{#if job.phase === 'download' && job.percent !== null}
+										{#if (job.phase === 'download' || job.phase === 'editing') && job.percent !== null}
 											<div
 												class="h-full rounded-full bg-rose-400 transition-[width]"
 												style="width: {job.percent}%"

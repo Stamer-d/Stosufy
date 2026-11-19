@@ -274,14 +274,21 @@ export function videoArgs(target: string, quality: Quality, options: VideoOption
 	// For editing: easy to decode, whatever quality's chosen. x264's ultrafast leaves out what
 	// costs the most to play back (B-frames, CABAC, more than one reference picture): bigger,
 	// but Premiere plays 1440p60 of it smoothly, where it stutters on veryfast's (with no
-	// graphics card decoding it): as cutters made for Premiere do, at CRF 18
+	// graphics card decoding it): as cutters made for Premiere do, at CRF 18 (16 at its best).
+	// Its adaptive quantization put back on: no blocks in dark and flat parts (a game's sky, a
+	// stream's dark scene), and nothing more to decode (as the downloader's, see ytdlp.rs)
 	const editing = target === 'editing';
-	const crf = editing ? '18' : { small: '30', balanced: '23', best: '18' }[quality];
+	const crf = editing
+		? quality === 'best'
+			? '16'
+			: '18'
+		: { small: '30', balanced: '23', best: '18' }[quality];
 	const h264 = [
 		'-c:v',
 		'libx264',
 		'-preset',
 		editing ? 'ultrafast' : 'veryfast',
+		...(editing ? ['-x264-params', 'aq-mode=1'] : []),
 		...(videoKbps ? rate(videoKbps) : ['-crf', crf]),
 		'-pix_fmt',
 		'yuv420p'

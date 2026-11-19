@@ -113,6 +113,33 @@ function tauri({ online, writes }) {
 				delete written[args.oldPath];
 				return null;
 			}
+			// (the computer's FFmpeg, where a test put window.__ffmpeg: its probe said, each run's
+			// arguments kept, its output written, half-way told; a run stopped with ffmpeg_cancel)
+			const ff = window.__ffmpeg;
+			if (ff && cmd === 'ffmpeg_probe') return ff.probe;
+			if (ff && cmd === 'ffmpeg_cancel') return void ff.cancel?.(args.id);
+			if (ff && cmd === 'ffmpeg_run') {
+				(ff.runs ??= []).push(args.args);
+				window.__emit('ffmpeg-progress', { id: args.id, progress: 0.5 });
+				const stopped = ff.hold
+					? await new Promise((resolve) => {
+							ff.cancel = () => resolve(true);
+							setTimeout(() => resolve(false), ff.hold);
+						})
+					: false;
+				if (stopped) return { code: 255, log: '', cancelled: true };
+				if (ff.fail) return { code: 1, log: ff.fail, cancelled: false };
+				written[args.args.at(-1)] = new Uint8Array([7, 7, 7, 7]);
+				return { code: 0, log: '', cancelled: false };
+			}
+			if (writes && cmd === 'plugin:fs|stat' && written[args.path])
+				return {
+					isFile: true,
+					size: written[args.path].length,
+					mtime: null,
+					atime: null,
+					birthtime: null
+				};
 			if (writes && cmd === 'plugin:fs|remove') return null;
 			if (cmd === 'files_read') {
 				(window.__read ??= []).push(args.path);
