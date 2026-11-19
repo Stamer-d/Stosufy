@@ -469,8 +469,7 @@
 		// (the name given; a playlist's videos keep their own)
 		const title = (!playlist && fileName.replace(/\s+/g, ' ').trim()) || null;
 		const snapshot = $state.snapshot(info);
-		// (for editing: the best there is, whatever its codec; a part of it cut exactly, as it's
-		// made again anyway)
+		// (for editing: the best there is, whatever its codec)
 		const forEditing = !audio && choice?.id === 'editing';
 		addDownload(title ? { ...snapshot, title } : snapshot, {
 			url: info.url,
@@ -480,7 +479,7 @@
 			height: audio ? null : height,
 			audioKbps: audio ? kbps : null,
 			sections,
-			exactCuts: forEditing || options.exactCuts,
+			exactCuts: options.exactCuts,
 			editing: forEditing,
 			sponsorblock: youtube && options.sponsorblock && !sections.length,
 			playlist,
@@ -979,11 +978,13 @@
 								title="Only the part chosen is downloaded"
 								onclick={() => (part.on = !part.on)}
 							/>
-							{#if part.on && !editing}
+							{#if part.on}
 								<Toggle
 									label="Exact cut"
 									pressed={options.exactCuts}
-									title="Exactly where chosen (its picture made again: slower). Off: at the nearest keyframe, as fast as it gets, in the original quality"
+									title={editing
+										? 'Exactly where chosen, made ready for Premiere as it is cut. Off: cut at the nearest keyframe (fast, may start a few seconds early), made ready after'
+										: 'Exactly where chosen (its picture made again: slower). Off: at the nearest keyframe, as fast as it gets, in the original quality'}
 									onclick={() => (options.exactCuts = !options.exactCuts)}
 								/>
 							{/if}
@@ -1013,7 +1014,7 @@
 						<p class="-mt-1 flex items-center gap-1.5 text-xs text-white/55">
 							<span class="icon-[mingcute--information-line] size-3.5 shrink-0"></span>
 							The best quality there is, made once into an MP4 Premiere plays smoothly (H.264, a steady
-							frame rate){part.on ? ', the part cut exactly' : ''}: nothing to convert after.
+							frame rate): nothing to convert after.
 						</p>
 					{/if}
 					{#if part.on && !playlist && info.duration}

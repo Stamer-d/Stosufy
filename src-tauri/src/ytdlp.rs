@@ -547,7 +547,8 @@ pub struct DownloadRequest {
     pub file_name: Option<String>,
     /// A video for editing (Premiere, After Effects, Resolve): the best there is, whatever its
     /// codec (not HDR, where there's more), as MKV to be made an MP4 for editing by the page;
-    /// a part of it cut exactly, made that MP4 as it's cut (see `editing_encoder`)
+    /// a part of it cut exactly, made that MP4 as it's cut (see `EDITING_ENCODER`), or (not
+    /// exactly) at the keyframes as it is, made that MP4 by the page after
     #[serde(default)]
     pub editing: bool,
 }
@@ -857,15 +858,15 @@ pub fn download_args(
             // The best there is, whatever its codec: in SDR where there's also HDR (an editor's
             // 8 bits of HDR's picture would look washed out)
             let sdr = "[dynamic_range!~=?'HDR|HLG|DV']";
-            let selector =
-                format!("bv*{sdr}{height}+ba/bv*{height}+ba/b{height}/bv*+ba/b");
+            let selector = format!("bv*{sdr}{height}+ba/bv*{height}+ba/b{height}/bv*+ba/b");
             push(&["-f", &selector]);
-            if request.sections.is_empty() {
-                // (put together as it is, made an MP4 for editing by the page after)
-                push(&["--merge-output-format", "mkv", "--embed-chapters"]);
-            } else {
-                // (a part: made the MP4 for editing as it's cut, below)
+            if !request.sections.is_empty() && request.exact_cuts {
+                // (a part cut exactly: made the MP4 for editing as it's cut, below)
                 push(&["--merge-output-format", "mp4"]);
+            } else {
+                // (as it is, all of it or a part cut at the keyframes: made an MP4 for editing
+                // by the page after)
+                push(&["--merge-output-format", "mkv", "--embed-chapters"]);
             }
         }
         ("video", container @ ("mp4" | "webm" | "mkv")) => {
@@ -930,9 +931,9 @@ pub fn download_args(
     // Cut exactly (a video's picture made again where it's cut: with the fastest encoder there
     // is, at a high quality); else the streams as they are, cut at the keyframes (fast, and as
     // good as the original). Sound is cut exactly as it is.
-    // For editing, a part's always cut exactly: it's made again anyway, once, as it's cut.
+    // (for editing: made the MP4 for editing as it's cut, once)
     let editing = request.editing && request.kind == "video";
-    if !request.sections.is_empty() && (request.exact_cuts || editing) && request.kind == "video" {
+    if !request.sections.is_empty() && request.exact_cuts && request.kind == "video" {
         push(&["--force-keyframes-at-cuts"]);
         let output = if editing {
             EDITING_ENCODER.to_string()
@@ -1725,9 +1726,15 @@ mod tests {
         assert!(!whole.contains("--remux-video"), "{whole}");
         assert!(!whole.contains("--embed-thumbnail"), "{whole}");
         assert!(!whole.contains("--downloader-args"), "{whole}");
-        // A part: cut exactly (also without "exact cut"), made the MP4 for editing as it's cut
+        // A part at the keyframes: as it is, in an MKV (made the MP4 for editing after)
         r.sections = vec![[60.0, 90.0]];
         r.exact_cuts = false;
+        let fast = joined(&download_args(&r, Path::new("/out"), &software_encoder()).unwrap());
+        assert!(fast.contains("--merge-output-format mkv"), "{fast}");
+        assert!(!fast.contains("--force-keyframes-at-cuts"), "{fast}");
+        assert!(!fast.contains("--downloader-args"), "{fast}");
+        // A part cut exactly: made the MP4 for editing as it's cut (x264, not the graphics card's)
+        r.exact_cuts = true;
         let part = joined(&download_args(&r, Path::new("/out"), &fast_encoder_stub()).unwrap());
         assert!(part.contains("--merge-output-format mp4"), "{part}");
         assert!(part.contains("--force-keyframes-at-cuts"), "{part}");
@@ -1740,7 +1747,10 @@ mod tests {
 
     /// A graphics card's encoder, as `fast_encoder` may find one
     fn fast_encoder_stub() -> Vec<String> {
-        ["-c:v", "h264_nvenc", "-preset", "p4"].iter().map(|s| s.to_string()).collect()
+        ["-c:v", "h264_nvenc", "-preset", "p4"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     }
 
     /// What's made for editing is made by this FFmpeg: H.264 in 8 bits, Baseline, evenly timed

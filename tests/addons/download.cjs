@@ -725,31 +725,52 @@ const formats = (vcodec, heights, fps = 30) =>
 				/Error while decoding stream/.test(await kept.innerText()),
 			await kept.innerText()
 		);
-		// A part: cut exactly, made for editing as it's cut (nothing made again after)
-		const runs = (await edit.evaluate(() => window.__ffmpeg.runs)).length;
+		// A part: at the keyframes (fast), made ready after; cut exactly, made ready as it's cut
+		await edit.evaluate(() => (window.__ffmpeg.fail = ''));
 		// (a link to an hour in: only the part from there)
 		const at = `${TWITCH}?t=1h00m00s`;
 		await edit.evaluate(
 			(at) => (window.__ytdlp.infos[at] = window.__ytdlp.infos[at.split('?')[0]]),
 			at
 		);
-		await edit.fill('input[aria-label="Link"]', at);
-		await edit.press('input[aria-label="Link"]', 'Enter');
-		await edit.waitForSelector('section[aria-label="What it is"] h2:has-text("Long stream")');
+		const exact = edit.locator('section[aria-label="What it is"] button:has-text("Exact cut")');
+		const partOf = async () => {
+			await edit.fill('input[aria-label="Link"]', at);
+			await edit.press('input[aria-label="Link"]', 'Enter');
+			await edit.waitForSelector('section[aria-label="What it is"] h2:has-text("Long stream")');
+		};
+		await partOf();
 		check(
-			'a part for Premiere: no "Exact cut" to choose (always exact)',
-			(await edit
-				.locator('section[aria-label="What it is"] button:has-text("Exact cut")')
-				.count()) === 0
+			'a part for Premiere: "Exact cut" to choose, off at first',
+			(await exact.getAttribute('aria-pressed')) === 'false'
 		);
+		let runs = (await edit.evaluate(() => window.__ffmpeg.runs)).length;
 		await edit.click('section[aria-label="What it is"] button:has-text("Download")');
 		await editRow('Long stream').locator('text=Long stream.mp4').waitFor();
-		const part = await edit.evaluate(() => window.__ytdlp.requests.at(-1));
+		let part = await edit.evaluate(() => window.__ytdlp.requests.at(-1));
 		check(
-			'a part for Premiere: cut exactly, as it is made, nothing made again after',
+			'a part for Premiere, not exactly: at the keyframes, made ready after',
+			part.editing &&
+				!part.exactCuts &&
+				part.sections.length === 1 &&
+				(await edit.evaluate(() => window.__ffmpeg.runs.length)) === runs + 1,
+			JSON.stringify(part)
+		);
+		await partOf();
+		await exact.click();
+		runs = (await edit.evaluate(() => window.__ffmpeg.runs)).length;
+		await edit.click('section[aria-label="What it is"] button:has-text("Download")');
+		await edit.waitForFunction(() => window.__ytdlp.requests.length === 5);
+		await edit
+			.locator('ul[aria-label="Downloads"] > li')
+			.first()
+			.locator('text=/Long stream( \\(2\\))?\\.mp4/')
+			.waitFor();
+		part = await edit.evaluate(() => window.__ytdlp.requests.at(-1));
+		check(
+			'a part for Premiere, cut exactly: made ready as it is cut, nothing made again after',
 			part.editing &&
 				part.exactCuts &&
-				part.sections.length === 1 &&
 				(await edit.evaluate(() => window.__ffmpeg.runs.length)) === runs,
 			JSON.stringify(part)
 		);

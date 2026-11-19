@@ -245,9 +245,12 @@ function downloadIt(job: DownloadJob) {
 	);
 }
 
-/** Whether what's downloaded is made an MP4 for editing after (a part's made so as it's cut) */
+/**
+ * Whether what's downloaded is made an MP4 for editing after: all of it, or a part cut at the
+ * keyframes (a part cut exactly is made so as it's cut)
+ */
 const madeAfter = (request: DownloadRequest) =>
-	!!request.editing && request.kind === 'video' && !request.sections.length;
+	!!request.editing && request.kind === 'video' && !(request.sections.length && request.exactCuts);
 
 /**
  * A video downloaded whole made an MP4 for editing (Premiere, After Effects, Resolve): H.264

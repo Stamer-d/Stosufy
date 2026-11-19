@@ -488,7 +488,7 @@ export interface DownloadRequest {
 	fileName?: string | null;
 	/**
 	 * For editing (Premiere, …): the best there is, made an MP4 for editing after the download
-	 * (see jobs.ts); a part made so as it's cut (see ytdlp.rs)
+	 * (see jobs.ts); a part cut exactly made so as it's cut (see ytdlp.rs)
 	 */
 	editing?: boolean;
 }
