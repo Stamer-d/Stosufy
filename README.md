@@ -41,6 +41,9 @@ its button in the title bar.
   with practice mode (checkpoints on their own or set yourself) and five difficulties, from easy to
   demon level.
 - 🧩 **Puzzle.** Put a song's background back together, with leaderboards and a daily puzzle.
+- 🤖 **Claude.** Connect Claude and ask it for music: playlists from what you listen to or from a
+  description, songs like your favourites from all of osu!, your listening stats. Set it up in
+  _Settings → Claude_.
 - 🌍 **World center.** The weather with its radar, live lightning, storms, flights, earthquakes,
   departures, the ISS and webcams on one live map, and widgets of them for the home screen.
 - 🔁 **File converter.** Pictures, sound, video, data and text into other formats (PNG, JPG, WebP,
@@ -126,6 +129,7 @@ npm install
 npm run tauri dev     # run the app while developing
 npm run check         # type and icon checks
 npm run test:dash     # the Dash mode's tests (physics, levels, timing)
+npm run test:mcp      # the tools Claude uses
 npm run tauri build   # build an installer
 npm run build:web     # build the web app
 ```

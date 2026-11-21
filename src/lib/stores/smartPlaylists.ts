@@ -232,7 +232,7 @@ const idOf = (names: Record<number, string>, name: string | undefined) =>
 	Object.entries(names).find(([, other]) => other === name)?.[0] ?? '';
 
 /** Songs on osu! like the ones put in: their artists, anime and games, genre and language */
-async function searchOnline(seeds: MapSet[]): Promise<MapSet[]> {
+export async function searchOnline(seeds: MapSet[]): Promise<MapSet[]> {
 	const quote = (text: string) => `"${text.replace(/"/g, '')}"`;
 	const artists = mostCommon(seeds.map((seed) => artistsOf(seed.artist ?? '')[0]));
 	const sources = mostCommon(seeds.map((seed) => seed.songSource?.trim()));

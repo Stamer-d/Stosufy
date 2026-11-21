@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
 
 export type SettingsTab =
-	'home' | 'appearance' | 'playback' | 'library' | 'notifications' | 'shortcuts';
+	'home' | 'appearance' | 'playback' | 'library' | 'notifications' | 'shortcuts' | 'claude';
 
 /** The open tab of the settings window, or null while it's closed */
 export const settingsTab = writable<SettingsTab | null>(null);

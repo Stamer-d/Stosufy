@@ -1,0 +1,81 @@
+[
+	{
+		"name": "playlist_from_my_listening",
+		"title": "Playlist from my listening",
+		"description": "A new playlist made from what you've been listening to",
+		"arguments": [
+			{
+				"name": "period",
+				"description": "Which listening to go by, e.g. \"this week\", \"this month\", \"this year\", \"all time\"",
+				"required": false,
+				"default": "the last 30 days"
+			},
+			{
+				"name": "size",
+				"description": "About how many songs",
+				"required": false,
+				"default": "40"
+			},
+			{
+				"name": "wish",
+				"description": "Anything else, e.g. \"only anime songs\", \"more energetic\", \"for studying\"",
+				"required": false,
+				"default": ""
+			}
+		],
+		"template": "Make me a new Stosufy playlist from what I've been listening to ({{period}}), about {{size}} songs. {{wish}}\n\nHow to go about it:\n1. get_listening_stats for that time: my top songs, artists, genres, languages, sources and tempo, the songs I keep skipping, and the favourites I haven't heard for a while.\n2. Pick a clear direction from that (the strongest style, or a mix of my top styles), and seeds from my top songs that fit it.\n3. find_similar_songs with those seeds (osu! too) for songs I'd like; search_osu and search_library for more of my top artists and sources where it helps.\n4. Choose: mostly songs that fit my taste, a few of my forgotten favourites, some new ones I don't have yet. No songs I keep skipping, one version per song, not the same artist again and again. Order them so tempo and energy flow.\n5. create_playlist with a title that fits and a one-line description.\n\nThen tell me in a few lines what the playlist is about and why, and ask if I want to play it."
+	},
+	{
+		"name": "playlist_from_description",
+		"title": "Playlist from a description",
+		"description": "A playlist of osu! songs that fit what you describe",
+		"arguments": [
+			{
+				"name": "description",
+				"description": "What it should be, e.g. \"fast Touhou remixes for a run\", \"calm piano songs to fall asleep to\"",
+				"required": true
+			},
+			{
+				"name": "size",
+				"description": "About how many songs",
+				"required": false,
+				"default": "30"
+			}
+		],
+		"template": "Make me a Stosufy playlist: {{description}}. About {{size}} songs.\n\nHow to go about it:\n1. Work out what the description means in osu! terms: genres, languages, sources (anime, games), artists, a tempo (bpm) and length range, and the words and tags to look for.\n2. Look in my downloaded songs first (search_library), then on osu! (search_osu with its search syntax, sorted by plays or favourites to find good ones). find_similar_songs from the best matches finds more.\n3. Lean towards my taste where it fits the description (get_listening_stats), and leave out songs I keep skipping.\n4. Choose songs that really fit, one version per song (the full one unless the description says otherwise), not the same artist again and again, in an order that flows.\n5. create_playlist with a title that fits and a one-line description.\n\nThen tell me briefly what's in it and ask if I want to play it."
+	},
+	{
+		"name": "listening_recap",
+		"title": "My listening recap",
+		"description": "What your listening says about you",
+		"arguments": [
+			{
+				"name": "period",
+				"description": "\"week\", \"month\", \"year\" or \"all\"",
+				"required": false,
+				"default": "month"
+			}
+		],
+		"template": "Give me a recap of my listening in Stosufy (period: {{period}}). Use get_listening_stats. Tell me my top songs and artists, what my taste is like (genres, sources, languages, tempo), when I listen most, my new finds and what's been on repeat, in a fun, personal way, short and with numbers. End with one or two ideas for playlists you could make me from it."
+	},
+	{
+		"name": "discover_new_songs",
+		"title": "Discover new songs",
+		"description": "osu! songs you don't have yet that fit your taste",
+		"arguments": [
+			{
+				"name": "count",
+				"description": "How many songs",
+				"required": false,
+				"default": "20"
+			},
+			{
+				"name": "focus",
+				"description": "Anything to focus on, e.g. \"Japanese rock\", \"newer songs\"",
+				"required": false,
+				"default": ""
+			}
+		],
+		"template": "Find me about {{count}} songs on osu! that I don't have yet and would probably like. {{focus}}\n\nUse get_listening_stats (and get_osu_profile_songs if my Stosufy history is short) to learn my taste, then find_similar_songs and search_osu for songs that aren't downloaded and that I've never played. Prefer popular, well-liked beatmaps and full versions, one per song, and different artists. List them with one short line each on why I'd like it, then offer to put them in a playlist or play them."
+	}
+]

@@ -7,7 +7,9 @@ name = "Stosfy"
 version = "0.6.124"
 dependencies = [
  "clipboard-rs",
+ "dirs",
  "flate2",
+ "getrandom 0.3.4",
  "libc",
  "reqwest 0.13.5",
  "serde",

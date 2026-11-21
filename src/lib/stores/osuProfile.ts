@@ -75,7 +75,7 @@ function song(set: any, beatmap: any): MapSet {
 }
 
 /** The songs of a profile list, newest or most played first, one per beatmap set */
-async function loadList(list: ProfileList): Promise<MapSet[]> {
+export async function loadList(list: ProfileList): Promise<MapSet[]> {
 	const me = get(user);
 	const songs: MapSet[] = [];
 	if (list === 'favourite') {

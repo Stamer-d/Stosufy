@@ -206,6 +206,39 @@ export function fitTo(seeds: MapSet[]) {
 	};
 }
 
+/**
+ * Why a song is like the seeds, in words (for Claude): what it shares with the seed it's
+ * most like, the strongest first
+ */
+export function alikeReasons(seeds: MapSet[], song: MapSet): string[] {
+	const features = featuresOf(song);
+	let best: { seed: MapSet; features: Features; score: number } | null = null;
+	for (const seed of seeds) {
+		const seedFeatures = featuresOf(seed);
+		const score = similarity(seedFeatures, features);
+		if (!best || score > best.score) best = { seed, features: seedFeatures, score };
+	}
+	if (!best) return [];
+	const { seed, features: like } = best;
+	const reasons: string[] = [];
+	const artist = artistsOf(song.artist ?? '').find((name) => like.artists.has(normalized(name)));
+	if (artist) reasons.push(`by ${artist}, like "${seed.title}"`);
+	if (like.source && like.source === features.source) reasons.push(`also from ${song.songSource}`);
+	if (like.creator && like.creator === features.creator)
+		reasons.push(`mapped by ${song.creator} too`);
+	if (like.genre && like.genre === features.genre) reasons.push(`the same genre (${song.genre})`);
+	if (like.language && like.language === features.language) {
+		reasons.push(`the same language (${song.language})`);
+	}
+	const tempo = tempoDistance(like.tempo, features.tempo);
+	if (tempo != null && tempo < 0.1 && features.tempo) {
+		reasons.push(`a tempo like "${seed.title}" (${Math.round(features.tempo)} BPM)`);
+	}
+	const tags = [...features.tags].filter((tag) => like.tags.has(tag)).slice(0, 3);
+	if (tags.length) reasons.push(`tags ${tags.join(', ')}`);
+	return reasons;
+}
+
 /** The most similar downloaded songs, without the seed and the excluded ones */
 export function similarSongs(seed: MapSet, exclude: MapSet[] = []): MapSet[] {
 	return radioSongs([seed], exclude);

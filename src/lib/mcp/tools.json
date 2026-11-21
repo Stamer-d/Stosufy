@@ -1,0 +1,526 @@
+[
+	{
+		"name": "get_now_playing",
+		"title": "Now playing",
+		"description": "What Stosufy plays right now: the song, how far in it is, whether it's paused, the speed mod (DT/NC/HT/DC), what comes next and where the queue is from (a playlist, a radio).",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"upcoming": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 50,
+					"default": 10,
+					"description": "How many of the next songs to include"
+				}
+			}
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": false }
+	},
+	{
+		"name": "get_listening_stats",
+		"title": "Listening stats",
+		"description": "A summary of what the user listened to in Stosufy over a time, like a Wrapped: totals, top songs, artists, mappers, genres, languages and sources (the anime, game… a song is from), the hours and weekdays they listen, their usual tempo, new finds, songs on repeat, songs they keep skipping (avoid those) and favourites they haven't heard for a while. The best start for anything based on their taste.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"period": {
+					"type": "string",
+					"enum": ["week", "month", "year", "all"],
+					"default": "month",
+					"description": "week: the last 7 days, month: the last 30 days, year: this calendar year, all: all of it"
+				},
+				"days": {
+					"type": "number",
+					"minimum": 1,
+					"maximum": 3650,
+					"description": "The last this many days instead of a period"
+				},
+				"limit": {
+					"type": "integer",
+					"minimum": 3,
+					"maximum": 50,
+					"default": 15,
+					"description": "How many entries each top list has"
+				}
+			}
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": false }
+	},
+	{
+		"name": "get_listening_history",
+		"title": "Listening history",
+		"description": "The user's single plays in Stosufy, newest first: when each started (local time), the song and how long it was heard. A song counts as played after 30 s (half of a short one); listens left before that are skips and only included with include_skips. The history is synced across the user's devices. For totals and top lists use get_listening_stats instead of paging through this.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"days": {
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 3650,
+					"default": 7,
+					"description": "The last this many days (0.5 is the last 12 hours)"
+				},
+				"since": {
+					"type": "string",
+					"description": "From this date or time on instead (ISO, e.g. 2026-11-01 or 2026-11-01T18:00)"
+				},
+				"until": { "type": "string", "description": "Up to this date or time (ISO)" },
+				"song": { "type": "string", "description": "Only the plays of this song (a song id)" },
+				"include_skips": { "type": "boolean", "default": false },
+				"limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+			}
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": false }
+	},
+	{
+		"name": "get_library_overview",
+		"title": "Library overview",
+		"description": "What the user has in Stosufy: how many songs are downloaded (they play instantly, also offline), their playlists, liked songs and how far the history goes back, and what the downloaded songs are: the most common artists, genres, languages and sources, and their tempo and length. Also whether songs that aren't downloaded stream in full (else only a preview plays until they're downloaded).",
+		"inputSchema": { "type": "object", "properties": {} },
+		"annotations": { "readOnlyHint": true, "openWorldHint": false }
+	},
+	{
+		"name": "search_library",
+		"title": "Search downloaded songs",
+		"description": "Searches the user's downloaded songs. Every word of query has to be in the title, artist, source, tags or mapper (case and accents don't matter); the filters narrow it down further. With no query and no filters it lists the whole library in the chosen order. Each song comes with the user's plays, skips, last play and whether it's liked.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": { "type": "string", "description": "Words to look for" },
+				"artist": {
+					"type": "string",
+					"description": "Only songs by this artist (part of the name)"
+				},
+				"source": {
+					"type": "string",
+					"description": "Only songs from this source, e.g. an anime or game (part of the name)"
+				},
+				"genre": {
+					"type": "string",
+					"enum": [
+						"Video Game",
+						"Anime",
+						"Rock",
+						"Pop",
+						"Novelty",
+						"Hip Hop",
+						"Electronic",
+						"Metal",
+						"Classical",
+						"Folk",
+						"Jazz",
+						"Other"
+					]
+				},
+				"language": {
+					"type": "string",
+					"enum": [
+						"English",
+						"Japanese",
+						"Chinese",
+						"Instrumental",
+						"Korean",
+						"French",
+						"German",
+						"Swedish",
+						"Spanish",
+						"Italian",
+						"Russian",
+						"Polish",
+						"Other"
+					]
+				},
+				"bpm_min": { "type": "number", "minimum": 0 },
+				"bpm_max": { "type": "number", "minimum": 0 },
+				"length_min": { "type": "number", "minimum": 0, "description": "Seconds" },
+				"length_max": { "type": "number", "minimum": 0, "description": "Seconds" },
+				"liked": {
+					"type": "boolean",
+					"description": "Only liked songs (true) or only others (false)"
+				},
+				"played": {
+					"type": "string",
+					"enum": ["never", "ever", "often", "not_lately"],
+					"description": "never: not played yet, ever: played at least once, often: 5 plays or more, not_lately: played before but not in the last 30 days"
+				},
+				"sort": {
+					"type": "string",
+					"enum": [
+						"relevance",
+						"most_played",
+						"recently_played",
+						"least_recently_played",
+						"recently_added",
+						"bpm",
+						"length",
+						"title",
+						"artist",
+						"random"
+					],
+					"default": "relevance"
+				},
+				"limit": { "type": "integer", "minimum": 1, "maximum": 300, "default": 50 },
+				"offset": { "type": "integer", "minimum": 0, "default": 0 }
+			}
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": false }
+	},
+	{
+		"name": "search_osu",
+		"title": "Search osu!",
+		"description": "Searches every beatmap on osu!, so every song osu! has, not only downloaded ones. query takes free words and osu!'s search syntax, combinable: artist=\"Camellia\", title=\"...\", source=\"Touhou\", creator=mapper, tag=vocaloid, bpm>=170, length<240 (s), stars>6, ar>9, played=0, created>2024. Each result is a song (a beatmap set) with its osu! play count and favourites (how popular it is), its status, the star range of its difficulties and whether the user has it downloaded. osu! often has several sets of the same song (TV size, cut, sped up, remixes): pick one per song, the full version unless asked otherwise, ideally a popular one. Use next_cursor for more results.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": { "type": "string", "description": "Words and/or search syntax; empty for all" },
+				"genre": {
+					"type": "string",
+					"enum": [
+						"Video Game",
+						"Anime",
+						"Rock",
+						"Pop",
+						"Novelty",
+						"Hip Hop",
+						"Electronic",
+						"Metal",
+						"Classical",
+						"Folk",
+						"Jazz",
+						"Other"
+					]
+				},
+				"language": {
+					"type": "string",
+					"enum": [
+						"English",
+						"Japanese",
+						"Chinese",
+						"Instrumental",
+						"Korean",
+						"French",
+						"German",
+						"Swedish",
+						"Spanish",
+						"Italian",
+						"Russian",
+						"Polish",
+						"Other"
+					]
+				},
+				"status": {
+					"type": "string",
+					"enum": ["any", "leaderboard", "ranked", "loved", "qualified", "pending", "graveyard"],
+					"default": "any",
+					"description": "leaderboard: ranked, approved, qualified and loved"
+				},
+				"sort": {
+					"type": "string",
+					"enum": [
+						"relevance",
+						"plays",
+						"favourites",
+						"rating",
+						"newest",
+						"oldest",
+						"title",
+						"artist",
+						"difficulty"
+					],
+					"default": "relevance",
+					"description": "relevance needs a query (without one osu! sorts by date); plays and favourites find the popular ones"
+				},
+				"limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 25 },
+				"cursor": { "type": "string", "description": "next_cursor of the results before" }
+			}
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": true }
+	},
+	{
+		"name": "get_song_details",
+		"title": "Song details",
+		"description": "Everything about songs: title and artist (also in their own script), source, genre, language, tempo, length, mapper, osu! status, the difficulties with their star ratings, tags, osu! play count and favourites, and the user's own plays, skips, first and last play, whether it's liked and the playlists it's in.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"songs": {
+					"type": "array",
+					"items": { "type": "string" },
+					"minItems": 1,
+					"maxItems": 20,
+					"description": "Song ids (e.g. \"1234567\" or \"1234567:1\"), or osu! beatmap set links"
+				}
+			},
+			"required": ["songs"]
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": true }
+	},
+	{
+		"name": "find_similar_songs",
+		"title": "Find similar songs",
+		"description": "Songs like the given ones, ranked the way Stosufy's radio and smart playlists rank them: shared artists, the same anime or game, the same mapper, genre and language, a tempo that fits and shared tags, plus the user's taste (often played and liked songs higher, often skipped ones lower). Looks through the downloaded songs and, with include_osu, on osu! for songs the user doesn't have yet. Each result says why it matched. Without seeds it starts from the user's most played songs of the last 30 days.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"seeds": {
+					"type": "array",
+					"items": { "type": "string" },
+					"maxItems": 25,
+					"description": "Song ids to find songs like"
+				},
+				"include_osu": {
+					"type": "boolean",
+					"default": true,
+					"description": "Also search osu! for songs that aren't downloaded"
+				},
+				"only_new": {
+					"type": "boolean",
+					"default": false,
+					"description": "Only songs the user has never played"
+				},
+				"exclude": {
+					"type": "array",
+					"items": { "type": "string" },
+					"description": "Song ids to leave out (e.g. ones already chosen)"
+				},
+				"limit": { "type": "integer", "minimum": 1, "maximum": 150, "default": 40 }
+			}
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": true }
+	},
+	{
+		"name": "get_osu_profile_songs",
+		"title": "osu! profile songs",
+		"description": "Songs from the user's osu! profile: the beatmaps they favourited, played most or set their best scores on. What they like to play in osu! says a lot about their taste, especially while their Stosufy history is short.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"list": {
+					"type": "string",
+					"enum": ["favourite", "most_played", "best"],
+					"description": "favourite: favourited beatmaps (newest first), most_played: the 100 most played, best: the beatmaps of the 100 best scores"
+				},
+				"limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+			},
+			"required": ["list"]
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": true }
+	},
+	{
+		"name": "list_playlists",
+		"title": "List playlists",
+		"description": "The user's playlists in Stosufy: their own, smart playlists (Stosufy fills them with songs like the ones put in), Liked Songs, Downloaded, and public playlists of others they saved. Their ids are what the other playlist tools take.",
+		"inputSchema": { "type": "object", "properties": {} },
+		"annotations": { "readOnlyHint": true, "openWorldHint": false }
+	},
+	{
+		"name": "get_playlist_songs",
+		"title": "Playlist songs",
+		"description": "The songs of a playlist in its order, each with the user's plays and whether it's downloaded.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"playlist": { "type": "string", "description": "A playlist id from list_playlists" },
+				"limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 200 },
+				"offset": { "type": "integer", "minimum": 0, "default": 0 }
+			},
+			"required": ["playlist"]
+		},
+		"annotations": { "readOnlyHint": true, "openWorldHint": false }
+	},
+	{
+		"name": "create_playlist",
+		"title": "Create playlist",
+		"description": "Creates a playlist in Stosufy with these songs in this order. It shows up in the user's library right away and syncs to their devices. Songs that aren't downloaded can be in it (they stream or download when they play). Give it a fitting title and a short description. Choose the songs carefully first (one version per song, in an order that flows); to change it afterwards use add_to_playlist and remove_from_playlist instead of making another one.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 100 },
+				"description": { "type": "string", "maxLength": 300 },
+				"songs": {
+					"type": "array",
+					"items": { "type": "string" },
+					"minItems": 1,
+					"maxItems": 500,
+					"description": "Song ids in the playlist's order"
+				},
+				"public": {
+					"type": "boolean",
+					"default": false,
+					"description": "Show it to the community (only when the user asks)"
+				},
+				"download": {
+					"type": "boolean",
+					"default": false,
+					"description": "Also download the songs that aren't downloaded yet (needs the osu! session key in Stosufy)"
+				},
+				"open": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show the playlist in Stosufy"
+				},
+				"play": { "type": "boolean", "default": false, "description": "Start playing it" }
+			},
+			"required": ["title", "songs"]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": false
+		}
+	},
+	{
+		"name": "add_to_playlist",
+		"title": "Add to playlist",
+		"description": "Adds songs to the end of a playlist (songs already in it are skipped). The playlist \"liked\" likes the songs; a smart playlist takes them as songs it's based on.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"playlist": {
+					"type": "string",
+					"description": "A playlist id from list_playlists, or \"liked\""
+				},
+				"songs": {
+					"type": "array",
+					"items": { "type": "string" },
+					"minItems": 1,
+					"maxItems": 500
+				}
+			},
+			"required": ["playlist", "songs"]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": false
+		}
+	},
+	{
+		"name": "remove_from_playlist",
+		"title": "Remove from playlist",
+		"description": "Takes songs out of a playlist of the user (\"liked\": unlikes them). The songs stay downloaded.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"playlist": { "type": "string" },
+				"songs": {
+					"type": "array",
+					"items": { "type": "string" },
+					"minItems": 1,
+					"maxItems": 500
+				}
+			},
+			"required": ["playlist", "songs"]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": true,
+			"idempotentHint": true,
+			"openWorldHint": false
+		}
+	},
+	{
+		"name": "edit_playlist",
+		"title": "Edit playlist",
+		"description": "Renames a playlist of the user, changes its description, or makes it public or private (public only when the user asks). For a smart playlist: the title and how many songs it's filled up to.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"playlist": { "type": "string" },
+				"title": { "type": "string", "minLength": 1, "maxLength": 100 },
+				"description": { "type": "string", "maxLength": 300 },
+				"public": { "type": "boolean" },
+				"size": { "type": "integer", "enum": [25, 50, 100], "description": "Smart playlists only" }
+			},
+			"required": ["playlist"]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": false
+		}
+	},
+	{
+		"name": "create_smart_playlist",
+		"title": "Create smart playlist",
+		"description": "Creates one of Stosufy's own smart playlists: from a few songs put in (seeds), Stosufy fills it up with songs like them, from the library and from osu!, and the user can refill it any time in the app. Use it when the user wants a playlist that keeps finding songs like these; for a hand-picked list use create_playlist. Returns the songs it was filled with.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 100 },
+				"seeds": {
+					"type": "array",
+					"items": { "type": "string" },
+					"minItems": 1,
+					"maxItems": 25,
+					"description": "Song ids it's based on (3 to 10 that clearly share a style work best)"
+				},
+				"size": { "type": "integer", "enum": [25, 50, 100], "default": 50 },
+				"include_osu": {
+					"type": "boolean",
+					"default": true,
+					"description": "Also fill it with songs from osu! that aren't downloaded"
+				},
+				"open": { "type": "boolean", "default": true, "description": "Show it in Stosufy" }
+			},
+			"required": ["title", "seeds"]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "play",
+		"title": "Play",
+		"description": "Plays music in Stosufy: songs or a playlist. mode now replaces what's playing, next plays them after the current song, queue adds them to the end of the queue, radio starts a radio of similar downloaded songs from the first song.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"songs": {
+					"type": "array",
+					"items": { "type": "string" },
+					"maxItems": 500,
+					"description": "Song ids, in order"
+				},
+				"playlist": { "type": "string", "description": "A playlist id, instead of songs" },
+				"mode": {
+					"type": "string",
+					"enum": ["now", "next", "queue", "radio"],
+					"default": "now"
+				},
+				"shuffle": { "type": "boolean", "default": false }
+			}
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": false
+		}
+	},
+	{
+		"name": "control_playback",
+		"title": "Control playback",
+		"description": "Pauses, resumes or skips in Stosufy. Returns what plays afterwards.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"action": { "type": "string", "enum": ["pause", "resume", "toggle", "next", "previous"] }
+			},
+			"required": ["action"]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": false
+		}
+	}
+]

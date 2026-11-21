@@ -27,6 +27,7 @@
 	import { startKeybinds } from '#lib/stores/keybinds.ts';
 	import { startSettingsSync } from '#lib/stores/settingsSync.ts';
 	import { startHitsounds } from '#lib/hitsounds/player.ts';
+	import { startClaudeConnection } from '#lib/mcp/connection.ts';
 	import { queuePanelOpen, currentSong, focusMode } from '#lib/stores/audio.ts';
 	import { playingLive } from '#lib/gameplay/play.ts';
 	import PlayOverlay from '#lib/components/PlayOverlay.svelte';
@@ -121,6 +122,8 @@
 		startHitsounds();
 		// Your other devices (the web app on a phone): what plays there, controlled from here
 		startConnect();
+		// Claude's tool calls (Settings → Claude), from the start: Claude may have opened the app
+		startClaudeConnection();
 		// Invites to listening sessions: stosufynew://listen/CODE
 		const joinFromLink = (urls) => {
 			const link = urls?.find((url) => /^stosufynew:\/*listen\//i.test(url));

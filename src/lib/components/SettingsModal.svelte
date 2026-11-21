@@ -30,6 +30,7 @@
 	import KeybindSettings from './KeybindSettings.svelte';
 	import HitsoundSettings from './HitsoundSettings.svelte';
 	import EqualizerSettings from './EqualizerSettings.svelte';
+	import ClaudeSettings from './ClaudeSettings.svelte';
 
 	// The osu! folder (chosen, or found where osu! usually is): its songs and skins
 	let osuRoot = $state(null);
@@ -59,7 +60,8 @@
 		{ id: 'playback', label: 'Playback', icon: 'icon-[mingcute--play-circle-line]' },
 		{ id: 'library', label: 'Library', icon: 'icon-[mingcute--folder-open-line]' },
 		{ id: 'notifications', label: 'Notifications', icon: 'icon-[mingcute--notification-line]' },
-		{ id: 'shortcuts', label: 'Shortcuts', icon: 'icon-[mingcute--keyboard-line]' }
+		{ id: 'shortcuts', label: 'Shortcuts', icon: 'icon-[mingcute--keyboard-line]' },
+		{ id: 'claude', label: 'Claude', icon: 'icon-[mingcute--ai-line]' }
 	];
 
 	const SECTION_LABELS = {
@@ -607,6 +609,8 @@
 				</section>
 			{:else if $settingsTab === 'shortcuts'}
 				<KeybindSettings />
+			{:else if $settingsTab === 'claude'}
+				<ClaudeSettings />
 			{/if}
 		</div>
 	</div>
