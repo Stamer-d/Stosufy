@@ -7,7 +7,7 @@ import { favourites } from '../stores/favourites';
 import { history, playCounts, type HistorySong, type SongPlays } from '../stores/history';
 import { songFromSearch } from '../stores/smartPlaylists';
 import { songBpm } from '../songBpm';
-import { GENRES, LANGUAGES } from '../genres';
+import { GENRES, LANGUAGES, englishName } from '../genres';
 import { songKey, trackOf } from '../tracks';
 import type { MapSet } from '../types';
 
@@ -63,10 +63,13 @@ export function moment(seconds: number) {
 	return `${WEEKDAYS[date.getDay()]} ${day(seconds)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** osu!'s genre or language as a name (the library keeps names, osu!'s API objects or ids) */
-function named(value: any, names: Record<number, string>, id: unknown) {
+/**
+ * osu!'s genre or language as its English name (the library keeps names, maybe in the user's
+ * language, osu!'s API objects or ids)
+ */
+export function named(value: any, names: Record<number, string>, id?: unknown) {
 	const name = typeof value === 'string' ? value : (value?.name ?? names[Number(id)] ?? null);
-	return name && !/^(unspecified|any)$/i.test(name) ? name : null;
+	return name && !/^(unspecified|any)$/i.test(name) ? englishName(name) : null;
 }
 
 /** Where a song is from (an anime, a game…): songs imported from osu! have 'osu' as source */
@@ -80,7 +83,8 @@ export function tempoOf(song: MapSet) {
 	const data = get(mapDataStore);
 	const own = data[String(song.id)] ? songBpm(song, data) : 0;
 	const bpm = Number(own || song.bpm) || 0;
-	return bpm > 0 && Number.isFinite(bpm) ? Math.round(bpm) : null;
+	// (joke maps have 6 billion BPM, or 1)
+	return bpm >= 20 && bpm <= 1000 ? Math.round(bpm) : null;
 }
 
 export const lengthOf = (song: MapSet) =>

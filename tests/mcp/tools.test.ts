@@ -15,6 +15,10 @@ import { offline } from '../../src/lib/stores/network.ts';
 import { user } from '../../src/lib/stores/user.ts';
 import { playlists, playlistSongsCache } from '../../src/lib/stores/playlist.ts';
 import { smartPlaylists } from '../../src/lib/stores/smartPlaylists.ts';
+import { librarySongs } from '../../src/lib/stores/data.ts';
+import { userSettings } from '../../src/lib/stores/user.ts';
+import { cancelDownloads } from '../../src/lib/stores/downloadQueue.ts';
+import { songQueue, currentSong, upNext } from '../../src/lib/stores/audio.ts';
 
 const DAY = 86400;
 const now = Math.floor(Date.now() / 1000);
@@ -64,7 +68,8 @@ const LIBRARY = {
 	}),
 	1004: stored(1004, 'Night of Nights', 'COOL&CREATE', {
 		source: 'Touhou',
-		genre: 'Video Game',
+		genre: 'Videospiel',
+		language: 'Japanisch',
 		bpm: 180
 	}),
 	1005: stored(1005, 'Unravel', 'TK from Ling tosite sigure', {
@@ -152,7 +157,8 @@ const OSU = [
 		source: 'Touhou',
 		genre: 'Video Game',
 		bpm: 175
-	})
+	}),
+	osuSet(2006, 'Aspire joke', 'Someone', { genre: 'Novelty', bpm: 6000000000, plays: 10 })
 ];
 
 /** What the fake osu! search finds for a query (artist and source searches, else everything) */
@@ -169,8 +175,17 @@ const server = {
 	playlists: [] as { id: number; title: string; description: string; public: boolean }[],
 	songs: new Map<number, { id: number; setId: number; mapId: number; position: number }[]>(),
 	favourites: [{ setId: 1003, mapId: 10030 }],
-	nextId: 500
+	nextId: 500,
+	/** Public playlists of others, and which of them the user saved */
+	community: [
+		{ id: 900, title: 'Touhou classics', description: 'The best of Touhou', public: true }
+	],
+	saved: new Set<number>()
 };
+server.songs.set(900, [
+	{ id: 9001, setId: 1003, mapId: 10030, position: 1 },
+	{ id: 9002, setId: 2003, mapId: 20030, position: 2 }
+]);
 
 const allSets = () => [
 	...OSU,
@@ -178,17 +193,53 @@ const allSets = () => [
 ];
 
 function graphql(query: string, variables: any) {
-	const playlistOut = (p: (typeof server.playlists)[number]) => ({
-		...p,
-		imageUrl: null,
-		createdBy: 7,
-		songAmount: server.songs.get(p.id)?.length ?? 0,
-		createdAt: '2026-11-21',
-		updatedAt: '2026-11-21',
-		saves: 0,
-		saved: false,
-		creator: null
-	});
+	const playlistOut = (p: (typeof server.playlists)[number]) => {
+		const theirs = server.community.some((other) => other.id === p.id);
+		return {
+			...p,
+			imageUrl: null,
+			createdBy: theirs ? 99 : 7,
+			songAmount: server.songs.get(p.id)?.length ?? 0,
+			createdAt: '2026-11-21',
+			updatedAt: '2026-11-21',
+			saves: theirs ? 12 : 0,
+			saved: server.saved.has(p.id),
+			creator: theirs ? { osuId: 99, username: 'someone', avatarUrl: null } : null
+		};
+	};
+	if (query.includes('moveSongInStosufyPlaylist')) {
+		const list = server.songs.get(variables.playlistId)!;
+		const [song] = list.splice(
+			list.findIndex((other) => other.id === variables.songId),
+			1
+		);
+		list.splice(variables.position - 1, 0, song);
+		list.forEach((other, i) => (other.position = i + 1));
+		return { moveSongInStosufyPlaylist: true };
+	}
+	if (query.includes('deleteStosufyPlaylist')) {
+		server.playlists = server.playlists.filter((p) => p.id !== variables.id);
+		server.songs.delete(variables.id);
+		return { deleteStosufyPlaylist: true };
+	}
+	if (query.includes('getPublicStosufyPlaylists')) {
+		const words = String(variables.search ?? '').toLowerCase();
+		return {
+			getPublicStosufyPlaylists: server.community
+				.filter((p) => p.title.toLowerCase().includes(words))
+				.map(playlistOut)
+		};
+	}
+	if (query.includes('getStosufyPlaylist(')) {
+		const playlist = [...server.playlists, ...server.community].find((p) => p.id === variables.id);
+		if (!playlist) throw new Error('Playlist not found');
+		return { getStosufyPlaylist: playlistOut(playlist) };
+	}
+	if (query.includes('saveStosufyPlaylist')) {
+		if (variables.saved) server.saved.add(variables.id);
+		else server.saved.delete(variables.id);
+		return { saveStosufyPlaylist: true };
+	}
 	if (query.includes('createStosufyPlaylist')) {
 		const playlist = {
 			id: server.nextId++,
@@ -515,4 +566,129 @@ test("what Claude is told when it can't", async () => {
 		/downloading/
 	);
 	await assert.rejects(call('create_playlist', { title: 'x', songs: [] }), /list of song ids/);
+});
+
+test("genres and languages in the user's language count as osu!'s", async () => {
+	const english = await call('search_library', { genre: 'Video Game' });
+	assert.deepEqual(english.songs.map((song: any) => song.id).sort(), ['1003', '1004']);
+	const german = await call('search_library', { genre: 'Videospiel' });
+	assert.equal(german.total, 2);
+	assert.equal(english.songs.find((song: any) => song.id === '1004').genre, 'Video Game');
+	const overview = await call('get_library_overview');
+	assert.equal(overview.library.genres['Video Game'], 2);
+	assert.equal(overview.library.genres['Videospiel'], undefined);
+	assert.equal(overview.library.languages['Japanese'], 5);
+	const all = await call('get_listening_stats', { period: 'all' });
+	assert.equal(all.top_genres.find((genre: any) => genre.name === 'Video Game').plays, 11);
+	assert.ok(!all.top_genres.some((genre: any) => genre.name === 'Videospiel'));
+	const joke = (await call('search_osu', { query: '' })).songs.find(
+		(song: any) => song.id === '2006'
+	);
+	assert.equal(joke.bpm, undefined);
+});
+
+test("downloads: only what isn't downloaded, and how far they are", async () => {
+	await assert.rejects(call('download_songs', { songs: ['2001'] }), /session key is missing/);
+	const none = await call('download_songs', { songs: ['1001'] });
+	assert.equal(none.queued, 0);
+	keyStore.update((keys) => ({ ...keys, sessionKey: 'session' }));
+	const queued = await call('download_songs', { songs: ['2001', '2003', '1001'] });
+	assert.equal(queued.queued, 2);
+	assert.equal(queued.already_downloaded, 1);
+	const status = await call('get_downloads');
+	assert.equal((status.downloading ? 1 : 0) + status.waiting, 2);
+	cancelDownloads();
+	keyStore.update((keys) => ({ ...keys, sessionKey: '' }));
+});
+
+test('the queue: reorder, remove and clear what comes next, and how it plays', async () => {
+	const song = (id: string) => librarySongs().find((one) => String(one.id) === id)!;
+	const audio = { currentTime: 10, duration: 200, paused: false, playbackRate: 1 } as any;
+	songQueue.set({
+		queue: ['1001', '1002', '1003', '1006'].map(song),
+		currentIndex: 0,
+		audio,
+		type: 'playlist',
+		playlistId: null
+	});
+	currentSong.set({ song: song('1001'), isPlaying: true });
+	upNext.set([song('1004')]);
+	const ids = (now: any) => now.up_next.map((one: any) => one.id);
+	assert.deepEqual(ids(await call('get_now_playing')), ['1004', '1002', '1003', '1006']);
+	let now = await call('edit_queue', { action: 'reorder', songs: ['1006', '1004'] });
+	assert.deepEqual(ids(now), ['1006', '1004', '1002', '1003']);
+	now = await call('edit_queue', { action: 'remove', songs: ['1002'] });
+	assert.deepEqual(ids(now), ['1006', '1004', '1003']);
+
+	now = await call('set_playback', {
+		volume: 50,
+		repeat: 'one',
+		sleep_minutes: 30,
+		autoplay: false
+	});
+	assert.equal(now.volume, 50);
+	assert.equal(get(userSettings).settings.volume, 0.1);
+	assert.equal(now.repeat, 'one');
+	assert.equal(now.sleep_timer, 'in 30 min');
+	assert.equal(now.autoplay, false);
+	now = await call('set_playback', { seek: 60, sleep_minutes: 0 });
+	assert.equal(now.position, 60);
+	assert.equal(now.sleep_timer, undefined);
+	await assert.rejects(call('set_playback', { mod: 'XX' }), /mod is one of/);
+	await assert.rejects(call('set_playback', {}), /Nothing to change/);
+
+	now = await call('edit_queue', { action: 'clear' });
+	assert.deepEqual(now.up_next, []);
+	songQueue.set({});
+	currentSong.set({ song: null, isPlaying: false });
+});
+
+test('a playlist in a new order, then deleted', async () => {
+	const made = await call('create_playlist', {
+		title: 'To sort',
+		songs: ['1006', '1003', '1001'],
+		open: false
+	});
+	const order = () => server.songs.get(Number(made.id))!.map((song) => song.setId);
+	const sorted = await call('reorder_playlist', { playlist: made.id, sort: 'bpm' });
+	assert.ok(sorted.moved > 0);
+	assert.deepEqual(order(), [1003, 1006, 1001]);
+	await call('reorder_playlist', { playlist: made.id, songs: ['1001'] });
+	assert.deepEqual(order(), [1001, 1003, 1006]);
+	await assert.rejects(call('reorder_playlist', { playlist: 'liked', sort: 'bpm' }), /own order/);
+
+	const gone = await call('delete_playlist', { playlist: made.id });
+	assert.equal(gone.deleted, 'To sort');
+	assert.ok(!server.playlists.some((p) => p.id === Number(made.id)));
+	assert.ok(!get(playlists).some((p) => String(p.id) === made.id));
+	await assert.rejects(call('delete_playlist', { playlist: 'downloaded' }), /deleted|removed/);
+});
+
+test('mixes and the playlists of others', async () => {
+	const { mixes } = await call('get_mixes');
+	const recent = mixes.find((mix: any) => mix.id === 'mix:recent');
+	assert.ok(recent.songs > 0);
+	const songs = await call('get_playlist_songs', { playlist: 'mix:recent' });
+	assert.equal(songs.total, recent.songs);
+	await assert.rejects(
+		call('add_to_playlist', { playlist: 'mix:recent', songs: ['1001'] }),
+		/mixes/
+	);
+
+	const found = await call('search_community_playlists', { query: 'touhou' });
+	assert.equal(found.playlists[0].id, '900');
+	assert.equal(found.playlists[0].by, 'someone');
+	const theirs = await call('get_playlist_songs', { playlist: '900' });
+	assert.deepEqual(
+		theirs.songs.map((one: any) => one.id),
+		['1003', '2003']
+	);
+	await assert.rejects(
+		call('add_to_playlist', { playlist: '900', songs: ['1001'] }),
+		/someone else/
+	);
+	const saved = await call('save_playlist', { playlist: '900' });
+	assert.equal(saved.saved, true);
+	assert.ok(server.saved.has(900));
+	await assert.rejects(call('save_playlist', { playlist: 'liked' }), /own/);
 });

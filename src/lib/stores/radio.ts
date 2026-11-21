@@ -13,6 +13,7 @@ import { favourites } from './favourites';
 import { history, playCounts, songKey, type SongPlays } from './history';
 import { songBpm } from '../songBpm';
 import { artistsOf, sameSong } from '../tracks';
+import { englishName } from '../genres';
 import type { MapSet } from '../types';
 
 const RADIO_LENGTH = 40;
@@ -48,8 +49,8 @@ function featuresOf(song: MapSet): Features {
 		features = {
 			artists: new Set(artistsOf(song.artist ?? '').map(normalized)),
 			creator: normalized(song.creator),
-			genre: known(song.genre),
-			language: known(song.language),
+			genre: known(englishName(song.genre)),
+			language: known(englishName(song.language)),
 			source: normalized(song.songSource),
 			tempo,
 			tags: new Set(
@@ -226,9 +227,10 @@ export function alikeReasons(seeds: MapSet[], song: MapSet): string[] {
 	if (like.source && like.source === features.source) reasons.push(`also from ${song.songSource}`);
 	if (like.creator && like.creator === features.creator)
 		reasons.push(`mapped by ${song.creator} too`);
-	if (like.genre && like.genre === features.genre) reasons.push(`the same genre (${song.genre})`);
+	if (like.genre && like.genre === features.genre)
+		reasons.push(`the same genre (${englishName(song.genre)})`);
 	if (like.language && like.language === features.language) {
-		reasons.push(`the same language (${song.language})`);
+		reasons.push(`the same language (${englishName(song.language)})`);
 	}
 	const tempo = tempoDistance(like.tempo, features.tempo);
 	if (tempo != null && tempo < 0.1 && features.tempo) {

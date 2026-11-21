@@ -1,6 +1,6 @@
 # Claude-Verbindung (MCP)
 
-Stand: 21.11.2026. Claude (die Claude-App und Claude Code) kann über das Model Context Protocol
+Stand: 21.11.2026 (27 Tools). Claude (die Claude-App und Claude Code) kann über das Model Context Protocol
 mit Stosufy reden: den Hörverlauf und die Bibliothek lesen, alle Songs auf osu! durchsuchen,
 Playlists anlegen und ändern und Musik abspielen. Eingerichtet wird es unter
 _Einstellungen → Claude_.
@@ -40,26 +40,35 @@ Claude ──stdio──▶ Stosufy --mcp (Brücke) ──HTTP 127.0.0.1 + Token
 
 ## 2. Tools
 
-| Tool                    | Was es tut                                                                                                  |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `get_now_playing`       | aktueller Song, Position, Pause, Mod, Warteschlange                                                         |
-| `get_listening_stats`   | wie Wrapped: Top-Songs/-Künstler/-Quellen/-Genres, Uhrzeiten, Tempo, oft übersprungen, vergessene Lieblinge |
-| `get_listening_history` | einzelne Plays (Ortszeit), Filter nach Zeit, Song, Skips                                                    |
-| `get_library_overview`  | Größe und Zusammensetzung der Bibliothek, Streaming, Download möglich                                       |
-| `search_library`        | heruntergeladene Songs: Wörter, Künstler, Quelle, Genre, Sprache, BPM, Länge, gespielt, geliked, Sortierung |
-| `search_osu`            | alle Beatmaps auf osu! mit osu!-Suchsyntax, Status, Sortierung, Cursor                                      |
-| `get_song_details`      | alles zu bis zu 20 Songs, osu!-Daten und die eigenen Plays, Playlists                                       |
-| `find_similar_songs`    | ähnliche Songs nach dem Radio-Modell (`fitTo`) aus Bibliothek und osu!, mit Begründung                      |
-| `get_osu_profile_songs` | Favoriten, meistgespielte und Top-Plays des osu!-Profils                                                    |
-| `list_playlists`        | eigene, Smart Playlists, Liked, Downloaded, gespeicherte fremde                                             |
-| `get_playlist_songs`    | Songs einer Playlist                                                                                        |
-| `create_playlist`       | neue Playlist mit Songs in Reihenfolge, optional öffnen, abspielen, herunterladen                           |
-| `add_to_playlist`       | Songs anhängen (`liked` liked sie, Smart Playlist: als Grundlage)                                           |
-| `remove_from_playlist`  | Songs herausnehmen                                                                                          |
-| `edit_playlist`         | Titel, Beschreibung, öffentlich; bei Smart Playlists Titel und Größe                                        |
-| `create_smart_playlist` | Stosufys eigene Smart Playlist aus Seeds, gleich gefüllt                                                    |
-| `play`                  | Songs/Playlist jetzt, als Nächstes, ans Ende oder als Radio                                                 |
-| `control_playback`      | Pause, weiter, nächster, vorheriger                                                                         |
+| Tool                         | Was es tut                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `get_now_playing`            | aktueller Song, Position, Pause, Mod, Warteschlange                                                         |
+| `get_listening_stats`        | wie Wrapped: Top-Songs/-Künstler/-Quellen/-Genres, Uhrzeiten, Tempo, oft übersprungen, vergessene Lieblinge |
+| `get_listening_history`      | einzelne Plays (Ortszeit), Filter nach Zeit, Song, Skips                                                    |
+| `get_library_overview`       | Größe und Zusammensetzung der Bibliothek, Streaming, Download möglich                                       |
+| `search_library`             | heruntergeladene Songs: Wörter, Künstler, Quelle, Genre, Sprache, BPM, Länge, gespielt, geliked, Sortierung |
+| `search_osu`                 | alle Beatmaps auf osu! mit osu!-Suchsyntax, Status, Sortierung, Cursor                                      |
+| `get_song_details`           | alles zu bis zu 20 Songs, osu!-Daten und die eigenen Plays, Playlists                                       |
+| `find_similar_songs`         | ähnliche Songs nach dem Radio-Modell (`fitTo`) aus Bibliothek und osu!, mit Begründung                      |
+| `get_osu_profile_songs`      | Favoriten, meistgespielte und Top-Plays des osu!-Profils                                                    |
+| `get_mixes`                  | Stosufys Mixes („Made for you“): Tagesmixe, vergessene Lieblinge, zuletzt gehört (`mix:…`)                  |
+| `search_community_playlists` | öffentliche Playlists anderer, beliebteste oder neueste, mit Suche                                          |
+| `list_playlists`             | eigene, Smart Playlists, Liked, Downloaded, gespeicherte fremde                                             |
+| `get_playlist_songs`         | Songs einer Playlist                                                                                        |
+| `create_playlist`            | neue Playlist mit Songs in Reihenfolge, optional öffnen, abspielen, herunterladen                           |
+| `add_to_playlist`            | Songs anhängen (`liked` liked sie, Smart Playlist: als Grundlage)                                           |
+| `remove_from_playlist`       | Songs herausnehmen                                                                                          |
+| `reorder_playlist`           | neue Reihenfolge oder sortieren (BPM, Länge, Titel, Künstler, umgedreht, zufällig)                          |
+| `edit_playlist`              | Titel, Beschreibung, öffentlich; bei Smart Playlists Titel und Größe                                        |
+| `create_smart_playlist`      | Stosufys eigene Smart Playlist aus Seeds, gleich gefüllt                                                    |
+| `delete_playlist`            | eigene Playlist oder Smart Playlist löschen, nur auf ausdrücklichen Wunsch                                  |
+| `save_playlist`              | öffentliche Playlist anderer in die Bibliothek speichern (oder wieder heraus)                               |
+| `download_songs`             | Songs oder eine ganze Playlist herunterladen (braucht den osu!-Session-Key)                                 |
+| `get_downloads`              | Stand der Downloads: läuft, wartet, fertig, fehlgeschlagen, Pause wegen osu!                                |
+| `play`                       | Songs/Playlist jetzt, als Nächstes, ans Ende oder als Radio                                                 |
+| `edit_queue`                 | „Als Nächstes“ umsortieren, Songs herausnehmen, leeren                                                      |
+| `control_playback`           | Pause, weiter, nächster, vorheriger                                                                         |
+| `set_playback`               | Lautstärke, Mod (DT/NC/HT/DC), Shuffle, Repeat, Springen, Sleep-Timer, Autoplay                             |
 
 Songs heißen für Claude immer gleich: die Beatmap-Set-ID, bei Sets mit mehreren Songs mit
 `:track` („1234567", „1234567:1"); osu!-Links gehen auch. Leere und unbekannte Felder fehlen in
@@ -82,6 +91,9 @@ Prompts (in der Claude-App unter „+" → Stosufy, in Claude Code `/mcp__stosuf
   (gleicher Prozessname); Claude zeigt Stosufy danach als getrennt, bis Claude neu startet.
 - Claude Desktop liest seine Einstellungen nur beim Start: nach „Add to Claude" Claude ganz
   beenden (auch im Tray) und neu öffnen.
+- Genres und Sprachen schickt osu! in der Sprache des Nutzers; die Bibliothek hat deshalb oft
+  beide („Video Game“ und „Videospiel“). Die Tools (und Radio und Smart Playlists) vergleichen sie
+  über `englishName` in `src/lib/genres.ts`, das die deutschen Namen kennt.
 - Die Windows-Store-Version von Claude hat ihre Einstellungen ggf. in
   `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`; „Add to Claude" schreibt in jede
   gefundene Installation.

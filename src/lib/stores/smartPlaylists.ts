@@ -9,7 +9,7 @@ import { fetchMaps, libraryByKey, mapDataStore } from './data';
 import { offline } from './network';
 import { fitTo } from './radio';
 import { artistsOf, songKey, songName } from '../tracks';
-import { GENRES, LANGUAGES } from '../genres';
+import { GENRES, LANGUAGES, englishName } from '../genres';
 import type { MapSet } from '../types';
 
 /** A song of a smart playlist */
@@ -236,8 +236,11 @@ export async function searchOnline(seeds: MapSet[]): Promise<MapSet[]> {
 	const quote = (text: string) => `"${text.replace(/"/g, '')}"`;
 	const artists = mostCommon(seeds.map((seed) => artistsOf(seed.artist ?? '')[0]));
 	const sources = mostCommon(seeds.map((seed) => seed.songSource?.trim()));
-	const genre = mostCommon(seeds.map((seed) => seed.genre)).find((g) => g !== 'Other');
-	const language = mostCommon(seeds.map((seed) => seed.language)).find((l) => l !== 'Other');
+	// (in English: the library may have them in the user's language, osu!'s search wants its ids)
+	const genre = mostCommon(seeds.map((seed) => englishName(seed.genre))).find((g) => g !== 'Other');
+	const language = mostCommon(seeds.map((seed) => englishName(seed.language))).find(
+		(l) => l !== 'Other'
+	);
 	const searches = [
 		...artists.slice(0, ARTIST_SEARCHES).map((artist) => ({ q: `artist=${quote(artist)}` })),
 		...sources.slice(0, SOURCE_SEARCHES).map((source) => ({ q: `source=${quote(source)}` })),

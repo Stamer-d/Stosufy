@@ -49,7 +49,7 @@ const INSTRUCTIONS: &str = "Stosufy is the user's music player for osu! songs: e
 - Downloaded songs play instantly and offline; the others stream (if the user turned streaming on) or play a preview until they're downloaded.
 - osu! has several beatmap sets of many songs (TV size, cut, sped up): put one version of a song in a playlist, the full one unless asked otherwise.
 - To make a playlist: gather candidates, choose and order them yourself (tempo and energy that flow, varied artists), then create_playlist once; refine it with add_to_playlist and remove_from_playlist.
-- Playlists show up in the app right away. Make a playlist public, play music or change playback only when the user asks for it.
+- Playlists show up in the app right away. Make a playlist public, delete one, download songs, play music or change playback only when the user asks for it.
 - Write playlist titles and descriptions in the language the user writes in, unless they want otherwise.";
 
 const TURNED_OFF: &str = "Claude's access to Stosufy is turned off. The user can turn it on in Stosufy: Settings → Claude.";
