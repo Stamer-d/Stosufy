@@ -136,4 +136,3 @@ Claude (Handy/Web) ──HTTPS + OAuth──▶ api.stamer-d.de/v2/stosufy/mcp (
   `refresh` (`claudeChanges.ts`): sie laden Playlists, Likes oder Einstellungen neu.
 - Ändert sich `tools.json` oder `prompts.json` hier, die Kopie im Backend
   (`src/stosufy/mcp/tools.json`, `prompts.json`) und dessen Tools mitziehen.
-
