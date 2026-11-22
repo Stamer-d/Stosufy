@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Settings → Claude: turn the connection on, add Stosufy to Claude (Desktop with a click,
-	// Claude Code with a command), and what to ask then
+	// Claude Code with a command), and what to ask then; and the connector on Stosufy's server,
+	// for Claude on the phone and claude.ai (it works while this app is closed)
 	import { onMount } from 'svelte';
 	import { open as openUrl } from '@tauri-apps/plugin-shell';
 	import Button from './Button.svelte';
@@ -25,6 +26,9 @@
 	let busy = $state(false);
 	let problem = $state('');
 	let clock = $state(Date.now());
+
+	/** Stosufy's connector on the server: Claude on the phone and claude.ai add it by this */
+	const CONNECTOR_URL = 'https://api.stamer-d.de/v2/stosufy/mcp';
 
 	const EXAMPLES = [
 		'Make me a playlist from what I listened to this month',
@@ -161,8 +165,8 @@
 		Connect Claude to Stosufy and ask it for music. Claude can see what you listen to, search all of
 		osu!'s songs, make playlists from your listening or from a description, and play them.
 		<span class="block mt-1 text-xs text-secondary-600">
-			Claude reaches Stosufy only on this computer and only while you chat with it. What it looks up
-			(your history, library, playlists) becomes part of that chat.
+			Claude reaches Stosufy only while you chat with it. What it looks up (your history, library,
+			playlists) becomes part of that chat.
 		</span>
 	</span>
 </section>
@@ -348,6 +352,53 @@
 		</p>
 	</li>
 </ol>
+
+<section class="p-3 rounded-lg bg-white/[0.04]">
+	<span class="flex items-start gap-3">
+		<span class="icon-[mingcute--cellphone-line] size-6 shrink-0 text-primary-500"></span>
+		<span class="min-w-0">
+			<span class="block font-semibold text-white">On your phone and claude.ai</span>
+			<span class="block text-xs text-secondary-600">
+				Add Stosufy to Claude as a connector: it runs on Stosufy’s server, so it works on your phone
+				too, also while this computer is off. Music plays on the Stosufy you have open (this app or
+				the web app on your phone).
+			</span>
+		</span>
+	</span>
+	<ol class="mt-3 ml-9 flex flex-col gap-1.5 text-xs text-secondary-600 list-decimal list-inside">
+		<li>
+			In Claude (on claude.ai or in the app): Settings → Connectors → <span class="text-white/80"
+				>Add custom connector</span
+			>.
+		</li>
+		<li>Name it Stosufy and paste this address:</li>
+	</ol>
+	<div class="relative mt-2 ml-9">
+		<pre
+			class="p-3 pr-10 rounded-lg bg-black/30 text-xs text-white/80 whitespace-pre-wrap break-all">{CONNECTOR_URL}</pre>
+		<button
+			title="Copy"
+			aria-label="Copy the connector's address"
+			class="absolute top-2 right-2 size-7 grid place-items-center rounded-md text-secondary-600 hover:text-white hover:bg-white/10 cursor-pointer"
+			onclick={() => copy(CONNECTOR_URL, 'Address')}
+		>
+			<span class="icon-[mingcute--copy-2-line] size-4"></span>
+		</button>
+	</div>
+	<ol
+		start="3"
+		class="mt-2 ml-9 flex flex-col gap-1.5 text-xs text-secondary-600 list-decimal list-inside"
+	>
+		<li>
+			Connect, log in with your osu! account and choose whether Claude may make changes. It’s then
+			in Claude on all your devices.
+		</li>
+	</ol>
+	<p class="mt-2 ml-9 text-xs text-secondary-600">
+		Your downloaded songs, downloads and mixes are on this computer: Claude reaches them from the
+		phone while Stosufy is open here and “Allow Claude” is on.
+	</p>
+</section>
 
 {#if problem}
 	<p class="text-xs text-red-400" role="alert">{problem}</p>

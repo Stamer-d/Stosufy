@@ -34,6 +34,7 @@ import {
 	type ConnectPlayer,
 	type Repeat
 } from './connect';
+import { followClaudeChanges } from './claudeChanges';
 import type { MapSet } from '../types';
 
 /** A song from another device, as this app keeps it (the downloaded one if it's there) */
@@ -187,6 +188,8 @@ const desktopPlayer: ConnectPlayer = {
 /** Connects the desktop app as one of the user's devices */
 export function startConnect() {
 	useConnectPlayer(desktopPlayer, true);
+	// (what Claude changes on the server shows up here right away)
+	followClaudeChanges();
 	// While another device plays, the player's controls and the songs chosen go there; not
 	// from the add-ons (they play here), nor in a listening session
 	setRedirect(() => {

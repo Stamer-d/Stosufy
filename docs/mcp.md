@@ -1,9 +1,13 @@
 # Claude-Verbindung (MCP)
 
-Stand: 21.11.2026 (27 Tools). Claude (die Claude-App und Claude Code) kann über das Model Context Protocol
+Stand: 22.11.2026 (27 Tools). Claude (die Claude-App und Claude Code) kann über das Model Context Protocol
 mit Stosufy reden: den Hörverlauf und die Bibliothek lesen, alle Songs auf osu! durchsuchen,
 Playlists anlegen und ändern und Musik abspielen. Eingerichtet wird es unter
 _Einstellungen → Claude_.
+
+Zwei Wege: lokal über die Desktop-App (Abschnitt 1) und als Connector auf dem Server
+(`https://api.stamer-d.de/v2/stosufy/mcp`, Abschnitt 5) – der geht auch auf dem Handy und auf
+claude.ai, während die Desktop-App zu ist.
 
 ## 1. Aufbau
 
@@ -80,6 +84,9 @@ Prompts (in der Claude-App unter „+" → Stosufy, in Claude Code `/mcp__stosuf
 
 ## 3. Tests
 
+- Server-Connector: `test/stosufy/mcp.test.ts` im Backend (OAuth mit osu!, die Tools gegen
+  Postgres, Abspielen über Connect, Weitergabe an die Desktop-App).
+
 - `npm run test:mcp`: alle Tools mit den echten Stores, osu! und die Stamer-API als Attrappen
   (`tests/mcp/`). Prüft u. a., dass `tools.json` und die Tools übereinstimmen.
 - `cargo test --lib mcp` in `src-tauri`: Protokoll, Prompts, Server (Token, Origin),
@@ -97,3 +104,36 @@ Prompts (in der Claude-App unter „+" → Stosufy, in Claude Code `/mcp__stosuf
 - Die Windows-Store-Version von Claude hat ihre Einstellungen ggf. in
   `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`; „Add to Claude" schreibt in jede
   gefundene Installation.
+
+## 5. Auf dem Server (Handy, claude.ai)
+
+```
+Claude (Handy/Web) ──HTTPS + OAuth──▶ api.stamer-d.de/v2/stosufy/mcp (stamer-v2-backend)
+                                        │ Hörverlauf, Playlists, Likes, Einstellungen, osu!
+                                        │ Wiedergabe: Stosufy Connect ──▶ offenes Gerät
+                                        └ mcp-Befehl über Connect ──▶ Desktop-App (tools.ts)
+```
+
+- **Einrichten**: in Claude Einstellungen → Connectors → _Add custom connector_, Name Stosufy,
+  URL `https://api.stamer-d.de/v2/stosufy/mcp`. Angemeldet wird mit osu! (über die osu!-App der
+  Web-App: osu! schickt zurück an deren `/callback`, die Seite reicht Logins mit
+  `state=stosufy-mcp.…` an den Server weiter). Auf der Freigabe-Seite: „Änderungen erlauben" und die
+  Zeitzone (für Statistik und Verlauf).
+- **Auf dem Server** (`src/stosufy/mcp/` im Backend) laufen dieselben 27 Tools (Namen, Argumente und
+  Beschreibungen aus einer Kopie von `tools.json`, mit Hinweisen, wo es anders ist), mit dem, was
+  der Server hat: Hörverlauf, Playlists, Likes, gespeicherte Playlists, Smart Playlists (in den
+  Einstellungen) und osu! (mit dem osu!-Login der Verbindung).
+- **Abspielen** geht an das Gerät, das spielt, sonst an die Desktop-App, sonst an ein anderes
+  offenes Gerät (die Web-App auf dem Handy), über die Connect-Befehle (`playSongs`, `queueSong`,
+  `pause`, `volume` …).
+- **Nur mit Desktop-App**: heruntergeladene Songs (`search_library`, Downloaded Songs), Downloads,
+  Mixes, Mod/Autoplay/Sleep-Timer und die Warteschlange bearbeiten. Ist die Desktop-App offen (und
+  „Allow Claude" an), meldet sie sich bei Connect mit `mcp: true`; der Server schickt ihr den Aufruf
+  als Befehl `mcp`, sie führt ihr eigenes Tool aus (`connection.ts`, mit den lokalen Einstellungen)
+  und antwortet mit `answerConnectMcp`. `find_similar_songs` und `get_library_overview` laufen
+  dann auch dort (mit der Bibliothek).
+- **Änderungen** von Claude auf dem Server schickt der Server den offenen Apps als Befehl
+  `refresh` (`claudeChanges.ts`): sie laden Playlists, Likes oder Einstellungen neu.
+- Ändert sich `tools.json` oder `prompts.json` hier, die Kopie im Backend
+  (`src/stosufy/mcp/tools.json`, `prompts.json`) und dessen Tools mitziehen.
+

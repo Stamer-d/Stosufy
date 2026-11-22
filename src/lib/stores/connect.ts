@@ -196,8 +196,8 @@ const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 20000, 30000];
 /** The device that plays also sends where it is this often (the others' clocks drift) */
 const HEARTBEAT = 15_000;
 
-const SUBSCRIPTION = `subscription ($deviceId: String!, $name: String!, $kind: String!) {
-	connect(deviceId: $deviceId, name: $name, kind: $kind) {
+const SUBSCRIPTION = `subscription ($deviceId: String!, $name: String!, $kind: String!, $mcp: Boolean) {
+	connect(deviceId: $deviceId, name: $name, kind: $kind, mcp: $mcp) {
 		devices { id name kind isActive }
 		activeDeviceId
 		playback { song position duration playing rate volume shuffle repeat updatedAt }
@@ -227,6 +227,26 @@ export function positionOf(playback: ConnectPlayback | null) {
 	if (!playback.playing) return playback.position;
 	const at = playback.position + ((serverNow() - playback.updatedAt) / 1000) * playback.rate;
 	return playback.duration > 0 ? Math.min(at, playback.duration) : at;
+}
+
+// --- What else the server asks of this device -------------------------------------------------
+
+/** Handlers of the commands that aren't the player's (refresh, mcp), by type */
+const handlers = new Map<string, (data: any) => unknown>();
+
+/** Handles a command the server sends (e.g. "refresh": Claude changed playlists on the server) */
+export function onConnectCommand(type: string, handler: (data: any) => unknown) {
+	handlers.set(type, handler);
+}
+
+/** Whether this device runs Claude's tools for the server (the desktop app with Claude on) */
+let canRunClaude = false;
+
+/** Tells the server whether this device can run Claude's tools (reconnects if that changed) */
+export function setClaudeAbility(on: boolean) {
+	if (canRunClaude === on) return;
+	canRunClaude = on;
+	if (controller && get(connect).status !== 'off') start();
 }
 
 /** Hands in the app's player and connects this device (once the user is logged in) */
@@ -283,7 +303,12 @@ async function stream(signal: AbortSignal, attempt: number) {
 			},
 			body: JSON.stringify({
 				query: SUBSCRIPTION,
-				variables: { deviceId: device!.id, name: device!.name, kind: device!.kind }
+				variables: {
+					deviceId: device!.id,
+					name: device!.name,
+					kind: device!.kind,
+					mcp: canRunClaude
+				}
 			}),
 			signal
 		});
@@ -446,6 +471,10 @@ function run(type: string, data: any) {
 			}
 			case 'release':
 				return p.release();
+			default:
+				return void Promise.resolve(handlers.get(type)?.(data)).catch((error) =>
+					console.error(`Connect: couldn't ${type}:`, error)
+				);
 		}
 	} catch (error) {
 		console.error(`Connect: couldn't ${type}:`, error);
