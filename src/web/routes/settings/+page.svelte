@@ -14,6 +14,24 @@
 	import { VISIBILITY, setVisibility, visibility } from '../../friends';
 	import { downloadedSongs, removeAllDownloads } from '../../downloads';
 	import { showToast } from '../../../lib/stores/toast';
+	import { equalizer } from '../../audioGraph';
+	import { EQ_BANDS, EQ_LIMIT, EQ_PRESETS } from '../../../lib/stores/equalizer';
+
+	// The equalizer (this phone's own): presets, and each band by hand
+	function setEq(change) {
+		equalizer.update((eq) => ({ ...eq, ...change }));
+		wakeAudio();
+	}
+	function setBand(index, value) {
+		const gains = [...$equalizer.gains];
+		gains[index] = value;
+		const preset = Object.entries(EQ_PRESETS).find(([, values]) =>
+			values.every((v, i) => v === gains[i])
+		)?.[0];
+		setEq({ gains, preset: preset ?? null });
+	}
+	const hz = (frequency) => (frequency >= 1000 ? `${frequency / 1000} kHz` : `${frequency} Hz`);
+	const db = (value) => `${value > 0 ? '+' : ''}${value} dB`;
 
 	const ACCENTS = [
 		{ value: 'violet', label: 'Violet', color: 'oklch(0.57 0.21 295)' },
@@ -145,15 +163,24 @@
 
 <!-- Account -->
 <div class="mx-4 mt-3 p-3 flex items-center gap-3 rounded-xl bg-white/[0.04]">
-	<img
-		src={$webUser?.avatar_url ?? `${base}/logo.png`}
-		alt=""
-		class="size-12 rounded-full object-cover bg-secondary-300"
-	/>
-	<div class="min-w-0 flex-1">
-		<p class="font-semibold truncate">{$webUser?.username ?? 'Logged in'}</p>
-		<p class="text-sm text-secondary-600">osu! account · settings synced with the desktop app</p>
-	</div>
+	<!-- (tap: your osu! profile) -->
+	<a
+		href="{base}/profile/me"
+		aria-label="Your profile"
+		class="min-w-0 flex-1 flex items-center gap-3"
+	>
+		<img
+			src={$webUser?.avatar_url ?? `${base}/logo.png`}
+			alt=""
+			class="size-12 shrink-0 rounded-full object-cover bg-secondary-300"
+		/>
+		<span class="min-w-0 flex-1">
+			<span class="block font-semibold truncate">{$webUser?.username ?? 'Logged in'}</span>
+			<span class="block text-sm text-secondary-600">
+				Your profile · settings synced with the desktop app
+			</span>
+		</span>
+	</a>
 	<button class="h-10 px-3 rounded-full bg-white/[0.08] text-sm font-semibold" onclick={logOut}>
 		Log out
 	</button>
@@ -230,6 +257,55 @@
 		wakeAudio();
 	}
 )}
+{@render toggle(
+	'Equalizer',
+	$equalizer.on
+		? `${$equalizer.preset ?? 'Your own'} · on this phone`
+		: 'Shape the sound: more bass, clearer voices…',
+	$equalizer.on,
+	() => setEq({ on: !$equalizer.on })
+)}
+{#if $equalizer.on}
+	<div
+		class="px-4 pb-1 flex gap-2 overflow-x-auto [scrollbar-width:none]"
+		data-no-swipe
+		role="group"
+		aria-label="Equalizer presets"
+	>
+		{#each Object.entries(EQ_PRESETS) as [name, gains] (name)}
+			<button
+				aria-pressed={$equalizer.preset === name}
+				class="shrink-0 h-10 px-4 rounded-full text-sm font-semibold transition {$equalizer.preset ===
+				name
+					? 'bg-white text-black'
+					: 'bg-white/[0.08] text-white/80'}"
+				onclick={() => setEq({ gains: [...gains], preset: name })}
+			>
+				{name}
+			</button>
+		{/each}
+	</div>
+	<div class="px-4 py-2 flex flex-col gap-1" role="group" aria-label="Equalizer bands">
+		{#each EQ_BANDS as frequency, i (frequency)}
+			<label class="flex items-center gap-3">
+				<span class="w-14 shrink-0 text-xs text-secondary-600 tabular-nums">{hz(frequency)}</span>
+				<input
+					type="range"
+					min={-EQ_LIMIT}
+					max={EQ_LIMIT}
+					step="0.5"
+					value={$equalizer.gains[i] ?? 0}
+					aria-label={hz(frequency)}
+					oninput={(e) => setBand(i, Number(e.currentTarget.value))}
+					class="min-w-0 flex-1 h-8 accent-[var(--color-primary-400)]"
+				/>
+				<span class="w-14 shrink-0 text-end text-xs text-secondary-600 tabular-nums">
+					{db($equalizer.gains[i] ?? 0)}
+				</span>
+			</label>
+		{/each}
+	</div>
+{/if}
 <div class="px-4 py-3">
 	<p class="font-semibold">Speed</p>
 	<div class="mt-3 grid grid-cols-5 gap-2">

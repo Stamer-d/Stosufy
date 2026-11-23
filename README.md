@@ -23,6 +23,9 @@ and Dash levels.
 - 🎤 **Synced lyrics**, with romaji for Japanese songs, and a full-screen focus mode.
 - 🎯 **Gameplay.** Watch the map play along with the song, watch top replays or play it yourself.
 - 👥 **Friends.** See what your friends are listening to and listen together.
+- 🏆 **Players and rankings.** Search any osu! player, open their profile (ranks, best plays,
+  the songs they play most and favourited, all to listen to), and browse osu!'s rankings:
+  worldwide, by country, among your friends, in every game mode.
 - 📱 **Your devices together.** As in Spotify: play on your computer and control it from your
   phone (play, pause, skip, seek, its volume, songs to play), or the other way around, and move
   the song from one to the other, going on where it was.

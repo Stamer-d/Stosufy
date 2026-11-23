@@ -56,3 +56,20 @@ export function slim(original: MapSet): MapSet {
 		beatmaps: map ? [{ id: map.id, total_length: map.total_length, version: map.version }] : []
 	} as MapSet;
 }
+
+/** A beatmap set of osu!'s answers (the search, a player's lists) as a song: its osu!
+ * standard difficulty first */
+export function songOfSet(set: MapSet): MapSet {
+	const maps = [...(set.beatmaps ?? [])].sort(
+		(a, b) =>
+			Number((b as { mode?: string }).mode === 'osu') -
+			Number((a as { mode?: string }).mode === 'osu')
+	);
+	return slim({
+		id: set.id,
+		title: set.title,
+		artist: set.artist,
+		creator: set.creator,
+		beatmaps: maps
+	} as MapSet);
+}

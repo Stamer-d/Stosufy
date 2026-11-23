@@ -39,6 +39,12 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
   await ctx.addInitScript(() => {
     const play = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function (...a) { (window.__played ||= []).push(this); (window.__elements ||= new Set()).add(this); return play.apply(this, a); };
+    // (the lock screen's buttons and its line, as the page sets them)
+    window.__handlers = {};
+    const setHandler = MediaSession.prototype.setActionHandler;
+    MediaSession.prototype.setActionHandler = function (action, handler) { window.__handlers[action] = handler; return setHandler.call(this, action, handler); };
+    const setPosition = MediaSession.prototype.setPositionState;
+    MediaSession.prototype.setPositionState = function (state) { window.__position = state; return setPosition.call(this, state); };
     // (the song's element: the one that began playing last and is heard. The next song is made
     // ready in the other one, silent, and isn't the song until it takes over)
     Object.defineProperty(window, '__audio', { get() {
@@ -79,6 +85,15 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
       setTimeout(() => { routing.gains.length = Math.min(routing.gains.length, 2); routing.done = true; hear(this, source, element); });
       return source;
     };
+    // (where a song's fade goes: the speakers, or the equalizer's bands)
+    const connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (to, ...rest) {
+      if (this instanceof GainNode && (window.__routes || []).some((r) => r.gains[1] === this)) (window.__eqOutputs ||= []).push(to instanceof AudioDestinationNode ? 'out' : 'bands');
+      return connect.call(this, to, ...rest);
+    };
+    // (the equalizer's bands)
+    const biquad = AudioContext.prototype.createBiquadFilter;
+    AudioContext.prototype.createBiquadFilter = function () { const node = biquad.call(this); (window.__biquads ||= []).push(node); return node; };
     const gain = AudioContext.prototype.createGain;
     AudioContext.prototype.createGain = function () {
       const node = gain.call(this);
@@ -905,6 +920,105 @@ const nowTitle = () => p.evaluate(() => { const s = JSON.parse(localStorage.getI
     expect((await nowTitle()) !== before, 'still ' + before);
     expect(after.same && !after.paused, 'the next song does not play in the same element: ' + JSON.stringify(after));
     expect((await logged()).some((line) => /next song not made ready/.test(line)), 'not in the log');
+  });
+
+  await step('a mirror without byte ranges: a jump in the song goes there (from memory), from the lock screen too', async () => {
+    try {
+    mock.ranges = false;
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Library'); await p.click('text=Gaming'); await wait(900); await playFirst();
+    // (a few seconds in, the song playing is read into memory)
+    await p.waitForFunction(() => window.__audio && window.__audio.currentTime > 5.5, null, { timeout: 15000 });
+    await p.waitForFunction(() => JSON.parse(localStorage.getItem('stosufy-web-log') || '[]').some((line) => /in memory: Song number 31/.test(line)), null, { timeout: 8000 });
+    expect(await p.evaluate(() => !window.__audio.src.startsWith('blob:')), 'the tapped song does not start straight from the mirror');
+    await lock();
+    await p.evaluate(() => window.__handlers.seekto({ seekTime: 14 }));
+    await wait(1500);
+    const there = await p.evaluate(() => ({ at: window.__audio.currentTime, memory: window.__audio.src.startsWith('blob:'), paused: window.__audio.paused, position: window.__position }));
+    await unlock();
+    expect(there.memory && !there.paused, 'not playing from memory after the jump: ' + JSON.stringify(there));
+    expect(there.at > 14 && there.at < 17, 'not where it was sent: ' + there.at);
+    expect(there.position && Math.abs(there.position.duration - 20) < 0.5 && there.position.position >= 13.5, "the lock screen's line is not there: " + JSON.stringify(there.position));
+    // back, in the app: in the same audio now
+    await p.evaluate(() => window.__handlers.seekto({ seekTime: 3 }));
+    await wait(900);
+    const back = await p.evaluate(() => window.__audio.currentTime);
+    expect(back > 3 && back < 5.5, 'not back at 3 s: ' + back);
+    // A song tapped, and a jump right away, before it's in memory: it gets there once it is
+    await p.locator('main ol > li').nth(3).locator('button').first().click(); await wait(1200);
+    await p.evaluate(() => window.__handlers.seekto({ seekTime: 15 }));
+    await p.waitForFunction(() => window.__audio.src.startsWith('blob:') && window.__audio.currentTime > 15 && window.__audio.currentTime < 19, null, { timeout: 6000 });
+    expect((await nowTitle()) === 'Song number 34', 'another song now: ' + (await nowTitle()));
+    } finally { mock.ranges = true; await unlock(); }
+  });
+
+  await step("screen locked: the next song is in memory before this one ends, and starts though the mirror is gone; so does the one after with the lock screen's next", async () => {
+    try {
+    mock.ranges = false;
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Library'); await p.click('text=Anime openings'); await wait(900); await playFirst();
+    const first = await nowTitle();
+    await p.waitForFunction(() => window.__audio && window.__audio.currentTime > 5.5, null, { timeout: 15000 });
+    const inMemory = (title) => p.waitForFunction((title) => JSON.parse(localStorage.getItem('stosufy-web-log') || '[]').some((line) => line.includes('in memory: ' + title)), title, { timeout: 8000 });
+    const titles = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('stosufy-web-player')); return s.songs.slice(s.index, s.index + 3).map((song) => song.title); });
+    await inMemory(titles[1]);
+    await lock();
+    mock.mirrorDown = true;
+    // (to near its end, as from the lock screen's line: the song is in memory by now too)
+    await p.evaluate(() => window.__handlers.seekto({ seekTime: 20 - 1.5 }));
+    await wait(4000);
+    const second = await p.evaluate(() => ({ memory: window.__audio.src.startsWith('blob:'), paused: window.__audio.paused, at: window.__audio.currentTime }));
+    expect((await nowTitle()) === titles[1], 'playing ' + (await nowTitle()) + ' after ' + first);
+    expect(second.memory && !second.paused && second.at > 0.5, 'the next song does not play from memory: ' + JSON.stringify(second));
+    // the one after it is read while this one plays (the mirror is back), and the lock
+    // screen's next starts it at once
+    mock.mirrorDown = false;
+    await p.waitForFunction(() => window.__audio.currentTime > 5.5, null, { timeout: 15000 });
+    await inMemory(titles[2]);
+    mock.mirrorDown = true;
+    await p.evaluate(() => window.__handlers.nexttrack());
+    await wait(1200);
+    const third = await p.evaluate(() => ({ memory: window.__audio.src.startsWith('blob:'), paused: window.__audio.paused, at: window.__audio.currentTime }));
+    // and back: the song before is still in memory
+    await p.evaluate(() => window.__handlers.previoustrack());
+    await wait(1200);
+    const again = await p.evaluate(() => ({ memory: window.__audio.src.startsWith('blob:'), paused: window.__audio.paused, at: window.__audio.currentTime }));
+    const title = await nowTitle();
+    expect(third.memory && !third.paused && third.at > 0.3, "the lock screen's next does not play from memory: " + JSON.stringify(third));
+    expect(title === titles[1] && again.memory && !again.paused, 'back: ' + title + ' ' + JSON.stringify(again));
+    // (each of the next songs came from the mirror once)
+    const asked = (title) => ops.filter((op) => op === 'mirror:' + (1000 + Number(title.match(/\d+/)[0]) - 1)).length;
+    expect(asked(titles[1]) === 1 && asked(titles[2]) === 1, 'asked the mirror for the next songs ' + asked(titles[1]) + ' and ' + asked(titles[2]) + ' times');
+    } finally { mock.mirrorDown = false; mock.ranges = true; await unlock(); }
+  });
+
+  await step("equalizer: a preset sets its ten bands, a band moved by hand makes it the user's own; kept on this phone; off, the song plays as it is", async () => {
+    await p.goto(BASE + '/'); await wait(1200);
+    await tab('Library'); await p.click('text=Chill'); await wait(900); await playFirst(); await wait(1200);
+    await tab('Home'); if (path() !== '/') await tab('Home');
+    await p.click('main a[aria-label="Settings"]'); await wait(1000);
+    const toggle = p.locator('button[role="switch"]:has-text("Equalizer")');
+    expect((await toggle.getAttribute('aria-checked')) === 'false', 'on from the start');
+    await toggle.click(); await wait(400);
+    await p.click('button:has-text("Bass boost")'); await wait(600);
+    const bands = () => p.evaluate(() => (window.__biquads || []).filter((f) => f.Q.value > 1.05 && f.Q.value < 1.15).map((f) => [f.type, f.frequency.value, Math.round(f.gain.value * 10) / 10]));
+    const boosted = await bands();
+    expect(boosted.length === 10 && boosted[0][0] === 'lowshelf' && boosted[9][0] === 'highshelf', 'not ten bands: ' + JSON.stringify(boosted));
+    expect(boosted[0][2] === 6 && boosted[3][2] === 2 && boosted[9][2] === 0, 'not the preset: ' + JSON.stringify(boosted.map((b) => b[2])));
+    expect(await p.evaluate(() => window.__eqOutputs.at(-1) === 'bands'), 'the song does not go through the bands');
+    expect(await p.evaluate(() => !window.__audio.paused && window.__audio.currentTime > 1), 'the song stopped');
+    await p.locator('input[aria-label="1 kHz"]').evaluate((input) => { input.value = '4'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await wait(500);
+    expect((await bands())[5][2] === 4, 'the band was not moved: ' + JSON.stringify((await bands())[5]));
+    expect((await toggle.innerText()).includes('Your own'), 'still a preset: ' + (await toggle.innerText()));
+    const kept = await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-equalizer')));
+    expect(kept.on && kept.gains[5] === 4 && kept.preset === null, 'not kept: ' + JSON.stringify(kept));
+    // off: the song straight out again, past the bands
+    await toggle.click(); await wait(600);
+    expect((await toggle.getAttribute('aria-checked')) === 'false' && await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-equalizer')).on === false), 'not off');
+    expect(await p.evaluate(() => window.__eqOutputs.at(-1) === 'out'), 'off, the song still goes through the bands: ' + (await p.evaluate(() => window.__eqOutputs.slice(-3).join())));
+    expect(await p.evaluate(() => !window.__audio.paused), 'the song stopped when it was turned off');
+    await p.evaluate(() => localStorage.removeItem('stosufy-web-equalizer'));
   });
 
   await step("hitsounds: on the song's sound, to a few milliseconds (heard in the audio graph), while its element tells its place late and coarsely (as Safari)", async () => {

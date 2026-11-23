@@ -19,8 +19,27 @@
 	import { sameSong } from '../../../lib/tracks';
 	import { handleImageError } from '../../shims/data';
 	import Skeleton from '../../Skeleton.svelte';
+	import PlayerRow from '../../PlayerRow.svelte';
+	import { osuFriends } from '../../../lib/stores/profile';
 
 	onMount(watchFriends);
+
+	// All your osu! friends (not only those who use Stosufy): the ones online first, then by rank
+	let osuList = $state(null);
+	let allShown = $state(false);
+	$effect(() => {
+		if ($offline || osuList) return;
+		osuFriends()
+			.then(
+				(all) =>
+					(osuList = all.sort(
+						(a, b) =>
+							Number(b.online) - Number(a.online) ||
+							(a.globalRank ?? Infinity) - (b.globalRank ?? Infinity)
+					))
+			)
+			.catch(() => (osuList = []));
+	});
 
 	let shown = $derived.by(() => {
 		void $userSettings;
@@ -154,6 +173,46 @@
 		</li>
 	{/each}
 </ul>
+
+{#if osuList?.length}
+	<section class="mt-6">
+		<div class="px-4 flex items-center justify-between gap-3">
+			<h2 class="text-lg font-bold">
+				On osu! <span class="text-secondary-600">{osuList.length}</span>
+			</h2>
+			<a
+				href="{base}/rankings?friends"
+				class="h-10 px-3 flex items-center gap-1.5 rounded-full bg-white/[0.08] text-sm font-semibold"
+			>
+				<span class="icon-[mingcute--trophy-line] size-4"></span> Ranking
+			</a>
+		</div>
+		<ul class="px-2 mt-1" aria-label="osu! friends">
+			{#each allShown ? osuList : osuList.slice(0, 8) as player (player.id)}
+				<PlayerRow
+					{player}
+					detail={[
+						player.globalRank ? `#${player.globalRank.toLocaleString()}` : '',
+						player.pp ? `${Math.round(player.pp).toLocaleString()}pp` : '',
+						player.online ? 'online' : ''
+					]
+						.filter(Boolean)
+						.join(' · ') || 'osu! player'}
+				/>
+			{/each}
+		</ul>
+		{#if osuList.length > 8}
+			<div class="px-4 pt-1">
+				<button
+					class="h-10 px-5 rounded-full bg-white/10 text-sm font-semibold"
+					onclick={() => (allShown = !allShown)}
+				>
+					{allShown ? 'Show less' : `Show all ${osuList.length}`}
+				</button>
+			</div>
+		{/if}
+	</section>
+{/if}
 
 <section class="mx-4 mt-6 mb-6 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/5">
 	<h2 class="font-bold">What your friends see</h2>

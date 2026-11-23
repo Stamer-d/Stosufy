@@ -48,6 +48,12 @@ const playNs = PLAYS ? Array.from({ length: PLAYS }, (_, i) => 1 + ((i * 7919) %
 const plays = playNs.map((n, i) => ({ songKey: `${100 + n}:0`, at: now - Math.round((PLAYS ? 86400 * 300 : 72000) * (1 - i / playNs.length)), heard: 180, length: 200 }));
 const songs = Object.fromEntries([...new Set(playNs)].map((n) => [`${100 + n}:0`, { setId: 100 + n, track: 0, mapId: 1000 + n - 1, title: `Song number ${n}`, artist: `Artist ${n % 37}`, creator: 'mapper', genre: ['Anime', 'Video Game', 'Electronic'][n % 3], language: 'Japanese', source: n % 3 ? 'Some Anime' : null, bpm: 100 + (n % 80) }]));
 const ops = [];
+// osu! players and countries (the rankings, the profiles, the player search)
+const COUNTRIES = [['US', 'United States'], ['JP', 'Japan'], ['DE', 'Germany'], ['KR', 'South Korea'], ['FR', 'France'], ['PL', 'Poland']];
+const player = (id, rank, country) => {
+  const [code, name] = COUNTRIES.find(([c]) => c === country) || COUNTRIES[id % COUNTRIES.length];
+  return { id, username: id === 5 ? 'tester' : `Player ${id}`, avatar_url: null, country_code: code, country: { code, name }, is_online: id % 3 === 0, statistics: { global_rank: rank, country_rank: Math.ceil(rank / 20), pp: Math.max(100, 21000 - rank * 3), hit_accuracy: 99.1 - (rank % 50) / 10, play_count: 150000 - rank, ranked_score: 9e10 - rank * 1e6, total_score: 2e11, play_time: 3600 * 1500, maximum_combo: 4321, level: { current: 101, progress: 40 }, grade_counts: { ss: 10, ssh: 5, s: 300, sh: 200, a: 800 } } };
+};
 const rows = (list) => list.map((m, i) => ({ ...m, rowId: 100000 + m.id }));
 const state = {
   playlists: [{ id: 7, title: 'Big playlist' + (LONG ? ' with an extremely long name that goes on and on' : ''), createdBy: 1 }, { id: 2, title: 'Chill', createdBy: 1 }, { id: 3, title: 'Gaming', createdBy: 1 }, { id: 4, title: 'Anime openings', createdBy: 1 }],
@@ -62,7 +68,11 @@ const state = {
   /** The .osu files have a spinner (2–6 s) */
   spinner: false,
   /** The songs' audio has a beat (else a tone) */
-  beat: false
+  beat: false,
+  /** The mirror sends byte ranges (the real one doesn't: tests of that turn it off) */
+  ranges: true,
+  /** The mirror can't be reached */
+  mirrorDown: false
 };
 async function setup(ctx, { lyrics = true } = {}) {
   await ctx.route(/^https?:\/\/(?!127\.0\.0\.1).*/, async (original) => {
@@ -107,6 +117,43 @@ async function setup(ctx, { lyrics = true } = {}) {
       return state.durations[id] ? route.fulfill({ json: { seconds: state.durations[id] } }) : route.fulfill({ status: 404, json: {} });
     }
     if (url.includes('/stosufy/web-login')) return route.fulfill({ status: 503, json: {} });
+    if (url.includes('/stosufy/osu/rankings/')) {
+      const [, mode, board] = url.match(/rankings\/(\w+)\/(\w+)/);
+      const q = new URL(url).searchParams;
+      const pageNo = Number(q.get('cursor[page]') || 1);
+      ops.push(`rankings:${mode}:${board}:${q.get('country') || ''}:${q.get('filter') || ''}:${pageNo}`);
+      if (board === 'country') return route.fulfill({ json: { cursor: null, ranking: COUNTRIES.map(([code, name], i) => ({ code, active_users: 90000 - i * 9000, play_count: 9e8 - i * 1e8, ranked_score: 9e13, performance: 9e7 - i * 7e6, country: { code, name } })) } });
+      const friends = q.get('filter') === 'friends';
+      const from = (pageNo - 1) * 50;
+      // (the user themselves at place 4321)
+      const ranking = Array.from({ length: friends ? 3 : 50 }, (_, i) => player(friends ? [5, 11, 12][i] : from + i + 1 === 4321 ? 5 : 2000 + from + i, friends ? [4321, 77, 150000][i] : from + i + 1, q.get('country')));
+      return route.fulfill({ json: { cursor: !friends && pageNo < 200 ? { page: pageNo + 1 } : null, ranking: ranking.map((u) => ({ ...u.statistics, user: u })) } });
+    }
+    if (/\/stosufy\/osu\/users\/[^/]+\/scores\//.test(url)) {
+      const offset = Number(new URL(url).searchParams.get('offset') || 0);
+      return route.fulfill({ json: beatmaps.slice(offset, offset + 10).map((m, i) => ({ id: 7000 + offset + i, pp: 400 - offset - i, accuracy: 0.9876, rank: i % 2 ? 'S' : 'XH', mods: i % 2 ? [] : [{ acronym: 'HD' }, { acronym: 'CL' }], ended_at: '2026-01-01T00:00:00Z', weight: { percentage: 100 - i * 5 }, beatmap: { id: m.id, version: m.version, difficulty_rating: 5.5, beatmapset_id: m.beatmapset_id }, beatmapset: m.beatmapset })) });
+    }
+    if (/\/stosufy\/osu\/users\/\d+\/beatmapsets\//.test(url)) {
+      const list = url.match(/beatmapsets\/(\w+)/)[1];
+      const offset = Number(new URL(url).searchParams.get('offset') || 0);
+      const part = beatmaps.slice(200 + offset, 200 + offset + 20);
+      ops.push('usersets:' + list + ':' + offset);
+      return route.fulfill({ json: list === 'most_played' ? part.map((m, i) => ({ count: 900 - offset - i, beatmap: m, beatmapset: m.beatmapset })) : part.map((m) => ({ ...m.beatmapset, beatmaps: [m] })) });
+    }
+    if (url.includes('/stosufy/osu/users/')) {
+      const who = decodeURIComponent(url.match(/users\/([^/?]+)/)[1]);
+      ops.push('user:' + who);
+      if (who === 'nobody') return route.fulfill({ status: 404, json: { error: null } });
+      const id = /^\d+$/.test(who) ? Number(who) : 9;
+      const u = player(id, id === 5 ? 4321 : id, 'DE');
+      return route.fulfill({ json: { ...u, username: /^\d+$/.test(who) ? u.username : who, cover: { url: 'https://assets.ppy.sh/user-profile-covers/1.jpg' }, join_date: '2019-05-01T00:00:00Z', is_supporter: true, rank_history: { data: Array.from({ length: 90 }, (_, i) => 5000 - i * 7) }, rank_highest: { rank: 3210, updated_at: '2025-03-01T00:00:00Z' }, previous_usernames: ['oldname'], follower_count: 42, user_achievements: [{}, {}], favourite_beatmapset_count: 45, beatmap_playcounts_count: 300, ranked_beatmapset_count: 3, scores_best_count: 30, groups: [{ name: 'Beatmap Nominators', short_name: 'BN', colour: '#A347EB' }] } });
+    }
+    if (url.includes('/stosufy/osu/search')) {
+      const q = new URL(url).searchParams.get('query') || '';
+      ops.push('players:' + q);
+      return route.fulfill({ json: { user: { total: 5, data: Array.from({ length: 5 }, (_, i) => ({ ...player(300 + i, 10 + i, 'JP'), username: `${q}${i || ''}` })) } } });
+    }
+    if (url.includes('/stosufy/osu/friends')) return route.fulfill({ json: [11, 12, 13, 14].map((id, i) => ({ target_id: id, mutual: i < 2, target: { ...player(id, [77, 150000, 900, 12][i], 'DE'), is_online: i < 2 } })) });
     if (url.includes('/stosufy/osu/beatmapsets/search')) ops.push('search:' + new URL(url).search);
     if (url.includes('/stosufy/osu/beatmapsets/search')) return route.fulfill({ json: { beatmapsets: sets.slice(0, 8).map((s, i) => ({ ...s, title: 'Found ' + s.title, beatmaps: [beatmaps[i]] })), cursor_string: null } });
     if (url.includes('/stosufy/osu/beatmapsets/')) {
@@ -139,7 +186,7 @@ async function setup(ctx, { lyrics = true } = {}) {
         case 'getStosufyFavourites': data = { getStosufyFavourites: state.favs.map((m, i) => ({ id: i + 1, setId: m.beatmapset_id, mapId: m.id, createdAt: '' })) }; break;
         case 'getStosufyPlaylists': data = { getStosufyPlaylists: state.playlists.map((p) => ({ ...p, songAmount: (state.songs[p.id] ?? []).length })) }; break;
         case 'createStosufyPlaylist': { const p = { id: 60 + state.playlists.length, title: v.title, createdBy: 1 }; state.playlists.push(p); state.songs[p.id] = []; ops.push('create:' + v.title); data = { createStosufyPlaylist: { ...p, songAmount: 0 } }; break; }
-        case 'editStosufyPlaylist': { const p = state.playlists.find((x) => x.id === v.id); if (p) p.title = v.title; ops.push('edit:' + v.title); data = { editStosufyPlaylist: { ...p, songAmount: 0 } }; break; }
+        case 'editStosufyPlaylist': { const p = state.playlists.find((x) => x.id === v.id); if (p) { p.title = v.title; if (v.description != null) p.description = v.description; if (v.public != null) p.public = v.public; } ops.push('edit:' + v.title); if (v.description) ops.push(`details:${v.description}:${v.public}`); data = { editStosufyPlaylist: { ...p, songAmount: 0 } }; break; }
         case 'deleteStosufyPlaylist': state.playlists = state.playlists.filter((x) => x.id !== v.id); ops.push('delete:' + v.id); data = { deleteStosufyPlaylist: true }; break;
         case 'addSongToStosufyPlaylist': { const m = beatmaps.find((b) => b.id === v.mapId); const row = { ...m, rowId: 9000 + ops.length }; (state.songs[v.playlistId] ??= []).push(row); ops.push(`add:${v.playlistId}:${v.mapId}`); data = { addSongToStosufyPlaylist: { id: row.rowId, setId: v.setId, mapId: v.mapId, createdAt: '' } }; break; }
         case 'removeSongFromStosufyPlaylist': { state.songs[v.playlistId] = (state.songs[v.playlistId] ?? []).filter((m) => m.rowId !== v.songId); ops.push(`remove:${v.playlistId}:${v.songId}`); data = { removeSongFromStosufyPlaylist: true }; break; }
@@ -163,8 +210,15 @@ async function setup(ctx, { lyrics = true } = {}) {
       return route.fulfill({ json: { data } });
     }
     if (url.includes('catboy.best') || url.includes('b.ppy.sh') || url.includes('/stosufy/preview/')) {
-      // (with ranges, as the mirror: the audio can be seeked)
-      const wav = state.beat && url.includes('catboy.best') ? BEAT : TONE;
+      const mirror = url.includes('catboy.best');
+      if (mirror) ops.push('mirror:' + (url.match(/audio\/(\d+)/) || [])[1]);
+      // (the mirror can't be reached, when the test says)
+      if (mirror && state.mirrorDown) return route.abort('failed');
+      const wav = state.beat && mirror ? BEAT : TONE;
+      // (the mirror without byte ranges, as the real one, when the test says: the whole song
+      // whatever part is asked for)
+      if (mirror && !state.ranges) return route.fulfill({ body: wav, contentType: 'audio/wav', headers: { 'access-control-allow-origin': '*' } });
+      // (else with ranges: the audio can be seeked)
       const range = /bytes=(\d+)-(\d*)/.exec(req.headers()['range'] || '');
       if (range) {
         const from = Number(range[1]);
