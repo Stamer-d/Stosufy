@@ -30,6 +30,11 @@
 	import { queue, playing, toggle, shuffle } from '../../../player';
 	import { sortable } from '../../../sortable';
 	import { moveSongInPlaylist, toggleSavedPlaylist } from '../../../../lib/stores/playlist';
+	import { sortOptions, sortSongs } from '../../../../lib/songSort';
+	import { addAllToQueue } from '../../../player';
+	import { fade, fly } from 'svelte/transition';
+	import { swipe } from '../../../gestures';
+	import { haptic } from '../../../haptics';
 
 	/** Rows shown: more as the list is scrolled */
 	const STEP = 100;
@@ -67,16 +72,45 @@
 			)
 	);
 	let menuOpen = $state(false);
+	$effect(() => {
+		if (!menuOpen) confirmDelete = false;
+	});
 	let autoOn = $derived($autoDownload.has(String(id)));
 	let error = $state('');
 	let loading = $state(false);
 	/** How many songs (while they load, as many as the library says it has) */
 	let count = $derived(songs.length || (loading ? (playlist?.song_amount ?? 0) : 0));
 	let filter = $state('');
+	// The order the songs are shown and played in: the playlist's own, or by when they were
+	// added, their title, artist, tempo or length (kept for each playlist on this phone)
+	const SORT_KEY = 'stosufy-web-playlist-sort';
+	const SORTS = sortOptions(false).filter((option) => option.value !== 'stars');
+	function keptSorts() {
+		try {
+			return JSON.parse(localStorage.getItem(SORT_KEY) ?? '{}');
+		} catch {
+			return {};
+		}
+	}
+	let sorts = $state(keptSorts());
+	let sort = $derived(sorts[id] ?? 'custom');
+	let choosingSort = $state(false);
+	function setSort(value) {
+		choosingSort = false;
+		const next = { ...sorts, [id]: value };
+		if (value === 'custom') delete next[id];
+		sorts = next;
+		try {
+			localStorage.setItem(SORT_KEY, JSON.stringify(next));
+		} catch {
+			// (only for now)
+		}
+	}
+	let listed = $derived(sort === 'custom' ? songs : sortSongs(songs, sort));
 	let shown = $derived.by(() => {
 		const words = filter.trim().toLowerCase();
-		if (!words) return songs.map((song, index) => ({ song, index }));
-		return songs
+		if (!words) return listed.map((song, index) => ({ song, index }));
+		return listed
 			.map((song, index) => ({ song, index }))
 			.filter(({ song }) => `${song.title} ${song.artist}`.toLowerCase().includes(words));
 	});
@@ -135,6 +169,60 @@
 		}
 	}
 
+	// Its details: the description, who sees it, and its cover (your own playlists)
+	let details = $state(null);
+	let saving = $state(false);
+	function openDetails() {
+		menuOpen = false;
+		details = {
+			title: playlist?.title ?? '',
+			description: playlist?.description ?? '',
+			isPublic: !!playlist?.public,
+			file: null,
+			preview: null,
+			error: ''
+		};
+	}
+	function pickCover(event) {
+		const file = event.currentTarget.files?.[0];
+		if (!file || !details) return;
+		if (file.size > 8 * 1024 * 1024) {
+			details.error = 'That picture is too big (8 MB at most)';
+			return;
+		}
+		if (details.preview) URL.revokeObjectURL(details.preview);
+		details.file = file;
+		details.preview = URL.createObjectURL(file);
+		details.error = '';
+	}
+	function closeDetails() {
+		if (details?.preview) URL.revokeObjectURL(details.preview);
+		details = null;
+	}
+	async function saveDetails() {
+		const title = details.title.trim();
+		if (!title || saving) return;
+		saving = true;
+		try {
+			const updated = await editPlaylist(
+				id,
+				title,
+				details.description.trim(),
+				details.isPublic,
+				details.file
+			);
+			playlists.update((list) =>
+				list.map((p) => (p.id == id ? { ...updated, song_amount: p.song_amount } : p))
+			);
+			closeDetails();
+			showToast('Saved', 'icon-[mingcute--check-line]');
+		} catch (e) {
+			details.error = `Couldn't save: ${e instanceof Error ? e.message : e}`;
+		} finally {
+			saving = false;
+		}
+	}
+
 	async function remove() {
 		if (!confirmDelete) {
 			confirmDelete = true;
@@ -173,7 +261,7 @@
 	label={id == '-2' ? 'Playlist' : playlist?.public ? 'Public playlist' : 'Private playlist'}
 	title={editing ? '' : title}
 	back="{base}/library"
-	onplay={songs.length ? () => (playingThis ? toggle() : play(songs, 0)) : undefined}
+	onplay={songs.length ? () => (playingThis ? toggle() : play(listed, 0)) : undefined}
 	playing={playingThis}
 >
 	{#snippet cover()}
@@ -206,9 +294,9 @@
 	{/if}
 	<p class="mt-2 text-sm">
 		{#if playlist?.creator?.username}
-			<span class="font-bold">{playlist.creator.username}</span><span class="text-white/70">
-				·
-			</span>
+			<a href="{base}/profile/{playlist.creator.osuId}" class="py-2 font-bold"
+				>{playlist.creator.username}</a
+			><span class="text-white/70"> · </span>
 		{:else if own && $webUser?.username}
 			<span class="font-bold">{$webUser.username}</span><span class="text-white/70"> · </span>
 		{/if}
@@ -221,7 +309,7 @@
 		<PlayButton
 			playing={playingThis}
 			disabled={!songs.length}
-			onclick={() => (playingThis ? toggle() : play(songs, 0))}
+			onclick={() => (playingThis ? toggle() : play(listed, 0))}
 		/>
 		<button
 			aria-label="Shuffle"
@@ -279,7 +367,7 @@
 				></span>
 			</button>
 		{/if}
-		{#if own}
+		{#if own || songs.length}
 			<div class="relative">
 				<button
 					aria-label="More"
@@ -289,39 +377,78 @@
 					<span class="icon-[mingcute--more-2-fill] size-6"></span>
 				</button>
 				{#if menuOpen}
-					<div
-						class="absolute left-0 top-11 z-20 w-48 py-1 rounded-lg bg-secondary-200 shadow-2xl ring-1 ring-white/10"
-					>
+					<!-- (a sheet from the bottom, as the song's menu: a list under the button ran off the screen) -->
+					<div class="fixed inset-0 z-40 flex flex-col justify-end">
 						<button
-							class="w-full flex items-center gap-3 px-3 py-2.5 text-start text-sm active:bg-white/5"
-							onclick={() => {
-								menuOpen = false;
-								newTitle = playlist?.title ?? '';
-								editing = true;
-							}}
+							class="absolute inset-0 bg-black/60"
+							aria-label="Close"
+							onclick={() => (menuOpen = false)}
+							transition:fade={{ duration: 150 }}
+						></button>
+						<div
+							class="relative rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+							transition:fly={{ y: 400, duration: 220, opacity: 1 }}
+							use:swipe={{ axis: 'y', only: 1, onswipe: () => (menuOpen = false) }}
 						>
-							<span class="icon-[mingcute--edit-2-line] size-5"></span> Rename
-						</button>
-						{#if songs.length > 1}
-							<button
-								class="w-full flex items-center gap-3 px-3 py-2.5 text-start text-sm active:bg-white/5"
-								onclick={() => {
-									menuOpen = false;
-									filter = '';
-									limit = songs.length;
-									reordering = true;
-								}}
-							>
-								<span class="icon-[mingcute--menu-line] size-5"></span> Reorder songs
-							</button>
-						{/if}
-						<button
-							class="w-full flex items-center gap-3 px-3 py-2.5 text-start text-sm text-red-400 active:bg-white/5"
-							onclick={remove}
-						>
-							<span class="icon-[mingcute--delete-2-line] size-5"></span>
-							{confirmDelete ? 'Tap again to delete' : 'Delete'}
-						</button>
+							<div class="pt-2 flex justify-center">
+								<span class="w-10 h-1 rounded-full bg-white/20"></span>
+							</div>
+							<p class="px-5 pt-3 pb-2 text-lg font-bold truncate">{title}</p>
+							{#if songs.length}
+								<button
+									class="w-full flex items-center gap-4 px-5 py-3.5 text-start active:bg-white/5"
+									onclick={() => {
+										menuOpen = false;
+										addAllToQueue(listed);
+										showToast(
+											`${listed.length} ${listed.length === 1 ? 'song' : 'songs'} added to the queue`,
+											'icon-[mingcute--list-check-line]'
+										);
+									}}
+								>
+									<span class="icon-[mingcute--playlist-line] size-5"></span> Add to queue
+								</button>
+							{/if}
+							{#if own}
+								<button
+									class="w-full flex items-center gap-4 px-5 py-3.5 text-start active:bg-white/5"
+									onclick={() => {
+										menuOpen = false;
+										newTitle = playlist?.title ?? '';
+										editing = true;
+									}}
+								>
+									<span class="icon-[mingcute--edit-2-line] size-5"></span> Rename
+								</button>
+								<button
+									class="w-full flex items-center gap-4 px-5 py-3.5 text-start active:bg-white/5"
+									onclick={openDetails}
+								>
+									<span class="icon-[mingcute--pic-line] size-5"></span> Edit details
+								</button>
+								{#if songs.length > 1}
+									<button
+										class="w-full flex items-center gap-4 px-5 py-3.5 text-start active:bg-white/5"
+										onclick={() => {
+											menuOpen = false;
+											filter = '';
+											setSort('custom');
+											limit = songs.length;
+											reordering = true;
+										}}
+									>
+										<span class="icon-[mingcute--menu-line] size-5"></span> Reorder songs
+									</button>
+								{/if}
+								<button
+									class="w-full flex items-center gap-4 px-5 py-3.5 text-start text-red-400 active:bg-white/5"
+									onclick={remove}
+								>
+									<span class="icon-[mingcute--delete-2-line] size-5"></span>
+									{confirmDelete ? 'Tap again to delete' : 'Delete'}
+								</button>
+							{/if}
+						</div>
 					</div>
 				{/if}
 			</div>
@@ -346,18 +473,33 @@
 				onclick={() => (reordering = false)}>Done</button
 			>
 		</div>
-	{:else if songs.length > 15}
-		<div class="relative mx-2 mt-1 mb-2 flex items-center">
-			<span
-				class="icon-[mingcute--search-line] absolute left-3 size-4 text-secondary-600 pointer-events-none"
-			></span>
-			<input
-				type="search"
-				bind:value={filter}
-				placeholder="Filter"
-				aria-label="Filter songs in this playlist"
-				class="w-full h-10 pl-9 pr-3 rounded-full bg-white/[0.06] focus:bg-white/10 text-white placeholder:text-secondary-600 outline-none ring-1 ring-transparent focus:ring-white/20 transition [&::-webkit-search-cancel-button]:hidden"
-			/>
+	{:else if songs.length > 5}
+		<div class="mx-2 mt-1 mb-2 flex items-center gap-2">
+			{#if songs.length > 15}
+				<div class="relative min-w-0 flex-1 flex items-center">
+					<span
+						class="icon-[mingcute--search-line] absolute left-3 size-4 text-secondary-600 pointer-events-none"
+					></span>
+					<input
+						type="search"
+						bind:value={filter}
+						placeholder="Filter"
+						aria-label="Filter songs in this playlist"
+						class="w-full h-10 pl-9 pr-3 rounded-full bg-white/[0.06] focus:bg-white/10 text-white placeholder:text-secondary-600 outline-none ring-1 ring-transparent focus:ring-white/20 transition [&::-webkit-search-cancel-button]:hidden"
+					/>
+				</div>
+			{/if}
+			<button
+				aria-label="Sort"
+				class="shrink-0 h-10 px-3 flex items-center gap-1.5 rounded-full text-sm font-semibold {sort ===
+				'custom'
+					? 'bg-white/[0.06] text-white/80'
+					: 'bg-primary-300 text-white'} {songs.length > 15 ? '' : 'ml-auto'}"
+				onclick={() => (choosingSort = true)}
+			>
+				<span class="icon-[mingcute--sort-descending-line] size-4"></span>
+				{SORTS.find((option) => option.value === sort)?.label}
+			</button>
 		</div>
 	{/if}
 
@@ -373,7 +515,7 @@
 		}}
 	>
 		{#each shown.slice(0, limit) as { song, index } (`${song.id}:${song.track ?? 0}:${index}`)}
-			<SongRow {song} {index} playlistId={id} onplay={() => play(songs, index)}>
+			<SongRow {song} {index} playlistId={id} onplay={() => play(listed, index)}>
 				{#snippet extra()}
 					{#if reordering}
 						<span
@@ -395,3 +537,153 @@
 		{/key}
 	{/if}
 </div>
+
+{#if choosingSort}
+	<div class="fixed inset-0 z-40 flex flex-col justify-end">
+		<button
+			class="absolute inset-0 bg-black/60"
+			aria-label="Close"
+			onclick={() => (choosingSort = false)}
+			transition:fade={{ duration: 150 }}
+		></button>
+		<div
+			class="relative rounded-t-2xl bg-panel pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+			transition:fly={{ y: 400, duration: 220, opacity: 1 }}
+			use:swipe={{ axis: 'y', only: 1, onswipe: () => (choosingSort = false) }}
+		>
+			<div class="pt-2 flex justify-center">
+				<span class="w-10 h-1 rounded-full bg-white/20"></span>
+			</div>
+			<p class="px-5 pt-3 pb-2 text-lg font-bold">Sort by</p>
+			<ul class="pb-2">
+				{#each SORTS as option (option.value)}
+					<li>
+						<button
+							class="w-full flex items-center gap-4 px-5 py-3.5 text-start active:bg-white/5 {sort ===
+							option.value
+								? 'text-primary-400 font-semibold'
+								: ''}"
+							onclick={() => {
+								haptic();
+								setSort(option.value);
+							}}
+						>
+							<span class="flex-1">{option.label}</span>
+							{#if sort === option.value}<span class="icon-[mingcute--check-line] size-5"
+								></span>{/if}
+						</button>
+					</li>
+				{/each}
+			</ul>
+		</div>
+	</div>
+{/if}
+
+{#if details}
+	<div class="fixed inset-0 z-40 flex flex-col justify-end">
+		<button
+			class="absolute inset-0 bg-black/60"
+			aria-label="Close"
+			onclick={closeDetails}
+			transition:fade={{ duration: 150 }}
+		></button>
+		<form
+			class="relative max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-panel px-5 pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+			transition:fly={{ y: 500, duration: 220, opacity: 1 }}
+			onsubmit={(e) => {
+				e.preventDefault();
+				saveDetails();
+			}}
+		>
+			<div class="pt-2 flex justify-center">
+				<span class="w-10 h-1 rounded-full bg-white/20"></span>
+			</div>
+			<p class="pt-3 pb-3 text-lg font-bold">Edit details</p>
+			<div class="flex items-center gap-4">
+				<label class="relative shrink-0 size-24 rounded-md overflow-hidden bg-white/[0.06]">
+					{#if details.preview}
+						<img src={details.preview} alt="" class="size-full object-cover" />
+					{:else}
+						<PlaylistCover
+							playlist={playlist ?? /** @type {any} */ ({ id, title })}
+							class="size-full"
+							iconClass="size-8"
+						/>
+					{/if}
+					<span
+						class="absolute inset-x-0 bottom-0 py-1 bg-black/60 text-center text-xs font-semibold"
+						>Change</span
+					>
+					<input
+						type="file"
+						accept="image/png,image/jpeg,image/webp"
+						class="sr-only"
+						aria-label="Cover"
+						onchange={pickCover}
+					/>
+				</label>
+				<label class="min-w-0 flex-1">
+					<span class="block text-xs font-semibold text-secondary-600">Name</span>
+					<input
+						bind:value={details.title}
+						maxlength="100"
+						required
+						class="mt-1 w-full h-11 px-3 rounded-lg bg-white/[0.08] outline-none ring-1 ring-transparent focus:ring-white/20"
+					/>
+				</label>
+			</div>
+			<label class="mt-4 block">
+				<span class="block text-xs font-semibold text-secondary-600">Description</span>
+				<textarea
+					bind:value={details.description}
+					maxlength="300"
+					rows="3"
+					placeholder="What's this playlist about?"
+					class="mt-1 w-full p-3 rounded-lg bg-white/[0.08] outline-none ring-1 ring-transparent focus:ring-white/20 resize-none placeholder:text-secondary-600"
+				></textarea>
+			</label>
+			<button
+				type="button"
+				role="switch"
+				aria-checked={details.isPublic}
+				class="mt-3 w-full py-2 flex items-center justify-between gap-4 text-start"
+				onclick={() => (details.isPublic = !details.isPublic)}
+			>
+				<span>
+					<span class="block font-semibold">Public</span>
+					<span class="block text-sm text-secondary-600">
+						Everyone finds it in the community playlists and on your profile
+					</span>
+				</span>
+				<span
+					class="relative w-11 h-6 shrink-0 rounded-full transition {details.isPublic
+						? 'bg-primary-400'
+						: 'bg-white/20'}"
+				>
+					<span
+						class="absolute top-0.5 left-0.5 size-5 rounded-full bg-white transition-transform {details.isPublic
+							? 'translate-x-5'
+							: ''}"
+					></span>
+				</span>
+			</button>
+			{#if details.error}
+				<p class="mt-2 text-sm text-red-400">{details.error}</p>
+			{/if}
+			<div class="mt-4 flex gap-3">
+				<button
+					type="button"
+					class="flex-1 h-12 rounded-full bg-white/10 font-semibold"
+					onclick={closeDetails}>Cancel</button
+				>
+				<button
+					type="submit"
+					class="flex-1 h-12 rounded-full bg-primary-300 font-semibold disabled:opacity-50"
+					disabled={saving || !details.title.trim()}
+				>
+					{saving ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</form>
+	</div>
+{/if}

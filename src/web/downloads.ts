@@ -177,15 +177,15 @@ export async function removeAllDownloads() {
 	await run(SONGS, 'readwrite', (store) => store.clear());
 }
 
-/** A song's kept audio to play (null: not kept) */
-export async function localUrl(song: MapSet): Promise<string | null> {
+/** A song's kept audio (null: not kept) */
+export async function localBlob(song: MapSet): Promise<Blob | null> {
 	const kept = await run<KeptAudio | Blob | undefined>(AUDIO, 'readonly', (store) =>
 		store.get(keyOf(song))
 	).catch(() => undefined);
 	if (!kept) return null;
 	// (downloads from before were kept as a Blob)
 	const blob = kept instanceof Blob ? kept : new Blob([kept.data], { type: kept.type });
-	return blob.size ? URL.createObjectURL(blob) : null;
+	return blob.size ? blob : null;
 }
 
 /** A song's kept audio as bytes (null: not kept) */
