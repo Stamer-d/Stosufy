@@ -82,6 +82,9 @@ export function audioArgs(target: string, quality: Quality, options: AudioOption
 	];
 }
 
+/** The sound with the picture: from 0, filled where it starts late, a jump in it not a gap */
+export const SOUND_IN_TIME = 'asetpts=N/SR/TB+STARTPTS,aresample=async=1:first_pts=0';
+
 /** Scaled to at most this many lines high (0: as it is), a width that divides by 2 */
 export function scale(height: number) {
 	return height ? `scale=-2:'min(${height},ih)'` : 'scale=trunc(iw/2)*2:trunc(ih/2)*2';
@@ -228,12 +231,11 @@ export function repackArgs(target: string, source: VideoSource) {
 export function videoArgs(target: string, quality: Quality, options: VideoOptions = {}) {
 	const { height = 0, videoKbps, audioKbps: aKbps, mute } = options;
 	const vf = [options.videoFilters, scale(height)].filter(Boolean).join(',');
-	// (the sound kept with the picture where the source's has gaps or starts late: stretched
-	// or filled, from 0; editors like Premiere stutter on such files otherwise)
-	const af = [
-		'-af',
-		['aresample=async=1:first_pts=0', options.audioFilters].filter(Boolean).join(',')
-	];
+	// (the sound kept with the picture where it starts late: filled, from 0, as editors like
+	// Premiere stutter on such files otherwise. Its timestamps made again from its samples
+	// first, from where it starts: a jump in them (a part cut out of the download as it was,
+	// SponsorBlock's) isn't made silence, which took away the sound of all the rest)
+	const af = ['-af', [SOUND_IN_TIME, options.audioFilters].filter(Boolean).join(',')];
 	const { graph } = options;
 	// A constant frame rate, a standard one, with a keyframe every 2 s: a file editors (Premiere,
 	// After Effects, Resolve) play smoothly, whatever its timestamps were (a stream cut out,

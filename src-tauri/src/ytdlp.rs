@@ -700,8 +700,9 @@ pub fn software_encoder() -> Vec<String> {
 /// quality: x264's ultrafast (no B-frames, no CABAC: easy to decode, 1440p60 too), with its
 /// adaptive quantization on (no blocks in dark and flat parts, nothing more to decode), at
 /// CRF 16, in 8 bits; a constant frame rate, a keyframe every 2 s, the sound at 48 kHz and
-/// kept with the picture. As the page's "MP4 for editing" at its best (see presets.ts)
-pub const EDITING_ENCODER: &str = "-c:v libx264 -preset ultrafast -crf 16 -x264-params aq-mode=1 -pix_fmt yuv420p -fps_mode cfr -force_key_frames expr:gte(t,n_forced*2) -c:a aac -b:a 320k -ar 48000 -af aresample=async=1:first_pts=0 -movflags +faststart";
+/// kept with the picture (a jump in its timestamps not made silence: see SOUND_IN_TIME in
+/// presets.ts). As the page's "MP4 for editing" at its best (see presets.ts)
+pub const EDITING_ENCODER: &str = "-c:v libx264 -preset ultrafast -crf 16 -x264-params aq-mode=1 -pix_fmt yuv420p -fps_mode cfr -force_key_frames expr:gte(t,n_forced*2) -c:a aac -b:a 320k -ar 48000 -af asetpts=N/SR/TB+STARTPTS,aresample=async=1:first_pts=0 -movflags +faststart";
 
 /// The graphics card's H.264 encoders there may be, the likeliest first
 fn hardware_encoders() -> Vec<Vec<&'static str>> {
