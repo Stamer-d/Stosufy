@@ -85,6 +85,9 @@ async function pick(at, target) {
 	const easy = fs.readFileSync(path.join(__dirname, 'fixtures', 'easy.mp4'));
 	// (exactly 60 fps, in an MKV: as YouTube's 1440p60)
 	const sixty = fs.readFileSync(path.join(__dirname, 'fixtures', 'sixty.mkv'));
+	// (4 s, its sound's timestamps jumping a minute ahead at 2 s: as a part cut out of a
+	// download as it was, SponsorBlock's, leaves them)
+	const jump = fs.readFileSync(path.join(__dirname, 'fixtures', 'jump.mkv'));
 	// (2 s of a tone, titled "Tone" by "Stosufy", with a cover)
 	const tagged = fs.readFileSync(path.join(__dirname, 'fixtures', 'tagged.mp3'));
 	const mp3 = (name) => ({ name, mimeType: 'audio/mpeg', buffer: tagged });
@@ -108,6 +111,7 @@ async function pick(at, target) {
 		// MKV's, made again: easy to decode, evenly timed)
 		[{ name: 'easy.mp4', mimeType: 'video/mp4', buffer: easy }, 'editing'],
 		[{ name: 'sixty.mkv', mimeType: 'video/x-matroska', buffer: sixty }, 'editing'],
+		[{ name: 'jump.mkv', mimeType: 'video/x-matroska', buffer: jump }, 'editing'],
 		[{ name: 'premiere.mp4', mimeType: 'video/mp4', buffer: clip }, 'editing'],
 		[{ name: 'premiere-mkv.mkv', mimeType: 'video/x-matroska', buffer: clipMkv }, 'editing'],
 		[
@@ -335,6 +339,23 @@ async function pick(at, target) {
 			videoTimescale(file('sixty.mp4')) !== 60000 &&
 			profileOf(file('sixty.mp4')) === 66,
 		`timescale ${videoTimescale(file('sixty.mp4'))}`
+	);
+	/** An MP4's tracks' lengths (s), from their mdhd's: the picture's, then the sound's */
+	const trackSeconds = (data) => {
+		const seconds = [];
+		for (let at = data.indexOf('mdhd'); at >= 0; at = data.indexOf('mdhd', at + 4)) {
+			const v1 = data[at + 4] === 1;
+			const scale = data.readUInt32BE(at + (v1 ? 24 : 16));
+			const length = v1 ? Number(data.readBigUInt64BE(at + 28)) : data.readUInt32BE(at + 20);
+			seconds.push(length / scale);
+		}
+		return seconds;
+	};
+	const jumped = trackSeconds(file('jump.mp4'));
+	check(
+		'MP4 for editing, of a sound whose timestamps jump: the sound all there, as long as the picture (no minute of silence)',
+		jumped.length === 2 && Math.abs(jumped[1] - jumped[0]) < 0.2,
+		JSON.stringify(jumped)
 	);
 	check(
 		'MP4 for editing, of an MP4 made for editing (Baseline, evenly timed): repacked',
