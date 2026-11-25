@@ -91,8 +91,16 @@ function rank(
 		.map(([name, { plays, seconds, top }]) => ({ name, plays, seconds, top }));
 }
 
-export function recap(history: History, period: Period, now = new Date()): Recap {
-	const from = periodStart(period, now);
+/**
+ * The recap of a period (`from`: of the time from then on instead; `limit`: longer top lists,
+ * for Claude)
+ */
+export function recap(
+	history: History,
+	period: Period,
+	now = new Date(),
+	{ from = periodStart(period, now), limit }: { from?: number; limit?: number } = {}
+): Recap {
 	const { songs } = history;
 	const firstHeard = new Map<string, number>();
 	for (const [key, at, heard, length] of history.plays)
@@ -192,18 +200,18 @@ export function recap(history: History, period: Period, now = new Date()): Recap
 		artists: tallies.artists.size,
 		days: days.length,
 		streak,
-		topSongs: topSongs.slice(0, 10),
-		topArtists: rank(tallies.artists, 8),
-		topMappers: rank(tallies.mappers, 8),
-		topGenres: rank(tallies.genres, 6),
-		topLanguages: rank(tallies.languages, 6),
-		topSources: rank(tallies.sources, 6),
+		topSongs: topSongs.slice(0, limit ?? 10),
+		topArtists: rank(tallies.artists, limit ?? 8),
+		topMappers: rank(tallies.mappers, limit ?? 8),
+		topGenres: rank(tallies.genres, limit ?? 6),
+		topLanguages: rank(tallies.languages, limit ?? 6),
+		topSources: rank(tallies.sources, limit ?? 6),
 		hours,
 		weekdays,
 		busiestDay,
 		onRepeat,
-		newSongs: period === 'all' ? 0 : found.length,
-		bestFind: period === 'all' ? null : (found[0] ?? null),
+		newSongs: from <= 0 ? 0 : found.length,
+		bestFind: from <= 0 ? null : (found[0] ?? null),
 		bpm: bpms.length ? Math.round(bpms[Math.floor(bpms.length / 2)]) : null,
 		skips: inPeriod.length - played.length,
 		since: history.plays[0]?.[1] ?? null

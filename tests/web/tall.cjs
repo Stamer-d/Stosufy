@@ -64,6 +64,15 @@ async function touchDrag(x0, y0, dx, dy = 0) {
   await step('library: list', async () => { await tab('Library'); const t = await p.locator('main ul li').allTextContents(); expect(t.some((x) => x.includes('Downloaded Songs')) && t.some((x) => x.includes('Liked Songs')) && t.some((x) => x.includes('Chill')), 'entries: ' + t.join('|')); });
   await step('library: create playlist', async () => { await p.click('button[aria-label="New playlist"]'); await p.fill('input[aria-label="Name of the new playlist"]', 'Test new'); await p.click('button:has-text("Create")'); await wait(1500); expect(p.url().includes('/playlist/6'), 'not opened: ' + p.url()); expect(ops.includes('create:Test new'), 'no create op'); });
   await step('playlist: rename', async () => { await p.click('main button[aria-label="More"]'); await p.click('button:has-text("Rename")'); await p.fill('input[aria-label="Name"]', 'Renamed one'); await p.keyboard.press('Enter'); await wait(800); expect(ops.includes('edit:Renamed one'), 'no edit op'); expect(await p.locator('h1:has-text("Renamed one")').count(), 'title not shown'); });
+  await step('playlist: edit details (description, public)', async () => {
+    await p.click('main button[aria-label="More"]'); await p.click('button:has-text("Edit details")'); await wait(400);
+    await p.fill('.fixed.inset-0.z-40 textarea', 'Songs for the night');
+    await p.click('.fixed.inset-0.z-40 button[role="switch"]:has-text("Public")');
+    await p.click('.fixed.inset-0.z-40 button:has-text("Save")'); await wait(900);
+    expect(ops.includes('details:Songs for the night:true'), 'not saved: ' + ops.filter((op) => op.startsWith('details')).join());
+    expect(!(await p.locator('.fixed.inset-0.z-40').count()), 'the sheet stayed open');
+    expect(await p.locator('main p:has-text("Songs for the night")').count() && await p.locator('text=Public playlist').count(), 'the page does not show them');
+  });
   await step('playlist: delete', async () => { await p.click('main button[aria-label="More"]'); await p.click('button:has-text("Delete")'); await p.click('button:has-text("Tap again to delete")'); await wait(1200); expect(p.url().endsWith('/library'), 'not back to library: ' + p.url()); expect(!(await p.locator('main ul li:has-text("Renamed one")').count()), 'still listed'); });
 
   await step('playlist: open and play', async () => { await p.click('main a:has-text("Chill")'); await wait(1500); expect(await p.locator('main ol > li').count() === 25, 'rows ' + await p.locator('main ol > li').count()); await p.locator('main button[aria-label="Play"]').last().click(); await wait(800); expect(await nowTitle() === 'Song number 21', 'now ' + await nowTitle()); });
@@ -122,13 +131,117 @@ async function touchDrag(x0, y0, dx, dy = 0) {
   await step('player: swipe down closes', async () => { await touchDrag(200, 120, 0, 300); await wait(600); expect(!(await p.locator('.fixed.inset-0.z-30').count()), 'still open'); });
   await step('dock: swipe = next / back', async () => { const a = (await playerState()).index; const bx = await p.locator('[data-no-edge]').first().boundingBox(); await touchDrag(bx.x + 220, bx.y + bx.height / 2, -180); await wait(600); expect((await playerState()).index === a + 1, 'next'); await touchDrag(bx.x + 40, bx.y + bx.height / 2, 180); await wait(600); expect((await playerState()).index === a, 'back'); });
 
+  await step('player: clear what comes up; with autoplay, songs like these play on', async () => {
+    await dockOpen(); await p.click('button[aria-label="Up next"]'); await wait(400);
+    if ((await playerState()).autoplay) { await p.click('button[role=switch]:has-text("Autoplay")'); await wait(200); }
+    const before = await playerState();
+    expect(before.songs.length - before.index > 2, 'nothing coming up to clear');
+    await p.click('.fixed.inset-0.z-30 button:has-text("Clear")'); await wait(400);
+    const after = await playerState();
+    expect(after.songs.length === after.index + 1 && after.songs[after.index].title === before.songs[before.index].title, 'not cleared: ' + (after.songs.length - after.index - 1) + ' left');
+    expect(await p.locator('text=Nothing after this song').count(), 'the list is not empty');
+    await p.click('button[role=switch]:has-text("Autoplay")'); await wait(400);
+    // (songs like these, unless the queue repeats)
+    expect(after.repeat !== 'off' || (await playerState()).songs.length > after.songs.length, 'autoplay added nothing');
+    await p.click('button[aria-label="Up next"]'); await wait(200);
+    await touchDrag(200, 120, 0, 300); await wait(600);
+  });
   await step('downloads: list, play, shuffle', async () => { await tab('Downloads'); const n = await p.locator('main ol > li').count(); expect(n >= 25, 'downloads ' + n); await p.locator('main button[aria-label="Play"]').last().click(); await wait(500); expect((await playerState()).songs.length === n, 'queue ' + (await playerState()).songs.length); });
+  await step('playlist: sorted by tempo, it plays in that order; all of it added to the queue', async () => {
+    await tab('Library'); if (!p.url().endsWith('/library')) await tab('Library');
+    await p.click('main a:has-text("Chill")'); await wait(1200);
+    await p.click('main button[aria-label="Sort"]'); await p.click('.fixed.inset-0.z-40 button:has-text("BPM")'); await wait(500);
+    const rows = p.locator('main ol > li');
+    expect((await rows.first().innerText()).includes('Song number 45'), 'not the fastest first: ' + (await rows.first().innerText()));
+    await rows.first().locator('button').first().click(); await wait(600);
+    const sorted = await playerState();
+    expect(sorted.songs[sorted.index].title === 'Song number 45' && (sorted.shuffle || sorted.songs[sorted.index + 1].title === 'Song number 44'), 'not playing in that order: ' + sorted.songs.slice(sorted.index, sorted.index + 2).map((s) => s.title));
+    await p.click('main button[aria-label="More"]'); await p.click('button:has-text("Add to queue")'); await wait(500);
+    const queued = await playerState();
+    expect(queued.songs.length === sorted.songs.length * 2 && queued.songs[queued.index + 1].queued, 'the playlist is not in the queue: ' + sorted.songs.length + ' -> ' + queued.songs.length);
+    expect(await p.locator('main button[aria-label="Sort"]:has-text("BPM")').count() && await p.evaluate(() => JSON.parse(localStorage.getItem('stosufy-web-playlist-sort'))['2'] === 'bpm'), 'the order was not kept');
+    await p.click('main button[aria-label="Sort"]'); await p.click('.fixed.inset-0.z-40 button:has-text("Custom order")'); await wait(400);
+    expect((await rows.first().innerText()).includes('Song number 21'), 'not its own order again');
+  });
   await step('search: your songs and osu!, recent', async () => {
     await tab('Search'); await p.fill('input[aria-label="Search"]', 'number 4'); await wait(1500);
     const h = await p.locator('main h2').allTextContents(); expect(h.some((x) => x.includes('Your songs')) && h.some((x) => x.includes('On osu!')), 'sections ' + h);
     await p.locator('main ul').nth(0).locator('li button').first().click(); await wait(500);
     await p.click('button[aria-label="Clear"]'); await wait(300); expect(await p.locator('text=Searched before').count(), 'no recent');
     await p.locator('main section li button').first().click(); await wait(800); expect((await p.inputValue('input[aria-label="Search"]')) === 'number 4', 'recent not filled');
+  });
+  await step('search: osu! players; a profile with their best plays and their music, to listen to', async () => {
+    await tab('Search'); await p.fill('input[aria-label="Search"]', 'cookiezi'); await wait(1500);
+    const found = p.locator('main ul[aria-label="Players"] > li');
+    expect((await found.count()) === 3, 'players shown: ' + (await found.count()));
+    await p.click('text=Show all 5'); await wait(200);
+    expect((await found.count()) === 5, 'all players: ' + (await found.count()));
+    expect(ops.includes('players:cookiezi'), 'osu! was not asked for players');
+    await found.first().locator('a').click(); await wait(1800);
+    expect(p.url().includes('/profile/300'), 'not on the profile: ' + p.url());
+    expect(await p.locator('h1:has-text("Player 300")').count(), 'no name');
+    expect(await p.locator('text=Germany').count() && await p.locator('text=#300').count(), 'no country or rank');
+    const plays = p.locator('main section:has(h2:has-text("Best plays")) ul > li');
+    expect((await plays.count()) === 10, 'best plays: ' + (await plays.count()));
+    expect((await plays.first().innerText()).includes('400pp'), 'no pp: ' + (await plays.first().innerText()));
+    await plays.nth(1).locator('button').first().click(); await wait(700);
+    expect((await nowTitle()) === 'Song number 2', 'a best play plays ' + (await nowTitle()));
+    expect((await playerState()).songs.length === 10, 'the best plays are not the queue');
+    await p.click('button:has-text("More plays")'); await wait(900);
+    expect((await plays.count()) === 20, 'more plays: ' + (await plays.count()));
+    const music = p.locator('main section:has(h2:has-text("Their music")) ul > li');
+    expect((await music.count()) === 20 && ops.includes('usersets:favourite:0'), 'favourites: ' + (await music.count()));
+    await p.click('button[role="tab"]:has-text("Most played")'); await wait(900);
+    expect(ops.includes('usersets:most_played:0') && (await music.first().innerText()).includes('900×'), 'most played: ' + (await music.first().innerText()));
+    await music.first().locator('button').first().click(); await wait(700);
+    expect((await nowTitle()) === 'Song number 201', 'their music plays ' + (await nowTitle()));
+    // (the search as it was: empty, and not typing any more)
+    await tab('Search'); await tab('Search');
+    await p.click('button[aria-label="Clear"]'); await p.evaluate(() => document.activeElement?.blur?.()); await wait(400);
+  });
+  await step('rankings: worldwide, my place, a country, friends, another mode; a player opens their profile', async () => {
+    await tab('Home'); await tab('Home'); await p.click('a[aria-label="Rankings"]'); await wait(1800);
+    const rows = p.locator('main ol[aria-label="Ranking"] > li');
+    expect((await rows.count()) === 50, 'rows: ' + (await rows.count()));
+    const first = await rows.first().innerText();
+    expect(first.includes('#1') && first.includes('Player 2000') && /pp/.test(first), 'first row: ' + first);
+    expect(await p.locator('text=You · tester').count(), 'no card of the user');
+    // more as it's scrolled
+    await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight)); await wait(1500);
+    expect((await rows.count()) === 100 && ops.includes('rankings:osu:performance:::2'), 'second page: ' + (await rows.count()));
+    // my place (4321: page 87)
+    await p.click('button:has-text("Show me")'); await wait(1800);
+    expect(ops.includes('rankings:osu:performance:::87'), 'the page of my place was not asked for');
+    expect(await p.locator('main ol li[data-me]:has-text("#4,321")').count(), 'my row is not shown');
+    await p.click('button:has-text("From the top")'); await wait(1200);
+    expect((await rows.first().innerText()).includes('#1'), 'not from the top again');
+    // the countries, and a country's players
+    await p.evaluate(() => window.scrollTo(0, 0));
+    await p.click('button[role="tab"]:has-text("Countries")'); await wait(1200);
+    expect((await rows.count()) === 6 && (await rows.first().innerText()).includes('United States'), 'countries: ' + (await rows.count()));
+    await p.click('main ol button:has-text("Japan")'); await wait(1500);
+    expect(ops.includes('rankings:osu:performance:JP::1'), "Japan's players were not asked for");
+    expect(await p.locator('button[aria-pressed="true"]:has-text("Japan")').count(), 'no chip for the country');
+    // the friends, in another mode
+    await p.click('main header button:has-text("Friends")'); await wait(1200);
+    expect((await rows.count()) === 3 && ops.includes('rankings:osu:performance::friends:1'), 'friends: ' + (await rows.count()));
+    await p.click('main header button:has-text("Mania")'); await wait(1200);
+    expect(ops.includes('rankings:mania:performance::friends:1'), 'mania was not asked for');
+    await rows.nth(1).locator('a').click(); await wait(1500);
+    expect(p.url().includes('/profile/11'), 'not on the profile: ' + p.url());
+    // back: the ranking as it was left
+    await p.locator('main a[aria-label="Back"]').click(); await wait(1200);
+    expect(p.url().includes('/rankings') && await p.locator('button[aria-pressed="true"]:has-text("Mania")').count(), 'the ranking was not kept: ' + p.url());
+    await tab('Home'); await tab('Home');
+  });
+  await step('friends: all osu! friends, the ones online first, each opening their profile', async () => {
+    await p.click('a[aria-label="Friends"]'); await wait(1800);
+    const list = p.locator('main ul[aria-label="osu! friends"] > li');
+    expect((await list.count()) === 4, 'osu! friends: ' + (await list.count()));
+    expect((await list.first().innerText()).includes('Player 11'), 'not the online ones first: ' + (await list.first().innerText()));
+    await list.first().locator('a').click(); await wait(1200);
+    expect(p.url().includes('/profile/11'), 'not on the profile: ' + p.url());
+    await tab('Home'); await tab('Home');
   });
   await step('tabs: remember and go to start', async () => { await tab('Library'); expect(p.url().includes('/playlist/2'), 'Library tab forgot Chill: ' + p.url()); await tab('Library'); await p.click('main a:has-text("Gaming")'); await wait(1000); await tab('Home'); await tab('Library'); expect(p.url().includes('/playlist/3'), 'not remembered ' + p.url()); await tab('Library'); expect(p.url().endsWith('/library'), 'not to start ' + p.url()); });
   await step('checks page loads', async () => { await tab('Home'); await p.click('a[aria-label="Settings"]'); await wait(600); expect(await p.locator('text=Accent color').count(), 'no settings'); await p.click('a:has-text("Checks and player log")'); await wait(4000); expect(await p.locator('text=Lyrics (LRCLIB)').count(), 'no lyrics check'); expect(await p.locator('text=What the player did').count(), 'no log'); });
@@ -140,6 +253,10 @@ async function touchDrag(x0, y0, dx, dy = 0) {
     await p.locator('main ol > li').nth(0).locator('button').first().click(); await wait(500);
     expect(await toast('Offline: only downloaded songs play'), 'no offline toast');
     await ctx.setOffline(false); await p.evaluate(() => window.dispatchEvent(new Event('online'))); await wait(500);
+  });
+  await step("a profile of a name that isn't a player's says so", async () => {
+    await p.goto('http://127.0.0.1:5288/Stosufy/profile/@nobody'); await wait(1800);
+    expect(await p.locator("text=This player couldn't be found").count(), 'no message for an unknown player');
   });
   await step('no page errors', async () => { expect(!errors.length, errors.join(' | ')); });
   for (const r of results) console.log(r.join('  '));

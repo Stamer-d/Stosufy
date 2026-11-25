@@ -159,6 +159,13 @@
 					class="py-2.5 font-semibold text-white"
 					onclick={() => searchFor(`creator=${info.creator}`)}>{info.creator}</button
 				>
+				<a
+					href="{base}/profile/{info.user_id ?? `@${encodeURIComponent(info.creator)}`}"
+					aria-label="Profile of {info.creator}"
+					class="inline-grid size-11 -my-3 -mx-2 place-items-center align-middle text-white/70"
+				>
+					<span class="icon-[mingcute--user-3-line] size-4"></span>
+				</a>
 			{/if}
 			{#if length}· {clock(length)}{/if}
 			{#if info?.bpm}· {Math.round(info.bpm)} BPM{/if}

@@ -40,6 +40,7 @@ import {
 	type Elsewhere
 } from './player';
 import type { MapSet } from '../lib/types';
+import { followClaudeChanges } from '../lib/stores/claudeChanges';
 
 /** What the player's controls do while another device plays */
 const controls: Elsewhere = {
@@ -214,6 +215,8 @@ const webPlayer: ConnectPlayer = {
 
 if (typeof window !== 'undefined') {
 	useConnectPlayer(webPlayer, false);
+	// (what Claude changes on the server shows up here right away)
+	followClaudeChanges();
 	let before: ConnectState | null = null;
 	connect.subscribe((state) => {
 		follow(state, before);

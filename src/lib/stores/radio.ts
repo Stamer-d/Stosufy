@@ -13,6 +13,7 @@ import { favourites } from './favourites';
 import { history, playCounts, songKey, type SongPlays } from './history';
 import { songBpm } from '../songBpm';
 import { artistsOf, sameSong } from '../tracks';
+import { englishName } from '../genres';
 import type { MapSet } from '../types';
 
 const RADIO_LENGTH = 40;
@@ -48,8 +49,8 @@ function featuresOf(song: MapSet): Features {
 		features = {
 			artists: new Set(artistsOf(song.artist ?? '').map(normalized)),
 			creator: normalized(song.creator),
-			genre: known(song.genre),
-			language: known(song.language),
+			genre: known(englishName(song.genre)),
+			language: known(englishName(song.language)),
 			source: normalized(song.songSource),
 			tempo,
 			tags: new Set(
@@ -204,6 +205,40 @@ export function fitTo(seeds: MapSet[]) {
 			taste: taste(song, plays, liked, Infinity)
 		};
 	};
+}
+
+/**
+ * Why a song is like the seeds, in words (for Claude): what it shares with the seed it's
+ * most like, the strongest first
+ */
+export function alikeReasons(seeds: MapSet[], song: MapSet): string[] {
+	const features = featuresOf(song);
+	let best: { seed: MapSet; features: Features; score: number } | null = null;
+	for (const seed of seeds) {
+		const seedFeatures = featuresOf(seed);
+		const score = similarity(seedFeatures, features);
+		if (!best || score > best.score) best = { seed, features: seedFeatures, score };
+	}
+	if (!best) return [];
+	const { seed, features: like } = best;
+	const reasons: string[] = [];
+	const artist = artistsOf(song.artist ?? '').find((name) => like.artists.has(normalized(name)));
+	if (artist) reasons.push(`by ${artist}, like "${seed.title}"`);
+	if (like.source && like.source === features.source) reasons.push(`also from ${song.songSource}`);
+	if (like.creator && like.creator === features.creator)
+		reasons.push(`mapped by ${song.creator} too`);
+	if (like.genre && like.genre === features.genre)
+		reasons.push(`the same genre (${englishName(song.genre)})`);
+	if (like.language && like.language === features.language) {
+		reasons.push(`the same language (${englishName(song.language)})`);
+	}
+	const tempo = tempoDistance(like.tempo, features.tempo);
+	if (tempo != null && tempo < 0.1 && features.tempo) {
+		reasons.push(`a tempo like "${seed.title}" (${Math.round(features.tempo)} BPM)`);
+	}
+	const tags = [...features.tags].filter((tag) => like.tags.has(tag)).slice(0, 3);
+	if (tags.length) reasons.push(`tags ${tags.join(', ')}`);
+	return reasons;
 }
 
 /** The most similar downloaded songs, without the seed and the excluded ones */

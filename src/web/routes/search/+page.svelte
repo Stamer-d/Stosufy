@@ -4,7 +4,11 @@
 	// while nothing is typed. osu!'s songs by status, genre, language and order, as in the
 	// desktop app (the same filters: they're in the account's settings).
 	import { page } from '$app/state';
-	import { play, slim } from '../../player';
+	import { play } from '../../player';
+	import { songOfSet as songOf } from '../../songs';
+	import { searchPlayers } from '../../../lib/stores/profile';
+	import { offline } from '../../../lib/stores/network';
+	import PlayerRow from '../../PlayerRow.svelte';
 	import SongRow from '../../SongRow.svelte';
 	import { libraryPool, fetchMaps } from '../../shims/data';
 	import { userSettings, updateUserSettings } from '../../shims/user';
@@ -119,19 +123,27 @@
 	let error = $state('');
 	let cursor = $state('');
 
-	/** A beatmap set of osu!'s search as a song (its osu! standard difficulty first) */
-	function songOf(set) {
-		const maps = [...(set.beatmaps ?? [])].sort(
-			(a, b) => Number(b.mode === 'osu') - Number(a.mode === 'osu')
-		);
-		return slim({
-			id: set.id,
-			title: set.title,
-			artist: set.artist,
-			creator: set.creator,
-			beatmaps: maps
-		});
-	}
+	// osu! players whose name matches, a moment after the typing stops (as the songs)
+	const PLAYERS_SHOWN = 3;
+	let players = $state([]);
+	let allPlayers = $state(false);
+	$effect(() => {
+		const words = query.trim();
+		allPlayers = false;
+		if (words.length < 2 || $offline) {
+			players = [];
+			return;
+		}
+		let stale = false;
+		const timer = setTimeout(async () => {
+			const found = await searchPlayers(words).catch(() => ({ players: [] }));
+			if (!stale) players = found.players;
+		}, 400);
+		return () => {
+			stale = true;
+			clearTimeout(timer);
+		};
+	});
 
 	async function search(words, after = '') {
 		const data = await fetchMaps(words, after, filters);
@@ -295,6 +307,19 @@
 		</span>
 		<span class="icon-[mingcute--right-line] size-5 text-white/60"></span>
 	</a>
+	<a
+		href="{base}/rankings"
+		class="mx-3 mb-2 flex items-center gap-3 p-3 rounded-xl bg-white/[0.05] active:opacity-80"
+	>
+		<span class="size-11 grid place-items-center rounded-lg bg-black/25">
+			<span class="icon-[mingcute--trophy-line] size-6"></span>
+		</span>
+		<span class="min-w-0 flex-1">
+			<span class="block font-semibold">osu! rankings</span>
+			<span class="block text-sm text-white/70">The best players, by country and your friends</span>
+		</span>
+		<span class="icon-[mingcute--right-line] size-5 text-white/60"></span>
+	</a>
 {/if}
 
 {#if !query.trim() && !filtered && recent.length}
@@ -343,9 +368,33 @@
 	</ul>
 {/if}
 
+{#if players.length}
+	<div class="px-4 pt-2 pb-1 flex items-center justify-between">
+		<h2 class="text-lg font-bold">Players</h2>
+		{#if players.length > PLAYERS_SHOWN}
+			<button
+				class="-mr-2 h-10 px-2 text-sm text-secondary-600"
+				onclick={() => (allPlayers = !allPlayers)}
+			>
+				{allPlayers ? 'Show less' : `Show all ${players.length}`}
+			</button>
+		{/if}
+	</div>
+	<ul class="px-2 pb-3" aria-label="Players">
+		{#each allPlayers ? players : players.slice(0, PLAYERS_SHOWN) as player (player.id)}
+			<PlayerRow
+				{player}
+				detail={player.globalRank
+					? `#${player.globalRank.toLocaleString()} worldwide`
+					: 'osu! player'}
+			/>
+		{/each}
+	</ul>
+{/if}
+
 {#if error}
 	<p class="px-5 text-sm text-red-400">Couldn't search: {error}</p>
-{:else if (query.trim() || filtered) && !searching && !results.length && !yours.length}
+{:else if (query.trim() || filtered) && !searching && !results.length && !yours.length && !players.length}
 	<p class="px-5 text-sm text-secondary-600">No songs found</p>
 {/if}
 

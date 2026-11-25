@@ -3,14 +3,23 @@ use tauri::Manager;
 mod clipboard;
 mod fetch;
 mod ffmpeg;
+pub mod mcp;
 mod ytdlp;
+
+/// Opened by Claude (see mcp.rs): the window starts minimized instead of in front
+fn in_background(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--background")
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // First, so a second start hands over to the running app before anything else starts
         // (with the deep-link feature it passes on its link, e.g. the login or an invite)
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if in_background(&argv) {
+                return;
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
@@ -57,9 +66,23 @@ pub fn run() {
             ytdlp::cookies_info,
             ytdlp::cookies_add,
             ytdlp::cookies_remove,
-            ytdlp::ytdlp_cancel
+            ytdlp::ytdlp_cancel,
+            mcp::mcp_status,
+            mcp::mcp_set_enabled,
+            mcp::mcp_set_allow_changes,
+            mcp::mcp_ready,
+            mcp::mcp_reply,
+            mcp::mcp_claude_desktop,
+            mcp::mcp_connect_claude_desktop,
+            mcp::mcp_disconnect_claude_desktop
         ])
         .setup(|app| {
+            mcp::setup(app.handle());
+            if in_background(&std::env::args().collect::<Vec<_>>()) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.minimize();
+                }
+            }
             // (off the start's way: it could be big)
             let handle = app.handle().clone();
             std::thread::spawn(move || ffmpeg::clean_work_folders(&handle));

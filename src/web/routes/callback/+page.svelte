@@ -1,6 +1,7 @@
 <script>
 	const base = __WEB_BASE__;
-	// Back from osu!'s login: its code becomes the login, then on to the playlists
+	// Back from osu!'s login: its code becomes the login, then on to the playlists (or, for
+	// Claude's connector, on to the server)
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -8,8 +9,16 @@
 
 	let error = $state('');
 
+	/** Logins of Claude's Stosufy connector (they use this app's osu! login): the server goes on */
+	const CLAUDE_LOGIN = 'stosufy-mcp.';
+	const CLAUDE_CALLBACK = 'https://api.stamer-d.de/v2/stosufy/oauth/osu';
+
 	onMount(async () => {
 		const params = page.url.searchParams;
+		if (params.get('state')?.startsWith(CLAUDE_LOGIN)) {
+			location.replace(`${CLAUDE_CALLBACK}${location.search}`);
+			return;
+		}
 		try {
 			if (params.get('error'))
 				throw new Error(params.get('error_description') ?? params.get('error'));

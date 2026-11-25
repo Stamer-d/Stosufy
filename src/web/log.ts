@@ -1,10 +1,10 @@
-// What the player did, kept on the phone (the last 80 events) and shown on the checks page:
+// What the player did, kept on the phone (the last 160 events) and shown on the checks page:
 // to see what happens with the screen locked, where nothing can be watched
 
 import { writable } from 'svelte/store';
 
 const KEY = 'stosufy-web-log';
-const MOST = 80;
+const MOST = 160;
 
 function kept(): string[] {
 	try {

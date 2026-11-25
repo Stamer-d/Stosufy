@@ -16,6 +16,7 @@
 		previous,
 		jumpTo,
 		removeFromQueue,
+		clearQueue,
 		moveInQueue,
 		toggleShuffle,
 		cycleRepeat,
@@ -201,6 +202,22 @@
 						></span>
 					</span>
 				</button>
+				{#if upNext.length}
+					<div class="-mx-1 px-1 flex items-center justify-between">
+						<p class="text-xs font-bold uppercase tracking-wide text-white/60">
+							{$queue.songs.length - $queue.index - 1} coming up
+						</p>
+						<button
+							class="-mr-2 h-10 px-3 text-sm font-semibold text-white/70 active:text-white"
+							onclick={() => {
+								haptic();
+								clearQueue();
+							}}
+						>
+							Clear
+						</button>
+					</div>
+				{/if}
 				<!-- (moved by their handles ≡: only what comes next, the song playing stays) -->
 				<ol
 					class="flex-1 overflow-y-auto overscroll-contain -mx-3"
@@ -225,7 +242,15 @@
 								/>
 								<span class="min-w-0">
 									<span class="block truncate font-semibold">{upcoming.title}</span>
-									<span class="block truncate text-sm text-white/60">{upcoming.artist}</span>
+									<span class="flex items-center gap-1.5 text-sm text-white/60">
+										{#if upcoming.queued}
+											<span
+												class="shrink-0 px-1.5 rounded bg-primary-300/40 text-[0.65rem] font-bold uppercase text-white/90"
+												>Queued</span
+											>
+										{/if}
+										<span class="truncate">{upcoming.artist}</span>
+									</span>
 								</span>
 							</button>
 							<button

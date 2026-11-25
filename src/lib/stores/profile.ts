@@ -95,13 +95,14 @@ async function osuApi(path: string, { latest = false } = {}) {
 
 const profiles = new Map<number | string, Promise<OsuProfile>>();
 
-/** A user's osu! profile by id or by name (kept for the session) */
-export function osuProfile(osuId: number | string): Promise<OsuProfile> {
-	if (!profiles.has(osuId)) {
+/** A user's osu! profile by id or by name, in a game mode (kept for the session) */
+export function osuProfile(osuId: number | string, mode = 'osu'): Promise<OsuProfile> {
+	const kept = mode === 'osu' ? osuId : `${mode}:${osuId}`;
+	if (!profiles.has(kept)) {
 		const loading = (async () => {
 			const byName = typeof osuId === 'string' && !/^\d+$/.test(osuId);
 			const user = await osuApi(
-				`users/${encodeURIComponent(osuId)}/osu?key=${byName ? 'username' : 'id'}`
+				`users/${encodeURIComponent(osuId)}/${mode}?key=${byName ? 'username' : 'id'}`
 			);
 			const stats = user.statistics ?? {};
 			const grades = stats.grade_counts ?? {};
@@ -177,10 +178,10 @@ export function osuProfile(osuId: number | string): Promise<OsuProfile> {
 				}
 			} as OsuProfile;
 		})();
-		loading.catch(() => profiles.delete(osuId));
-		profiles.set(osuId, loading);
+		loading.catch(() => profiles.delete(kept));
+		profiles.set(kept, loading);
 	}
-	return profiles.get(osuId)!;
+	return profiles.get(kept)!;
 }
 
 /**
@@ -220,10 +221,11 @@ export async function userScores(
 	osuId: number,
 	kind: 'best' | 'firsts' | 'recent',
 	offset = 0,
-	limit = 10
+	limit = 10,
+	mode = 'osu'
 ): Promise<UserScore[]> {
 	const result = await osuApi(
-		`users/${osuId}/scores/${kind}?mode=osu&limit=${limit}&offset=${offset}`,
+		`users/${osuId}/scores/${kind}?mode=${mode}&limit=${limit}&offset=${offset}`,
 		{ latest: true }
 	);
 	return result.map((score: any) => ({
@@ -259,7 +261,6 @@ export async function userPlaylists(osuId: number): Promise<Playlist[]> {
 	return api.getUserPlaylists(await freshToken(), osuId);
 }
 
-/** A country's flag as an emoji */
 /** An osu! player as the search and the friend list show them */
 export interface OsuPlayer {
 	id: number;
@@ -313,6 +314,102 @@ export async function osuFriends(): Promise<OsuPlayer[]> {
 	);
 }
 
+// --- Rankings ------------------------------------------------------------------------------
+// osu!'s leaderboards: the players by performance (pp) or ranked score, worldwide, of one
+// country or among the user's friends, and the countries. 50 a page, 10 000 at most.
+
+export type RankingMode = 'osu' | 'taiko' | 'fruits' | 'mania';
+export const RANKING_MODES: { id: RankingMode; label: string }[] = [
+	{ id: 'osu', label: 'osu!' },
+	{ id: 'taiko', label: 'Taiko' },
+	{ id: 'fruits', label: 'Catch' },
+	{ id: 'mania', label: 'Mania' }
+];
+export const RANKING_PAGE = 50;
+const RANKING_PAGES = 200;
+
+export interface RankedPlayer extends OsuPlayer {
+	/** Their place in this ranking (in the country's, among the friends) */
+	place: number;
+	countryName: string | null;
+	accuracy: number | null;
+	playCount: number | null;
+	rankedScore: number | null;
+}
+
+export interface RankedCountry {
+	place: number;
+	code: string;
+	name: string;
+	/** Players active in this mode */
+	players: number;
+	pp: number;
+	playCount: number;
+	rankedScore: number;
+}
+
+/**
+ * A page (from 1) of the players' ranking by pp or ranked score: of everyone, of a country
+ * (its two-letter code) or of the user's friends
+ */
+export async function playerRanking(
+	mode: RankingMode,
+	by: 'performance' | 'score',
+	{
+		page = 1,
+		country = '',
+		friends = false
+	}: { page?: number; country?: string; friends?: boolean }
+): Promise<{ players: RankedPlayer[]; more: boolean }> {
+	const query = [
+		`cursor[page]=${page}`,
+		country && by === 'performance' ? `country=${encodeURIComponent(country)}` : '',
+		friends ? 'filter=friends' : ''
+	].filter(Boolean);
+	const result = await osuApi(`rankings/${mode}/${by}?${query.join('&')}`);
+	const players = (result?.ranking ?? []).map((entry: any, index: number) => ({
+		...player({ ...entry.user, statistics: entry }),
+		place: (page - 1) * RANKING_PAGE + index + 1,
+		countryName: entry.user?.country?.name ?? null,
+		accuracy: entry.hit_accuracy ?? null,
+		playCount: entry.play_count ?? null,
+		rankedScore: entry.ranked_score ?? null
+	}));
+	return {
+		players,
+		more: !!result?.cursor && players.length > 0 && page < RANKING_PAGES
+	};
+}
+
+/** A page (from 1) of the countries' ranking by their players' pp */
+export async function countryRanking(
+	mode: RankingMode,
+	page = 1
+): Promise<{ countries: RankedCountry[]; more: boolean }> {
+	const result = await osuApi(`rankings/${mode}/country?cursor[page]=${page}`);
+	const countries = (result?.ranking ?? []).map((entry: any, index: number) => ({
+		place: (page - 1) * RANKING_PAGE + index + 1,
+		code: entry.code ?? entry.country?.code ?? '',
+		name: entry.country?.name ?? entry.code ?? '',
+		players: entry.active_users ?? 0,
+		pp: entry.performance ?? 0,
+		playCount: entry.play_count ?? 0,
+		rankedScore: entry.ranked_score ?? 0
+	}));
+	return { countries, more: !!result?.cursor && countries.length > 0 };
+}
+
+/** 12 345 678 as 12.3M (scores, play counts) */
+export function shortNumber(value: number | null | undefined) {
+	const n = Number(value) || 0;
+	if (n >= 1e12) return `${(n / 1e12).toFixed(1)}T`;
+	if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+	if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+	if (n >= 1e4) return `${Math.round(n / 1e3)}K`;
+	return n.toLocaleString();
+}
+
+/** A country's flag as an emoji */
 export function flag(code: string | undefined | null) {
 	if (!code || code.length !== 2) return '';
 	return String.fromCodePoint(

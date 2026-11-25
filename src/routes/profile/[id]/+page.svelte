@@ -390,22 +390,35 @@
 			<section class="grid gap-4 xl:grid-cols-[1fr_22rem]">
 				<div class="rounded-2xl bg-white/[0.04] ring-1 ring-white/5 p-5 overflow-hidden">
 					<div class="flex flex-wrap items-end gap-x-10 gap-y-3">
-						<div>
+						<button
+							class="text-start cursor-pointer hover:opacity-80 transition"
+							title="The global ranking"
+							onclick={() => goto('/rankings')}
+						>
 							<p class="text-xs font-bold uppercase tracking-wide text-secondary-600">
 								Global ranking
 							</p>
 							<p class="text-4xl font-extrabold tabular-nums" style="color: {accent}">
 								{profile.globalRank ? `#${number(profile.globalRank)}` : '–'}
 							</p>
-						</div>
-						<div>
+						</button>
+						<button
+							class="text-start cursor-pointer hover:opacity-80 transition"
+							title={profile.country ? `The ranking of ${profile.country.name}` : 'The rankings'}
+							onclick={() =>
+								goto(
+									profile.country
+										? `/rankings?country=${profile.country.code}&name=${encodeURIComponent(profile.country.name)}`
+										: '/rankings'
+								)}
+						>
 							<p class="text-xs font-bold uppercase tracking-wide text-secondary-600">
 								Country ranking
 							</p>
 							<p class="text-2xl font-extrabold tabular-nums">
 								{profile.countryRank ? `#${number(profile.countryRank)}` : '–'}
 							</p>
-						</div>
+						</button>
 						<div>
 							<p class="text-xs font-bold uppercase tracking-wide text-secondary-600">pp</p>
 							<p class="text-2xl font-extrabold tabular-nums text-pink-300">{number(profile.pp)}</p>

@@ -147,6 +147,13 @@
 				{/if}
 			</a>
 			<a
+				href="{base}/rankings"
+				aria-label="Rankings"
+				class="size-11 grid place-items-center text-secondary-600"
+			>
+				<span class="icon-[mingcute--trophy-line] size-7"></span>
+			</a>
+			<a
 				href="{base}/settings"
 				aria-label="Settings"
 				class="size-11 grid place-items-center text-secondary-600"

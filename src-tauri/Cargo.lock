@@ -4,10 +4,12 @@ version = 4
 
 [[package]]
 name = "Stosfy"
-version = "0.6.125"
+version = "0.6.129"
 dependencies = [
  "clipboard-rs",
+ "dirs",
  "flate2",
+ "getrandom 0.3.4",
  "libc",
  "reqwest 0.13.5",
  "serde",

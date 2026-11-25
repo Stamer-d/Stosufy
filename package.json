@@ -1,6 +1,6 @@
 {
 	"name": "Stosufy",
-	"version": "0.6.125",
+	"version": "0.6.129",
 	"description": "",
 	"type": "module",
 	"imports": {
@@ -12,6 +12,7 @@
 		"build": "vite build",
 		"test:dash": "node --experimental-transform-types --no-warnings --import ./tests/dash/register.mjs --test \"tests/dash/*.test.ts\"",
 		"test:addons": "tests/addons/run.sh",
+		"test:mcp": "node --experimental-transform-types --no-warnings --import ./tests/mcp/register.mjs --test \"tests/mcp/*.test.ts\"",
 		"test:web": "tests/web/run.sh",
 		"test:web:webkit": "BROWSER=webkit tests/web/run.sh",
 		"build:web": "vite build --mode web && node -e \"require('fs').copyFileSync('build-web/404.html', 'build-web/index.html')\"",

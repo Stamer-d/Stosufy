@@ -7,7 +7,7 @@ const SIZES = [
   ['13', { ...devices['iPhone 13'] }],
   ['ProMax', { ...devices['iPhone 14 Pro Max'] }]
 ];
-const PAGES = ['/', '/library', '/search', '/downloads', '/library/downloads', '/playlist/7', '/playlist/2', '/smart/abc', '/map/122', '/community', '/friends', '/wrapped', '/settings', '/check'];
+const PAGES = ['/', '/library', '/search', '/downloads', '/library/downloads', '/playlist/7', '/playlist/2', '/smart/abc', '/map/122', '/community', '/friends', '/rankings', '/profile/5', '/wrapped', '/settings', '/check'];
 const findings = new Map();
 const note = (kind, where, what) => { const k = `${kind}|${what}`; if (!findings.has(k)) findings.set(k, { kind, what, where: new Set() }); findings.get(k).where.add(where); };
 const inspect = (p, where, { bottom = true } = {}) => p.evaluate(({ bottom }) => {

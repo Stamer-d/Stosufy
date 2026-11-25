@@ -31,6 +31,45 @@ export const LANGUAGES: Record<number, string> = {
 	14: 'Other'
 };
 
+/**
+ * osu! names genres and languages in the user's language (the library keeps whatever it got
+ * then, so one library can have "Video Game" and "Videospiel"): those names in English
+ */
+const TRANSLATED: Record<string, string> = {
+	// German
+	videospiel: 'Video Game',
+	andere: 'Other',
+	hiphop: 'Hip Hop',
+	elektronisch: 'Electronic',
+	klassik: 'Classical',
+	englisch: 'English',
+	japanisch: 'Japanese',
+	chinesisch: 'Chinese',
+	koreanisch: 'Korean',
+	franzosisch: 'French',
+	deutsch: 'German',
+	schwedisch: 'Swedish',
+	spanisch: 'Spanish',
+	italienisch: 'Italian',
+	russisch: 'Russian',
+	polnisch: 'Polish'
+};
+const nameKey = (name: string) =>
+	name
+		.normalize('NFKD')
+		.replace(/[^a-z]/gi, '')
+		.toLowerCase();
+const ENGLISH = new Map(
+	[...Object.values(GENRES), ...Object.values(LANGUAGES)].map((name) => [nameKey(name), name])
+);
+
+/** A genre or language as osu! names it in English (as it is, if it's none it knows) */
+export function englishName(name: string | null | undefined) {
+	if (!name) return name ?? null;
+	const key = nameKey(name);
+	return ENGLISH.get(key) ?? TRANSLATED[key] ?? name;
+}
+
 /** The tags of a set as a list (osu! keeps them as one string, separated by spaces) */
 export function tagList(tags: string | undefined | null) {
 	return [...new Set((tags ?? '').split(/\s+/).filter((tag) => tag.length > 1))];

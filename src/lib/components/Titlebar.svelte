@@ -296,6 +296,14 @@
 					<Button
 						type="ghost"
 						class="w-full rounded-md text-sm hover:bg-secondary-400"
+						icon="icon-[mingcute--trophy-line]"
+						onclick={() => go('/rankings')}
+					>
+						Rankings
+					</Button>
+					<Button
+						type="ghost"
+						class="w-full rounded-md text-sm hover:bg-secondary-400"
 						icon="icon-[mingcute--sparkles-line]"
 						onclick={() => go('/wrapped')}
 					>

@@ -5,12 +5,16 @@
 // With the screen locked a page may go on playing, but hardly start to: so the next song is
 // made ready in the second element while this one still plays, and takes over at its end
 // without a moment of silence in between (see "The next song, ahead of time").
-// The songs stream from the beatmap mirror, like the desktop app's streaming, or play from
-// the phone if they were downloaded. The queue, shuffle and repeat are kept for the next
-// start, where it goes on where it was.
+// The songs come from the beatmap mirror, like the desktop app's streaming, or from the phone
+// if they were downloaded. A song tapped starts straight from the mirror, right away; the
+// next one is read whole into memory while this one plays (songAudio.ts), and so is the one
+// playing a few seconds in: from memory a song can be jumped in anywhere (the mirror sends no
+// byte ranges), its length is known, and it starts at once with the screen locked. The
+// queue, shuffle and repeat are kept for the next start, where it goes on where it was.
 
 import { get, writable } from 'svelte/store';
-import { downloaded, localUrl } from './downloads';
+import { downloaded } from './downloads';
+import { hold, heldUrl, isReading, cantPlayHeld, setKeeper } from './songAudio';
 import { coverUrl, keyOf, previewUrl, slim, streamUrl } from './songs';
 import { log } from './log';
 import { sharpArtwork } from './covers';
@@ -53,6 +57,15 @@ export function setSimilarSongs(find: typeof similarTo) {
 	similarTo = find;
 }
 
+/** Songs like these from all of osu!, without those (set by listening.ts): for when the
+ * user's own songs have too few like them (a new account, a song unlike the rest) */
+let similarOnOsu: ((seeds: MapSet[], exclude: MapSet[]) => Promise<MapSet[]>) | null = null;
+export function setSimilarOnOsu(find: typeof similarOnOsu) {
+	similarOnOsu = find;
+}
+/** With fewer songs like these among the user's own, osu! is asked for more */
+const FEW = 5;
+
 /**
  * Autoplay: with fewer than two songs left, songs like the last ones are added, ahead of
  * time (with the screen locked, the next song has to be there already when one ends)
@@ -60,14 +73,45 @@ export function setSimilarSongs(find: typeof similarTo) {
 function topUp() {
 	if (elsewhere) return;
 	const { songs, index } = get(queue);
-	if (!get(autoplay) || get(repeat) !== 'off' || !similarTo || songs.length - index - 1 >= 2)
-		return;
-	const more = similarTo(songs.slice(-5).reverse(), songs).slice(0, 20).map(slim);
-	if (!more.length) return;
-	log(`autoplay: ${more.length} songs like these`);
-	queue.update((q) => ({ ...q, songs: [...q.songs, ...more] }));
-	ordered.push(...more);
-	readNext();
+	if (!get(autoplay) || get(repeat) !== 'off' || songs.length - index - 1 >= 2) return;
+	const more = similarTo ? similarTo(songs.slice(-5).reverse(), songs).slice(0, 20).map(slim) : [];
+	if (more.length) {
+		log(`autoplay: ${more.length} songs like these`);
+		queue.update((q) => ({ ...q, songs: [...q.songs, ...more] }));
+		ordered.push(...more);
+		save();
+		holdNext();
+	}
+	if (more.length < FEW) topUpFromOsu();
+}
+
+let askingOsu = false;
+/** Autoplay's songs from osu!, a moment later (it's asked): added if they're still wanted */
+async function topUpFromOsu() {
+	if (!similarOnOsu || askingOsu || get(offline)) return;
+	askingOsu = true;
+	try {
+		const before = get(queue).songs;
+		const found = await similarOnOsu(before.slice(-2).reverse(), before);
+		const { songs, index } = get(queue);
+		if (elsewhere || !get(autoplay) || get(repeat) !== 'off' || songs.length - index - 1 >= FEW)
+			return;
+		const have = new Set(songs.map((song) => String(song.id)));
+		const more = found
+			.filter((song) => !have.has(String(song.id)))
+			.slice(0, 15)
+			.map(slim);
+		if (!more.length) return;
+		log(`autoplay: ${more.length} songs like these from osu!`);
+		queue.update((q) => ({ ...q, songs: [...q.songs, ...more] }));
+		ordered.push(...more);
+		save();
+		holdNext();
+	} catch {
+		// (the queue ends where it ends)
+	} finally {
+		askingOsu = false;
+	}
 }
 
 /** The sleep timer: when it stops (ms), or at the end of the song playing */
@@ -84,10 +128,8 @@ let spare: HTMLAudioElement | null = null;
 let outgoing: HTMLAudioElement | null = null;
 /** A crossfade into the next song is on its way (or was turned down for this song) */
 let crossfading = false;
-let objectUrl: string | null = null;
-/** The next song's downloaded audio, read ahead: iOS starts a song with the screen locked
- * only if it's started right away when the one before ends (no waiting on anything) */
-let readAhead: { key: string; url: string } | null = null;
+/** The song playing was asked for whole, into memory (once it played a few seconds) */
+let askedWhole = false;
 /** Where the song was at the last timeupdate (to see it go round to the start) */
 let lastTime = 0;
 /** The position was changed by hand (going back to the start isn't the song's end then) */
@@ -233,7 +275,8 @@ function create() {
 		if (!mine() || elsewhere) return;
 		const now = player.currentTime;
 		const duration = lengthOf(player);
-		time.set({ current: now, duration });
+		// (a jump that waits for the song to be in memory: the line stays where it goes)
+		time.set({ current: waitingJump?.song === loaded ? waitingJump!.at : now, duration });
 		// (back at its start by itself: its end. Not by its length: Safari may get that wrong)
 		const round = wentRound(player);
 		// (or at its end by the length the Stosufy API knows: Safari, thinking the song longer
@@ -261,6 +304,8 @@ function create() {
 		} else if (!seekedByHand) {
 			crossfadeIfDue(now, duration);
 			prepareIfDue(now, duration);
+			holdWhole(player, now);
+			holdNext();
 		}
 		seekedByHand = false;
 		saveSoon();
@@ -286,20 +331,25 @@ function create() {
 	});
 	player.addEventListener('error', () => {
 		const song = current();
-		if (!mine() || !song || player.src.startsWith('blob:')) return;
+		if (!mine() || !song) return;
 		const code = player.error?.code;
+		const at = lastTime;
+		// From memory, and the browser can't play it (its format, mostly): straight from the
+		// mirror instead, as before songs were kept in memory
+		if (player.src.startsWith('blob:')) {
+			log(`can't play ${song.title} from memory (error ${code}): from the mirror`);
+			cantPlayHeld(song);
+			player.src = streamUrl(song);
+			startAt(player, at > 1 ? at : 0, song);
+			player.play().catch(startTurnedDown);
+			return;
+		}
 		// It played and the stream broke off (the connection, a moment): on from where it was,
 		// a few times, waiting a bit longer each time
-		const at = lastTime;
 		if (!get(previewOnly) && at > 1 && retries < 4) {
 			retries++;
 			log(`stream broke off at ${Math.round(at)}s (error ${code}): again, try ${retries}`);
-			setTimeout(() => {
-				if (current() !== song || !mine()) return;
-				player.src = streamUrl(song);
-				startAt(player, at, song);
-				player.play().catch(startTurnedDown);
-			}, 1000 * retries);
+			setTimeout(() => current() === song && mine() && playAgain(player, song, at), 1000 * retries);
 			return;
 		}
 		// The mirror didn't have the song (or has a break): its preview instead
@@ -350,27 +400,30 @@ const current = () => {
 	return songs[index] ?? null;
 };
 
+/** The element plays the song straight from the mirror (not from memory, not its preview) */
+const fromMirror = (player: HTMLAudioElement) => !!loaded && player.src === streamUrl(loaded);
+
 /**
- * Plays the queue's current song: right away (a stream, or a download read ahead), only a
- * download that wasn't read ahead waits for it to be read
+ * Plays the queue's current song: right away (from memory, or straight from the mirror),
+ * only a downloaded one that isn't in memory waits for the phone to read it
  */
 function load(at = 0) {
 	const song = current();
 	if (!song) return;
 	const player = element();
 	endCrossfade();
-	// (a song made ready for after this one isn't the one now; its downloaded audio is)
+	// (a song made ready for after this one isn't the one now)
 	handing?.stop();
 	handing = null;
 	dropPrepared();
+	stopJump();
 	loaded = song;
 	previewOnly.set(false);
 	showInMediaSession(song);
 	const key = keyOf(song);
-	const start = (url: string, own: boolean) => {
-		if (objectUrl && objectUrl !== url) URL.revokeObjectURL(objectUrl);
-		objectUrl = own ? url : null;
+	const start = (url: string, how: string) => {
 		crossfading = false;
+		askedWhole = false;
 		unfade(player);
 		startLoudness(player, key);
 		askDuration(song);
@@ -380,36 +433,146 @@ function load(at = 0) {
 		player.src = url;
 		startAt(player, at, song);
 		const format = formatOf(song);
-		log(`start ${song.title} (${own ? 'downloaded' : 'stream'}${format ? `, ${format}` : ''})`);
+		log(`start ${song.title} (${how}${format ? `, ${format}` : ''})`);
 		player.play().catch(startTurnedDown);
 		save();
 		topUp();
-		readNext();
+		holdNext();
 	};
-	if (readAhead?.key === key) {
-		const { url } = readAhead;
-		readAhead = null;
-		start(url, true);
-	} else if (get(downloaded).has(key)) {
-		return localUrl(song).then((url) => {
-			if (current() === song) start(url ?? streamUrl(song), !!url);
-			else if (url) URL.revokeObjectURL(url);
+	const local = get(downloaded).has(key);
+	const url = heldUrl(song);
+	if (url) start(url, local ? 'downloaded' : 'from memory');
+	else if (local)
+		return hold(song, true).then((url) => {
+			if (current() === song) start(url ?? streamUrl(song), url ? 'downloaded' : 'stream');
 		});
-	} else start(streamUrl(song), false);
+	else start(streamUrl(song), 'stream');
 }
 
-/** Reads the next song's audio ahead if it's downloaded */
-async function readNext() {
+/** This long (s) into a song the next one is read into memory, and the one playing if it
+ * plays straight from the mirror (not each song skipped past: the mirror counts) */
+const AHEAD_AFTER = 5;
+
+/** Reads the next song into memory ahead of time */
+function holdNext() {
 	if (elsewhere) return;
-	const { songs, index } = get(queue);
-	const upcoming = songs[index + 1] ?? (get(repeat) === 'all' ? songs[0] : null);
+	const at = upcomingIndex();
+	const upcoming = at == null ? null : get(queue).songs[at];
 	if (!upcoming) return;
-	const key = keyOf(upcoming);
-	if (readAhead?.key === key || !get(downloaded).has(key)) return;
-	const url = await localUrl(upcoming);
-	if (!url) return;
-	if (readAhead) URL.revokeObjectURL(readAhead.url);
-	readAhead = { key, url };
+	// (one from the mirror only once this song plays a while; a downloaded one right away)
+	if (
+		!get(downloaded).has(keyOf(upcoming)) &&
+		(!audio || audio.paused || audio.currentTime < AHEAD_AFTER)
+	)
+		return;
+	hold(upcoming);
+}
+
+/** The song playing straight from the mirror is read into memory too, a few seconds in: to
+ * jump in it, and to go on if its stream breaks off */
+function holdWhole(player: HTMLAudioElement, now: number) {
+	if (askedWhole || now < AHEAD_AFTER || !loaded || !fromMirror(player)) return;
+	askedWhole = true;
+	// (not where data is saved: it would come from the mirror twice)
+	const saving = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+		?.saveData;
+	if (!saving) hold(loaded);
+}
+
+/** The song goes on from memory at `at` (s), in the element it plays in */
+function playFromMemory(player: HTMLAudioElement, song: MapSet, url: string, at: number) {
+	const playing = !player.paused;
+	player.src = url;
+	startAt(player, at, song);
+	if (playing) player.play().catch(startTurnedDown);
+	updatePosition();
+}
+
+/** The song again from `at` (its stream broke off or stood still): from memory if it's
+ * there, else from the mirror once more */
+function playAgain(player: HTMLAudioElement, song: MapSet, at: number) {
+	const url = get(previewOnly) ? previewUrl(song) : (heldUrl(song) ?? streamUrl(song));
+	player.src = url;
+	startAt(player, at, song);
+	player.play().catch(startTurnedDown);
+	// (the mirror can't be asked for a part: if the song doesn't get there, from memory)
+	if (url === streamUrl(song)) checkJump(song, at);
+}
+
+// --- Jumping in a song --------------------------------------------------------------------
+// A song in memory (or downloaded, or a preview) goes anywhere at once. One that plays
+// straight from the mirror only goes where it has come in already: the mirror sends it in one
+// piece. So from memory if it's there; else the element is asked, and looked at a moment
+// later: if it isn't there, the song is read into memory and goes on from there.
+
+/** A jump that waits for the song to be in memory: where to, in which song */
+let waitingJump: { song: MapSet; at: number } | null = null;
+let jumpCheck: ReturnType<typeof setTimeout> | null = null;
+
+/** No jump is waited for or looked after any more (another song, another jump) */
+function stopJump() {
+	waitingJump = null;
+	if (jumpCheck) clearTimeout(jumpCheck);
+	jumpCheck = null;
+}
+
+const covers = (ranges: TimeRanges, seconds: number) => {
+	for (let i = 0; i < ranges.length; i++)
+		if (ranges.start(i) <= seconds && seconds <= ranges.end(i) - 0.5) return true;
+	return false;
+};
+
+/** The song playing goes to `seconds` */
+function jumpWithin(player: HTMLAudioElement, seconds: number) {
+	const song = loaded;
+	stopJump();
+	jumped(seconds);
+	if (!song || !fromMirror(player)) {
+		player.currentTime = seconds;
+		return;
+	}
+	const url = heldUrl(song);
+	if (url) {
+		log(`jump to ${Math.round(seconds)}s: from memory`);
+		playFromMemory(player, song, url, seconds);
+		return;
+	}
+	if (covers(player.buffered, seconds) || covers(player.seekable, seconds)) {
+		player.currentTime = seconds;
+		checkJump(song, seconds);
+		return;
+	}
+	// (not come in that far yet: the song plays on where it is until it's in memory)
+	log(`jump to ${Math.round(seconds)}s: once the song is in memory`);
+	jumpFromMemory(song, seconds);
+}
+
+/** Looks whether the song got to `seconds`; if not, it goes there from memory */
+function checkJump(song: MapSet, seconds: number) {
+	if (jumpCheck) clearTimeout(jumpCheck);
+	const from = performance.now();
+	jumpCheck = setTimeout(() => {
+		jumpCheck = null;
+		const player = audio;
+		if (!player || loaded !== song || !fromMirror(player)) return;
+		const passed = ((performance.now() - from) / 1000) * (player.playbackRate || 1);
+		const now = player.currentTime;
+		if (!player.seeking && now > seconds - 2.5 && now < seconds + passed + 2.5) return;
+		log(`the stream didn't get to ${Math.round(seconds)}s: from memory`);
+		jumpFromMemory(song, seconds);
+	}, 1500);
+}
+
+function jumpFromMemory(song: MapSet, seconds: number) {
+	const mine = (waitingJump = { song, at: seconds });
+	hold(song, true).then((url) => {
+		if (waitingJump !== mine) return;
+		waitingJump = null;
+		const player = audio;
+		if (!url || !player || loaded !== song || !fromMirror(player)) return;
+		jumped(seconds);
+		playFromMemory(player, song, url, seconds);
+	});
 }
 
 /** (from a tap in the app: in the background there's none) */
@@ -444,14 +607,15 @@ function crossfadeIfDue(now: number, duration: number) {
 	const { songs } = get(queue);
 	const song = songs[at];
 	const key = keyOf(song);
-	// (a downloaded song not read ahead would wait for the phone: as without crossfade then)
-	const url =
-		readAhead?.key === key ? readAhead.url : get(downloaded).has(key) ? null : streamUrl(song);
-	if (!url) return;
+	// (a downloaded song not in memory would wait for the phone: as without crossfade then)
+	const url = heldUrl(song) ?? (get(downloaded).has(key) ? null : streamUrl(song));
+	if (!url) {
+		hold(song, true);
+		return;
+	}
 	crossfading = true;
 	const incoming = spare;
 	const was = current();
-	if (readAhead?.key === key) readAhead = null;
 	fadeTo(incoming, 0, 0);
 	incoming.src = url;
 	// (at the speed of the mod: the beat goes on)
@@ -461,15 +625,15 @@ function crossfadeIfDue(now: number, duration: number) {
 		() => {
 			// (another song meanwhile, or paused: not this one then)
 			if (audio !== main || main.paused || current() !== was) {
-				release(incoming, key, url);
+				release(incoming);
 				return;
 			}
-			takeOver(incoming, main, at, song, url, seconds);
+			takeOver(incoming, main, at, song, seconds);
 		},
 		(error) => {
 			// (turned down: iOS, with the screen locked. The next song when this one ends then)
 			log(`crossfade turned down (${error?.name}): the next song at the end`);
-			release(incoming, key, url);
+			release(incoming);
 		}
 	);
 }
@@ -480,7 +644,6 @@ function takeOver(
 	main: HTMLAudioElement,
 	at: number,
 	song: MapSet,
-	url: string,
 	seconds: number
 ) {
 	// (a song still going out of a crossfade before stops now)
@@ -488,9 +651,8 @@ function takeOver(
 	outgoing = main;
 	spare = main;
 	audio = incoming;
-	// (the song going out still plays from its downloaded audio: let go of it at the end)
-	outgoingUrl = objectUrl;
-	objectUrl = url.startsWith('blob:') ? url : null;
+	stopJump();
+	askedWhole = false;
 	queue.set({ songs: get(queue).songs, index: at });
 	loaded = song;
 	lastTime = 0;
@@ -517,7 +679,7 @@ function takeOver(
 	log(`playing ${song.title}`);
 	save();
 	topUp();
-	readNext();
+	holdNext();
 }
 
 // --- The next song, ahead of time -------------------------------------------------------------
@@ -536,7 +698,6 @@ const PREPARE = 12;
 let prepared: {
 	key: string;
 	song: MapSet;
-	url: string;
 	element: HTMLAudioElement;
 	loaded: boolean;
 	started: Promise<void>;
@@ -559,24 +720,26 @@ function prepareIfDue(now: number, duration: number) {
 	// (another song comes next now: put in the queue meanwhile, or the queue was reordered)
 	if (prepared && prepared.key !== key) dropPrepared();
 	if (!song || !key || prepared || notPrepared === key) return;
-	// (a downloaded song is read from the phone first: at one of the next time updates)
+	// (from memory; one on its way there is waited for a little: at one of the next time
+	// updates. Else straight from the mirror, unless it's downloaded: read from the phone first)
 	const url =
-		readAhead?.key === key ? readAhead.url : get(downloaded).has(key) ? null : streamUrl(song);
+		heldUrl(song) ??
+		(get(downloaded).has(key) || (isReading(song) && now < duration - PREPARE / 2)
+			? null
+			: streamUrl(song));
 	if (!url) {
-		readNext();
+		hold(song, true);
 		return;
 	}
-	if (readAhead?.key === key) readAhead = null;
 	const incoming = spare;
 	fadeTo(incoming, 0, 0);
 	incoming.src = url;
 	// (at the speed of the mod)
 	applyMod(incoming);
-	log(`next song made ready: ${song.title}`);
+	log(`next song made ready: ${song.title}${url.startsWith('blob:') ? ' (from memory)' : ''}`);
 	const mine: NonNullable<typeof prepared> = {
 		key,
 		song,
-		url,
 		element: incoming,
 		loaded: false,
 		started: incoming.play()
@@ -605,18 +768,15 @@ function prepareIfDue(now: number, duration: number) {
 function dropPrepared() {
 	const gone = prepared;
 	prepared = null;
-	if (gone) release(gone.element, gone.key, gone.url);
+	if (gone) release(gone.element);
 }
 
-/** The spare element empty again; a downloaded song's audio stays read ahead */
-function release(element: HTMLAudioElement, key: string, url: string) {
+/** The spare element empty again */
+function release(element: HTMLAudioElement) {
 	element.pause();
 	element.removeAttribute('src');
 	element.load();
 	unfade(element);
-	if (!url.startsWith('blob:')) return;
-	if (!readAhead) readAhead = { key, url };
-	else if (readAhead.url !== url) URL.revokeObjectURL(url);
 }
 
 /**
@@ -653,7 +813,7 @@ function handOver() {
 			if (over) return;
 			over = true;
 			clearTimeout(late);
-			release(incoming, ready.key, ready.url);
+			release(incoming);
 		}
 	});
 	/** Not this way: the next song in this element, as before */
@@ -663,7 +823,7 @@ function handOver() {
 		over = true;
 		if (handing === mine) handing = null;
 		log(`the song made ready didn't start (${why}): in this element`);
-		release(incoming, ready.key, ready.url);
+		release(incoming);
 		notPrepared = ready.key;
 		if (audio === main && current() === was) next();
 	};
@@ -675,13 +835,13 @@ function handOver() {
 			if (over) return;
 			if (handing !== mine || audio !== main || current() !== was) {
 				over = true;
-				release(incoming, ready.key, ready.url);
+				release(incoming);
 				return;
 			}
 			over = true;
 			handing = null;
 			const paused = main.paused;
-			takeOver(incoming, main, at, ready.song, ready.url, 0);
+			takeOver(incoming, main, at, ready.song, 0);
 			// (paused in that moment: the next song, paused at its start)
 			if (paused) pauseHere("paused at the song's end");
 		},
@@ -691,7 +851,6 @@ function handOver() {
 }
 
 let fadeTimer: ReturnType<typeof setTimeout> | null = null;
-let outgoingUrl: string | null = null;
 /** The song gone out of a crossfade stops (at its end, or a pause or another song now) */
 function endCrossfade() {
 	if (fadeTimer) clearTimeout(fadeTimer);
@@ -703,8 +862,6 @@ function endCrossfade() {
 	gone.removeAttribute('src');
 	gone.load();
 	unfade(gone);
-	if (outgoingUrl && outgoingUrl !== objectUrl) URL.revokeObjectURL(outgoingUrl);
-	outgoingUrl = null;
 }
 
 /** Plays `songs` from the one at `index` (shuffled when shuffle is on) */
@@ -808,8 +965,7 @@ export function previous() {
 	// A bit into the song: back to its start, else the one before
 	if (element().currentTime > 3 || (index === 0 && get(repeat) !== 'all')) {
 		seekedByHand = true;
-		jumped(0);
-		element().currentTime = 0;
+		jumpWithin(element(), 0);
 		return;
 	}
 	let before = index === 0 ? songs.length - 1 : index - 1;
@@ -817,8 +973,7 @@ export function previous() {
 		before = playableAfter(songs, index, -1);
 		if (before < 0) {
 			seekedByHand = true;
-			jumped(0);
-			element().currentTime = 0;
+			jumpWithin(element(), 0);
 			return;
 		}
 	}
@@ -849,8 +1004,7 @@ export function seek(seconds: number) {
 		songEnded();
 		return;
 	}
-	jumped(seconds);
-	player.currentTime = seconds;
+	jumpWithin(player, seconds);
 	updatePosition();
 }
 
@@ -876,6 +1030,20 @@ queue.subscribe(({ songs, index }) => {
 	if (songs[index] && !isQueued(songs[index])) lastOfPlaylist = songs[index];
 });
 
+// The songs that stay in memory whatever else is read: the one playing, the next, the one
+// before (going back is at once), and one made ready or going out in a crossfade
+setKeeper(() => {
+	const { songs, index } = get(queue);
+	const next = upcomingIndex();
+	return [
+		loaded,
+		songs[index],
+		songs[index - 1],
+		next == null ? null : songs[next],
+		prepared?.song
+	];
+});
+
 /** The song comes right after the one playing */
 export function playNext(song: MapSet) {
 	if (elsewhere) return elsewhere.queueSong(song, true);
@@ -885,7 +1053,7 @@ export function playNext(song: MapSet) {
 		index
 	}));
 	save();
-	readNext();
+	holdNext();
 }
 
 /** The song comes after the one playing and the songs already put in the queue, before the
@@ -899,7 +1067,25 @@ export function addToQueue(song: MapSet) {
 		return { songs: [...songs.slice(0, at), asQueued(song), ...songs.slice(at)], index };
 	});
 	save();
-	readNext();
+	holdNext();
+}
+
+/** All of these come after the song playing and the songs already put in the queue (a whole
+ * playlist), before the playlist that plays goes on */
+export function addAllToQueue(list: MapSet[]) {
+	if (!list.length) return;
+	if (elsewhere) {
+		for (const song of list) elsewhere.queueSong(song, false);
+		return;
+	}
+	if (!current()) return play(list);
+	queue.update(({ songs, index }) => {
+		let at = index + 1;
+		while (isQueued(songs[at])) at++;
+		return { songs: [...songs.slice(0, at), ...list.map(asQueued), ...songs.slice(at)], index };
+	});
+	save();
+	holdNext();
 }
 
 /** A song coming up moves to another place among those coming up */
@@ -915,7 +1101,7 @@ export function moveInQueue(from: number, to: number) {
 		return { songs: next, index };
 	});
 	save();
-	readNext();
+	holdNext();
 }
 
 export function removeFromQueue(at: number) {
@@ -933,7 +1119,20 @@ export function removeFromQueue(at: number) {
 		index: at < index ? index - 1 : index
 	}));
 	save();
-	readNext();
+	holdNext();
+}
+
+/** Takes out all that comes after the song playing (with autoplay, songs like it play on) */
+export function clearQueue() {
+	if (elsewhere) return elsewhere.cantChangeQueue();
+	const { songs, index } = get(queue);
+	if (index < 0 || songs.length <= index + 1) return;
+	const kept = songs.slice(0, index + 1);
+	queue.set({ songs: kept, index });
+	ordered = kept.filter((song) => !isQueued(song));
+	save();
+	topUp();
+	holdNext();
 }
 
 export function toggleShuffle() {
@@ -964,7 +1163,7 @@ export function toggleShuffle() {
 		});
 	}
 	save();
-	readNext();
+	holdNext();
 }
 
 export function toggleAutoplay() {
@@ -977,7 +1176,7 @@ export function cycleRepeat() {
 	if (elsewhere) return elsewhere.cycleRepeat();
 	repeat.update((mode) => (mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off'));
 	save();
-	readNext();
+	holdNext();
 }
 
 // The lock screen's controls: iOS gives them to whatever began playing last. An audio context
@@ -1064,6 +1263,7 @@ export function showElsewhere(controls: Elsewhere, shown: Shown) {
 		handing?.stop();
 		handing = null;
 		dropPrepared();
+		stopJump();
 		// (the song here starts again where it was, when it's this one's turn again)
 		loaded = null;
 		log('another device plays: showing it');
@@ -1234,9 +1434,7 @@ if (typeof window !== 'undefined') {
 		retries++;
 		const at = audio.currentTime;
 		log(`stream stood still at ${Math.round(at)}s: again, try ${retries}`);
-		audio.src = get(previewOnly) ? previewUrl(song) : streamUrl(song);
-		startAt(audio, at, song);
-		audio.play().catch(startTurnedDown);
+		playAgain(audio, song, at);
 	}, 3000);
 }
 

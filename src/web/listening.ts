@@ -10,7 +10,8 @@ import { allMixes } from '../lib/stores/mixes';
 import { offline } from '../lib/stores/network';
 import { keyStore } from './shims/auth';
 import { downloadedSongs } from './downloads';
-import { play, setSimilarSongs } from './player';
+import { play, setSimilarSongs, setSimilarOnOsu } from './player';
+import { searchOnline } from '../lib/stores/smartPlaylists';
 import { normalized } from './songs';
 import type { MapSet } from '../lib/types';
 
@@ -93,6 +94,27 @@ setSimilarSongs((seeds, exclude) =>
 		{ length: 20 }
 	)
 );
+
+// …and from all of osu! when the playlists have too few like them: the most played songs of
+// the same artists, anime or games, genre and language (as the smart playlists' autofill
+// finds them), each song once (osu! has several sets of many), a little at random so it isn't
+// the same every time
+setSimilarOnOsu(async (seeds, exclude) => {
+	const like = seeds.map((song) => libraryByKey().get(keyOfSong(song)) ?? normalized(song));
+	const found = await searchOnline(like);
+	const name = (song: MapSet) => `${song.title}|${song.artist}`.toLowerCase();
+	const seen = new Set(exclude.map(name));
+	const once: MapSet[] = [];
+	for (const song of found) {
+		if (seen.has(name(song)) || !song.beatmaps?.length) continue;
+		seen.add(name(song));
+		once.push(song);
+	}
+	return once
+		.map((song, i) => ({ song, order: i + Math.random() * 12 }))
+		.sort((a, b) => a.order - b.order)
+		.map(({ song }) => song);
+});
 
 let allLoaded: Promise<unknown> | null = null;
 

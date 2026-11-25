@@ -279,6 +279,21 @@ export async function sendConnectCommand(
 	return result.sendConnectCommand;
 }
 
+/** The answer to a tool call of Claude that the server handed this app (Connect's command mcp) */
+export async function answerConnectMcp(
+	token: string,
+	deviceId: string,
+	id: string,
+	result: unknown
+): Promise<boolean> {
+	const data = await graphql<any>(
+		token,
+		'mutation ($deviceId: String!, $id: String!, $result: JSON) { answerConnectMcp(deviceId: $deviceId, id: $id, result: $result) }',
+		{ deviceId, id, result }
+	);
+	return data.answerConnectMcp;
+}
+
 /** Moves the playback to another device (or this one) */
 export async function transferConnectPlayback(
 	token: string,

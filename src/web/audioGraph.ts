@@ -1,16 +1,18 @@
 // The songs' sound through Web Audio, for what an <audio> element can't do on an iPhone (its
-// volume is fixed there): every song at the same loudness, and crossfades between songs.
-// Each element goes source → level (the loudness) → fade (crossfades) → out; a K-weighted
-// meter listens along to measure how loud the song is (see loudness.ts).
+// volume is fixed there): every song at the same loudness, crossfades between songs, and the
+// equalizer. Each element goes source → level (the loudness) → fade (crossfades) → out, or
+// through the equalizer's ten bands while it's on; a K-weighted meter listens along to
+// measure how loud the song is (see loudness.ts).
 //
 // Safely: an element is routed only once the audio context runs (started by a tap, as browsers
 // want; a routed element whose context doesn't run is silent), and only when one of the two
 // is on. The page's audio session is a player's (hitsounds.ts), so iOS keeps it running in the
 // background.
 
-import { get } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { userSettings } from './shims/user';
 import { log } from './log';
+import { EQ_BANDS, EQ_PRESETS, type EqSettings } from '../lib/stores/equalizer';
 
 type Route = {
 	level: GainNode;
@@ -32,7 +34,94 @@ export const crossfadeSeconds = () => Math.max(0, get(userSettings).settings?.cr
 /** (the hitsounds too: only a song that goes through the hitsounds' audio can be heard there,
  * and so be on their clock exactly: songClock.ts) */
 const wanted = () =>
-	normalizeOn() || crossfadeSeconds() > 0 || !!get(userSettings).settings?.hitsounds;
+	normalizeOn() ||
+	crossfadeSeconds() > 0 ||
+	!!get(userSettings).settings?.hitsounds ||
+	get(equalizer).on;
+
+// --- The equalizer -----------------------------------------------------------------------
+// Ten bands, as in the desktop app, but this phone's own (kept here, not with the account: a
+// phone's speaker and its headphones want another sound than the computer's). The songs go
+// through it only while it's on.
+
+const EQ_KEY = 'stosufy-web-equalizer';
+const EQ_OFF: EqSettings = { on: false, gains: EQ_PRESETS.Flat, preset: 'Flat' };
+function keptEq(): EqSettings {
+	try {
+		const kept = JSON.parse(localStorage.getItem(EQ_KEY) ?? 'null');
+		if (kept && Array.isArray(kept.gains) && kept.gains.length === EQ_BANDS.length)
+			return { ...EQ_OFF, ...kept };
+	} catch {
+		// (off)
+	}
+	return EQ_OFF;
+}
+export const equalizer = writable<EqSettings>(
+	typeof localStorage === 'undefined' ? EQ_OFF : keptEq()
+);
+
+let eq: { input: GainNode; filters: BiquadFilterNode[]; preamp: GainNode } | null = null;
+/** The end of each routed song's own chain (its fade): to the equalizer, or straight out */
+const outputs = new Set<GainNode>();
+
+function eqChain() {
+	if (!eq && context) {
+		const input = context.createGain();
+		const filters = EQ_BANDS.map((frequency, i) => {
+			const filter = context!.createBiquadFilter();
+			filter.type = i === 0 ? 'lowshelf' : i === EQ_BANDS.length - 1 ? 'highshelf' : 'peaking';
+			filter.frequency.value = frequency;
+			filter.Q.value = 1.1;
+			return filter;
+		});
+		const preamp = context.createGain();
+		let node: AudioNode = input;
+		for (const filter of filters) node = node.connect(filter);
+		node.connect(preamp).connect(context.destination);
+		eq = { input, filters, preamp };
+	}
+	return eq;
+}
+
+/** Where a routed song's sound goes: the equalizer while it's on, else straight out */
+const outputOf = (on: boolean) => (on && eqChain()?.input) || context!.destination;
+
+/** The bands as set (smoothly), and the songs through them or not */
+function applyEq() {
+	if (!context) return;
+	const { on, gains } = get(equalizer);
+	const through = outputOf(on);
+	for (const fade of outputs) {
+		fade.disconnect();
+		fade.connect(through);
+	}
+	if (!eq) return;
+	const now = context.currentTime;
+	eq.filters.forEach((filter, i) =>
+		filter.gain.setTargetAtTime(on ? (gains[i] ?? 0) : 0, now, 0.05)
+	);
+	// (headroom for boosted bands, so they don't clip)
+	const boost = on ? Math.max(0, ...gains) : 0;
+	eq.preamp.gain.setTargetAtTime(10 ** (-(boost * 0.6) / 20), now, 0.05);
+}
+/** (what was set last, to rewire the songs only when it's turned on or off) */
+let eqWasOn = false;
+equalizer.subscribe((settings) => {
+	try {
+		if (typeof localStorage !== 'undefined') localStorage.setItem(EQ_KEY, JSON.stringify(settings));
+	} catch {
+		// (only for now)
+	}
+	if (!context) return;
+	if (settings.on !== eqWasOn || !eq) {
+		eqWasOn = settings.on;
+		applyEq();
+		return;
+	}
+	const now = context.currentTime;
+	eq.filters.forEach((filter, i) => filter.gain.setTargetAtTime(settings.gains[i] ?? 0, now, 0.05));
+	eq.preamp.gain.setTargetAtTime(10 ** (-(Math.max(0, ...settings.gains) * 0.6) / 20), now, 0.05);
+});
 
 /**
  * The page's one audio context: the songs' and the hitsounds' (the same clock and the same
@@ -93,7 +182,13 @@ function route(element: HTMLAudioElement) {
 		const before = pending.get(element);
 		level.gain.value = before?.level ?? 1;
 		fade.gain.value = before?.fade ?? 1;
-		source.connect(level).connect(fade).connect(context.destination);
+		source
+			.connect(level)
+			.connect(fade)
+			.connect(outputOf(get(equalizer).on));
+		outputs.add(fade);
+		eqWasOn = get(equalizer).on;
+		if (eqWasOn) applyEq();
 		// The meter: K-weighted (BS.1770's head shelf and high-pass), each channel on its own
 		const shelf = context.createBiquadFilter();
 		shelf.type = 'highshelf';
