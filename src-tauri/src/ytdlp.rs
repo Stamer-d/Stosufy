@@ -1021,6 +1021,70 @@ fn kill_tree(mut child: Child) {
     let _ = child.wait();
 }
 
+/// The site refused FFmpeg its stream: "403 Forbidden" (FFmpeg's code for it, as yt-dlp tells it:
+/// AVERROR_HTTP_FORBIDDEN, -858797304, or 3436169992 as Windows says it)
+pub fn refused(log: &str) -> bool {
+    let lower = log.to_lowercase();
+    lower.contains("3436169992")
+        || lower.contains("-858797304")
+        || lower.contains("403 forbidden")
+        || lower.contains("http error 403")
+}
+
+/// The part's file's name: the downloaded one's (an MP4 where it's made for editing as it's cut)
+fn cut_name(source: &Path, request: &DownloadRequest) -> Option<String> {
+    let stem = source.file_stem()?.to_string_lossy().into_owned();
+    let made_for_editing = request.editing && request.exact_cuts && request.kind == "video";
+    let ext = if made_for_editing {
+        "mp4".to_string()
+    } else {
+        source.extension()?.to_string_lossy().into_owned()
+    };
+    Some(format!("{stem}.{ext}"))
+}
+
+/// FFmpeg's arguments for a part (from–to, s) cut out of a downloaded file: exactly (its picture
+/// made again, as yt-dlp would have: for editing, or with `encoder`), else at the keyframes
+/// before, everything as it is
+pub fn cut_args(
+    request: &DownloadRequest,
+    from: f64,
+    to: f64,
+    source: &Path,
+    target: &Path,
+    encoder: &[String],
+) -> Vec<String> {
+    let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-y", "-ss", &seconds(from), "-i"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    args.push(source.to_string_lossy().into_owned());
+    args.extend(["-t".to_string(), seconds(to - from)]);
+    let mut push = |items: &[&str]| args.extend(items.iter().map(|s| s.to_string()));
+    let video = request.kind == "video";
+    if video && request.exact_cuts {
+        push(&["-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]);
+        if request.editing {
+            push(&EDITING_ENCODER.split(' ').collect::<Vec<_>>());
+        } else if request.format == "webm" {
+            push(&[
+                "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1",
+                "-crf", "30", "-b:v", "0", "-c:a", "libopus", "-b:a", "160k",
+            ]);
+        } else {
+            push(&encoder.iter().map(String::as_str).collect::<Vec<_>>());
+            push(&["-c:a", "aac", "-b:a", "192k"]);
+            if request.format == "mp4" {
+                push(&["-movflags", "+faststart"]);
+            }
+        }
+    } else {
+        push(&["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"]);
+    }
+    args.push(target.to_string_lossy().into_owned());
+    args
+}
+
 /// What a run ended with: its code, the end of what it said on stderr, whether it was stopped
 pub struct Ended {
     pub code: i32,
@@ -1479,40 +1543,121 @@ pub async fn ytdlp_download(
         } else {
             software_encoder()
         };
-        let (ended, files) = loop {
+        let tell = |progress: Option<Progress>| {
+            if let Some(mut progress) = progress {
+                progress.id = id.clone();
+                let _ = app.emit("ytdlp-progress", progress);
+            }
+        };
+        // yt-dlp run for `request`: how it ended, the files it made (in its folder, each once)
+        let attempt = |request: &DownloadRequest, encoder: &[String]| {
             let mut args = common_args(&ffmpeg, deno.as_deref(), &request.cookies, &cookies_file);
-            args.extend(download_args(&request, &out, &encoder)?);
+            args.extend(download_args(request, &out, encoder)?);
             let mut files: Vec<String> = Vec::new();
             let ended = run(&binary, &id, &args, &running, |line| {
                 let (progress, file) = read_line(line);
-                if let Some(mut progress) = progress {
-                    progress.id = id.clone();
-                    let _ = app.emit("ytdlp-progress", progress);
-                }
-                // (only what it made in its folder, each once)
+                tell(progress);
                 if let Some(file) = file {
                     if Path::new(&file).starts_with(&out) && !files.contains(&file) {
                         files.push(file);
                     }
                 }
             })?;
-            // The graphics card's encoder failed on it: again, with the processor's
+            Ok::<_, String>((ended, files))
+        };
+        let fresh = || {
+            let _ = fs::remove_dir_all(&out);
+            let _ = fs::create_dir_all(&out);
+        };
+        let (mut ended, mut files) = loop {
+            let (ended, files) = attempt(&request, &encoder)?;
+            // The graphics card's encoder failed on it: again, with the processor's (not where
+            // the site refused the stream: no encoder's fault)
             let software = software_encoder();
             if cuts
                 && !ended.cancelled
                 && ended.code != 0
                 && files.is_empty()
                 && encoder != software
+                && !refused(&ended.log)
             {
                 HARDWARE_FAILED.store(true, Ordering::Relaxed);
                 encoder = software;
-                let _ = fs::remove_dir_all(&out);
-                let _ = fs::create_dir_all(&out);
+                fresh();
                 continue;
             }
             break (ended, files);
         };
-        let mut files = files;
+        // A part: the site refused FFmpeg its stream (YouTube's "403 Forbidden", now and then,
+        // also with a sign-in that's out of date): once more, with fresh links; then without the
+        // sign-in; else all of it downloaded (by yt-dlp itself, as the site allows) and the part
+        // cut out of it here
+        let parted = !request.sections.is_empty();
+        let refused_part = |ended: &Ended| {
+            parted && !ended.cancelled && ended.code != 0 && refused(&ended.log)
+        };
+        let mut note = None;
+        if refused_part(&ended) {
+            fresh();
+            (ended, files) = attempt(&request, &encoder)?;
+        }
+        let mut still = refused_part(&ended);
+        if still && request.cookies.is_some() {
+            fresh();
+            let signed_out = DownloadRequest {
+                cookies: None,
+                ..request.clone()
+            };
+            (ended, files) = attempt(&signed_out, &encoder)?;
+            // (anything else that went wrong without it, a members-only video's: all of it, with it)
+            still = !ended.cancelled && ended.code != 0;
+            if !still && !ended.cancelled {
+                note = Some(
+                    "Downloaded without your sign-in: YouTube refused the part with it (is the cookies file out of date?)"
+                        .to_string(),
+                );
+            }
+        }
+        if still {
+            fresh();
+            tell(Some(Progress {
+                phase: "step".into(),
+                step: Some("whole".into()),
+                ..Default::default()
+            }));
+            let whole = DownloadRequest {
+                sections: Vec::new(),
+                exact_cuts: false,
+                sponsorblock: false,
+                ..request.clone()
+            };
+            (ended, files) = attempt(&whole, &encoder)?;
+            let source = files
+                .first()
+                .cloned()
+                .or_else(|| media_in(&out).into_iter().next());
+            if let (false, Some(source)) = (ended.cancelled, source) {
+                let [from, to] = request.sections[0];
+                let source = PathBuf::from(source);
+                let target = out.join("cut").join(
+                    cut_name(&source, &request).ok_or("The downloaded file has no name")?,
+                );
+                fs::create_dir_all(out.join("cut")).map_err(|e| e.to_string())?;
+                let args = cut_args(&request, from, to, &source, &target, &encoder);
+                ended = run(&ffmpeg, &id, &args, &running, |line| tell(read_line(line).0))?;
+                let _ = fs::remove_file(&source);
+                files = if ended.code == 0 && !ended.cancelled {
+                    note = Some(
+                        "YouTube refused the part on its own: all of it downloaded, the part cut out here"
+                            .to_string(),
+                    );
+                    vec![target.to_string_lossy().into_owned()]
+                } else {
+                    let _ = fs::remove_file(&target);
+                    Vec::new()
+                };
+            }
+        }
         if ended.cancelled {
             let _ = fs::remove_dir_all(&out);
             return Ok(Downloaded {
@@ -1530,7 +1675,7 @@ pub async fn ytdlp_download(
             let _ = fs::remove_dir_all(&out);
             return Err(explain(&ended.log));
         }
-        let error = (ended.code != 0).then(|| explain(&ended.log));
+        let error = (ended.code != 0).then(|| explain(&ended.log)).or(note);
         let files = files
             .into_iter()
             .filter_map(|path: String| {
@@ -1744,6 +1889,38 @@ mod tests {
             "{part}"
         );
         assert!(!part.contains("h264_nvenc"), "{part}");
+    }
+
+    #[test]
+    fn a_part_refused_is_known() {
+        // (FFmpeg's "403 Forbidden", as yt-dlp tells it on Windows, and elsewhere)
+        assert!(refused("ERROR: ffmpeg exited with code 3436169992"));
+        assert!(refused("ERROR: ffmpeg exited with code -858797304"));
+        assert!(refused("[https @ 0x1] HTTP error 403 Forbidden"));
+        assert!(!refused("ERROR: ffmpeg exited with code 1"));
+        assert!(!refused("ERROR: Sign in to confirm you're not a bot"));
+    }
+
+    #[test]
+    fn a_part_cut_out_here() {
+        let mut r = request("video", "mp4");
+        r.editing = true;
+        r.exact_cuts = true;
+        let source = Path::new("/out/Clip.mkv");
+        assert_eq!(cut_name(source, &r).as_deref(), Some("Clip.mp4"));
+        let exact = joined(&cut_args(&r, 60.0, 90.5, source, Path::new("/out/cut/Clip.mp4"), &software_encoder()));
+        assert!(exact.starts_with("-hide_banner -nostdin -y -ss 60.000 -i /out/Clip.mkv -t 30.500 -map 0:v:0"), "{exact}");
+        assert!(exact.contains(EDITING_ENCODER) && exact.ends_with("/out/cut/Clip.mp4"), "{exact}");
+        // At the keyframes: as it is, in its own container
+        r.exact_cuts = false;
+        assert_eq!(cut_name(source, &r).as_deref(), Some("Clip.mkv"));
+        let fast = joined(&cut_args(&r, 60.0, 90.5, source, Path::new("/out/cut/Clip.mkv"), &software_encoder()));
+        assert!(fast.contains("-map 0 -c copy -avoid_negative_ts make_zero"), "{fast}");
+        // Not for editing, exactly: the encoder found, AAC
+        r.editing = false;
+        r.exact_cuts = true;
+        let plain = joined(&cut_args(&r, 1.0, 2.0, source, Path::new("/out/cut/Clip.mkv"), &software_encoder()));
+        assert!(plain.contains("-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart"), "{plain}");
     }
 
     /// A graphics card's encoder, as `fast_encoder` may find one

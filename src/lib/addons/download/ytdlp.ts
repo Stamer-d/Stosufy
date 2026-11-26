@@ -512,10 +512,20 @@ export interface Progress {
 /**
  * What yt-dlp does before (and between) the downloads: the link opened, the sign-in read, the
  * site's page loaded, YouTube's check solved, the qualities found, the download started, the
- * part cut out, a wait the site asks for, the sponsors found
+ * part cut out, a wait the site asks for, the sponsors found; all of it downloaded, as the site
+ * refused the part on its own (to be cut out here)
  */
 export type Step =
-	'open' | 'cookies' | 'page' | 'challenge' | 'formats' | 'start' | 'cut' | 'wait' | 'sponsors';
+	| 'open'
+	| 'cookies'
+	| 'page'
+	| 'challenge'
+	| 'formats'
+	| 'start'
+	| 'cut'
+	| 'wait'
+	| 'sponsors'
+	| 'whole';
 
 export interface Downloaded {
 	files: { path: string; size: number }[];

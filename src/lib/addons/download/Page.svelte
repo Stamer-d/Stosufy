@@ -111,7 +111,8 @@
 		start: 'Starting the download',
 		cut: 'Cutting out the part',
 		wait: 'Waiting a moment, as the site asks',
-		sponsors: 'Finding the sponsors'
+		sponsors: 'Finding the sponsors',
+		whole: 'YouTube refused the part on its own: getting all of it, to cut it out here'
 	};
 
 	function load() {
